@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RouterView } from 'vue-router'
+import { RouterView } from 'vue-router';
 </script>
 
 <template>
@@ -8,15 +8,17 @@ import { RouterView } from 'vue-router'
 
 <style>
 * {
-  margin: 0;
-  padding: 0;
   box-sizing: border-box;
+  padding: 0;
+  margin: 0;
 }
 
-html, body, #app {
-  height: 100%;
+html,
+body,
+#app {
   width: 100%;
+  height: 100%;
   overflow: hidden;
-  background: #F3F3F3;
+  background: #f3f3f3;
 }
 </style>

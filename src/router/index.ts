@@ -5,13 +5,13 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     name: 'Editor',
-    component: () => import('../views/editor/index.vue'),
-  },
+    component: () => import('../views/editor/index.vue')
+  }
 ];
 
 const router = createRouter({
   history: createWebHistory(),
-  routes,
+  routes
 });
 
 export default router;

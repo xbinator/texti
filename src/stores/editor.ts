@@ -1,5 +1,5 @@
-import { defineStore } from 'pinia';
 import { ref } from 'vue';
+import { defineStore } from 'pinia';
 
 export const useEditorStore = defineStore('editor', () => {
   const content = ref('');
@@ -32,6 +32,6 @@ export const useEditorStore = defineStore('editor', () => {
     setContent,
     setFilePath,
     markSaved,
-    reset,
+    reset
   };
 });

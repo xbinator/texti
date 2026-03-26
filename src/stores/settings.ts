@@ -1,5 +1,5 @@
-import { defineStore } from 'pinia';
 import { ref } from 'vue';
+import { defineStore } from 'pinia';
 
 export type Theme = 'light' | 'dark';
 
@@ -37,6 +37,6 @@ export const useSettingsStore = defineStore('settings', () => {
     fontSize,
     setTheme,
     setFontSize,
-    loadSettings,
+    loadSettings
   };
 });

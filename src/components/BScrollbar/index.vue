@@ -24,8 +24,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, CSSProperties } from 'vue';
-import { addCssUnit, isDefined } from '../../utils/common';
 import { useTimeoutFn, useEventListener, useElementSize } from '@vueuse/core';
+import { addCssUnit, isDefined } from '../../utils/common';
 
 interface Props {
   // 是否一直显示滚动条

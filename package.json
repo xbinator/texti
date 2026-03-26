@@ -13,6 +13,7 @@
     "lint:style": "stylelint 'src/**/*.{vue,less,css}' --fix"
   },
   "dependencies": {
+    "@iconify/vue": "^5.0.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.6.0",
     "@tauri-apps/plugin-fs": "^2.4.5",
@@ -39,10 +40,10 @@
     "@vue/eslint-config-typescript": "^11.0.3",
     "eslint": "^8.42.0",
     "eslint-config-airbnb-base": "^15.0.0",
-    "eslint-config-prettier": "^8.8.0",
+    "eslint-config-prettier": "^8.10.2",
     "eslint-import-resolver-alias": "^1.1.2",
     "eslint-plugin-import": "^2.27.5",
-    "eslint-plugin-prettier": "^4.2.1",
+    "eslint-plugin-prettier": "^4.2.5",
     "eslint-plugin-vue": "^9.14.1",
     "postcss-html": "^1.8.0",
     "prettier": "^2.8.8",

@@ -1,42 +1,54 @@
 <template>
-  <Dropdown v-model:open="visible" :trigger="trigger">
+  <BDropdown v-model:open="visible">
     <div class="b-dropdown-button" :class="[{ 'is-active': visible, 'is-small': props.size === 'small', 'is-bordered': props.bordered }]">
       <slot>
         <div class="b-dropdown-button-content" :style="{ width }">{{ contentPrefix }}{{ label }}</div>
       </slot>
 
-      <svg class="dropdown-icon" width="12" height="12" viewBox="0 0 12 12" fill="none">
-        <path d="M2 4L6 8L10 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" :style="{ transform: visible ? 'rotate(180deg)' : 'rotate(0deg)' }"/>
-      </svg>
+      <Icon v-if="showIcon" class="dropdown-icon" icon="lucide:chevron-down" :style="{ transform: visible ? 'rotate(180deg)' : 'rotate(0deg)' }" />
     </div>
 
     <template #overlay>
-      <DropdownMenu v-model:value="active" :options="options" :row-class="rowClass" @change="handleActiveChange">
+      <BDropdownMenu v-model:value="active" :options="options" :row-class="rowClass" :min-width="minWidth" @change="handleActiveChange">
         <template #menu="record">
           <slot name="menu" v-bind="record"></slot>
         </template>
-      </DropdownMenu>
+      </BDropdownMenu>
     </template>
-  </Dropdown>
+  </BDropdown>
 </template>
 
 <script setup lang="ts">
 import type { DropdownOption } from './type';
 import { computed, watch } from 'vue';
+import { Icon } from '@iconify/vue';
 import { addCssUnit } from '../../utils/common';
-import DropdownMenu from './Menu.vue';
 
 interface Props {
+  /** 当前选中的值 */
   value?: string | number;
+  /** 是否展开下拉菜单 */
   open?: boolean;
+  /** 下拉菜单项的类名 */
   rowClass?: string;
+  /** 内容宽度 */
   contentWidth?: string | number;
+  /** 下拉选项列表 */
   options?: DropdownOption[];
+  /** 点击菜单项后是否隐藏下拉菜单 */
   menuClickHide?: boolean;
+  /** 下拉菜单的类名 */
   overlayClassName?: string;
+  /** 内容前缀 */
   contentPrefix?: string;
+  /** 尺寸 */
   size?: 'small' | 'middle' | 'large';
+  /** 是否显示边框 */
   bordered?: boolean;
+  /** 是否显示图标 */
+  showIcon?: boolean;
+  /** 最小宽度 */
+  minWidth?: string | number;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -49,7 +61,9 @@ const props = withDefaults(defineProps<Props>(), {
   overlayClassName: '',
   contentPrefix: '',
   size: 'middle',
-  bordered: false
+  bordered: false,
+  showIcon: true,
+  minWidth: 'auto'
 });
 
 const emit = defineEmits(['update:value', 'change', 'update:open']);
@@ -82,20 +96,20 @@ watch(
   height: 32px;
   padding: 0 10px;
   font-size: 14px;
-  color: rgba(0, 0, 0, 0.65);
+  color: rgb(0 0 0 / 65%);
   cursor: pointer;
   border-radius: 6px;
   transition: all 0.3s;
 }
 
 .b-dropdown-button:hover {
-  color: rgba(0, 0, 0, 0.88);
-  background-color: rgba(68, 83, 130, 0.1);
+  color: rgb(0 0 0 / 88%);
+  background-color: rgb(68 83 130 / 10%);
 }
 
 .b-dropdown-button.is-active {
-  color: rgba(0, 0, 0, 0.88);
-  background-color: rgba(68, 83, 130, 0.1);
+  color: rgb(0 0 0 / 88%);
+  background-color: rgb(68 83 130 / 10%);
 }
 
 .b-dropdown-button.is-small {
@@ -111,21 +125,23 @@ watch(
 }
 
 .dropdown-icon {
+  width: 12px;
+  height: 12px;
   transition: transform 0.3s;
 }
 
 :global(.dark) .b-dropdown-button {
-  color: rgba(255, 255, 255, 0.65);
+  color: rgb(255 255 255 / 65%);
 }
 
 :global(.dark) .b-dropdown-button:hover {
-  color: rgba(255, 255, 255, 0.88);
-  background-color: rgba(255, 255, 255, 0.1);
+  color: rgb(255 255 255 / 88%);
+  background-color: rgb(255 255 255 / 10%);
 }
 
 :global(.dark) .b-dropdown-button.is-active {
-  color: rgba(255, 255, 255, 0.88);
-  background-color: rgba(255, 255, 255, 0.1);
+  color: rgb(255 255 255 / 88%);
+  background-color: rgb(255 255 255 / 10%);
 }
 
 :global(.dark) .b-dropdown-button.is-bordered {

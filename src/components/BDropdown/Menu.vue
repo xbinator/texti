@@ -1,5 +1,5 @@
 <template>
-  <div class="b-dropdown-menu" @contextmenu.prevent>
+  <div class="b-dropdown-menu" :style="{ minWidth: typeof minWidth === 'number' ? `${minWidth}px` : minWidth }" @contextmenu.prevent>
     <template v-for="item in options" :key="item.value">
       <div
         class="b-dropdown-menu-item"
@@ -23,9 +23,10 @@ interface Props {
   value?: string | number;
   options: DropdownOption[];
   rowClass?: string;
+  minWidth?: string | number;
 }
 
-const props = withDefaults(defineProps<Props>(), { value: '', rowClass: '' });
+withDefaults(defineProps<Props>(), { value: '', rowClass: '', minWidth: 'auto' });
 
 const emit = defineEmits<{
   (e: 'update:value', value: string | number): void;
@@ -52,26 +53,26 @@ function handleClickMenu(record: DropdownOption) {
   line-height: 32px;
   background: #fff;
   border-radius: 6px;
-  box-shadow: 1px 1px 8px 0 rgba(0, 0, 0, 0.12);
+  box-shadow: 1px 1px 8px 0 rgb(0 0 0 / 12%);
 }
 
 .b-dropdown-menu-item {
   display: flex;
   align-items: center;
   padding: 0 8px;
-  color: rgba(0, 0, 0, 0.78);
+  color: rgb(0 0 0 / 78%);
   cursor: pointer;
   border-radius: 6px;
 }
 
 .b-dropdown-menu-item:hover {
-  color: rgba(0, 0, 0, 0.78);
+  color: rgb(0 0 0 / 78%);
   background-color: #f2f3f5;
 }
 
 .b-dropdown-menu-item.disabled {
   cursor: default;
-  background-color: rgba(255, 255, 255, 0);
+  background-color: rgb(255 255 255 / 0%);
   opacity: 0.3;
 }
 
@@ -87,20 +88,20 @@ function handleClickMenu(record: DropdownOption) {
 
 :global(.dark) .b-dropdown-menu {
   background: #1f2937;
-  box-shadow: 1px 1px 8px 0 rgba(0, 0, 0, 0.3);
+  box-shadow: 1px 1px 8px 0 rgb(0 0 0 / 30%);
 }
 
 :global(.dark) .b-dropdown-menu-item {
-  color: rgba(255, 255, 255, 0.78);
+  color: rgb(255 255 255 / 78%);
 }
 
 :global(.dark) .b-dropdown-menu-item:hover {
-  color: rgba(255, 255, 255, 0.78);
+  color: rgb(255 255 255 / 78%);
   background-color: #374151;
 }
 
 :global(.dark) .b-dropdown-menu-item.disabled {
-  background-color: rgba(255, 255, 255, 0);
+  background-color: rgb(255 255 255 / 0%);
 }
 
 :global(.dark) .b-dropdown-menu-item.danger {

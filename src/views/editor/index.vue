@@ -1,297 +1,183 @@
 <template>
   <div class="editor-layout">
-    <Toolbar @new-file="newFile" @open-file="openFile" @save-file="saveFile" @save-file-as="saveFileAs" />
-
-    <div class="editor-container">
-      <Scrollbar class="editor-scrollbar">
-        <!-- <EditorContent v-if="editor" :editor="editor" class="editor" /> -->
-      </Scrollbar>
+    <!-- 顶部工具栏 -->
+    <div class="editor-header">
+      <div class="header-left">
+        <Toolbar @new-file="newFile" @open-file="openFile" @save-file="saveFile" @save-file-as="saveFileAs" />
+      </div>
+      <div class="header-right">
+        <span class="file-name">{{ currentFileName }}</span>
+      </div>
     </div>
+
+    <div class="editor-content">
+      <!-- 左侧目录 -->
+      <div class="editor-sidebar">
+        <TocSidebar :content="editorContent" />
+      </div>
+
+      <!-- 右侧编辑器 -->
+      <div class="editor-main">
+        <BEditor v-model="editorContent" />
+      </div>
+    </div>
+
+    <Modal v-model:open="confirmVisible" title="确认" @ok="handleConfirmOk" @cancel="handleConfirmCancel">
+      <p>当前文档有未保存的修改，是否保存？</p>
+    </Modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useEditor, EditorContent } from '@tiptap/vue-3'
-import StarterKit from '@tiptap/starter-kit'
+import { ref, computed, onMounted } from 'vue';
+import { Modal } from 'ant-design-vue';
+import Toolbar from '../../components/Toolbar.vue';
+import { fileAPI } from '../../utils/fileAPI';
 
-import { fileAPI } from '../../utils/fileAPI'
-import Toolbar from '../../components/Toolbar.vue'
+const currentFilePath = ref<string | null>(null);
+const isModified = ref(false);
+const editorContent = ref('');
+const confirmVisible = ref(false);
+const confirmCallback = ref<(() => void) | null>(null);
 
-const currentFilePath = ref<string | null>(null)
-const isModified = ref(false)
-const editorContent = ref('')
-
-const editor = useEditor({
-  content: '',
-  extensions: [
-    StarterKit,
-  ],
-  onUpdate: ({ editor }) => {
-    editorContent.value = editor.getHTML()
-    isModified.value = true
-  },
-})
-
-async function newFile() {
-  if (isModified.value) {
-    const confirmed = confirm('当前文档有未保存的修改，是否保存？')
-    if (confirmed) {
-      await saveFile()
-    }
+const currentFileName = computed(() => {
+  if (currentFilePath.value) {
+    const fileName = currentFilePath.value.split(/[/\\]/).pop();
+    return isModified.value ? `${fileName} *` : fileName;
   }
-  currentFilePath.value = null
-  isModified.value = false
-  if (editor.value) {
-    editor.value.commands.clearContent()
-  }
-  await updateTitle()
+  return '未命名';
+});
+
+function showConfirm(callback: () => void) {
+  confirmCallback.value = callback;
+  confirmVisible.value = true;
 }
 
-async function openFile() {
-  const file = await fileAPI.openFile()
+function handleConfirmOk() {
+  if (confirmCallback.value) {
+    confirmCallback.value();
+  }
+  confirmVisible.value = false;
+}
+
+function handleConfirmCancel() {
+  confirmVisible.value = false;
+}
+
+async function updateTitle() {
+  const fileName = currentFilePath.value ? currentFilePath.value.split(/[/\\]/).pop() : '未命名';
+  const title = isModified.value ? `${fileName} *` : fileName;
+  await fileAPI.setWindowTitle(`Markdown Editor - ${title}`);
+}
+
+async function saveFileAs() {
+  const content = editorContent.value;
+  const file = await fileAPI.saveFile(content);
   if (file) {
-    const content = await fileAPI.readFile(file)
-    currentFilePath.value = file
-    if (editor.value) {
-      editor.value.commands.setContent(content)
-    }
-    isModified.value = false
-    await updateTitle()
+    currentFilePath.value = file;
+    isModified.value = false;
+    await updateTitle();
   }
 }
 
 async function saveFile() {
   if (currentFilePath.value) {
-    const content = editor.value?.getHTML() || ''
-    await fileAPI.writeFile(currentFilePath.value, content)
-    isModified.value = false
-    await updateTitle()
+    const content = editorContent.value;
+    await fileAPI.writeFile(currentFilePath.value, content);
+    isModified.value = false;
+    await updateTitle();
   } else {
-    await saveFileAs()
+    await saveFileAs();
   }
 }
 
-async function saveFileAs() {
-  const content = editor.value?.getHTML() || ''
-  const file = await fileAPI.saveFile(content)
+async function newFile() {
+  if (isModified.value) {
+    showConfirm(async () => {
+      await saveFile();
+    });
+  }
+  currentFilePath.value = null;
+  isModified.value = false;
+  editorContent.value = '';
+  await updateTitle();
+}
+
+async function openFile() {
+  const file = await fileAPI.openFile();
   if (file) {
-    currentFilePath.value = file
-    isModified.value = false
-    await updateTitle()
+    const content = await fileAPI.readFile(file);
+    currentFilePath.value = file;
+    editorContent.value = content;
+    isModified.value = false;
+    await updateTitle();
   }
-}
-
-async function updateTitle() {
-  const fileName = currentFilePath.value
-    ? currentFilePath.value.split(/[/\\]/).pop()
-    : '未命名'
-  const title = isModified.value ? `${fileName} *` : fileName
-  await fileAPI.setWindowTitle(`Markdown Editor - ${title}`)
 }
 
 onMounted(() => {
-  updateTitle()
-})
+  updateTitle();
+});
 </script>
-
-
 
 <style scoped>
 .editor-layout {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  height: 100vh;
+  background: #f5f5f5;
 }
 
-.editor-container {
-  flex: 1;
-  height: 0;
-  background: #ffffff;
-  margin: 4px;
-  border-radius: 6px;
-}
-
-.editor {
-  margin: 0 auto;
+/* 顶部工具栏 */
+.editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56px;
   padding: 0 20px;
-  min-height: 100vh;
+  background: #fff;
+  border-bottom: 1px solid #e8e8e8;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 10%);
 }
 
-:global(.dark) .editor {
-  background: #F3F3F3;
+.header-left {
+  display: flex;
+  align-items: center;
 }
 
-.editor :deep(.ProseMirror) {
-  outline: none;
-  min-height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 1.6;
-  color: #37352f;
-  caret-color: #37352f;
+.header-right {
+  display: flex;
+  align-items: center;
 }
 
-:global(.dark) .editor :deep(.ProseMirror) {
-  color: #d4d4d4;
+.file-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
 }
 
-.editor :deep(.ProseMirror h1) {
-  font-size: 2em;
-  font-weight: 600;
-  margin: 1.2em 0 0.8em;
-  padding-bottom: 0.3em;
-  border-bottom: 1px solid #eaeaea;
-  color: #37352f;
+/* 主要内容区域 */
+.editor-content {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
 }
 
-:global(.dark) .editor :deep(.ProseMirror h1) {
-  border-bottom-color: #3e3e42;
+/* 左侧目录 */
+.editor-sidebar {
+  flex-shrink: 0;
+  width: 240px;
+  overflow-y: auto;
+  background: #fff;
+  border-right: 1px solid #e8e8e8;
 }
 
-.editor :deep(.ProseMirror h2) {
-  font-size: 1.5em;
-  font-weight: 600;
-  margin: 1em 0 0.6em;
-  padding-bottom: 0.2em;
-  border-bottom: 1px solid #eaeaea;
-  color: #37352f;
-}
-
-:global(.dark) .editor :deep(.ProseMirror h2) {
-  border-bottom-color: #3e3e42;
-}
-
-.editor :deep(.ProseMirror h3) {
-  font-size: 1.25em;
-  font-weight: 600;
-  margin: 0.8em 0 0.5em;
-}
-
-.editor :deep(.ProseMirror h4),
-.editor :deep(.ProseMirror h5),
-.editor :deep(.ProseMirror h6) {
-  font-weight: 600;
-  margin: 0.6em 0 0.4em;
-}
-
-.editor :deep(.ProseMirror p) {
-  margin: 0.8em 0;
-  min-height: 1em;
-}
-
-.editor :deep(.ProseMirror ul),
-.editor :deep(.ProseMirror ol) {
-  padding-left: 2em;
-  margin: 0.5em 0;
-}
-
-.editor :deep(.ProseMirror li) {
-  margin: 0.3em 0;
-}
-
-.editor :deep(.ProseMirror li > p) {
-  margin: 0.3em 0;
-}
-
-.editor :deep(.ProseMirror blockquote) {
-  margin: 0.8em 0;
-  padding: 0.5em 1em;
-  border-left: 4px solid #eaeaea;
-  background: #fafafa;
-  color: #5a5a5a;
-}
-
-:global(.dark) .editor :deep(.ProseMirror blockquote) {
-  border-left-color: #3e3e42;
-  background: #252526;
-  color: #9e9e9e;
-}
-
-.editor :deep(.ProseMirror code) {
-  font-family: "Fira Code", Consolas, Monaco, monospace;
-  font-size: 0.9em;
-  padding: 2px 6px;
-  background: #f6f8fa;
-  border-radius: 4px;
-  color: #e91e63;
-}
-
-:global(.dark) .editor :deep(.ProseMirror code) {
-  background: #2d2d2d;
-  color: #f48fb1;
-}
-
-.editor :deep(.ProseMirror pre) {
-  margin: 1em 0;
-  padding: 1em 1.2em;
-  background: #f6f8fa;
-  border-radius: 6px;
-  overflow-x: auto;
-  font-family: "Fira Code", Consolas, Monaco, monospace;
-  font-size: 0.9em;
-  line-height: 1.5;
-}
-
-:global(.dark) .editor :deep(.ProseMirror pre) {
-  background: #2d2d2d;
-}
-
-.editor :deep(.ProseMirror pre code) {
-  padding: 0;
-  background: none;
-  color: inherit;
-}
-
-.editor :deep(.ProseMirror hr) {
-  border: none;
-  border-top: 1px solid #eaeaea;
-  margin: 1.5em 0;
-}
-
-:global(.dark) .editor :deep(.ProseMirror hr) {
-  border-top-color: #3e3e42;
-}
-
-.editor :deep(.ProseMirror a) {
-  color: #409eff;
-  text-decoration: none;
-}
-
-.editor :deep(.ProseMirror a:hover) {
-  text-decoration: underline;
-}
-
-.editor :deep(.ProseMirror img) {
-  max-width: 100%;
-  border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.editor :deep(.ProseMirror table) {
-  border-collapse: collapse;
-  width: 100%;
-  margin: 1em 0;
-}
-
-.editor :deep(.ProseMirror th),
-.editor :deep(.ProseMirror td) {
-  border: 1px solid #eaeaea;
-  padding: 8px 12px;
-  text-align: left;
-}
-
-:global(.dark) .editor :deep(.ProseMirror th),
-:global(.dark) .editor :deep(.ProseMirror td) {
-  border-color: #3e3e42;
-}
-
-.editor :deep(.ProseMirror th) {
-  background: #fafafa;
-  font-weight: 600;
-}
-
-:global(.dark) .editor :deep(.ProseMirror th) {
-  background: #2d2d2d;
+/* 右侧编辑器 */
+.editor-main {
+  flex: 1;
+  margin: 20px;
+  overflow: hidden;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
 }
 </style>
