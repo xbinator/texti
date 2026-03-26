@@ -1,5 +1,5 @@
 {
-  "name": "md-editor",
+  "name": "vault",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "start:windows": "powershell -ExecutionPolicy ByPass -File ./scripts/windows_rust_bootstrap.ps1 && pnpm tauri dev",
+    "lint": "eslint src --ext .vue,.ts,.tsx,.js,.jsx --fix",
+    "lint:style": "stylelint 'src/**/*.{vue,less,css}' --fix"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -29,9 +32,29 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@typescript-eslint/eslint-plugin": "^5.59.6",
+    "@typescript-eslint/parser": "^5.59.6",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/eslint-config-prettier": "^7.1.0",
+    "@vue/eslint-config-typescript": "^11.0.3",
+    "eslint": "^8.42.0",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-config-prettier": "^8.8.0",
+    "eslint-import-resolver-alias": "^1.1.2",
+    "eslint-plugin-import": "^2.27.5",
+    "eslint-plugin-prettier": "^4.2.1",
+    "eslint-plugin-vue": "^9.14.1",
+    "postcss-html": "^1.8.0",
+    "prettier": "^2.8.8",
+    "stylelint": "^16.4.0",
+    "stylelint-config-html": "^1.1.0",
+    "stylelint-config-recess-order": "^6.0.0",
+    "stylelint-config-standard": "^38.0.0",
+    "stylelint-config-standard-less": "^3.0.1",
+    "stylelint-config-standard-vue": "^1.0.0",
     "typescript": "~5.6.2",
     "vite": "^6.0.3",
+    "vue-eslint-parser": "^10.1.1",
     "vue-tsc": "^2.1.10"
   }
 }

@@ -1,22 +1,26 @@
+<template>
+  <div class="editor-layout">
+    <Toolbar @new-file="newFile" @open-file="openFile" @save-file="saveFile" @save-file-as="saveFileAs" />
+
+    <div class="editor-container">
+      <Scrollbar class="editor-scrollbar">
+        <!-- <EditorContent v-if="editor" :editor="editor" class="editor" /> -->
+      </Scrollbar>
+    </div>
+  </div>
+</template>
+
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useEditor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 
-import { open, save } from '@tauri-apps/plugin-dialog'
-import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
-import { getCurrentWindow } from '@tauri-apps/api/window'
-import {
-  Layout,
-  LayoutContent
-} from 'ant-design-vue'
-import Toolbar from '../components/Toolbar.vue'
+import { fileAPI } from '../../utils/fileAPI'
+import Toolbar from '../../components/Toolbar.vue'
 
 const currentFilePath = ref<string | null>(null)
 const isModified = ref(false)
 const editorContent = ref('')
-
-const appWindow = getCurrentWindow()
 
 const editor = useEditor({
   content: '',
@@ -28,8 +32,6 @@ const editor = useEditor({
     isModified.value = true
   },
 })
-
-
 
 async function newFile() {
   if (isModified.value) {
@@ -43,15 +45,14 @@ async function newFile() {
   if (editor.value) {
     editor.value.commands.clearContent()
   }
+  await updateTitle()
 }
 
 async function openFile() {
-  const file = await open({
-    filters: [{ name: 'Markdown', extensions: ['md', 'markdown'] }]
-  })
+  const file = await fileAPI.openFile()
   if (file) {
-    const content = await readTextFile(file as string)
-    currentFilePath.value = file as string
+    const content = await fileAPI.readFile(file)
+    currentFilePath.value = file
     if (editor.value) {
       editor.value.commands.setContent(content)
     }
@@ -63,7 +64,7 @@ async function openFile() {
 async function saveFile() {
   if (currentFilePath.value) {
     const content = editor.value?.getHTML() || ''
-    await writeTextFile(currentFilePath.value, content)
+    await fileAPI.writeFile(currentFilePath.value, content)
     isModified.value = false
     await updateTitle()
   } else {
@@ -72,106 +73,53 @@ async function saveFile() {
 }
 
 async function saveFileAs() {
-  const file = await save({
-    filters: [{ name: 'Markdown', extensions: ['md'] }],
-    defaultPath: 'untitled.md'
-  })
+  const content = editor.value?.getHTML() || ''
+  const file = await fileAPI.saveFile(content)
   if (file) {
     currentFilePath.value = file
-    const content = editor.value?.getHTML() || ''
-    await writeTextFile(file, content)
     isModified.value = false
     await updateTitle()
   }
 }
 
 async function updateTitle() {
-  const fileName = currentFilePath.value 
-    ? currentFilePath.value.split(/[/\\]/).pop() 
+  const fileName = currentFilePath.value
+    ? currentFilePath.value.split(/[/\\]/).pop()
     : '未命名'
   const title = isModified.value ? `${fileName} *` : fileName
-  await appWindow.setTitle(`Markdown Editor - ${title}`)
+  await fileAPI.setWindowTitle(`Markdown Editor - ${title}`)
 }
 
 onMounted(() => {
-  // 初始化编辑器
+  updateTitle()
 })
 </script>
 
-<template>
-  <Layout class="app-layout">
-    <Toolbar
-      @new-file="newFile"
-      @open-file="openFile"
-      @save-file="saveFile"
-      @save-file-as="saveFileAs"
-    />
-      
-      <LayoutContent class="editor-content">
-        <EditorContent 
-          v-if="editor" 
-          :editor="editor" 
-          class="editor"
-        />
-      </LayoutContent>
-    </Layout>
-</template>
+
 
 <style scoped>
-.app-layout {
+.editor-layout {
+  display: flex;
+  flex-direction: column;
   height: 100%;
 }
 
-.toolbar-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0 16px;
-  -webkit-app-region: drag;
-}
-
-.toolbar-left, .toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  -webkit-app-region: no-drag;
-}
-
-.ant-dropdown-menu {
-  background: var(--ant-color-bg-container);
-  border-radius: 8px;
-  padding: 4px;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
-}
-
-.dropdown-item {
-  padding: 8px 16px;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: background 0.2s;
-}
-
-.dropdown-item:hover {
-  background: var(--ant-color-primary-light);
-}
-
-.editor-content {
-  padding: 24px 48px;
-  overflow: auto;
+.editor-container {
+  flex: 1;
+  height: 0;
+  background: #ffffff;
+  margin: 4px;
+  border-radius: 6px;
 }
 
 .editor {
-  height: 100%;
-  max-width: 800px;
   margin: 0 auto;
-  padding: 32px 48px;
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  padding: 0 20px;
+  min-height: 100vh;
 }
 
 :global(.dark) .editor {
-  background: #1e1e1e;
+  background: #F3F3F3;
 }
 
 .editor :deep(.ProseMirror) {
@@ -179,7 +127,7 @@ onMounted(() => {
   min-height: 100%;
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
   font-size: 16px;
-  line-height: 1.8;
+  line-height: 1.6;
   color: #37352f;
   caret-color: #37352f;
 }
@@ -345,22 +293,5 @@ onMounted(() => {
 
 :global(.dark) .editor :deep(.ProseMirror th) {
   background: #2d2d2d;
-}
-
-.source-editor {
-  width: 100%;
-  height: 100%;
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 32px 48px;
-  border: 1px solid var(--ant-color-border);
-  border-radius: 8px;
-  background: var(--ant-color-bg-container);
-  color: var(--ant-color-text);
-  font-family: "Fira Code", Consolas, Monaco, monospace;
-  font-size: 14px;
-  line-height: 1.8;
-  resize: none;
-  outline: none;
 }
 </style>

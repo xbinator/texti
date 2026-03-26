@@ -26,3 +26,6 @@ dist-ssr
 # Tauri
 src-tauri/target
 src-tauri/.tauri
+
+# Auto-generated files
+types/components.d.ts

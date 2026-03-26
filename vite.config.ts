@@ -13,6 +13,8 @@ export default defineConfig(async () => ({
     vue(),
     UnoCSS(),
     Components({
+      dts: 'types/components.d.ts',
+      dirs: ['src/components'],
       resolvers: [
         AntDesignVueResolver({
           importStyle: false,

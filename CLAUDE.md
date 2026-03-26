@@ -1,0 +1,75 @@
+# 项目代码规范
+
+## TypeScript 类型规范
+
+### 禁止使用 `any` 类型
+- ❌ **禁止**: 使用 `any` 类型
+- ✅ **推荐**: 使用具体类型或 `unknown` 类型
+
+**错误示例**:
+```typescript
+const data: any = fetchData()
+const window = (window as any).__TAURI__
+```
+
+**正确示例**:
+```typescript
+interface WindowWithTauri extends Window {
+  __TAURI__?: unknown
+}
+const window = (window as WindowWithTauri).__TAURI__
+
+// 或使用类型断言
+const data = fetchData() as DataType
+```
+
+### 类型定义要求
+- 所有函数参数必须有明确的类型注解
+- 所有函数返回值必须有明确的类型注解
+- 接口和类型定义必须使用 `interface` 或 `type` 关键字
+
+## 代码清理规范
+
+### 保留未使用的导入
+- ✅ **保留**: 可能会在运行时动态导入的模块
+- ✅ **保留**: Tauri 相关的 API 导入（用于条件加载）
+- ✅ **保留**: 类型定义的导入
+
+**示例**:
+```typescript
+// ✅ 保留 - 动态导入
+const { open } = await import('@tauri-apps/plugin-dialog')
+
+// ✅ 保留 - 类型定义
+import type { DefineComponent } from 'vue'
+
+// ✅ 保留 - Tauri API（条件加载）
+import { isTauri } from './platform'
+```
+
+### 代码清理原则
+- 只删除确认完全不会被使用的代码
+- 对于条件性使用的代码，需要检查所有执行路径
+- 动态导入的模块不要删除导入语句
+
+## 文件组织规范
+
+### 类型定义文件
+- 所有类型定义文件放在 `types/` 目录
+- 自动生成的类型文件（如 `components.d.ts`）添加到 `.gitignore`
+
+### 工具函数
+- 平台相关的工具函数放在 `src/utils/platform.ts`
+- API 抽象层放在 `src/utils/fileAPI.ts`
+
+## 代码质量要求
+
+### ESLint 和 TypeScript
+- 所有代码必须通过 ESLint 检查
+- 所有代码必须通过 TypeScript 类型检查
+- 使用 `strict` 模式
+
+### 代码风格
+- 使用一致的缩进和格式
+- 使用有意义的变量和函数命名
+- 添加必要的注释说明复杂逻辑

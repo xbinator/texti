@@ -5,7 +5,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     name: 'Editor',
-    component: () => import('../views/EditorView.vue'),
+    component: () => import('../views/editor/index.vue'),
   },
 ];
 
