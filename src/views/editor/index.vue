@@ -5,9 +5,6 @@
       <div class="header-left">
         <Toolbar @new-file="newFile" @open-file="openFile" @save-file="saveFile" @save-file-as="saveFileAs" />
       </div>
-      <div class="header-right">
-        <span class="file-name">{{ currentFileName }}</span>
-      </div>
     </div>
 
     <div class="editor-content">
@@ -22,38 +19,34 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { Modal } from 'ant-design-vue';
 import Toolbar from '../../components/Toolbar.vue';
 import { fileAPI } from '../../utils/fileAPI';
 
 const currentFilePath = ref<string | null>(null);
+const lastSavedContent = ref('');
 const isModified = ref(false);
 const editorContent = ref('');
 const confirmVisible = ref(false);
-const confirmCallback = ref<(() => void) | null>(null);
+const confirmCallback = ref<(() => Promise<void>) | null>(null);
 
-const currentFileName = computed(() => {
-  if (currentFilePath.value) {
-    const fileName = currentFilePath.value.split(/[/\\]/).pop();
-    return isModified.value ? `${fileName} *` : fileName;
-  }
-  return '未命名';
-});
-
-function showConfirm(callback: () => void) {
+function showConfirm(callback: () => Promise<void>) {
   confirmCallback.value = callback;
   confirmVisible.value = true;
 }
 
-function handleConfirmOk() {
+async function handleConfirmOk() {
   if (confirmCallback.value) {
-    confirmCallback.value();
+    await confirmCallback.value();
   }
+
+  confirmCallback.value = null;
   confirmVisible.value = false;
 }
 
 function handleConfirmCancel() {
+  confirmCallback.value = null;
   confirmVisible.value = false;
 }
 
@@ -68,6 +61,7 @@ async function saveFileAs() {
   const file = await fileAPI.saveFile(content);
   if (file) {
     currentFilePath.value = file;
+    lastSavedContent.value = content;
     isModified.value = false;
     await updateTitle();
   }
@@ -77,6 +71,7 @@ async function saveFile() {
   if (currentFilePath.value) {
     const content = editorContent.value;
     await fileAPI.writeFile(currentFilePath.value, content);
+    lastSavedContent.value = content;
     isModified.value = false;
     await updateTitle();
   } else {
@@ -84,31 +79,56 @@ async function saveFile() {
   }
 }
 
-async function newFile() {
-  if (isModified.value) {
-    showConfirm(async () => {
-      await saveFile();
-    });
-  }
+async function resetEditor() {
   currentFilePath.value = null;
+  lastSavedContent.value = '';
   isModified.value = false;
   editorContent.value = '';
   await updateTitle();
 }
 
-async function openFile() {
-  const file = await fileAPI.openFile();
-  if (file) {
-    const content = await fileAPI.readFile(file);
-    currentFilePath.value = file;
-    editorContent.value = content;
-    isModified.value = false;
-    await updateTitle();
+async function maybeSaveBefore(action: () => Promise<void>) {
+  if (!isModified.value) {
+    await action();
+    return;
   }
+
+  showConfirm(async () => {
+    await saveFile();
+    await action();
+  });
+}
+
+async function newFile() {
+  await maybeSaveBefore(resetEditor);
+}
+
+async function openSelectedFile() {
+  const file = await fileAPI.openFile();
+  if (!file) return;
+
+  const content = await fileAPI.readFile(file);
+  currentFilePath.value = file;
+  editorContent.value = content;
+  lastSavedContent.value = content;
+  isModified.value = false;
+  await updateTitle();
+}
+
+async function openFile() {
+  await maybeSaveBefore(openSelectedFile);
 }
 
 onMounted(() => {
   updateTitle();
+});
+
+watch(editorContent, async (value) => {
+  const modified = value !== lastSavedContent.value;
+  if (isModified.value === modified) return;
+
+  isModified.value = modified;
+  await updateTitle();
 });
 </script>
 
@@ -134,17 +154,6 @@ onMounted(() => {
 .header-left {
   display: flex;
   align-items: center;
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-}
-
-.file-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: #333;
 }
 
 /* 主要内容区域 */
