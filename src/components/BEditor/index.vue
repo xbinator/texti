@@ -11,11 +11,17 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
+import { Table } from '@tiptap/extension-table';
+import { TableCell } from '@tiptap/extension-table-cell';
+import { TableHeader } from '@tiptap/extension-table-header';
+import { TableRow } from '@tiptap/extension-table-row';
 import { Markdown } from '@tiptap/markdown';
 import StarterKit from '@tiptap/starter-kit';
-import { useEditor, EditorContent } from '@tiptap/vue-3';
+import { useEditor, EditorContent, VueNodeViewRenderer } from '@tiptap/vue-3';
 import { useWindowSize } from '@vueuse/core';
 import { common, createLowlight } from 'lowlight';
+import { marked } from 'marked';
+import CodeBlockView from './components/CodeBlockView.vue';
 
 const lowlight = createLowlight(common);
 
@@ -35,20 +41,86 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const content = defineModel<string>();
+const isApplyingExternalContent = ref(false);
+
+const CustomCodeBlock = CodeBlockLowlight.extend({
+  addNodeView() {
+    return VueNodeViewRenderer(CodeBlockView);
+  }
+}).configure({
+  lowlight
+});
+
+const TableExtensions = [
+  Table.configure({
+    resizable: false
+  }),
+  TableRow,
+  TableHeader,
+  TableCell
+];
+
+const editorExtensions = [StarterKit.configure({ codeBlock: false }), Markdown, CustomCodeBlock, ...TableExtensions];
+
+function normalizeMarkedHtml(html: string): string {
+  if (typeof window === 'undefined') {
+    return html;
+  }
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+
+  doc.querySelectorAll('th, td').forEach((cell) => {
+    const hasBlockChild = Array.from(cell.children).some((child) =>
+      ['P', 'UL', 'OL', 'PRE', 'BLOCKQUOTE', 'TABLE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6'].includes(child.tagName)
+    );
+
+    if (!hasBlockChild) {
+      const paragraph = doc.createElement('p');
+      paragraph.innerHTML = cell.innerHTML;
+      cell.innerHTML = '';
+      cell.appendChild(paragraph);
+    }
+  });
+
+  return doc.body.innerHTML;
+}
 
 function setEditorContent(text: string, emitUpdate = true) {
   // eslint-disable-next-line no-use-before-define
   const instance = editorInstance.value;
   if (!instance) return;
 
-  // contentType: 'markdown' 保持 Markdown 格式
-  // preserveWhitespace: 'full' 保持所有空格
-  instance.commands.setContent(text, { emitUpdate, parseOptions: { preserveWhitespace: 'full' }, contentType: 'markdown' });
+  const html = marked.parse(text, {
+    async: false,
+    gfm: true
+  });
+
+  const normalizedHtml = normalizeMarkedHtml(html);
+
+  isApplyingExternalContent.value = true;
+  instance.commands.setContent(normalizedHtml, {
+    emitUpdate,
+    parseOptions: { preserveWhitespace: 'full' }
+  });
+  nextTick(() => {
+    isApplyingExternalContent.value = false;
+  });
+}
+
+async function addHeadingIds() {
+  await nextTick();
+  // eslint-disable-next-line no-use-before-define
+  const editorElement = editorInstance.value?.view.dom;
+  if (!editorElement) return;
+
+  const headings = editorElement.querySelectorAll('h1, h2, h3, h4, h5, h6');
+  headings.forEach((heading, index) => (heading.id = `heading-${index}`));
 }
 
 const editorInstance = useEditor({
   content: content.value ?? '',
-  extensions: [StarterKit, Markdown, CodeBlockLowlight.configure({ lowlight })],
+  extensions: editorExtensions,
   editable: props.editable,
   editorProps: {
     attributes: { spellcheck: 'false' },
@@ -70,31 +142,16 @@ const editorInstance = useEditor({
   },
 
   onUpdate: ({ editor }) => {
+    if (isApplyingExternalContent.value) return;
+
     content.value = editor.getMarkdown();
-  }
-});
-
-function addHeadingIds() {
-  nextTick(() => {
-    const editorElement = editorInstance.value?.view.dom;
-    if (!editorElement) return;
-
-    const headings = editorElement.querySelectorAll('h1, h2, h3, h4, h5, h6');
-    headings.forEach((heading, index) => {
-      if (!heading.id) {
-        heading.id = `heading-${index}`;
-      }
-    });
-  });
-}
-
-watch(
-  () => editorInstance.value?.getHTML(),
-  () => {
     addHeadingIds();
   },
-  { immediate: true }
-);
+
+  onCreate: () => {
+    addHeadingIds();
+  }
+});
 
 watch(content, (newContent) => {
   const instance = editorInstance.value;
@@ -104,6 +161,7 @@ watch(content, (newContent) => {
 
   if (newContent !== current) {
     setEditorContent(newContent ?? '', false);
+    addHeadingIds();
   }
 });
 
@@ -241,84 +299,82 @@ function handleScrollbarClick() {
   }
 
   pre {
-    padding: 1em;
     margin: 0.75em 0;
-    overflow-x: auto;
-    background-color: #f5f5f5;
-    border: 1px solid #e0e0e0;
-    border-radius: 4px;
+    background-color: transparent;
+    border: 0;
+    border-radius: 0;
 
     code {
       padding: 0;
       font-family: 'Fira Code', 'Fira Mono', Consolas, Monaco, 'Courier New', monospace;
       font-size: 0.9em;
       line-height: 1.6;
-      color: #2e2e2e;
+      color: #24292f;
       background-color: transparent;
 
       .hljs-keyword {
-        color: #c678dd;
+        color: #cf222e;
       }
 
       .hljs-string {
-        color: #98c379;
+        color: #0a3069;
       }
 
       .hljs-number {
-        color: #d19a66;
+        color: #0550ae;
       }
 
       .hljs-comment {
         font-style: italic;
-        color: #5c6370;
+        color: #6e7781;
       }
 
       .hljs-function {
-        color: #61afef;
+        color: #8250df;
       }
 
       .hljs-title {
-        color: #e5c07b;
+        color: #8250df;
       }
 
       .hljs-params {
-        color: #d19a66;
+        color: #24292f;
       }
 
       .hljs-variable {
-        color: #e06c75;
+        color: #953800;
       }
 
       .hljs-operator {
-        color: #56b6c2;
+        color: #0550ae;
       }
 
       .hljs-tag {
-        color: #e06c75;
+        color: #116329;
       }
 
       .hljs-attr {
-        color: #d19a66;
+        color: #0550ae;
       }
 
       .hljs-value {
-        color: #98c379;
+        color: #0a3069;
       }
 
       .hljs-property {
-        color: #e06c75;
+        color: #953800;
       }
 
       .hljs-built_in {
-        color: #e5c07b;
+        color: #8250df;
       }
 
       .hljs-class {
-        color: #e5c07b;
+        color: #8250df;
       }
 
       .hljs-constant {
-        color: #d19a66;
+        color: #0550ae;
       }
     }
   }
@@ -349,7 +405,6 @@ function handleScrollbarClick() {
   table {
     width: 100%;
     margin: 0.75em 0;
-    overflow: hidden;
     border-collapse: collapse;
     border: 1px solid #e0e0e0;
     border-radius: 4px;
@@ -357,6 +412,7 @@ function handleScrollbarClick() {
     th {
       padding: 0.5em 0.75em;
       font-weight: 600;
+      vertical-align: top;
       color: #2e2e2e;
       text-align: left;
       background-color: #f5f5f5;
@@ -365,14 +421,38 @@ function handleScrollbarClick() {
 
     td {
       padding: 0.5em 0.75em;
+      vertical-align: top;
       color: #2e2e2e;
       text-align: left;
+      background-color: #fff;
       border: 1px solid #e0e0e0;
     }
 
     tr:hover td {
       background-color: #f9f9f9;
     }
+  }
+
+  .tableWrapper {
+    width: 100%;
+    margin: 0.75em 0;
+    overflow-x: auto;
+  }
+
+  .tableWrapper table {
+    margin: 0;
+  }
+
+  .tableWrapper th,
+  .tableWrapper td {
+    min-width: 120px;
+  }
+
+  .tableWrapper th p,
+  .tableWrapper td p {
+    min-height: auto;
+    margin: 0;
+    color: inherit;
   }
 }
 </style>

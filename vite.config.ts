@@ -17,11 +17,11 @@ export default defineConfig(async () => ({
       // 组件的有效文件扩展名
       extensions: ['vue', 'tsx'],
       // 搜索子目录
-      deep: true,
+      deep: false,
       // 允许子目录作为组件的命名空间前缀。
       directoryAsNamespace: true,
       // 组件目录
-      dirs: ['src/components'],
+      dirs: ['src/components', 'src/components/BDropdown', 'src/components/BEditor', 'src/components/BScrollbar'],
       resolvers: [
         AntDesignVueResolver({
           importStyle: false

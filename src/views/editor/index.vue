@@ -1,14 +1,16 @@
 <template>
   <div class="editor-layout">
-    <!-- 顶部工具栏 -->
     <div class="editor-header">
       <div class="header-left">
         <Toolbar @new-file="newFile" @open-file="openFile" @save-file="saveFile" @save-file-as="saveFileAs" />
       </div>
+
+      <div class="header-right">
+        <span class="file-name">{{ currentFileName }}</span>
+      </div>
     </div>
 
     <div class="editor-content">
-      <!-- 右侧编辑器 -->
       <BEditor v-model="editorContent" />
     </div>
 
@@ -19,7 +21,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
+import { computed, ref, onMounted, watch } from 'vue';
 import { Modal } from 'ant-design-vue';
 import Toolbar from '../../components/Toolbar.vue';
 import { fileAPI } from '../../utils/fileAPI';
@@ -30,6 +32,17 @@ const isModified = ref(false);
 const editorContent = ref('');
 const confirmVisible = ref(false);
 const confirmCallback = ref<(() => Promise<void>) | null>(null);
+
+const currentFileName = computed(() => {
+  if (!currentFilePath.value) {
+    return isModified.value ? '未命名 *' : '未命名';
+  }
+
+  const fileName = currentFilePath.value.split(/[/\\]/).pop() || '未命名';
+  return isModified.value ? `${fileName} *` : fileName;
+});
+
+const currentWindowTitle = computed(() => `${currentFileName.value} - Vault`);
 
 function showConfirm(callback: () => Promise<void>) {
   confirmCallback.value = callback;
@@ -51,9 +64,7 @@ function handleConfirmCancel() {
 }
 
 async function updateTitle() {
-  const fileName = currentFilePath.value ? currentFilePath.value.split(/[/\\]/).pop() : '未命名';
-  const title = isModified.value ? `${fileName} *` : fileName;
-  await fileAPI.setWindowTitle(`Markdown Editor - ${title}`);
+  await fileAPI.setWindowTitle(currentWindowTitle.value);
 }
 
 async function saveFileAs() {
@@ -156,21 +167,22 @@ watch(editorContent, async (value) => {
   align-items: center;
 }
 
-/* 主要内容区域 */
+.header-right {
+  display: flex;
+  align-items: center;
+}
+
+.file-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #57606a;
+}
+
 .editor-content {
   flex: 1;
   height: 0;
   margin: 6px;
   background: #fff;
   border-radius: 8px;
-}
-
-/* 左侧目录 */
-.editor-sidebar {
-  flex-shrink: 0;
-  width: 240px;
-  overflow-y: auto;
-  background: #fff;
-  border-right: 1px solid #e8e8e8;
 }
 </style>

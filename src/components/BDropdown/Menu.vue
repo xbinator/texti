@@ -36,9 +36,11 @@ const emit = defineEmits<{
 const active = defineModel<string | number>('value', { default: '' });
 
 function handleClickMenu(record: DropdownOption) {
-  if (record.value === active.value) return;
+  if (record.disabled) return;
 
-  active.value = record.value;
+  if (record.value !== active.value) {
+    active.value = record.value;
+  }
 
   emit('change', record);
 }
