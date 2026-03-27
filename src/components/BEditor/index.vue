@@ -9,8 +9,11 @@
 </template>
 
 <script setup lang="ts">
+import type { JSONContent, MarkdownParseHelpers, MarkdownParseResult, MarkdownToken } from '@tiptap/core';
 import { ref, watch, nextTick } from 'vue';
+import _Code from '@tiptap/extension-code';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
+import { ListItem as BaseListItem } from '@tiptap/extension-list';
 import { Table } from '@tiptap/extension-table';
 import { TableCell } from '@tiptap/extension-table-cell';
 import { TableHeader } from '@tiptap/extension-table-header';
@@ -20,8 +23,7 @@ import StarterKit from '@tiptap/starter-kit';
 import { useEditor, EditorContent, VueNodeViewRenderer } from '@tiptap/vue-3';
 import { useWindowSize } from '@vueuse/core';
 import { common, createLowlight } from 'lowlight';
-import { marked } from 'marked';
-import CodeBlockView from './components/CodeBlockView.vue';
+import _CodeBlock from './components/CodeBlock.vue';
 
 const lowlight = createLowlight(common);
 
@@ -43,69 +45,90 @@ const props = withDefaults(defineProps<Props>(), {
 const content = defineModel<string>();
 const isApplyingExternalContent = ref(false);
 
-const CustomCodeBlock = CodeBlockLowlight.extend({
-  addNodeView() {
-    return VueNodeViewRenderer(CodeBlockView);
+const Code = _Code.extend({ excludes: '' });
+
+const CodeBlock = CodeBlockLowlight.extend({ addNodeView: () => VueNodeViewRenderer(_CodeBlock) }).configure({ lowlight });
+
+function isBlockNode(node: JSONContent): boolean {
+  return typeof node.type === 'string' && node.type !== 'text';
+}
+
+function normalizeListItemContent(nodes: JSONContent[]): JSONContent[] {
+  if (nodes.length === 0) {
+    return [{ type: 'paragraph', content: [] }];
   }
-}).configure({
-  lowlight
+
+  if (nodes[0]?.type === 'paragraph') {
+    return nodes;
+  }
+
+  if (isBlockNode(nodes[0])) {
+    return [{ type: 'paragraph', content: [] }, ...nodes];
+  }
+
+  const leadingInlineNodes: JSONContent[] = [];
+  let blockStartIndex = nodes.length;
+
+  for (let index = 0; index < nodes.length; index += 1) {
+    const node = nodes[index];
+
+    if (isBlockNode(node)) {
+      blockStartIndex = index;
+      break;
+    }
+
+    leadingInlineNodes.push(node);
+  }
+
+  return [{ type: 'paragraph', content: leadingInlineNodes }, ...nodes.slice(blockStartIndex)];
+}
+
+const ListItem = BaseListItem.extend({
+  parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
+    const parseBlockChildren = helpers.parseBlockChildren ?? helpers.parseChildren;
+    let contentNodes: JSONContent[] = [];
+
+    if (token.tokens && token.tokens.length > 0) {
+      const hasParagraphToken = token.tokens.some((item) => item.type === 'paragraph');
+      const firstToken = token.tokens[0];
+
+      if (hasParagraphToken) {
+        contentNodes = parseBlockChildren(token.tokens);
+      } else if (firstToken?.type === 'text' && firstToken.tokens && firstToken.tokens.length > 0) {
+        contentNodes = helpers.parseInline(firstToken.tokens);
+
+        if (token.tokens.length > 1) {
+          const remainingTokens = token.tokens.slice(1);
+          contentNodes = [...contentNodes, ...parseBlockChildren(remainingTokens)];
+        }
+      } else {
+        contentNodes = parseBlockChildren(token.tokens);
+      }
+    }
+
+    return {
+      type: 'listItem',
+      content: normalizeListItemContent(contentNodes)
+    };
+  }
 });
 
-const TableExtensions = [
-  Table.configure({
-    resizable: false
-  }),
-  TableRow,
-  TableHeader,
-  TableCell
-];
+const TableExtensions = [Table.configure({ resizable: false }), TableRow, TableHeader, TableCell];
 
-const editorExtensions = [StarterKit.configure({ codeBlock: false }), Markdown, CustomCodeBlock, ...TableExtensions];
-
-function normalizeMarkedHtml(html: string): string {
-  if (typeof window === 'undefined') {
-    return html;
-  }
-
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, 'text/html');
-
-  doc.querySelectorAll('th, td').forEach((cell) => {
-    const hasBlockChild = Array.from(cell.children).some((child) =>
-      ['P', 'UL', 'OL', 'PRE', 'BLOCKQUOTE', 'TABLE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6'].includes(child.tagName)
-    );
-
-    if (!hasBlockChild) {
-      const paragraph = doc.createElement('p');
-      paragraph.innerHTML = cell.innerHTML;
-      cell.innerHTML = '';
-      cell.appendChild(paragraph);
-    }
-  });
-
-  return doc.body.innerHTML;
-}
+const editorExtensions = [StarterKit.configure({ code: false, codeBlock: false, listItem: false }), Markdown, Code, CodeBlock, ListItem, ...TableExtensions];
 
 function setEditorContent(text: string, emitUpdate = true) {
   // eslint-disable-next-line no-use-before-define
   const instance = editorInstance.value;
   if (!instance) return;
 
-  const html = marked.parse(text, {
-    async: false,
-    gfm: true
-  });
-
-  const normalizedHtml = normalizeMarkedHtml(html);
-
   isApplyingExternalContent.value = true;
-  instance.commands.setContent(normalizedHtml, {
+  instance.commands.setContent(text, {
     emitUpdate,
+    contentType: 'markdown',
     parseOptions: { preserveWhitespace: 'full' }
   });
-  nextTick(() => {
-    isApplyingExternalContent.value = false;
-  });
+  nextTick(() => (isApplyingExternalContent.value = false));
 }
 
 async function addHeadingIds() {
@@ -268,16 +291,49 @@ function handleScrollbarClick() {
 
   ul,
   ol {
-    padding-left: 1.5em;
+    padding-left: 1.75em;
     margin: 0.75em 0;
+  }
+
+  ul {
+    list-style: disc;
+  }
+
+  ol {
+    list-style: decimal;
+  }
+
+  ul ul {
+    list-style: circle;
+  }
+
+  ul ul ul {
+    list-style: square;
+  }
+
+  ol ol {
+    list-style: lower-alpha;
+  }
+
+  ol ol ol {
+    list-style: lower-roman;
   }
 
   li {
     margin: 0.25em 0;
 
+    &::marker {
+      color: #6b7280;
+    }
+
     > p {
       margin: 0.25em 0;
     }
+  }
+
+  li > ul,
+  li > ol {
+    margin: 0.25em 0;
   }
 
   blockquote {
