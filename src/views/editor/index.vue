@@ -24,7 +24,7 @@
 import { computed, ref, onMounted, watch } from 'vue';
 import { Modal } from 'ant-design-vue';
 import Toolbar from '../../components/Toolbar.vue';
-import { fileAPI } from '../../utils/fileAPI';
+import { fileAPI } from '../../utils/file';
 
 const currentFilePath = ref<string | null>(null);
 const lastSavedContent = ref('');
