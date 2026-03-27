@@ -4,6 +4,7 @@ import 'virtual:uno.css';
 import 'ant-design-vue/dist/reset.css';
 import App from './App.vue';
 import router from './router';
+import './assets/styles/index.less';
 
 const app = createApp(App);
 const pinia = createPinia();

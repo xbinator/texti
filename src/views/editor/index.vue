@@ -11,15 +11,8 @@
     </div>
 
     <div class="editor-content">
-      <!-- 左侧目录 -->
-      <div class="editor-sidebar">
-        <TocSidebar :content="editorContent" />
-      </div>
-
       <!-- 右侧编辑器 -->
-      <div class="editor-main">
-        <BEditor v-model="editorContent" />
-      </div>
+      <BEditor v-model="editorContent" />
     </div>
 
     <Modal v-model:open="confirmVisible" title="确认" @ok="handleConfirmOk" @cancel="handleConfirmCancel">
@@ -130,13 +123,12 @@ onMounted(() => {
 /* 顶部工具栏 */
 .editor-header {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
   height: 56px;
   padding: 0 20px;
   background: #fff;
-  border-bottom: 1px solid #e8e8e8;
-  box-shadow: 0 1px 4px rgb(0 0 0 / 10%);
 }
 
 .header-left {
@@ -157,9 +149,11 @@ onMounted(() => {
 
 /* 主要内容区域 */
 .editor-content {
-  display: flex;
   flex: 1;
-  overflow: hidden;
+  height: 0;
+  margin: 6px;
+  background: #fff;
+  border-radius: 8px;
 }
 
 /* 左侧目录 */
@@ -169,15 +163,5 @@ onMounted(() => {
   overflow-y: auto;
   background: #fff;
   border-right: 1px solid #e8e8e8;
-}
-
-/* 右侧编辑器 */
-.editor-main {
-  flex: 1;
-  margin: 20px;
-  overflow: hidden;
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
 }
 </style>
