@@ -1,5 +1,3 @@
-// 工具函数
-
 export function addCssUnit(value: string | number): string {
   if (value == null || value === '') {
     return '';
@@ -10,8 +8,4 @@ export function addCssUnit(value: string | number): string {
   }
 
   return value.toString();
-}
-
-export function isDefined<T>(val: T): val is Exclude<T, undefined> {
-  return val !== undefined;
 }

@@ -22,7 +22,7 @@
 import type { DropdownOption } from './type';
 import { computed, watch } from 'vue';
 import { Icon } from '@iconify/vue';
-import { addCssUnit } from '../../utils/common';
+import { addCssUnit } from '../../utils/css';
 
 interface Props {
   /** 当前选中的值 */

@@ -23,6 +23,9 @@ importers:
       '@tauri-apps/plugin-opener':
         specifier: ^2
         version: 2.5.3
+      '@tiptap/extension-code':
+        specifier: ^3.20.5
+        version: 3.20.5(@tiptap/core@3.20.5(@tiptap/pm@3.20.5))
       '@tiptap/extension-code-block-lowlight':
         specifier: ^3.20.5
         version: 3.20.5(@tiptap/core@3.20.5(@tiptap/pm@3.20.5))(@tiptap/extension-code-block@3.20.5(@tiptap/core@3.20.5(@tiptap/pm@3.20.5))(@tiptap/pm@3.20.5))(@tiptap/pm@3.20.5)(highlight.js@11.11.1)(lowlight@3.3.0)
