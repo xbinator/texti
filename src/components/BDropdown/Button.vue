@@ -79,6 +79,8 @@ const visible = defineModel<boolean>('open', { default: false });
 function handleActiveChange(record: DropdownOption) {
   props.menuClickHide && (visible.value = false);
 
+  record.onClick?.();
+
   emit('change', record);
 }
 

@@ -1,6 +1,6 @@
 <template>
   <div class="b-editor-layout">
-    <BEditorSidebar v-if="showSidebar" :content="content" class="b-editor-sidebar" />
+    <BEditorSidebar v-if="showSidebar" :content="editorContent" class="b-editor-sidebar" />
 
     <BScrollbar class="b-editor-scrollbar" @click="handleScrollbarClick">
       <EditorContent :editor="editorInstance" class="b-editor-content" />
@@ -10,7 +10,7 @@
 
 <script setup lang="ts">
 import type { JSONContent, MarkdownParseHelpers, MarkdownParseResult, MarkdownToken } from '@tiptap/core';
-import { ref, watch, nextTick } from 'vue';
+import { ref, watch } from 'vue';
 import _Code from '@tiptap/extension-code';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { Heading as BaseHeading } from '@tiptap/extension-heading';
@@ -44,8 +44,7 @@ const props = withDefaults(defineProps<Props>(), {
   editable: true
 });
 
-const content = defineModel<string>();
-const isApplyingExternalContent = ref(false);
+const editorContent = defineModel<string>();
 
 const Code = _Code.extend({ excludes: '' });
 
@@ -53,10 +52,10 @@ const CodeBlock = CodeBlockLowlight.extend({ addNodeView: () => VueNodeViewRende
 
 const Heading = BaseHeading.extend({
   parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
-    const value = helpers.parseInline(token.tokens || []);
+    const content = helpers.parseInline(token.tokens || []);
 
-    if (value.length > 0) {
-      return helpers.createNode('heading', { level: token.depth || 1 }, value);
+    if (content.length) {
+      return helpers.createNode('heading', { level: token.depth || 1 }, content);
     }
 
     const text = typeof token.text === 'string' ? token.text.trim() : '';
@@ -67,10 +66,10 @@ const Heading = BaseHeading.extend({
 
 const Paragraph = BaseParagraph.extend({
   parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
-    const value = helpers.parseInline(token.tokens || []);
+    const content = helpers.parseInline(token.tokens || []);
 
-    if (value.length > 0) {
-      return helpers.createNode('paragraph', undefined, value);
+    if (content.length) {
+      return helpers.createNode('paragraph', undefined, content);
     }
 
     const text = typeof token.text === 'string' ? token.text : '';
@@ -110,12 +109,10 @@ const ListItem = BaseListItem.extend({
   }
 });
 
-function parseInlineOrText(tokens: MarkdownToken[] | undefined, text: string | undefined, helpers: MarkdownParseHelpers): JSONContent[] {
-  const value = helpers.parseInline(tokens || []);
+function parseInlineOrText(tokens: MarkdownToken[] | undefined, text: string | undefined, helpers: MarkdownParseHelpers) {
+  const content = helpers.parseInline(tokens || []);
 
-  if (value.length > 0) {
-    return value;
-  }
+  if (content.length) return content;
 
   return text ? [helpers.createTextNode(text)] : [];
 }
@@ -170,9 +167,7 @@ function setEditorContent(text: string, emitUpdate = true) {
   const instance = editorInstance.value;
   if (!instance) return;
 
-  isApplyingExternalContent.value = true;
   instance.commands.setContent(text, { emitUpdate, contentType: 'markdown' });
-  nextTick(() => (isApplyingExternalContent.value = false));
 }
 
 async function addHeadingIds() {
@@ -185,7 +180,7 @@ async function addHeadingIds() {
 }
 
 const editorInstance = useEditor({
-  content: content.value ?? '',
+  content: editorContent.value ?? '',
   extensions: editorExtensions,
   editable: props.editable,
   editorProps: {
@@ -208,25 +203,12 @@ const editorInstance = useEditor({
   },
 
   onUpdate: ({ editor }) => {
-    if (isApplyingExternalContent.value) return;
+    editorContent.value = editor.getMarkdown();
 
-    content.value = editor.getMarkdown();
     addHeadingIds();
   },
 
   onCreate: () => {
-    addHeadingIds();
-  }
-});
-
-watch(content, (newContent) => {
-  const instance = editorInstance.value;
-  if (!instance) return;
-
-  const current = instance.getMarkdown();
-
-  if (newContent !== current) {
-    setEditorContent(newContent ?? '', false);
     addHeadingIds();
   }
 });
@@ -237,6 +219,21 @@ function handleScrollbarClick() {
     instance.commands.focus();
   }
 }
+
+watch(
+  () => editorContent.value,
+  (content) => {
+    const instance = editorInstance.value;
+    if (!instance) return;
+
+    const _content = instance.getMarkdown();
+    if (_content === content) return;
+
+    setEditorContent(content ?? '', false);
+  }
+);
+
+defineExpose({ setContent: (text: string) => setEditorContent(text, false) });
 </script>
 
 <style lang="less">
