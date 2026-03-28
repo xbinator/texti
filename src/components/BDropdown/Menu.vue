@@ -16,13 +16,16 @@
   </div>
 </template>
 
-<script setup lang="ts">
+<script setup lang="ts" generic="T extends DropdownOption">
 import type { DropdownOption } from './type';
 
 interface Props {
   value?: string | number;
-  options: DropdownOption[];
+  /** 下拉选项列表 */
+  options: T[];
+  /** 下拉菜单项的类名 */
   rowClass?: string;
+  /** 内容宽度 */
   minWidth?: string | number;
 }
 
@@ -30,12 +33,12 @@ withDefaults(defineProps<Props>(), { value: '', rowClass: '', minWidth: 'auto' }
 
 const emit = defineEmits<{
   (e: 'update:value', value: string | number): void;
-  (e: 'change', value: DropdownOption): void;
+  (e: 'change', value: T): void;
 }>();
 
 const active = defineModel<string | number>('value', { default: '' });
 
-function handleClickMenu(record: DropdownOption) {
+function handleClickMenu(record: T) {
   if (record.disabled) return;
 
   if (record.value !== active.value) {
@@ -85,32 +88,6 @@ function handleClickMenu(record: DropdownOption) {
 .b-dropdown-menu-item-divider {
   height: 1px;
   margin: 3px 8px;
-  background: #e5e6eb;
-}
-
-:global(.dark) .b-dropdown-menu {
-  background: #1f2937;
-  box-shadow: 1px 1px 8px 0 rgb(0 0 0 / 30%);
-}
-
-:global(.dark) .b-dropdown-menu-item {
-  color: rgb(255 255 255 / 78%);
-}
-
-:global(.dark) .b-dropdown-menu-item:hover {
-  color: rgb(255 255 255 / 78%);
-  background-color: #374151;
-}
-
-:global(.dark) .b-dropdown-menu-item.disabled {
-  background-color: rgb(255 255 255 / 0%);
-}
-
-:global(.dark) .b-dropdown-menu-item.danger {
-  color: #ff7875;
-}
-
-:global(.dark) .b-dropdown-menu-item-divider {
-  background: #374151;
+  border-bottom: 1px solid #e5e6eb;
 }
 </style>

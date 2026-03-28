@@ -4,7 +4,7 @@
       <!-- <div class="toc-panel__header">
         <span class="toc-panel__title">目录</span>
       </div> -->
-      <AnchorContent :items="items" :active-id="activeId" />
+      <AnchorContent :items="items" :active-id="activeId" @click="handleAnchorClick" />
     </div>
   </Transition>
 </template>
@@ -12,7 +12,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { marked, Tokens } from 'marked';
-import AnchorContent from './components/AnchorContent.vue';
+import AnchorContent, { AnchorItem } from './components/AnchorContent.vue';
 
 interface Props {
   content?: string;
@@ -21,6 +21,8 @@ interface Props {
 const props = defineProps<Props>();
 
 const activeId = ref<string>('');
+
+const emit = defineEmits(['change']);
 
 const items = computed(() => {
   if (!props.content) return [];
@@ -35,6 +37,12 @@ const items = computed(() => {
 
   return _headings.map((h) => ({ ...h, level: h.level - minLevel + 1 }));
 });
+
+function handleAnchorClick(item: AnchorItem) {
+  activeId.value = item.id;
+
+  emit('change', item);
+}
 </script>
 
 <style scoped>

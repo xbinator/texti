@@ -13,7 +13,10 @@ export class TauriNative implements Native {
 
     const content = await readTextFile(path);
 
-    return { path, content, name: path.split('/').pop()?.split('.').shift() || 'untitled', ext: path.split('.').pop() || '' };
+    const fileName = path.split(/[/\\]/).pop() ?? '';
+    const [, name, ext] = /^(.+?)(?:\.([^.]+))?$/.exec(fileName) || ['', '', ''];
+
+    return { path, content, name, ext };
   }
 
   async saveFile(content: string, path?: string, options?: SaveFileOptions) {
@@ -39,6 +42,7 @@ export class TauriNative implements Native {
   }
 
   async setWindowTitle(title: string) {
+    console.log('🚀 ~ TauriNative ~ setWindowTitle ~ title:', title);
     const appWindow = getCurrentWindow();
 
     await appWindow.setTitle(title);

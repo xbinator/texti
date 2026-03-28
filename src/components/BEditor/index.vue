@@ -1,6 +1,6 @@
 <template>
   <div class="b-editor-layout">
-    <BEditorSidebar v-if="showSidebar" :content="editorContent" class="b-editor-sidebar" />
+    <BEditorSidebar v-if="showSidebar" :content="editorContent" class="b-editor-sidebar" @change="handleChangeAnchor" />
 
     <BScrollbar class="b-editor-scrollbar" @click="handleScrollbarClick">
       <div class="b-editor-container">
@@ -215,6 +215,10 @@ function handleScrollbarClick(event: MouseEvent): void {
   if (instance) {
     instance.commands.focus();
   }
+}
+
+function handleChangeAnchor(record: { id: string; level: number; text: string }) {
+  console.log('🚀 ~ handleChangeAnchor ~ record:', record);
 }
 
 watch(

@@ -18,7 +18,7 @@
   </BDropdown>
 </template>
 
-<script setup lang="ts">
+<script setup lang="ts" generic="T extends DropdownOption">
 import type { DropdownOption } from './type';
 import { computed, watch } from 'vue';
 import { Icon } from '@iconify/vue';
@@ -34,7 +34,7 @@ interface Props {
   /** 内容宽度 */
   contentWidth?: string | number;
   /** 下拉选项列表 */
-  options?: DropdownOption[];
+  options?: T[];
   /** 点击菜单项后是否隐藏下拉菜单 */
   menuClickHide?: boolean;
   /** 下拉菜单的类名 */
@@ -95,7 +95,7 @@ watch(
   display: flex;
   gap: 10px;
   align-items: center;
-  height: 32px;
+  height: 28px;
   padding: 0 10px;
   font-size: 14px;
   color: rgb(0 0 0 / 65%);

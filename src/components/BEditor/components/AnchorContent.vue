@@ -1,8 +1,15 @@
 <template>
   <BScrollbar class="anchor-panel__content" inset>
     <TransitionGroup name="anchor-fade" tag="div">
-      <div v-for="item in treeItems" :key="item.id" class="anchor-item" :class="{ active: activeId === item.id }" :style="item.style">
-        <div v-if="item.children.length" class="anchor-item__toggle" @click="toggleCollapsed(item.id)">
+      <div
+        v-for="item in treeItems"
+        :key="item.id"
+        class="anchor-item"
+        :class="{ active: activeId === item.id }"
+        :style="item.style"
+        @click="handleClick(item)"
+      >
+        <div v-if="item.children.length" class="anchor-item__toggle" @click.stop="toggleCollapsed(item.id)">
           <Icon :icon="isCollapsed(item.id) ? 'lucide:chevron-right' : 'lucide:chevron-down'" />
         </div>
 
@@ -20,8 +27,11 @@ import { Icon } from '@iconify/vue';
 import BScrollbar from '../../BScrollbar/index.vue';
 
 export interface AnchorItem {
+  // 目录项id
   id: string;
+  // 目录项文本
   text: string;
+  // 目录项等级
   level: number;
 }
 
@@ -46,7 +56,13 @@ const props = withDefaults(defineProps<Props>(), {
   activeId: ''
 });
 
+const emit = defineEmits(['click']);
+
 const collapsedIds = ref<Record<string, boolean>>({});
+
+function handleClick(item: VisibleAnchorItem) {
+  emit('click', item);
+}
 
 function toggleCollapsed(id: string): void {
   collapsedIds.value[id] = !collapsedIds.value[id];

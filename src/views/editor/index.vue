@@ -37,7 +37,7 @@ const { toolbarMenuOptions } = useToolbar(sourceFile);
   flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
-  height: 56px;
+  height: 40px;
   padding: 0 20px;
   background: #fff;
 }
