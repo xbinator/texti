@@ -1,20 +1,18 @@
 <template>
   <Transition name="toc-fade">
-    <div v-if="tocItems.length" class="toc-panel">
+    <div v-if="items.length" class="toc-panel">
       <!-- <div class="toc-panel__header">
         <span class="toc-panel__title">目录</span>
       </div> -->
-      <TocContent :items="tocItems" :active-id="activeId" />
+      <AnchorContent :items="items" :active-id="activeId" />
     </div>
   </Transition>
 </template>
 
 <script setup lang="ts">
-import type { TocItem } from './components/TocContent.vue';
 import { computed, ref } from 'vue';
-import { forEach, trim } from 'lodash-es';
-import { marked } from 'marked';
-import TocContent from './components/TocContent.vue';
+import { marked, Tokens } from 'marked';
+import AnchorContent from './components/AnchorContent.vue';
 
 interface Props {
   content?: string;
@@ -24,38 +22,18 @@ const props = defineProps<Props>();
 
 const activeId = ref<string>('');
 
-function parseToc(markdown: string): TocItem[] {
-  const tokens = marked.lexer(markdown);
-  const items: TocItem[] = [];
-  let index = 0;
-
-  forEach(tokens, (token) => {
-    if (token.type === 'heading') {
-      const { text } = token;
-      const level = token.depth;
-
-      if (trim(text)) {
-        const id = `heading-${index}`;
-        items.push({ id, text, level });
-        index++;
-      }
-    }
-  });
-
-  // 计算相对层级
-  if (items.length) {
-    const minLevel = Math.min(...items.map((item) => item.level));
-
-    items.forEach((item) => (item.level = item.level - minLevel + 1));
-  }
-
-  return items;
-}
-
-const tocItems = computed<TocItem[]>(() => {
+const items = computed(() => {
   if (!props.content) return [];
 
-  return parseToc(props.content);
+  const tokens = marked.lexer(props.content);
+
+  const headings = tokens.filter((t) => t.type === 'heading' && t.text?.trim()) as Tokens.Heading[];
+
+  const _headings = headings.map((t, i) => ({ id: `heading-${i}`, text: t.text.trim(), level: t.depth }));
+
+  const minLevel = Math.min(..._headings.map((h) => h.level));
+
+  return _headings.map((h) => ({ ...h, level: h.level - minLevel + 1 }));
 });
 </script>
 

@@ -3,7 +3,11 @@
     <BEditorSidebar v-if="showSidebar" :content="editorContent" class="b-editor-sidebar" />
 
     <BScrollbar class="b-editor-scrollbar" @click="handleScrollbarClick">
-      <EditorContent :editor="editorInstance" class="b-editor-content" />
+      <div class="b-editor-container">
+        <textarea ref="textarea" v-model="editorTitle" class="b-editor-title" placeholder="请输入标题"></textarea>
+
+        <EditorContent :editor="editorInstance" class="b-editor-content" />
+      </div>
     </BScrollbar>
   </div>
 </template>
@@ -16,6 +20,7 @@ import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { Heading as BaseHeading } from '@tiptap/extension-heading';
 import { ListItem as BaseListItem } from '@tiptap/extension-list';
 import { Paragraph as BaseParagraph } from '@tiptap/extension-paragraph';
+import { Placeholder } from '@tiptap/extension-placeholder';
 import { Table } from '@tiptap/extension-table';
 import { TableCell } from '@tiptap/extension-table-cell';
 import { TableHeader } from '@tiptap/extension-table-header';
@@ -23,7 +28,7 @@ import { TableRow } from '@tiptap/extension-table-row';
 import { Markdown } from '@tiptap/markdown';
 import StarterKit from '@tiptap/starter-kit';
 import { useEditor, EditorContent, VueNodeViewRenderer } from '@tiptap/vue-3';
-import { useWindowSize } from '@vueuse/core';
+import { useWindowSize, useTextareaAutosize } from '@vueuse/core';
 import { common, createLowlight } from 'lowlight';
 import _CodeBlock from './components/CodeBlock.vue';
 
@@ -45,6 +50,10 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const editorContent = defineModel<string>();
+
+const editorTitle = defineModel<string>('title');
+
+const { textarea } = useTextareaAutosize({ input: editorTitle.value });
 
 const Code = _Code.extend({ excludes: '' });
 
@@ -153,6 +162,7 @@ const TableExtensions = [MarkdownTable.configure({ resizable: false }), TableRow
 
 const editorExtensions = [
   StarterKit.configure({ code: false, codeBlock: false, heading: false, listItem: false, paragraph: false }),
+  Placeholder.configure({ emptyEditorClass: 'is-editor-empty', placeholder: '请输入内容' }),
   Markdown,
   Heading,
   Paragraph,
@@ -168,15 +178,6 @@ function setEditorContent(text: string, emitUpdate = true) {
   if (!instance) return;
 
   instance.commands.setContent(text, { emitUpdate, contentType: 'markdown' });
-}
-
-async function addHeadingIds() {
-  // await nextTick();
-  // // eslint-disable-next-line no-use-before-define
-  // const editorElement = editorInstance.value?.view.dom;
-  // if (!editorElement) return;
-  // const headings = editorElement.querySelectorAll('h1, h2, h3, h4, h5, h6');
-  // headings.forEach((heading, index) => (heading.id = `heading-${index}`));
 }
 
 const editorInstance = useEditor({
@@ -204,16 +205,12 @@ const editorInstance = useEditor({
 
   onUpdate: ({ editor }) => {
     editorContent.value = editor.getMarkdown();
-
-    addHeadingIds();
-  },
-
-  onCreate: () => {
-    addHeadingIds();
   }
 });
 
-function handleScrollbarClick() {
+function handleScrollbarClick(event: MouseEvent): void {
+  if ((event.target as HTMLElement).tagName === 'TEXTAREA') return;
+
   const instance = editorInstance.value;
   if (instance) {
     instance.commands.focus();
@@ -256,11 +253,34 @@ defineExpose({ setContent: (text: string) => setEditorContent(text, false) });
   overflow: hidden;
 }
 
-.b-editor-content {
+.b-editor-container {
   max-width: 800px;
+  margin: 0 auto;
+}
+
+.b-editor-title {
+  display: block;
+  width: 100%;
+  padding: 20px 40px 0;
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  color: #2e2e2e;
+  cursor: text;
+  resize: none;
+  outline: none;
+  background: transparent;
+  border: none;
+
+  &::placeholder {
+    font-weight: 600;
+    color: #bfbfbf;
+  }
+}
+
+.b-editor-content {
   height: 100%;
   min-height: 100%;
-  margin: 0 auto;
 
   .ProseMirror {
     min-height: 100%;
@@ -275,6 +295,14 @@ defineExpose({ setContent: (text: string) => setEditorContent(text, false) });
 
     > *:first-child {
       margin-top: 0;
+    }
+
+    > .is-editor-empty:first-child::before {
+      float: left;
+      height: 0;
+      color: #bfbfbf;
+      pointer-events: none;
+      content: attr(data-placeholder);
     }
   }
 

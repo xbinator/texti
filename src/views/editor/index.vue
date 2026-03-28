@@ -11,7 +11,7 @@
     </div>
 
     <div class="editor-content">
-      <BEditor v-model="sourceFile.content" />
+      <BEditor v-model="sourceFile.content" v-model:title="sourceFile.name" />
     </div>
 
     <Modal v-model:open="confirmVisible" title="确认" @ok="handleConfirmOk" @cancel="handleConfirmCancel">
