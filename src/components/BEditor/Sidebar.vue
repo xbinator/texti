@@ -1,13 +1,20 @@
 <template>
-  <BToc :items="tocItems" :active-id="activeId" />
+  <Transition name="toc-fade">
+    <div v-if="tocItems.length" class="toc-panel">
+      <!-- <div class="toc-panel__header">
+        <span class="toc-panel__title">目录</span>
+      </div> -->
+      <TocContent :items="tocItems" :active-id="activeId" />
+    </div>
+  </Transition>
 </template>
 
 <script setup lang="ts">
-import type { TocItem } from './components/Toc.vue';
+import type { TocItem } from './components/TocContent.vue';
 import { computed, ref } from 'vue';
 import { forEach, trim } from 'lodash-es';
 import { marked } from 'marked';
-import BToc from './components/Toc.vue';
+import TocContent from './components/TocContent.vue';
 
 interface Props {
   content?: string;
@@ -51,3 +58,41 @@ const tocItems = computed<TocItem[]>(() => {
   return parseToc(props.content);
 });
 </script>
+
+<style scoped>
+.toc-fade-enter-active,
+.toc-fade-leave-active {
+  transition: all 0.3s ease;
+}
+
+.toc-fade-enter-from,
+.toc-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-20px);
+}
+
+.toc-panel {
+  display: flex;
+  flex-direction: column;
+  width: 280px;
+  height: 100%;
+  background: rgb(255 255 255 / 72%);
+  border-right: 1px solid rgb(208 215 222 / 85%);
+  backdrop-filter: blur(10px);
+}
+
+.toc-panel__header {
+  display: flex;
+  align-items: center;
+  height: 52px;
+  padding: 0 14px;
+  border-bottom: 1px solid #eaeef2;
+}
+
+.toc-panel__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #57606a;
+  letter-spacing: 0.08em;
+}
+</style>

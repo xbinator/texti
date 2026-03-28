@@ -1,34 +1,27 @@
 <template>
-  <Transition name="toc-fade">
-    <div v-if="props.items.length" class="toc-panel">
-      <div class="toc-panel__header">
-        <span class="toc-panel__title">目录</span>
-      </div>
+  <BScrollbar v-if="props.items.length" class="toc-panel__content">
+    <div
+      v-for="item in visibleItems"
+      :key="item.id"
+      class="toc-item"
+      :class="{ 'toc-item--active': props.activeId === item.id }"
+      :style="{ paddingLeft: `${14 + item.depth * 16}px` }"
+    >
+      <button v-if="item.hasChildren" type="button" class="toc-item__toggle" @click="toggleCollapsed(item.id)">
+        <Icon :icon="isCollapsed(item.id) ? 'lucide:chevron-right' : 'lucide:chevron-down'" />
+      </button>
 
-      <div class="toc-panel__content">
-        <div
-          v-for="item in visibleItems"
-          :key="item.id"
-          class="toc-item"
-          :class="{ 'toc-item--active': props.activeId === item.id }"
-          :style="{ paddingLeft: `${14 + item.depth * 16}px` }"
-        >
-          <button v-if="item.hasChildren" type="button" class="toc-item__toggle" @click="toggleCollapsed(item.id)">
-            <Icon :icon="isCollapsed(item.id) ? 'lucide:chevron-right' : 'lucide:chevron-down'" />
-          </button>
+      <span v-else class="toc-item__toggle toc-item__toggle--empty"></span>
 
-          <span v-else class="toc-item__toggle toc-item__toggle--empty"></span>
-
-          <span class="toc-item__text">{{ item.text }}</span>
-        </div>
-      </div>
+      <span class="toc-item__text">{{ item.text }}</span>
     </div>
-  </Transition>
+  </BScrollbar>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
+import BScrollbar from '../../BScrollbar/index.vue';
 
 export interface TocItem {
   id: string;
@@ -112,46 +105,9 @@ const visibleItems = computed<VisibleTocItem[]>(() => flattenVisibleItems(treeIt
 </script>
 
 <style scoped>
-.toc-fade-enter-active,
-.toc-fade-leave-active {
-  transition: all 0.3s ease;
-}
-
-.toc-fade-enter-from,
-.toc-fade-leave-to {
-  opacity: 0;
-  transform: translateX(-20px);
-}
-
-.toc-panel {
-  display: flex;
-  flex-direction: column;
-  width: 280px;
-  height: 100%;
-  background: rgb(255 255 255 / 72%);
-  border-right: 1px solid rgb(208 215 222 / 85%);
-  backdrop-filter: blur(10px);
-}
-
-.toc-panel__header {
-  display: flex;
-  align-items: center;
-  height: 52px;
-  padding: 0 14px;
-  border-bottom: 1px solid #eaeef2;
-}
-
-.toc-panel__title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #57606a;
-  letter-spacing: 0.08em;
-}
-
 .toc-panel__content {
   flex: 1;
   padding: 16px 8px 12px;
-  overflow-y: auto;
 }
 
 .toc-item {
