@@ -13,7 +13,9 @@ import type { JSONContent, MarkdownParseHelpers, MarkdownParseResult, MarkdownTo
 import { ref, watch, nextTick } from 'vue';
 import _Code from '@tiptap/extension-code';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
+import { Heading as BaseHeading } from '@tiptap/extension-heading';
 import { ListItem as BaseListItem } from '@tiptap/extension-list';
+import { Paragraph as BaseParagraph } from '@tiptap/extension-paragraph';
 import { Table } from '@tiptap/extension-table';
 import { TableCell } from '@tiptap/extension-table-cell';
 import { TableHeader } from '@tiptap/extension-table-header';
@@ -49,39 +51,33 @@ const Code = _Code.extend({ excludes: '' });
 
 const CodeBlock = CodeBlockLowlight.extend({ addNodeView: () => VueNodeViewRenderer(_CodeBlock) }).configure({ lowlight });
 
-function isBlockNode(node: JSONContent): boolean {
-  return typeof node.type === 'string' && node.type !== 'text';
-}
+const Heading = BaseHeading.extend({
+  parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
+    const value = helpers.parseInline(token.tokens || []);
 
-function normalizeListItemContent(nodes: JSONContent[]): JSONContent[] {
-  if (nodes.length === 0) {
-    return [{ type: 'paragraph', content: [] }];
-  }
-
-  if (nodes[0]?.type === 'paragraph') {
-    return nodes;
-  }
-
-  if (isBlockNode(nodes[0])) {
-    return [{ type: 'paragraph', content: [] }, ...nodes];
-  }
-
-  const leadingInlineNodes: JSONContent[] = [];
-  let blockStartIndex = nodes.length;
-
-  for (let index = 0; index < nodes.length; index += 1) {
-    const node = nodes[index];
-
-    if (isBlockNode(node)) {
-      blockStartIndex = index;
-      break;
+    if (value.length > 0) {
+      return helpers.createNode('heading', { level: token.depth || 1 }, value);
     }
 
-    leadingInlineNodes.push(node);
-  }
+    const text = typeof token.text === 'string' ? token.text.trim() : '';
 
-  return [{ type: 'paragraph', content: leadingInlineNodes }, ...nodes.slice(blockStartIndex)];
-}
+    return helpers.createNode('heading', { level: token.depth || 1 }, text ? [helpers.createTextNode(text)] : []);
+  }
+});
+
+const Paragraph = BaseParagraph.extend({
+  parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
+    const value = helpers.parseInline(token.tokens || []);
+
+    if (value.length > 0) {
+      return helpers.createNode('paragraph', undefined, value);
+    }
+
+    const text = typeof token.text === 'string' ? token.text : '';
+
+    return helpers.createNode('paragraph', undefined, text ? [helpers.createTextNode(text)] : []);
+  }
+});
 
 const ListItem = BaseListItem.extend({
   parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
@@ -95,27 +91,79 @@ const ListItem = BaseListItem.extend({
       if (hasParagraphToken) {
         contentNodes = parseBlockChildren(token.tokens);
       } else if (firstToken?.type === 'text' && firstToken.tokens && firstToken.tokens.length > 0) {
-        contentNodes = helpers.parseInline(firstToken.tokens);
+        contentNodes = [{ type: 'paragraph', content: helpers.parseInline(firstToken.tokens) }];
 
         if (token.tokens.length > 1) {
           const remainingTokens = token.tokens.slice(1);
-          contentNodes = [...contentNodes, ...parseBlockChildren(remainingTokens)];
+          contentNodes.push(...parseBlockChildren(remainingTokens));
         }
       } else {
         contentNodes = parseBlockChildren(token.tokens);
       }
     }
 
-    return {
-      type: 'listItem',
-      content: normalizeListItemContent(contentNodes)
-    };
+    if (contentNodes.length === 0) {
+      contentNodes = [{ type: 'paragraph', content: [] }];
+    }
+
+    return { type: 'listItem', content: contentNodes };
   }
 });
 
-const TableExtensions = [Table.configure({ resizable: false }), TableRow, TableHeader, TableCell];
+function parseInlineOrText(tokens: MarkdownToken[] | undefined, text: string | undefined, helpers: MarkdownParseHelpers): JSONContent[] {
+  const value = helpers.parseInline(tokens || []);
 
-const editorExtensions = [StarterKit.configure({ code: false, codeBlock: false, listItem: false }), Markdown, Code, CodeBlock, ListItem, ...TableExtensions];
+  if (value.length > 0) {
+    return value;
+  }
+
+  return text ? [helpers.createTextNode(text)] : [];
+}
+
+const MarkdownTable = Table.extend({
+  parseMarkdown: (
+    token: MarkdownToken & {
+      header?: Array<{ text?: string; tokens?: MarkdownToken[] }>;
+      rows?: Array<Array<{ text?: string; tokens?: MarkdownToken[] }>>;
+    },
+    helpers: MarkdownParseHelpers
+  ): MarkdownParseResult => {
+    const rows: JSONContent[] = [];
+
+    if (token.header) {
+      const headerCells = token.header.map((cell) =>
+        helpers.createNode('tableHeader', {}, [helpers.createNode('paragraph', {}, parseInlineOrText(cell.tokens, cell.text, helpers))])
+      );
+
+      rows.push(helpers.createNode('tableRow', {}, headerCells));
+    }
+
+    if (token.rows) {
+      token.rows.forEach((row) => {
+        const bodyCells = row.map((cell) =>
+          helpers.createNode('tableCell', {}, [helpers.createNode('paragraph', {}, parseInlineOrText(cell.tokens, cell.text, helpers))])
+        );
+
+        rows.push(helpers.createNode('tableRow', {}, bodyCells));
+      });
+    }
+
+    return helpers.createNode('table', undefined, rows);
+  }
+});
+
+const TableExtensions = [MarkdownTable.configure({ resizable: false }), TableRow, TableHeader, TableCell];
+
+const editorExtensions = [
+  StarterKit.configure({ code: false, codeBlock: false, heading: false, listItem: false, paragraph: false }),
+  Markdown,
+  Heading,
+  Paragraph,
+  Code,
+  CodeBlock,
+  ListItem,
+  ...TableExtensions
+];
 
 function setEditorContent(text: string, emitUpdate = true) {
   // eslint-disable-next-line no-use-before-define
@@ -123,22 +171,17 @@ function setEditorContent(text: string, emitUpdate = true) {
   if (!instance) return;
 
   isApplyingExternalContent.value = true;
-  instance.commands.setContent(text, {
-    emitUpdate,
-    contentType: 'markdown',
-    parseOptions: { preserveWhitespace: 'full' }
-  });
+  instance.commands.setContent(text, { emitUpdate, contentType: 'markdown' });
   nextTick(() => (isApplyingExternalContent.value = false));
 }
 
 async function addHeadingIds() {
-  await nextTick();
-  // eslint-disable-next-line no-use-before-define
-  const editorElement = editorInstance.value?.view.dom;
-  if (!editorElement) return;
-
-  const headings = editorElement.querySelectorAll('h1, h2, h3, h4, h5, h6');
-  headings.forEach((heading, index) => (heading.id = `heading-${index}`));
+  // await nextTick();
+  // // eslint-disable-next-line no-use-before-define
+  // const editorElement = editorInstance.value?.view.dom;
+  // if (!editorElement) return;
+  // const headings = editorElement.querySelectorAll('h1, h2, h3, h4, h5, h6');
+  // headings.forEach((heading, index) => (heading.id = `heading-${index}`));
 }
 
 const editorInstance = useEditor({
@@ -295,11 +338,11 @@ function handleScrollbarClick() {
     margin: 0.75em 0;
   }
 
-  ul {
+  ul > li {
     list-style: disc;
   }
 
-  ol {
+  ol > li {
     list-style: decimal;
   }
 
