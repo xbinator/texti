@@ -1,9 +1,10 @@
 <template>
-  <div class="b-editor-layout">
+  <div ref="layoutRef" class="b-editor-layout">
     <BEditorSidebar
       v-if="showSidebar"
       :title="editorTitle"
       :content="editorContent"
+      :anchor-id-prefix="editorInstanceId"
       :active-id="activeAnchorId"
       class="b-editor-sidebar"
       @change="handleChangeAnchor"
@@ -20,32 +21,21 @@
 </template>
 
 <script setup lang="ts">
-import type { JSONContent, MarkdownParseHelpers, MarkdownParseResult, MarkdownToken, Editor } from '@tiptap/core';
-import { ref, watch } from 'vue';
-import _Code from '@tiptap/extension-code';
-import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
-import { Heading as BaseHeading } from '@tiptap/extension-heading';
-import { ListItem as BaseListItem } from '@tiptap/extension-list';
-import { Paragraph as BaseParagraph } from '@tiptap/extension-paragraph';
-import { Placeholder } from '@tiptap/extension-placeholder';
-import { Table } from '@tiptap/extension-table';
-import { TableCell } from '@tiptap/extension-table-cell';
-import { TableHeader } from '@tiptap/extension-table-header';
-import { TableRow } from '@tiptap/extension-table-row';
-import { Markdown } from '@tiptap/markdown';
-import StarterKit from '@tiptap/starter-kit';
-import { useEditor, EditorContent, VueNodeViewRenderer } from '@tiptap/vue-3';
-import { useWindowSize, useTextareaAutosize, useThrottleFn } from '@vueuse/core';
-import { common, createLowlight } from 'lowlight';
-import _CodeBlock from './components/CodeBlock.vue';
-
-const lowlight = createLowlight(common);
+import type { Editor } from '@tiptap/core';
+import { ref, toRef, watch } from 'vue';
+import { useEditor, EditorContent } from '@tiptap/vue-3';
+import { useWindowSize, useTextareaAutosize } from '@vueuse/core';
+import { useAnchors } from './hooks/useAnchors';
+import { useContent } from './hooks/useContent';
+import { useExtensions } from './hooks/useExtensions';
 
 const MIN_WIDTH_FOR_SIDEBAR = 1360; // 800 + 280 * 2
+let editorInstanceCounter = 0;
 
 const { width } = useWindowSize();
+const layoutRef = ref<HTMLElement | null>(null);
 const showSidebar = ref(true);
-const activeAnchorId = ref<string>('');
+const editorInstanceId = `b-editor-${editorInstanceCounter++}`;
 
 watch(width, (newWidth) => (showSidebar.value = newWidth >= MIN_WIDTH_FOR_SIDEBAR), { immediate: true });
 
@@ -62,214 +52,32 @@ const editorContent = defineModel<string>();
 const editorTitle = defineModel<string>('title', { default: '' });
 // @ts-ignore
 const { textarea } = useTextareaAutosize({ input: editorTitle });
-
-const Code = _Code.extend({ excludes: '' });
-
-const CodeBlock = CodeBlockLowlight.extend({ addNodeView: () => VueNodeViewRenderer(_CodeBlock) }).configure({ lowlight });
-
-let headingIndex = 0;
-
-function resetHeadingIndex(): void {
-  headingIndex = 0;
-}
-
-const Heading = BaseHeading.extend({
-  addAttributes() {
-    return {
-      ...this.parent?.(),
-      id: {
-        default: null,
-        parseHTML: (element) => element.getAttribute('id'),
-        renderHTML: (attributes) => {
-          if (!attributes.id) {
-            return {};
-          }
-          return { id: attributes.id };
-        }
-      }
-    };
-  },
-  parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
-    const content = helpers.parseInline(token.tokens || []);
-    const id = `heading-${headingIndex++}`;
-
-    if (content.length) {
-      return helpers.createNode('heading', { level: token.depth || 1, id }, content);
-    }
-
-    const text = typeof token.text === 'string' ? token.text.trim() : '';
-
-    return helpers.createNode('heading', { level: token.depth || 1, id }, text ? [helpers.createTextNode(text)] : []);
-  },
-  addKeyboardShortcuts() {
-    return this.parent?.() ?? {};
-  },
-  onCreate() {
-    const { editor } = this;
-    editor.on('beforeCreate', () => {
-      resetHeadingIndex();
-    });
-  }
-}).configure({ levels: [1, 2, 3, 4, 5, 6] });
-
-const Paragraph = BaseParagraph.extend({
-  parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
-    const content = helpers.parseInline(token.tokens || []);
-
-    if (content.length) {
-      return helpers.createNode('paragraph', undefined, content);
-    }
-
-    const text = typeof token.text === 'string' ? token.text : '';
-
-    return helpers.createNode('paragraph', undefined, text ? [helpers.createTextNode(text)] : []);
-  }
+const { activeAnchorId, handleChangeAnchor, handleEditorScroll } = useAnchors(layoutRef);
+const { editorExtensions, resetHeadingIndex, assignHeadingIds } = useExtensions(editorInstanceId);
+const editorInstanceRef = ref<Editor>();
+const { setEditorContent, onPaste, onEditorUpdate } = useContent({
+  assignHeadingIds,
+  editable: toRef(props, 'editable'),
+  editorContent,
+  getEditorInstance: () => editorInstanceRef.value,
+  resetHeadingIndex
 });
-
-const ListItem = BaseListItem.extend({
-  parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
-    const parseBlockChildren = helpers.parseBlockChildren ?? helpers.parseChildren;
-    let contentNodes: JSONContent[] = [];
-
-    if (token.tokens && token.tokens.length > 0) {
-      const hasParagraphToken = token.tokens.some((item) => item.type === 'paragraph');
-      const firstToken = token.tokens[0];
-
-      if (hasParagraphToken) {
-        contentNodes = parseBlockChildren(token.tokens);
-      } else if (firstToken?.type === 'text' && firstToken.tokens && firstToken.tokens.length > 0) {
-        contentNodes = [{ type: 'paragraph', content: helpers.parseInline(firstToken.tokens) }];
-
-        if (token.tokens.length > 1) {
-          const remainingTokens = token.tokens.slice(1);
-          contentNodes.push(...parseBlockChildren(remainingTokens));
-        }
-      } else {
-        contentNodes = parseBlockChildren(token.tokens);
-      }
-    }
-
-    if (contentNodes.length === 0) {
-      contentNodes = [{ type: 'paragraph', content: [] }];
-    }
-
-    return { type: 'listItem', content: contentNodes };
-  }
-});
-
-function parseInlineOrText(tokens: MarkdownToken[] | undefined, text: string | undefined, helpers: MarkdownParseHelpers) {
-  const content = helpers.parseInline(tokens || []);
-
-  if (content.length) return content;
-
-  return text ? [helpers.createTextNode(text)] : [];
-}
-
-const MarkdownTable = Table.extend({
-  parseMarkdown: (
-    token: MarkdownToken & {
-      header?: Array<{ text?: string; tokens?: MarkdownToken[] }>;
-      rows?: Array<Array<{ text?: string; tokens?: MarkdownToken[] }>>;
-    },
-    helpers: MarkdownParseHelpers
-  ): MarkdownParseResult => {
-    const rows: JSONContent[] = [];
-
-    if (token.header) {
-      const headerCells = token.header.map((cell) =>
-        helpers.createNode('tableHeader', {}, [helpers.createNode('paragraph', {}, parseInlineOrText(cell.tokens, cell.text, helpers))])
-      );
-
-      rows.push(helpers.createNode('tableRow', {}, headerCells));
-    }
-
-    if (token.rows) {
-      token.rows.forEach((row) => {
-        const bodyCells = row.map((cell) =>
-          helpers.createNode('tableCell', {}, [helpers.createNode('paragraph', {}, parseInlineOrText(cell.tokens, cell.text, helpers))])
-        );
-
-        rows.push(helpers.createNode('tableRow', {}, bodyCells));
-      });
-    }
-
-    return helpers.createNode('table', undefined, rows);
-  }
-});
-
-const TableExtensions = [MarkdownTable.configure({ resizable: false }), TableRow, TableHeader, TableCell];
-
-const editorExtensions = [
-  StarterKit.configure({ code: false, codeBlock: false, heading: false, listItem: false, paragraph: false }),
-  Placeholder.configure({ emptyEditorClass: 'is-editor-empty', placeholder: '请输入内容' }),
-  Markdown,
-  Heading,
-  Paragraph,
-  Code,
-  CodeBlock,
-  ListItem,
-  ...TableExtensions
-];
-
-function assignHeadingIds(editor: Editor): void {
-  const { state, view } = editor;
-  const { tr } = state;
-  let index = 0;
-  let needsUpdate = false;
-
-  state.doc.descendants((node, pos) => {
-    if (node.type.name === 'heading') {
-      const expectedId = `heading-${index}`;
-      if (node.attrs.id !== expectedId) {
-        needsUpdate = true;
-        tr.setNodeMarkup(pos, undefined, { ...node.attrs, id: expectedId });
-      }
-      index++;
-    }
-  });
-
-  if (needsUpdate) {
-    view.dispatch(tr);
-  }
-}
-
-function setEditorContent(text: string, emitUpdate = true) {
-  // eslint-disable-next-line no-use-before-define
-  const instance = editorInstance.value;
-  if (!instance) return;
-
-  headingIndex = 0;
-  instance.commands.setContent(text, { emitUpdate, contentType: 'markdown' });
-}
 
 const editorInstance = useEditor({
   content: editorContent.value ?? '',
   extensions: editorExtensions,
   editable: props.editable,
-  editorProps: {
-    attributes: { spellcheck: 'false' },
-    handlePaste(_view, event) {
-      const instance = editorInstance.value;
-      if (!instance) return false;
-
-      const text = event.clipboardData?.getData('text/plain') || '';
-
-      // 只在当前内容为空时，将粘贴内容按 Markdown 解析并整体渲染
-      if (!text.trim()) return false;
-      if (instance.state.doc.textContent.trim().length > 0) return false;
-
-      event.preventDefault();
-      setEditorContent(text);
-
-      return true;
-    }
-  },
-
-  onUpdate: ({ editor }) => {
-    assignHeadingIds(editor);
-    editorContent.value = editor.getMarkdown();
-  }
+  editorProps: { attributes: { spellcheck: 'false' }, handlePaste: onPaste },
+  onUpdate: onEditorUpdate
 });
+
+watch(
+  editorInstance,
+  (instance) => {
+    editorInstanceRef.value = instance;
+  },
+  { immediate: true }
+);
 
 function handleScrollbarClick(event: MouseEvent): void {
   if ((event.target as HTMLElement).tagName === 'TEXTAREA') return;
@@ -279,70 +87,6 @@ function handleScrollbarClick(event: MouseEvent): void {
     instance.commands.focus();
   }
 }
-
-function handleChangeAnchor(record: { id: string; level: number; text: string }) {
-  activeAnchorId.value = record.id;
-
-  if (!record.id) {
-    const container = document.querySelector('.b-editor-scrollbar .scrollbar__wrap');
-    if (container) {
-      container.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-    return;
-  }
-
-  const element = document.getElementById(record.id);
-  if (element) {
-    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-}
-
-const HEADING_SELECTOR = '.b-editor-content h1, .b-editor-content h2, .b-editor-content h3, .b-editor-content h4, .b-editor-content h5, .b-editor-content h6';
-
-const updateActiveAnchor = useThrottleFn(() => {
-  const container = document.querySelector('.b-editor-scrollbar .scrollbar__wrap') as HTMLDivElement;
-  if (!container) return;
-
-  if (container.scrollTop < 50) {
-    activeAnchorId.value = '';
-    return;
-  }
-
-  const headings = document.querySelectorAll(HEADING_SELECTOR);
-  if (!headings.length) return;
-
-  let currentId = '';
-  const containerRect = container.getBoundingClientRect();
-  const threshold = containerRect.top + 100;
-
-  headings.forEach((heading) => {
-    const rect = heading.getBoundingClientRect();
-    if (rect.top <= threshold) {
-      currentId = heading.id;
-    }
-  });
-
-  if (currentId !== activeAnchorId.value) {
-    activeAnchorId.value = currentId;
-  }
-}, 100);
-
-function handleEditorScroll() {
-  updateActiveAnchor();
-}
-
-watch(
-  () => editorContent.value,
-  (content) => {
-    const instance = editorInstance.value;
-    if (!instance) return;
-
-    const _content = instance.getMarkdown();
-    if (_content === content) return;
-
-    setEditorContent(content ?? '', false);
-  }
-);
 
 defineExpose({ setContent: (text: string) => setEditorContent(text, false) });
 </script>

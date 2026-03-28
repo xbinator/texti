@@ -14,6 +14,7 @@ import AnchorContent, { AnchorItem } from './components/AnchorContent.vue';
 interface Props {
   title?: string;
   content?: string;
+  anchorIdPrefix?: string;
   // 当前选中的锚点id
   activeId?: string;
 }
@@ -21,6 +22,7 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   title: '',
   content: '',
+  anchorIdPrefix: '',
   activeId: ''
 });
 
@@ -33,7 +35,11 @@ const items = computed(() => {
 
   const headings = tokens.filter((t) => t.type === 'heading' && t.text?.trim()) as Tokens.Heading[];
 
-  const _headings = headings.map((t, i) => ({ id: `heading-${i}`, text: t.text.trim(), level: t.depth }));
+  const _headings = headings.map((t, i) => ({
+    id: props.anchorIdPrefix ? `${props.anchorIdPrefix}-heading-${i}` : `heading-${i}`,
+    text: t.text.trim(),
+    level: t.depth
+  }));
 
   const minLevel = Math.min(..._headings.map((h) => h.level));
 
