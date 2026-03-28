@@ -1,9 +1,10 @@
 <template>
-  <BScrollbar class="anchor-panel__content" inset>
+  <BScrollbar ref="scrollbarRef" class="anchor-panel__content" inset>
     <TransitionGroup name="anchor-fade" tag="div">
       <div
         v-for="item in treeItems"
         :key="item.id"
+        :ref="(el) => setItemRef(el as HTMLElement, item.id)"
         class="anchor-item"
         :class="{ active: activeId === item.id }"
         :style="item.style"
@@ -22,7 +23,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, CSSProperties, ref } from 'vue';
+import { computed, CSSProperties, ref, watch, nextTick } from 'vue';
 import { Icon } from '@iconify/vue';
 import BScrollbar from '../../BScrollbar/index.vue';
 
@@ -57,6 +58,15 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits(['click']);
+
+const scrollbarRef = ref<InstanceType<typeof BScrollbar>>();
+const itemRefs = ref<Record<string, HTMLElement>>({});
+
+function setItemRef(el: HTMLElement, id: string): void {
+  if (el) {
+    itemRefs.value[id] = el;
+  }
+}
 
 const collapsedIds = ref<Record<string, boolean>>({});
 
@@ -104,6 +114,20 @@ const treeItems = computed(() => {
 
   return buildAnchorTree(roots);
 });
+
+watch(
+  () => props.activeId,
+  (newId) => {
+    if (!newId) return;
+
+    nextTick(() => {
+      const activeEl = itemRefs.value[newId];
+      if (activeEl) {
+        activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    });
+  }
+);
 </script>
 
 <style scoped>
