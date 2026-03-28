@@ -165,9 +165,12 @@ watch(
 }
 
 .anchor-panel__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.08em;
+  white-space: nowrap;
 }
 
 .anchor-item {
