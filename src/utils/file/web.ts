@@ -1,8 +1,8 @@
 /* eslint-disable class-methods-use-this */
-import type { FileAPI } from './types';
+import type { FileAPI, OpenFileOptions, SaveFileOptions } from './types';
 
 export class WebFileAPI implements FileAPI {
-  async openFile(options?: { filters?: Array<{ name: string; extensions: string[] }> }): Promise<string | null> {
+  async openFile(options?: OpenFileOptions): Promise<string | null> {
     return new Promise((resolve) => {
       const input = document.createElement('input');
       input.type = 'file';
@@ -23,11 +23,7 @@ export class WebFileAPI implements FileAPI {
     });
   }
 
-  async saveFile(
-    content: string,
-    path?: string,
-    options?: { filters?: Array<{ name: string; extensions: string[] }>; defaultPath?: string }
-  ): Promise<string | null> {
+  async saveFile(content: string, path?: string, options?: SaveFileOptions): Promise<string | null> {
     const filename = path || options?.defaultPath || sessionStorage.getItem('web-editor-path') || 'untitled.md';
     const blob = new Blob([content], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);

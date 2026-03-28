@@ -1,18 +1,18 @@
 /* eslint-disable class-methods-use-this */
-import type { FileAPI } from './types';
+import type { FileAPI, OpenFileOptions, SaveFileOptions } from './types';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
 
 export class TauriFileAPI implements FileAPI {
-  async openFile(options?: { filters?: Array<{ name: string; extensions: string[] }> }) {
+  async openFile(options?: OpenFileOptions) {
     const filters = options?.filters || [{ name: 'Markdown', extensions: ['md', 'markdown'] }];
     const file = await open({ filters });
 
     return file;
   }
 
-  async saveFile(content: string, path?: string, options?: { filters?: Array<{ name: string; extensions: string[] }>; defaultPath?: string }) {
+  async saveFile(content: string, path?: string, options?: SaveFileOptions) {
     if (path) {
       await writeTextFile(path, content);
       return path;
