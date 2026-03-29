@@ -1,4 +1,5 @@
 import vue from '@vitejs/plugin-vue';
+import vueJsx from '@vitejs/plugin-vue-jsx';
 import UnoCSS from 'unocss/vite';
 import { AntDesignVueResolver } from 'unplugin-vue-components/resolvers';
 import Components from 'unplugin-vue-components/vite';
@@ -11,6 +12,7 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [
     vue(),
+    vueJsx(),
     UnoCSS(),
     Components({
       dts: 'types/components.d.ts',
