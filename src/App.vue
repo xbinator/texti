@@ -1,24 +1,11 @@
-<script setup lang="ts">
-import { RouterView } from 'vue-router';
-</script>
-
 <template>
-  <RouterView />
+  <AConfigProvider :locale="zhCN">
+    <RouterView />
+  </AConfigProvider>
 </template>
 
-<style>
-* {
-  box-sizing: border-box;
-  padding: 0;
-  margin: 0;
-}
+<script lang="ts" setup>
+import zhCN from 'ant-design-vue/es/locale/zh_CN';
+</script>
 
-html,
-body,
-#app {
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  background: #f3f3f3;
-}
-</style>
+<style></style>
