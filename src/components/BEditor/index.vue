@@ -11,7 +11,9 @@
     />
 
     <BScrollbar class="b-editor-scrollbar" @click="handleScrollbarClick" @scroll="handleEditorScroll">
-      <div class="b-editor-container">
+      <div ref="containerRef" class="b-editor-container" @mouseleave="onContainerMouseLeave" @mousemove="onContainerMouseMove">
+        <HoverIndicator :is-visible="hoverIndicator.isVisible" :label="hoverIndicator.label" :top="hoverIndicator.top" :type="hoverIndicator.type" />
+
         <textarea ref="textarea" v-model="editorTitle" class="b-editor-title" placeholder="请输入标题"></textarea>
 
         <EditorContent :editor="editorInstance" class="b-editor-content" />
@@ -25,15 +27,18 @@ import type { Editor } from '@tiptap/core';
 import { ref, toRef, watch } from 'vue';
 import { useEditor, EditorContent } from '@tiptap/vue-3';
 import { useWindowSize, useTextareaAutosize } from '@vueuse/core';
+import HoverIndicator from './components/HoverIndicator.vue';
 import { useAnchors } from './hooks/useAnchors';
 import { useContent } from './hooks/useContent';
 import { useExtensions } from './hooks/useExtensions';
+import { useHoverIndicator } from './hooks/useHoverIndicator';
 
 const MIN_WIDTH_FOR_SIDEBAR = 1360; // 800 + 280 * 2
 let editorInstanceCounter = 0;
 
 const { width } = useWindowSize();
 const layoutRef = ref<HTMLElement | null>(null);
+const containerRef = ref<HTMLElement | null>(null);
 const showSidebar = ref(true);
 const editorInstanceId = `b-editor-${editorInstanceCounter++}`;
 
@@ -54,6 +59,7 @@ const editorTitle = defineModel<string>('title', { default: '' });
 const { textarea } = useTextareaAutosize({ input: editorTitle });
 const { activeAnchorId, handleChangeAnchor, handleEditorScroll } = useAnchors(layoutRef);
 const { editorExtensions, resetHeadingIndex, assignHeadingIds } = useExtensions(editorInstanceId);
+const { hoverIndicator, onContainerMouseLeave, onContainerMouseMove } = useHoverIndicator(containerRef);
 const editorInstanceRef = ref<Editor>();
 const { setEditorContent, onPaste, onEditorUpdate } = useContent({
   assignHeadingIds,
@@ -112,6 +118,7 @@ defineExpose({ setContent: (text: string) => setEditorContent(text, false) });
 }
 
 .b-editor-container {
+  position: relative;
   max-width: 800px;
   margin: 0 auto;
 }
