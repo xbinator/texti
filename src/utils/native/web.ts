@@ -44,7 +44,7 @@ export class WebNative implements Native {
 
   async autoSave(path: string, content: string, name: string, ext: string): Promise<AutoSaveResult> {
     try {
-      await indexedDBStorage.saveFile({ path, content, name, ext, updatedAt: Date.now() });
+      await indexedDBStorage.saveFile({ path, content, name, ext });
 
       await indexedDBStorage.setCurrentFile(path);
       return { success: true, path };
