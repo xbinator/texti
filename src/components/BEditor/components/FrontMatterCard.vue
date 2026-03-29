@@ -247,6 +247,7 @@ function confirmComplexEditInline(): void {
 
 .action-btn {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
   width: 24px;
@@ -283,12 +284,12 @@ function confirmComplexEditInline(): void {
   box-sizing: border-box;
   min-width: 80px;
   max-width: 150px;
-  height: 26px;
+  height: 28px;
   padding: 0 8px;
   font-family: 'SF Mono', Monaco, 'Courier New', monospace;
   font-size: 12px;
   font-weight: 500;
-  line-height: 26px;
+  line-height: 28px;
   color: #7c3aed;
   cursor: pointer;
   background-color: #ede9fe;
@@ -316,7 +317,7 @@ function confirmComplexEditInline(): void {
 .item-value {
   box-sizing: border-box;
   width: 100%;
-  height: 26px;
+  height: 28px;
   padding: 0 8px;
   font-size: 13px;
   line-height: 24px;
@@ -347,10 +348,11 @@ function confirmComplexEditInline(): void {
 
 .item-delete {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   font-size: 14px;
   color: #9ca3af;
