@@ -1,10 +1,19 @@
 import type { EditorFile } from '../types';
-import { Ref, computed, ref, onMounted } from 'vue';
+import type { Ref } from 'vue';
+import { computed, ref, onMounted, nextTick } from 'vue';
+import { Modal } from 'ant-design-vue';
 import type { Props as ToolbarProps } from '@/components/Toolbar.vue';
 import { native } from '@/utils/native';
 import { indexedDBStorage, type StoredFile } from '@/utils/storage';
 
-export function useFileActive(fileState: Ref<Partial<EditorFile>>) {
+interface UseFileActiveOptions {
+  // 暂停自动保存
+  pause: () => void;
+  // 恢复自动保存
+  resume: () => void;
+}
+
+export function useFileActive(fileState: Ref<Partial<EditorFile>>, options: UseFileActiveOptions) {
   const canSave = computed(() => fileState.value.path !== undefined);
   const recentFiles = ref<StoredFile[]>([]);
 
@@ -12,7 +21,32 @@ export function useFileActive(fileState: Ref<Partial<EditorFile>>) {
     recentFiles.value = await indexedDBStorage.getAllRecentFiles();
   }
 
-  onMounted(loadRecentFiles);
+  function setFileState(file: Partial<EditorFile>): void {
+    options.pause();
+
+    fileState.value = file;
+
+    file.path && indexedDBStorage.setCurrentFile(file.path);
+
+    native.setWindowTitle(`${file.name || '未命名文件'}.${file.ext || 'md'}`);
+
+    nextTick(() => options.resume());
+  }
+
+  async function restoreCurrentFile(): Promise<void> {
+    const currentPath = await indexedDBStorage.getCurrentFile();
+
+    if (!currentPath) return;
+
+    const stored = await indexedDBStorage.getRecentFile(currentPath);
+
+    stored && setFileState(stored);
+  }
+
+  onMounted(async () => {
+    await loadRecentFiles();
+    await restoreCurrentFile();
+  });
 
   const toolbarMenuOptions = computed<ToolbarProps['options']>(() => [
     {
@@ -20,7 +54,7 @@ export function useFileActive(fileState: Ref<Partial<EditorFile>>) {
       label: '新建',
       shortcut: 'Ctrl+N',
       onClick: () => {
-        //  native.setWindowTitle('新建文件')
+        setFileState({ name: '', ext: 'md', content: '' });
       }
     },
     { type: 'divider' },
@@ -35,10 +69,9 @@ export function useFileActive(fileState: Ref<Partial<EditorFile>>) {
         if (!file.path) return;
 
         await indexedDBStorage.addRecentFile(file as StoredFile);
-
         loadRecentFiles();
 
-        fileState.value = file;
+        setFileState(file);
       }
     },
     {
@@ -54,7 +87,7 @@ export function useFileActive(fileState: Ref<Partial<EditorFile>>) {
 
             if (!stored) return;
 
-            fileState.value = stored;
+            setFileState(stored);
           }
         })),
         { type: 'divider' as const },
@@ -62,9 +95,21 @@ export function useFileActive(fileState: Ref<Partial<EditorFile>>) {
           value: 'clear-recent',
           label: '清除最近打开记录',
           onClick: async () => {
-            await indexedDBStorage.clearRecentFiles();
+            Modal.confirm({
+              title: '确认清除最近打开记录吗？',
+              centered: true,
+              content: '此操作将删除所有最近打开的文件记录，是否继续？',
+              okText: '删除',
+              cancelText: '取消',
+              maskClosable: true,
+              okButtonProps: { danger: true, type: 'primary' },
+              autoFocusButton: null,
+              onOk: async () => {
+                await indexedDBStorage.clearRecentFiles();
 
-            await loadRecentFiles();
+                await loadRecentFiles();
+              }
+            });
           }
         }
       ]
@@ -75,8 +120,16 @@ export function useFileActive(fileState: Ref<Partial<EditorFile>>) {
       label: '保存',
       shortcut: 'Ctrl+S',
       disabled: !canSave.value,
-      onClick: () => {
-        //
+      onClick: async () => {
+        const { path, content, name, ext } = fileState.value;
+
+        if (!path || content === undefined) return;
+
+        const savedPath = await native.saveFile(content, path);
+
+        if (savedPath) {
+          await indexedDBStorage.updateRecentFile({ path: savedPath, content, name: name ?? '', ext: ext ?? '' });
+        }
       }
     },
     {
@@ -84,8 +137,25 @@ export function useFileActive(fileState: Ref<Partial<EditorFile>>) {
       label: '另存为',
       shortcut: 'Ctrl+Shift+S',
       disabled: !canSave.value,
-      onClick: () => {
-        //
+      onClick: async () => {
+        const { content, name, ext } = fileState.value;
+
+        if (content === undefined) return;
+
+        const savedPath = await native.saveFile(content, undefined, {
+          defaultPath: name && ext ? `${name}.${ext}` : 'untitled.md'
+        });
+
+        if (savedPath) {
+          const fileName = savedPath.split(/[/\\]/).pop() ?? '';
+          const [, newName, newExt] = /^(.+?)(?:\.([^.]+))?$/.exec(fileName) || ['', '', ''];
+
+          const newFile = { path: savedPath, content, name: newName, ext: newExt };
+
+          await indexedDBStorage.addRecentFile(newFile);
+          loadRecentFiles();
+          setFileState(newFile);
+        }
       }
     }
   ]);

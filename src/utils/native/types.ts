@@ -19,20 +19,12 @@ export interface File {
   ext: string;
 }
 
-export interface AutoSaveResult {
-  success: boolean;
-  path: string;
-  error?: string;
-}
-
 export interface Native {
   openFile(options?: OpenFileOptions): Promise<File>;
 
   saveFile(content: string, path?: string, options?: SaveFileOptions): Promise<string | null>;
 
   writeFile(path: string, content: string): Promise<void>;
-
-  autoSave(path: string, content: string, name: string, ext: string): Promise<AutoSaveResult>;
 
   setWindowTitle(title: string): Promise<void>;
 }

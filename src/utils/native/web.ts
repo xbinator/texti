@@ -1,6 +1,5 @@
 /* eslint-disable class-methods-use-this */
-import type { Native, OpenFileOptions, SaveFileOptions, File, AutoSaveResult } from './types';
-import { indexedDBStorage } from '../storage';
+import type { Native, OpenFileOptions, SaveFileOptions, File } from './types';
 
 export class WebNative implements Native {
   async openFile(options?: OpenFileOptions) {
@@ -40,17 +39,6 @@ export class WebNative implements Native {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async writeFile(_path: string, _content: string): Promise<void> {
     // this.syncCurrentFile(path, content);
-  }
-
-  async autoSave(path: string, content: string, name: string, ext: string): Promise<AutoSaveResult> {
-    try {
-      await indexedDBStorage.saveFile({ path, content, name, ext });
-
-      await indexedDBStorage.setCurrentFile(path);
-      return { success: true, path };
-    } catch (error) {
-      return { success: false, path, error: error instanceof Error ? error.message : 'Auto save failed' };
-    }
   }
 
   async setWindowTitle(title: string): Promise<void> {
