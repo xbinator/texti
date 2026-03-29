@@ -9,14 +9,14 @@ export class TauriNative implements Native {
     const filters = options?.filters || [{ name: 'Markdown', extensions: ['md', 'markdown'] }];
     const path = await open({ filters });
 
-    if (!path) return { path: null, content: '', name: '', ext: '' };
+    if (!path) return { id: '', path: null, content: '', name: '', ext: '' };
 
     const content = await readTextFile(path);
 
     const fileName = path.split(/[/\\]/).pop() ?? '';
     const [, name, ext] = /^(.+?)(?:\.([^.]+))?$/.exec(fileName) || ['', '', ''];
 
-    return { path, content, name, ext };
+    return { id: '', path, content, name, ext };
   }
 
   async saveFile(content: string, path?: string, options?: SaveFileOptions) {
