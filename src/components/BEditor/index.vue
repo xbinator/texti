@@ -11,11 +11,11 @@
     />
 
     <BScrollbar class="b-editor-scrollbar" @click="handleScrollbarClick" @scroll="handleEditorScroll">
-      <div class="b-editor-container">
+      <div ref="containerRef" class="b-editor-container" @mouseleave="onContainerMouseLeave" @mousemove="onContainerMouseMove">
         <textarea ref="textarea" v-model="editorTitle" class="b-editor-title" placeholder="请输入标题" @blur="handleTitleBlur"></textarea>
 
         <FrontMatterCard
-          v-if="hasFrontMatter"
+          v-if="shouldShowFrontMatterCard"
           :data="frontMatterData"
           @click.stop
           @update="handleFrontMatterUpdate"
@@ -23,6 +23,8 @@
           @remove-field="handleFrontMatterFieldRemove"
           @add-field="handleFrontMatterFieldAdd"
         />
+
+        <HoverIndicator :is-visible="hoverIndicator.isVisible" :label="hoverIndicator.label" :top="hoverIndicator.top" :type="hoverIndicator.type" />
 
         <EditorContent :editor="editorInstance" class="b-editor-content" />
       </div>
@@ -36,16 +38,19 @@ import { computed, ref, toRef, watch } from 'vue';
 import { useEditor, EditorContent } from '@tiptap/vue-3';
 import { useWindowSize, useTextareaAutosize } from '@vueuse/core';
 import FrontMatterCard from './components/FrontMatterCard.vue';
+import HoverIndicator from './components/HoverIndicator.vue';
 import { useAnchors } from './hooks/useAnchors';
 import { useContent } from './hooks/useContent';
 import { useExtensions } from './hooks/useExtensions';
 import { useFrontMatter } from './hooks/useFrontMatter';
+import { useHoverIndicator } from './hooks/useHoverIndicator';
 
 const MIN_WIDTH_FOR_SIDEBAR = 1000 + 560;
 let editorInstanceCounter = 0;
 
 const { width } = useWindowSize();
 const layoutRef = ref<HTMLElement | null>(null);
+const containerRef = ref<HTMLElement | null>(null);
 const showSidebar = ref(true);
 const editorInstanceId = `b-editor-${editorInstanceCounter++}`;
 
@@ -74,6 +79,7 @@ function handleTitleBlur(): void {
 const { textarea } = useTextareaAutosize({ input: editorTitle });
 const { activeAnchorId, handleChangeAnchor, handleEditorScroll } = useAnchors(layoutRef);
 const { editorExtensions, resetHeadingIndex, assignHeadingIds } = useExtensions(editorInstanceId);
+const { hoverIndicator, onContainerMouseLeave, onContainerMouseMove } = useHoverIndicator(containerRef);
 const editorInstanceRef = ref<Editor>();
 
 const {
@@ -88,6 +94,7 @@ const {
 } = useFrontMatter(editorContent);
 
 const bodyContentForSidebar = computed(() => bodyContent.value);
+const shouldShowFrontMatterCard = computed(() => Boolean(hasFrontMatter.value));
 
 function syncToExternal(): void {
   editorContent.value = reconstructContent();
@@ -181,7 +188,8 @@ defineExpose({ setContent: (text: string) => setEditorContent(text, false) });
 }
 
 .b-editor-container {
-  max-width: 1000px;
+  position: relative;
+  max-width: 800px;
   margin: 0 auto;
 }
 
