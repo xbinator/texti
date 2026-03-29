@@ -1,10 +1,7 @@
 <template>
   <Transition name="toc-fade">
     <div v-if="items.length" class="toc-panel">
-      <!-- <div class="toc-panel__header">
-        <span class="toc-panel__title">目录</span>
-      </div> -->
-      <AnchorContent :items="items" :active-id="activeId" @click="handleAnchorClick" />
+      <AnchorContent :title="title" :items="items" :active-id="activeId" @click="handleAnchorClick" />
     </div>
   </Transition>
 </template>
@@ -15,12 +12,14 @@ import { marked, Tokens } from 'marked';
 import AnchorContent, { AnchorItem } from './components/AnchorContent.vue';
 
 interface Props {
+  title?: string;
   content?: string;
   // 当前选中的锚点id
   activeId?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  title: '',
   content: '',
   activeId: ''
 });

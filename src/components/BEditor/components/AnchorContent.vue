@@ -1,6 +1,9 @@
 <template>
-  <BScrollbar ref="scrollbarRef" class="anchor-panel__content" inset>
+  <BScrollbar class="anchor-panel__content" inset>
     <TransitionGroup name="anchor-fade" tag="div">
+      <div v-if="title" class="anchor-panel__header" :class="{ active: !activeId }" @click="handleTitleClick">
+        <span class="anchor-panel__title">{{ title }}</span>
+      </div>
       <div
         v-for="item in treeItems"
         :key="item.id"
@@ -47,6 +50,7 @@ interface VisibleAnchorItem extends AnchorTreeItem {
 }
 
 interface Props {
+  title?: string;
   // 目录项
   items: AnchorItem[];
   // 当前选中的目录项id
@@ -54,12 +58,12 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  title: '',
   activeId: ''
 });
 
 const emit = defineEmits(['click']);
 
-const scrollbarRef = ref<InstanceType<typeof BScrollbar>>();
 const itemRefs = ref<Record<string, HTMLElement>>({});
 
 function setItemRef(el: HTMLElement, id: string): void {
@@ -69,6 +73,10 @@ function setItemRef(el: HTMLElement, id: string): void {
 }
 
 const collapsedIds = ref<Record<string, boolean>>({});
+
+function handleTitleClick(): void {
+  emit('click', { id: '', text: '', level: 0 });
+}
 
 function handleClick(item: VisibleAnchorItem) {
   emit('click', item);
@@ -130,10 +138,36 @@ watch(
 );
 </script>
 
-<style scoped>
+<style lang="less" scoped>
 .anchor-panel__content {
   flex: 1;
   padding: 16px 2px 12px 8px;
+}
+
+.anchor-panel__header {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 12px;
+  color: #57606a;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background-color 0.2s ease, color 0.2s ease;
+
+  &:hover {
+    color: #0969da;
+    background: rgb(9 105 218 / 8%);
+  }
+
+  &.active {
+    color: #0969da;
+  }
+}
+
+.anchor-panel__title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
 }
 
 .anchor-item {

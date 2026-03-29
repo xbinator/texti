@@ -1,6 +1,13 @@
 <template>
   <div class="b-editor-layout">
-    <BEditorSidebar v-if="showSidebar" :content="editorContent" :active-id="activeAnchorId" class="b-editor-sidebar" @change="handleChangeAnchor" />
+    <BEditorSidebar
+      v-if="showSidebar"
+      :title="editorTitle"
+      :content="editorContent"
+      :active-id="activeAnchorId"
+      class="b-editor-sidebar"
+      @change="handleChangeAnchor"
+    />
 
     <BScrollbar class="b-editor-scrollbar" @click="handleScrollbarClick" @scroll="handleEditorScroll">
       <div class="b-editor-container">
@@ -275,23 +282,36 @@ function handleScrollbarClick(event: MouseEvent): void {
 
 function handleChangeAnchor(record: { id: string; level: number; text: string }) {
   activeAnchorId.value = record.id;
+
+  if (!record.id) {
+    const container = document.querySelector('.b-editor-scrollbar .scrollbar__wrap');
+    if (container) {
+      container.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    return;
+  }
+
   const element = document.getElementById(record.id);
   if (element) {
-    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 }
 
-const updateActiveAnchor = useThrottleFn(() => {
-  const headings = document.querySelectorAll(
-    '.b-editor-content h1, .b-editor-content h2, .b-editor-content h3, .b-editor-content h4, .b-editor-content h5, .b-editor-content h6'
-  );
+const HEADING_SELECTOR = '.b-editor-content h1, .b-editor-content h2, .b-editor-content h3, .b-editor-content h4, .b-editor-content h5, .b-editor-content h6';
 
+const updateActiveAnchor = useThrottleFn(() => {
+  const container = document.querySelector('.b-editor-scrollbar .scrollbar__wrap') as HTMLDivElement;
+  if (!container) return;
+
+  if (container.scrollTop < 50) {
+    activeAnchorId.value = '';
+    return;
+  }
+
+  const headings = document.querySelectorAll(HEADING_SELECTOR);
   if (!headings.length) return;
 
   let currentId = '';
-  const container = document.querySelector('.b-editor-scrollbar .scrollbar__wrap');
-  if (!container) return;
-
   const containerRect = container.getBoundingClientRect();
   const threshold = containerRect.top + 100;
 
@@ -302,7 +322,7 @@ const updateActiveAnchor = useThrottleFn(() => {
     }
   });
 
-  if (currentId && currentId !== activeAnchorId.value) {
+  if (currentId !== activeAnchorId.value) {
     activeAnchorId.value = currentId;
   }
 }, 100);
