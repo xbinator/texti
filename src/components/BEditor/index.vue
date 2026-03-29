@@ -448,9 +448,11 @@ defineExpose({ setContent: (text: string) => setEditorContent(text, false) });
   table {
     width: 100%;
     margin: 0.75em 0;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     border: 1px solid #e0e0e0;
-    border-radius: 4px;
+    border-radius: 8px;
+    overflow: hidden;
 
     th {
       padding: 0.5em 0.75em;
@@ -459,7 +461,12 @@ defineExpose({ setContent: (text: string) => setEditorContent(text, false) });
       color: #2e2e2e;
       text-align: left;
       background-color: #f5f5f5;
-      border: 1px solid #e0e0e0;
+      border-bottom: 1px solid #e0e0e0;
+      border-right: 1px solid #e0e0e0;
+
+      &:last-child {
+        border-right: none;
+      }
     }
 
     td {
@@ -468,7 +475,16 @@ defineExpose({ setContent: (text: string) => setEditorContent(text, false) });
       color: #2e2e2e;
       text-align: left;
       background-color: #fff;
-      border: 1px solid #e0e0e0;
+      border-bottom: 1px solid #e0e0e0;
+      border-right: 1px solid #e0e0e0;
+
+      &:last-child {
+        border-right: none;
+      }
+    }
+
+    tr:last-child td {
+      border-bottom: none;
     }
 
     tr:hover td {
