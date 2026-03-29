@@ -9,49 +9,13 @@ export interface StoredFile {
   ext: string;
 }
 
-const FILES_KEY = 'files';
-const CURRENT_FILE_KEY = 'current_file';
 const RECENT_FILES_KEY = 'recent_files';
-const MAX_RECENT_FILES = 10;
+
+const CURRENT_FILE_KEY = 'current_file';
+
+const MAX_RECENT_FILES = 100;
 
 export const indexedDBStorage = {
-  async saveFile(file: StoredFile): Promise<void> {
-    const files = await this.getAllFiles();
-    const index = files.findIndex((f) => f.path === file.path);
-
-    if (index >= 0) {
-      files[index] = { ...file };
-    } else {
-      files.push({ ...file });
-    }
-
-    await localforage.setItem(FILES_KEY, files);
-  },
-
-  async getFile(path: string): Promise<StoredFile | null> {
-    const files = await this.getAllFiles();
-    return files.find((f) => f.path === path) || null;
-  },
-
-  async getAllFiles(): Promise<StoredFile[]> {
-    const files = await localforage.getItem<StoredFile[]>(FILES_KEY);
-    return files || [];
-  },
-
-  async deleteFile(path: string): Promise<void> {
-    const files = await this.getAllFiles();
-    const filtered = files.filter((f) => f.path !== path);
-    await localforage.setItem(FILES_KEY, filtered);
-  },
-
-  async setCurrentFile(path: string | null): Promise<void> {
-    await localforage.setItem(CURRENT_FILE_KEY, path);
-  },
-
-  async getCurrentFilePath(): Promise<string | null> {
-    return localforage.getItem<string>(CURRENT_FILE_KEY);
-  },
-
   async addRecentFile(file: StoredFile): Promise<void> {
     const files = await this.getAllRecentFiles();
 
@@ -72,6 +36,15 @@ export const indexedDBStorage = {
     return files.find((f) => f.path === path) || null;
   },
 
+  async updateRecentFile(file: StoredFile): Promise<void> {
+    const files = await this.getAllRecentFiles();
+    const index = files.findIndex((f) => f.path === file.path);
+    if (index !== -1) {
+      files[index] = { ...file };
+      await localforage.setItem(RECENT_FILES_KEY, files);
+    }
+  },
+
   async removeRecentFile(path: string): Promise<void> {
     const files = await this.getAllRecentFiles();
     const filtered = files.filter((f) => f.path !== path);
@@ -80,6 +53,18 @@ export const indexedDBStorage = {
 
   async clearRecentFiles(): Promise<void> {
     await localforage.setItem(RECENT_FILES_KEY, []);
+  },
+
+  async setCurrentFile(path: string): Promise<void> {
+    await localforage.setItem(CURRENT_FILE_KEY, path);
+  },
+
+  async getCurrentFile(): Promise<string | null> {
+    return localforage.getItem<string>(CURRENT_FILE_KEY);
+  },
+
+  async clearCurrentFile(): Promise<void> {
+    await localforage.removeItem(CURRENT_FILE_KEY);
   },
 
   async clear(): Promise<void> {

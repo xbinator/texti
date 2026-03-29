@@ -4,12 +4,11 @@
       <slot>
         <div class="b-dropdown-button-content" :style="{ width }">{{ contentPrefix }}{{ label }}</div>
       </slot>
-
       <Icon v-if="showIcon" class="dropdown-icon" icon="lucide:chevron-down" :style="{ transform: visible ? 'rotate(180deg)' : 'rotate(0deg)' }" />
     </div>
 
     <template #overlay>
-      <BDropdownMenu v-model:value="active" :options="options" :row-class="rowClass" :min-width="minWidth" @change="handleActiveChange">
+      <BDropdownMenu v-model:value="active" :options="options" :row-class="rowClass" :width="overlayWidth" @change="handleActiveChange">
         <template #menu="record">
           <slot name="menu" v-bind="record"></slot>
         </template>
@@ -47,8 +46,8 @@ interface Props {
   bordered?: boolean;
   /** 是否显示图标 */
   showIcon?: boolean;
-  /** 最小宽度 */
-  minWidth?: string | number;
+  /** 内容宽度 */
+  overlayWidth?: string | number;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -63,7 +62,7 @@ const props = withDefaults(defineProps<Props>(), {
   size: 'middle',
   bordered: false,
   showIcon: true,
-  minWidth: 'auto'
+  overlayWidth: 'auto'
 });
 
 const emit = defineEmits(['update:value', 'change', 'update:open']);

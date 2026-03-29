@@ -1,5 +1,5 @@
 <template>
-  <div class="b-dropdown-menu" :style="{ minWidth: typeof minWidth === 'number' ? `${minWidth}px` : minWidth }" @contextmenu.prevent>
+  <div class="b-dropdown-menu" :style="{ width: typeof width === 'number' ? `${width}px` : width }" @contextmenu.prevent>
     <template v-for="(item, index) in options" :key="index">
       <div v-if="item.type === 'divider'" class="b-dropdown-menu-item-divider"></div>
       <div
@@ -11,19 +11,19 @@
         <BDropdown v-if="item.children?.length" placement="rightTop" :align="{ targetOffset: [-9, 0] }" :disabled="item.disabled">
           <div class="b-dropdown-menu-item-content">
             <slot name="menu" v-bind="{ record: item }">
-              <span>{{ item.label }}</span>
+              <BTruncateText :text="item.label" />
             </slot>
 
             <Icon class="b-dropdown-menu-item-arrow" icon="lucide:chevron-right" />
           </div>
 
           <template #overlay>
-            <Menu :options="(item.children as T[])" :row-class="rowClass" :min-width="minWidth" />
+            <Menu :options="(item.children as T[])" :row-class="rowClass" :width="width" />
           </template>
         </BDropdown>
 
         <slot v-else name="menu" v-bind="{ record: item }">
-          <span>{{ item.label }}</span>
+          <BTruncateText :text="item.label" />
         </slot>
       </div>
     </template>
@@ -33,6 +33,7 @@
 <script setup lang="ts" generic="T extends DropdownOption">
 import type { DropdownOption, DropdownOptionItem } from './type';
 import { Icon } from '@iconify/vue';
+import BTruncateText from '../BTruncateText/index.vue';
 
 interface Props {
   value?: string | number;
@@ -41,10 +42,10 @@ interface Props {
   /** 下拉菜单项的类名 */
   rowClass?: string;
   /** 内容宽度 */
-  minWidth?: string | number;
+  width?: string | number;
 }
 
-withDefaults(defineProps<Props>(), { value: '', rowClass: '', minWidth: 'auto' });
+withDefaults(defineProps<Props>(), { value: '', rowClass: '', width: 'auto' });
 
 const emit = defineEmits<{
   (e: 'update:value', value: string | number): void;
