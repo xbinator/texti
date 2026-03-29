@@ -38,6 +38,7 @@
     "ant-design-vue": "^4.2.6",
     "js-yaml": "^4.1.1",
     "less": "^4.6.4",
+    "localforage": "^1.10.0",
     "lodash-es": "^4.17.23",
     "lowlight": "^3.3.0",
     "marked": "^17.0.5",

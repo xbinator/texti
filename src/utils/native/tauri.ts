@@ -1,5 +1,5 @@
 /* eslint-disable class-methods-use-this */
-import type { Native, OpenFileOptions, SaveFileOptions } from './types';
+import type { Native, OpenFileOptions, SaveFileOptions, AutoSaveResult } from './types';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
@@ -39,6 +39,20 @@ export class TauriNative implements Native {
 
   async writeFile(path: string, content: string): Promise<void> {
     await writeTextFile(path, content);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async autoSave(path: string, content: string, _name: string, _ext: string): Promise<AutoSaveResult> {
+    try {
+      await writeTextFile(path, content);
+      return { success: true, path };
+    } catch (error) {
+      return {
+        success: false,
+        path,
+        error: error instanceof Error ? error.message : 'Auto save failed'
+      };
+    }
   }
 
   async setWindowTitle(title: string) {
