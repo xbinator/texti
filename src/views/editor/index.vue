@@ -17,11 +17,14 @@ import type { EditorFile } from './types';
 import { ref } from 'vue';
 import Toolbar from '@/components/Toolbar.vue';
 import { native } from '@/utils/native';
+import { useAutoSave } from './hooks/useAutoSave';
 import { useFileActive } from './hooks/useFileActive';
 
 const fileState = ref<Partial<EditorFile>>({});
 
-const { toolbarMenuOptions } = useFileActive(fileState);
+const { pause, resume } = useAutoSave(fileState);
+
+const { toolbarMenuOptions } = useFileActive(fileState, { pause, resume });
 
 function handleTitleBlur(title: string): void {
   if (!title) return;

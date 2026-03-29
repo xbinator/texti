@@ -60,8 +60,6 @@ async function handleCopy(): Promise<void> {
     copyLabel.value = '复制失败';
     message.error('复制失败');
     scheduleResetCopyLabel();
-
-    console.error('Failed to copy code block content:', error);
   }
 }
 
