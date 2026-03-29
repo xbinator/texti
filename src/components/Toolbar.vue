@@ -1,5 +1,5 @@
 <template>
-  <BDropdownButton :show-icon="false" :options="options" :min-width="220">
+  <BDropdownButton :show-icon="false" :options="options" :overlay-width="220">
     <div>{{ title }}</div>
 
     <template #menu="{ record }">
@@ -14,7 +14,7 @@
 <script setup lang="ts">
 import type { DropdownOptionItem, DropdownOptionDivider } from './BDropdown/type';
 import { computed, watch } from 'vue';
-import { useMagicKeys, whenever } from '@vueuse/core';
+import { useMagicKeys, whenever, useEventListener } from '@vueuse/core';
 import { isMac } from '@/utils/is';
 
 interface ToolbarOption extends DropdownOptionItem {
@@ -59,6 +59,26 @@ function setupShortcuts() {
 
     const stopFn = whenever(keys[keyCombo], () => option.onClick?.());
     stopFns.push(stopFn);
+
+    const stopPreventDefault = useEventListener('keydown', (e) => {
+      const shortcut = option.shortcut?.toLowerCase();
+      if (!shortcut) return;
+
+      const ctrl = e.ctrlKey || e.metaKey;
+      const shift = e.shiftKey;
+      const alt = e.altKey;
+
+      const hasCtrl = shortcut.includes('ctrl') || shortcut.includes('meta');
+      const hasShift = shortcut.includes('shift');
+      const hasAlt = shortcut.includes('alt');
+
+      const key = shortcut.split('+').pop();
+
+      if (ctrl === hasCtrl && shift === hasShift && alt === hasAlt && e.key.toLowerCase() === key) {
+        e.preventDefault();
+      }
+    });
+    stopFns.push(stopPreventDefault);
 
     if (isMacOS.value && option.shortcut.toLowerCase().includes('ctrl')) {
       const macKeyCombo = getKeyName(option.shortcut.replace(/ctrl/gi, 'meta'));
