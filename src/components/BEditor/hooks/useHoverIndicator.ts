@@ -16,12 +16,11 @@ interface UseHoverIndicatorResult {
   onContainerMouseMove: (event: MouseEvent) => void;
 }
 
+// 指示器高度的一半，用于扩展块的命中区域，防止鼠标在指示器边缘时隐藏
+const INDICATOR_HALF_HEIGHT = 14;
+
 const BLOCK_SELECTOR =
   '.b-editor-content h1, .b-editor-content h2, .b-editor-content h3, .b-editor-content h4, .b-editor-content h5, .b-editor-content h6, .b-editor-content p';
-
-function isTrackedBlock(element: Element): element is HTMLElement {
-  return element instanceof HTMLElement && /^(H[1-6]|P)$/.test(element.tagName);
-}
 
 function getIndicatorLabel(block: HTMLElement): string {
   if (block.tagName === 'P') {
@@ -58,15 +57,19 @@ export function useHoverIndicator(containerRef: Ref<HTMLElement | null>): UseHov
 
   function onContainerMouseMove(event: MouseEvent): void {
     const container = containerRef.value;
-    const { target } = event;
 
-    if (!(container && target instanceof Element)) {
+    if (!container) {
       hideIndicator();
       return;
     }
 
-    const block = target.closest(BLOCK_SELECTOR);
-    if (!(block && isTrackedBlock(block) && container.contains(block))) {
+    const blocks = container.querySelectorAll<HTMLElement>(BLOCK_SELECTOR);
+    const block = Array.from(blocks).find((b) => {
+      const rect = b.getBoundingClientRect();
+      return event.clientY >= rect.top - INDICATOR_HALF_HEIGHT && event.clientY <= rect.bottom + INDICATOR_HALF_HEIGHT;
+    });
+
+    if (!block) {
       hideIndicator();
       return;
     }
