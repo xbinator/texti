@@ -1,4 +1,5 @@
 import type { AnyExtension, JSONContent, MarkdownParseHelpers, MarkdownParseResult, MarkdownToken, Editor } from '@tiptap/core';
+import { Ref } from 'vue';
 import _Code from '@tiptap/extension-code';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { Heading as BaseHeading } from '@tiptap/extension-heading';
@@ -40,7 +41,7 @@ function parseInlineOrText(tokens: MarkdownToken[] | undefined, text: string | u
   return text ? [helpers.createTextNode(text)] : [];
 }
 
-export function useExtensions(editorInstanceId: string): UseBEditorExtensionsResult {
+export function useExtensions(editorInstanceId: Ref<string>): UseBEditorExtensionsResult {
   let headingIndex = 0;
 
   function resetHeadingIndex(): void {
@@ -48,7 +49,7 @@ export function useExtensions(editorInstanceId: string): UseBEditorExtensionsRes
   }
 
   function getHeadingId(index: number): string {
-    return `${editorInstanceId}-heading-${index}`;
+    return `${editorInstanceId.value}-heading-${index}`;
   }
 
   const Code = _Code.extend({ excludes: '' });

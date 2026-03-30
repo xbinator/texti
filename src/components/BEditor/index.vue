@@ -26,7 +26,7 @@
 
         <HoverIndicator :is-visible="hoverIndicator.isVisible" :label="hoverIndicator.label" :top="hoverIndicator.top" :type="hoverIndicator.type" />
 
-        <EditorContent :editor="editorInstance" class="b-editor-content" />
+        <EditorContent :key="editorId" :editor="editorInstance" class="b-editor-content" />
       </div>
     </BScrollbar>
   </div>
@@ -46,31 +46,34 @@ import { useFrontMatter } from './hooks/useFrontMatter';
 import { useHoverIndicator } from './hooks/useHoverIndicator';
 
 const MIN_WIDTH_FOR_SIDEBAR = 1000 + 560;
-let editorInstanceCounter = 0;
+const editorInstanceCounter = ref(0);
 
 const { width } = useWindowSize();
 const layoutRef = ref<HTMLElement | null>(null);
 const containerRef = ref<HTMLElement | null>(null);
 const showSidebar = ref(true);
-const editorInstanceId = `b-editor-${editorInstanceCounter++}`;
 
 watch(width, (newWidth) => (showSidebar.value = newWidth >= MIN_WIDTH_FOR_SIDEBAR), { immediate: true });
 
 interface Props {
   editable?: boolean;
+  // 编辑器实例ID
+  editorId?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  editable: true
+  editable: true,
+  // 编辑器实例ID
+  editorId: ''
 });
 
-const editorContent = defineModel<string>();
+const editorInstanceId = computed(() => `${props.editorId || ''}`);
+
+const editorContent = defineModel<string>('value', { default: '' });
 
 const editorTitle = defineModel<string>('title', { default: '' });
 
-const emit = defineEmits<{
-  titleBlur: [title: string];
-}>();
+const emit = defineEmits<{ titleBlur: [title: string] }>();
 
 function handleTitleBlur(): void {
   emit('titleBlur', editorTitle.value);
@@ -113,7 +116,19 @@ const editorInstance = useEditor({
   content: bodyContent.value ?? '',
   extensions: editorExtensions,
   editable: props.editable,
-  editorProps: { attributes: { spellcheck: 'false' }, handlePaste: onPaste },
+  editorProps: {
+    attributes: { spellcheck: 'false' },
+    handlePaste: onPaste,
+    handleKeyDown: (_view, event) => {
+      const isUndo = (event.ctrlKey || event.metaKey) && event.key === 'z' && !event.shiftKey;
+      const isRedo = (event.ctrlKey || event.metaKey) && (event.key === 'y' || (event.key === 'z' && event.shiftKey));
+      if (isUndo || isRedo) {
+        event.preventDefault();
+        return true;
+      }
+      return false;
+    }
+  },
   onUpdate: onEditorUpdate
 });
 
@@ -164,7 +179,13 @@ function handleScrollbarClick(event: MouseEvent): void {
   }
 }
 
-defineExpose({ setContent: (text: string) => setEditorContent(text, false) });
+function setContent(text: string): void {
+  editorInstanceCounter.value += 1;
+
+  setEditorContent(text, false);
+}
+
+defineExpose({ setContent });
 </script>
 
 <style lang="less">
