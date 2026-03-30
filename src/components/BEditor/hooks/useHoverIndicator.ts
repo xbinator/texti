@@ -19,8 +19,7 @@ interface UseHoverIndicatorResult {
 // 指示器高度的一半，用于扩展块的命中区域，防止鼠标在指示器边缘时隐藏
 const INDICATOR_HALF_HEIGHT = 14;
 
-const BLOCK_SELECTOR =
-  '.b-editor-content h1, .b-editor-content h2, .b-editor-content h3, .b-editor-content h4, .b-editor-content h5, .b-editor-content h6, .b-editor-content p';
+const BLOCK_SELECTOR = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'].map((tag) => `.b-editor-content ${tag}`).join(', ');
 
 function getIndicatorLabel(block: HTMLElement): string {
   if (block.tagName === 'P') {

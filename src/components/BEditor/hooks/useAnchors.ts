@@ -14,7 +14,7 @@ interface UseBEditorAnchorsResult {
   handleEditorScroll: () => void;
 }
 
-const HEADING_SELECTOR = '.b-editor-content h1, .b-editor-content h2, .b-editor-content h3, .b-editor-content h4, .b-editor-content h5, .b-editor-content h6';
+const HEADING_SELECTOR = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].map((tag) => `.b-editor-content ${tag}`).join(', ');
 
 export function useAnchors(layoutRef: Ref<HTMLElement | null>): UseBEditorAnchorsResult {
   const activeAnchorId = ref('');

@@ -45,7 +45,8 @@ import { useExtensions } from './hooks/useExtensions';
 import { useFrontMatter } from './hooks/useFrontMatter';
 import { useHoverIndicator } from './hooks/useHoverIndicator';
 
-const MIN_WIDTH_FOR_SIDEBAR = 1000 + 560;
+// 视图宽度 + 侧边栏宽度 + 视图间距
+const MIN_WIDTH_FOR_SIDEBAR = 800 + 560;
 const editorInstanceCounter = ref(0);
 
 const { width } = useWindowSize();
