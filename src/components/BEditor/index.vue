@@ -117,6 +117,7 @@ const editorInstance = useEditor({
   content: bodyContent.value ?? '',
   extensions: editorExtensions,
   editable: props.editable,
+  contentType: 'markdown',
   editorProps: {
     attributes: { spellcheck: 'false' },
     handlePaste: onPaste,

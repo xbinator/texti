@@ -1,7 +1,9 @@
 <template>
-  <div v-show="isVisible" class="hover-indicator" :class="`is-${type}`" :style="{ top }">
-    {{ label }}
-  </div>
+  <Transition name="hover-indicator-fade">
+    <div v-show="isVisible" class="hover-indicator" :class="`is-${type}`" :style="{ top }">
+      {{ label }}
+    </div>
+  </Transition>
 </template>
 
 <script setup lang="ts">
@@ -48,5 +50,16 @@ withDefaults(defineProps<Props>(), {
     color: #1761d2;
     border-color: rgb(23 97 210 / 22%);
   }
+}
+
+.hover-indicator-fade-enter-active,
+.hover-indicator-fade-leave-active {
+  transition: all 0.2s ease;
+}
+
+.hover-indicator-fade-enter-from,
+.hover-indicator-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-50%) scale(0.8);
 }
 </style>
