@@ -121,7 +121,7 @@ const editorInstance = useEditor({
   editorProps: {
     attributes: { spellcheck: 'false' },
     handlePaste: onPaste,
-    handleKeyDown: (_view, event) => {
+    handleKeyDown: (_, event) => {
       const isUndo = (event.ctrlKey || event.metaKey) && event.key === 'z' && !event.shiftKey;
       const isRedo = (event.ctrlKey || event.metaKey) && (event.key === 'y' || (event.key === 'z' && event.shiftKey));
       if (isUndo || isRedo) {
@@ -246,7 +246,7 @@ defineExpose({ setContent });
       margin-top: 0;
     }
 
-    > .is-editor-empty:first-child::before {
+    p.is-editor-empty:first-child::before {
       float: left;
       height: 0;
       color: #bfbfbf;

@@ -37,6 +37,7 @@
     "@vueuse/core": "^14.2.1",
     "ant-design-vue": "^4.2.6",
     "dayjs": "^1.11.20",
+    "js-beautify": "^1.15.4",
     "js-yaml": "^4.1.1",
     "less": "^4.6.4",
     "localforage": "^1.10.0",
@@ -53,6 +54,7 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@types/js-beautify": "^1.14.3",
     "@types/lodash-es": "^4.17.12",
     "@typescript-eslint/eslint-plugin": "^5.59.6",
     "@typescript-eslint/parser": "^5.59.6",
