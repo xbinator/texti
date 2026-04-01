@@ -2,7 +2,7 @@
   <NodeViewWrapper class="b-code-block" :class="{ 'is-collapsed': isCollapsed, 'is-word-wrap': isWordWrap }">
     <div class="b-code-block__header" contenteditable="false" @mousedown.stop.prevent>
       <div class="b-code-block__header-left">
-        <ASelect v-model:value="selectedLanguage" class="b-code-block__language-select" :options="languageOptions" @change="handleLanguageChange" />
+        <BSelect v-model:value="selectedLanguage" class="b-code-block__language-select" :options="languageOptions" @change="handleLanguageChange" />
       </div>
 
       <div class="b-code-block__controls">
@@ -59,6 +59,7 @@ import { NodeViewContent, NodeViewWrapper, nodeViewProps } from '@tiptap/vue-3';
 import { useClipboard } from '@vueuse/core';
 import { message } from 'ant-design-vue';
 import { js as jsBeautify, html as htmlBeautify, css as cssBeautify } from 'js-beautify';
+import BSelect from '@/components/BSelect/index.vue';
 
 const props = defineProps(nodeViewProps);
 
@@ -323,7 +324,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 38px;
+  height: 42px;
   padding: 0 14px;
   background: #f6f8fa;
   border-bottom: 1px solid #d8dee4;
