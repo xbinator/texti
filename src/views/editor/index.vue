@@ -2,7 +2,9 @@
   <div class="editor-layout">
     <div class="editor-header">
       <div class="header-left">
-        <Toolbar :title="'文件'" :options="toolbarMenuOptions" />
+        <Toolbar :title="'文件'" :options="toolbarFileOptions" />
+
+        <Toolbar :title="'编辑'" :options="toolbarEditOptions" />
       </div>
     </div>
 
@@ -19,13 +21,16 @@ import Toolbar from '@/components/Toolbar.vue';
 import { native } from '@/utils/native';
 import { indexedDB } from '@/utils/storage';
 import { useAutoSave } from './hooks/useAutoSave';
+import { useEditActive } from './hooks/useEditActive';
 import { useFileActive } from './hooks/useFileActive';
 
 const fileState = ref<EditorFile>({ id: '', path: '', content: '', name: '', ext: 'md' });
 
 const { pause, resume } = useAutoSave(fileState);
 
-const { toolbarMenuOptions, loadRecentFiles } = useFileActive(fileState, { pause, resume });
+const { toolbarFileOptions, loadRecentFiles } = useFileActive(fileState, { pause, resume });
+
+const { toolbarEditOptions } = useEditActive(fileState);
 
 function handleTitleBlur(title: string) {
   if (!title || !fileState.value?.id) return;
