@@ -216,7 +216,7 @@ onUnmounted(() => {
   color: #24292f;
   cursor: pointer;
   background: transparent;
-  border-radius: 2px;
+  border-radius: 4px;
   transition: all 0.2s ease;
 }
 

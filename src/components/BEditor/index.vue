@@ -122,10 +122,51 @@ const editorInstance = useEditor({
     attributes: { spellcheck: 'false' },
     handlePaste: onPaste,
     handleKeyDown: (_, event) => {
-      const isUndo = (event.ctrlKey || event.metaKey) && event.key === 'z' && !event.shiftKey;
-      const isRedo = (event.ctrlKey || event.metaKey) && (event.key === 'y' || (event.key === 'z' && event.shiftKey));
+      const key = event.key.toLowerCase();
+      const isTab = key === 'tab';
+      const isUndo = (event.ctrlKey || event.metaKey) && key === 'z' && !event.shiftKey;
+      const isRedo = (event.ctrlKey || event.metaKey) && (key === 'y' || (key === 'z' && event.shiftKey));
+
+      if (isTab && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        const instance = editorInstanceRef.value;
+        if (!instance) {
+          return false;
+        }
+
+        if (instance.isActive('table') || instance.isActive('listItem')) {
+          return false;
+        }
+
+        event.preventDefault();
+
+        if (event.shiftKey) {
+          const { from, empty } = instance.state.selection;
+          if (!empty || from <= 2) {
+            return true;
+          }
+
+          const before = instance.state.doc.textBetween(from - 2, from, '\0', '\0');
+          if (before === '  ') {
+            instance.commands.deleteRange({ from: from - 2, to: from });
+          }
+          return true;
+        }
+
+        instance.commands.insertContent(instance.isActive('codeBlock') ? '\t' : '  ');
+        return true;
+      }
+
       if (isUndo || isRedo) {
         event.preventDefault();
+        const instance = editorInstanceRef.value;
+        if (!instance) {
+          return true;
+        }
+        if (isUndo) {
+          instance.commands.undo();
+          return true;
+        }
+        instance.commands.redo();
         return true;
       }
       return false;
@@ -178,7 +219,32 @@ function setContent(text: string): void {
   setEditorContent(text, false);
 }
 
-defineExpose({ setContent });
+function undo(): void {
+  editorInstanceRef.value?.commands.undo();
+}
+
+function redo(): void {
+  editorInstanceRef.value?.commands.redo();
+}
+
+function canUndo(): boolean {
+  const instance = editorInstanceRef.value;
+  const can = instance?.can();
+  return Boolean(can?.undo());
+}
+
+function canRedo(): boolean {
+  const instance = editorInstanceRef.value;
+  const can = instance?.can();
+  return Boolean(can?.redo());
+}
+
+function selectAll(): void {
+  editorInstanceRef.value?.commands.focus();
+  editorInstanceRef.value?.commands.selectAll();
+}
+
+defineExpose({ setContent, undo, redo, canUndo, canRedo, selectAll });
 </script>
 
 <style lang="less">
