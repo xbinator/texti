@@ -1,23 +1,15 @@
 import { computed, ref } from 'vue';
+import type { BEditorViewMode } from '@/components/BEditor/types';
 import type { Props as ToolbarProps } from '@/components/Toolbar.vue';
 
 export function useViewActive() {
-  const viewMode = ref<'rich' | 'source'>('rich');
+  const viewMode = ref<BEditorViewMode>('rich');
   const toolbarViewOptions = computed<ToolbarProps['options']>(() => [
     {
-      value: 'rich',
-      label: '富文本编辑',
-      disabled: viewMode.value === 'rich',
-      onClick: () => {
-        viewMode.value = 'rich';
-      }
-    },
-    {
       value: 'source',
-      label: '源代码编辑',
-      disabled: viewMode.value === 'source',
+      label: '源代码模式',
       onClick: () => {
-        viewMode.value = 'source';
+        viewMode.value = viewMode.value === 'source' ? 'rich' : 'source';
       }
     }
   ]);

@@ -30,13 +30,6 @@ export function useEditActive(fileState: Ref<EditorFile>, editorRef: Ref<Instanc
       },
       { type: 'divider' },
       {
-        value: 'selectAll',
-        label: '全选',
-        shortcut: 'Ctrl+A',
-        enableShortcut: false,
-        onClick: () => editorRef.value?.selectAll()
-      },
-      {
         value: 'copyAll',
         label: '复制全文',
         disabled: !canCopy,
