@@ -1,4 +1,4 @@
-import { computed, ref, watch, type ComputedRef } from 'vue';
+import { computed, ref, watch, type ComputedRef, type Ref } from 'vue';
 import yaml from 'js-yaml';
 
 export interface FrontMatterData {
@@ -6,9 +6,9 @@ export interface FrontMatterData {
 }
 
 interface UseFrontMatterResult {
-  bodyContent: ReturnType<typeof ref<string>>;
-  frontMatterData: ReturnType<typeof ref<FrontMatterData>>;
-  frontMatterRaw: ReturnType<typeof ref<string>>;
+  bodyContent: Ref<string>;
+  frontMatterData: Ref<FrontMatterData>;
+  frontMatterRaw: Ref<string>;
   hasFrontMatter: ComputedRef<boolean>;
   updateFrontMatter: (data: FrontMatterData) => void;
   updateFrontMatterField: (key: string, value: unknown) => void;
@@ -20,7 +20,7 @@ interface UseFrontMatterResult {
 
 const FRONT_MATTER_REGEX = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
-export function useFrontMatter(content: ReturnType<typeof ref<string | undefined>>): UseFrontMatterResult {
+export function useFrontMatter(content: Ref<string | undefined>): UseFrontMatterResult {
   const frontMatterRaw = ref<string>('');
   const frontMatterData = ref<FrontMatterData>({});
   const bodyContent = ref<string>('');

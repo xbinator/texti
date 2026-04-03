@@ -11,39 +11,37 @@
     />
 
     <BScrollbar class="b-editor-scrollbar" @scroll="handleEditorScroll">
-      <div ref="containerRef" class="b-editor-container" @mouseleave="onContainerMouseLeave" @mousemove="onContainerMouseMove">
-        <textarea ref="textarea" v-model="editorTitle" class="b-editor-title" placeholder="请输入标题" @blur="handleTitleBlur"></textarea>
+      <div ref="containerRef" :class="['b-editor-container']" @mouseleave="onContainerMouseLeave" @mousemove="onContainerMouseMove">
+        <textarea ref="titleTextareaRef" v-model="editorTitle" class="b-editor-title" placeholder="请输入标题" @blur="handleTitleBlur"></textarea>
 
-        <FrontMatterCard
-          v-if="shouldShowFrontMatterCard"
-          :data="frontMatterData"
-          @click.stop
-          @update="handleFrontMatterUpdate"
-          @update-field="handleFrontMatterFieldUpdate"
-          @remove-field="handleFrontMatterFieldRemove"
-          @add-field="handleFrontMatterFieldAdd"
+        <RichEditorPane
+          v-if="isRichMode"
+          ref="richEditorPaneRef"
+          v-model:front-matter-data="frontMatterModel"
+          :editor="editorInstance"
+          :editor-id="props.editorId"
+          :hover-indicator="hoverIndicator"
+          :should-show-front-matter-card="shouldShowFrontMatterCard"
         />
 
-        <HoverIndicator :is-visible="hoverIndicator.isVisible" :label="hoverIndicator.label" :top="hoverIndicator.top" :type="hoverIndicator.type" />
-
-        <EditorContent :key="editorId" :editor="editorInstance" class="b-editor-content" />
+        <SourceEditorPane v-else ref="sourceEditorPaneRef" v-model:value="editorContent" />
       </div>
     </BScrollbar>
   </div>
 </template>
 
 <script setup lang="ts">
-import type { Editor } from '@tiptap/core';
+import type { FrontMatterData } from './hooks/useFrontMatter';
+import type { BEditorViewMode } from './types';
 import { computed, ref, toRef, watch } from 'vue';
-import { useEditor, EditorContent } from '@tiptap/vue-3';
-import { useWindowSize, useTextareaAutosize } from '@vueuse/core';
-import FrontMatterCard from './components/FrontMatterCard.vue';
-import HoverIndicator from './components/HoverIndicator.vue';
+import { useTextareaAutosize, useWindowSize } from '@vueuse/core';
+import RichEditorPane from './components/RichEditorPane.vue';
+import SourceEditorPane from './components/SourceEditorPane.vue';
 import { useAnchors } from './hooks/useAnchors';
-import { useContent } from './hooks/useContent';
-import { useExtensions } from './hooks/useExtensions';
+import { useEditorController } from './hooks/useEditorController';
 import { useFrontMatter } from './hooks/useFrontMatter';
 import { useHoverIndicator } from './hooks/useHoverIndicator';
+import { useRichEditor } from './hooks/useRichEditor';
 
 // 视图宽度 + 侧边栏宽度 + 视图间距
 const MIN_WIDTH_FOR_SIDEBAR = 800 + 560;
@@ -52,6 +50,7 @@ const editorInstanceCounter = ref(0);
 const { width } = useWindowSize();
 const layoutRef = ref<HTMLElement | null>(null);
 const containerRef = ref<HTMLElement | null>(null);
+const titleTextareaRef = ref<HTMLTextAreaElement | null>(null);
 const showSidebar = ref(true);
 
 watch(width, (newWidth) => (showSidebar.value = newWidth >= MIN_WIDTH_FOR_SIDEBAR), { immediate: true });
@@ -60,42 +59,34 @@ interface Props {
   editable?: boolean;
   // 编辑器实例ID
   editorId?: string;
+  viewMode?: BEditorViewMode;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   editable: true,
   // 编辑器实例ID
-  editorId: ''
+  editorId: '',
+  viewMode: 'rich'
 });
 
 const editorInstanceId = computed(() => `${props.editorId || ''}`);
+const isRichMode = computed(() => props.viewMode === 'rich');
 
 const editorContent = defineModel<string>('value', { default: '' });
 
 const editorTitle = defineModel<string>('title', { default: '' });
 
 const emit = defineEmits<{ titleBlur: [title: string] }>();
+const richEditorPaneRef = ref<InstanceType<typeof RichEditorPane> | null>(null);
+const sourceEditorPaneRef = ref<InstanceType<typeof SourceEditorPane> | null>(null);
 
 function handleTitleBlur(): void {
   emit('titleBlur', editorTitle.value);
 }
-// @ts-ignore
-const { textarea } = useTextareaAutosize({ input: editorTitle });
 const { activeAnchorId, handleChangeAnchor, handleEditorScroll } = useAnchors(layoutRef);
-const { editorExtensions, resetHeadingIndex, assignHeadingIds } = useExtensions(editorInstanceId);
 const { hoverIndicator, onContainerMouseLeave, onContainerMouseMove } = useHoverIndicator(containerRef);
-const editorInstanceRef = ref<Editor>();
 
-const {
-  bodyContent,
-  frontMatterData,
-  hasFrontMatter,
-  updateFrontMatter,
-  updateFrontMatterField,
-  removeFrontMatterField,
-  addFrontMatterField,
-  reconstructContent
-} = useFrontMatter(editorContent);
+const { bodyContent, frontMatterData, hasFrontMatter, updateFrontMatter, reconstructContent } = useFrontMatter(editorContent);
 
 const bodyContentForSidebar = computed(() => bodyContent.value);
 const shouldShowFrontMatterCard = computed(() => Boolean(hasFrontMatter.value));
@@ -104,147 +95,51 @@ function syncToExternal(): void {
   editorContent.value = reconstructContent();
 }
 
-const { setEditorContent, onPaste, onEditorUpdate } = useContent({
-  assignHeadingIds,
+const frontMatterModel = computed<FrontMatterData>({
+  get(): FrontMatterData {
+    return frontMatterData.value;
+  },
+  set(data: FrontMatterData): void {
+    updateFrontMatter(data);
+    syncToExternal();
+  }
+});
+
+const { editorInstance, setContent: setRichEditorContent } = useRichEditor({
+  bodyContent,
   editable: toRef(props, 'editable'),
-  editorContent: bodyContent,
-  getEditorInstance: () => editorInstanceRef.value,
-  resetHeadingIndex,
+  editorInstanceId,
   onContentChange: syncToExternal
 });
 
-const editorInstance = useEditor({
-  content: bodyContent.value ?? '',
-  extensions: editorExtensions,
-  editable: props.editable,
-  contentType: 'markdown',
-  editorProps: {
-    attributes: { spellcheck: 'false' },
-    handlePaste: onPaste,
-    handleKeyDown: (_, event) => {
-      const key = event.key.toLowerCase();
-      const isTab = key === 'tab';
-      const isUndo = (event.ctrlKey || event.metaKey) && key === 'z' && !event.shiftKey;
-      const isRedo = (event.ctrlKey || event.metaKey) && (key === 'y' || (key === 'z' && event.shiftKey));
-
-      if (isTab && !event.ctrlKey && !event.metaKey && !event.altKey) {
-        const instance = editorInstanceRef.value;
-        if (!instance) {
-          return false;
-        }
-
-        if (instance.isActive('table') || instance.isActive('listItem')) {
-          return false;
-        }
-
-        event.preventDefault();
-
-        if (event.shiftKey) {
-          const { from, empty } = instance.state.selection;
-          if (!empty || from <= 2) {
-            return true;
-          }
-
-          const before = instance.state.doc.textBetween(from - 2, from, '\0', '\0');
-          if (before === '  ') {
-            instance.commands.deleteRange({ from: from - 2, to: from });
-          }
-          return true;
-        }
-
-        instance.commands.insertContent(instance.isActive('codeBlock') ? '\t' : '  ');
-        return true;
-      }
-
-      if (isUndo || isRedo) {
-        event.preventDefault();
-        const instance = editorInstanceRef.value;
-        if (!instance) {
-          return true;
-        }
-        if (isUndo) {
-          instance.commands.undo();
-          return true;
-        }
-        instance.commands.redo();
-        return true;
-      }
-      return false;
-    }
-  },
-  onUpdate: onEditorUpdate
-});
-
-watch(
-  editorInstance,
-  (instance) => {
-    editorInstanceRef.value = instance;
-  },
-  { immediate: true }
-);
-
-watch(bodyContent, (content) => {
-  const instance = editorInstanceRef.value;
-  if (!instance) return;
-
-  const currentContent = instance.getMarkdown();
-  if (currentContent === content) return;
-
-  setEditorContent(content ?? '', false);
-});
-
-function handleFrontMatterUpdate(data: Record<string, unknown>): void {
-  updateFrontMatter(data);
-  syncToExternal();
-}
-
-function handleFrontMatterFieldUpdate(key: string, value: unknown): void {
-  updateFrontMatterField(key, value);
-  syncToExternal();
-}
-
-function handleFrontMatterFieldRemove(key: string): void {
-  removeFrontMatterField(key);
-  syncToExternal();
-}
-
-function handleFrontMatterFieldAdd(key: string, value: unknown): void {
-  addFrontMatterField(key, value);
-  syncToExternal();
-}
+const editorController = useEditorController({ isRichMode, richEditorPaneRef, sourceEditorPaneRef });
 
 function setContent(text: string): void {
   editorInstanceCounter.value += 1;
 
-  setEditorContent(text, false);
+  setRichEditorContent(text);
 }
 
 function undo(): void {
-  editorInstanceRef.value?.commands.undo();
+  editorController.value.undo();
 }
 
 function redo(): void {
-  editorInstanceRef.value?.commands.redo();
+  editorController.value.redo();
 }
 
 function canUndo(): boolean {
-  const instance = editorInstanceRef.value;
-  const can = instance?.can();
-  return Boolean(can?.undo());
+  return editorController.value.canUndo();
 }
 
 function canRedo(): boolean {
-  const instance = editorInstanceRef.value;
-  const can = instance?.can();
-  return Boolean(can?.redo());
+  return editorController.value.canRedo();
 }
 
-function selectAll(): void {
-  editorInstanceRef.value?.commands.focus();
-  editorInstanceRef.value?.commands.selectAll();
-}
+defineExpose({ setContent, undo, redo, canUndo, canRedo });
 
-defineExpose({ setContent, undo, redo, canUndo, canRedo, selectAll });
+// @ts-ignore
+useTextareaAutosize({ element: titleTextareaRef, input: editorTitle });
 </script>
 
 <style lang="less">
@@ -290,324 +185,6 @@ defineExpose({ setContent, undo, redo, canUndo, canRedo, selectAll });
   &::placeholder {
     font-weight: 600;
     color: #bfbfbf;
-  }
-}
-
-.b-editor-content {
-  height: 100%;
-  min-height: 100%;
-
-  .ProseMirror {
-    min-height: 100%;
-    padding: 20px 40px 90px;
-    margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    font-size: 14px;
-    line-height: 1.5;
-    color: #2e2e2e;
-    caret-color: #2e2e2e;
-    outline: none;
-
-    > *:first-child {
-      margin-top: 0;
-    }
-
-    p.is-editor-empty:first-child::before {
-      float: left;
-      height: 0;
-      color: #bfbfbf;
-      pointer-events: none;
-      content: attr(data-placeholder);
-    }
-  }
-
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6 {
-    font-weight: 600;
-    color: #2e2e2e;
-  }
-
-  h1 {
-    padding-bottom: 0.3em;
-    margin: 1.5em 0 0.75em;
-    font-size: 24px;
-    border-bottom: 1px solid #e0e0e0;
-  }
-
-  h2 {
-    padding-bottom: 0.2em;
-    margin: 1.25em 0 0.625em;
-    font-size: 20px;
-    border-bottom: 1px solid #e0e0e0;
-  }
-
-  h3 {
-    margin: 1em 0 0.5em;
-    font-size: 16px;
-  }
-
-  h4 {
-    margin: 0.875em 0 0.4375em;
-    font-size: 14px;
-  }
-
-  h5 {
-    margin: 0.75em 0 0.375em;
-    font-size: 12px;
-    text-transform: uppercase;
-  }
-
-  h6 {
-    margin: 0.625em 0 0.3125em;
-    font-size: 11px;
-    text-transform: uppercase;
-  }
-
-  p {
-    min-height: 1em;
-    margin: 0.75em 0;
-  }
-
-  ul,
-  ol {
-    padding-left: 1.75em;
-    margin: 0.75em 0;
-  }
-
-  ul > li {
-    list-style: disc;
-  }
-
-  ol > li {
-    list-style: decimal;
-  }
-
-  ul ul {
-    list-style: circle;
-  }
-
-  ul ul ul {
-    list-style: square;
-  }
-
-  ol ol {
-    list-style: lower-alpha;
-  }
-
-  ol ol ol {
-    list-style: lower-roman;
-  }
-
-  li {
-    margin: 0.25em 0;
-
-    &::marker {
-      color: #6b7280;
-    }
-
-    > p {
-      margin: 0.25em 0;
-    }
-  }
-
-  li > ul,
-  li > ol {
-    margin: 0.25em 0;
-  }
-
-  blockquote {
-    padding: 0.5em 1em 0.5em 1.25em;
-    margin: 0.75em 0;
-    color: #585858;
-    background-color: #f5f5f5;
-    border-left: 4px solid #d0d0d0;
-    border-radius: 0 4px 4px 0;
-  }
-
-  code {
-    padding: 0.125em 0.25em;
-    font-family: Menlo, Monaco, 'Courier New', monospace;
-    font-size: 0.85em;
-    color: #e83e8c;
-    background-color: #f1f1f1;
-    border-radius: 3px;
-  }
-
-  pre {
-    margin: 0.75em 0;
-    background-color: transparent;
-    border: 0;
-    border-radius: 0;
-
-    code {
-      padding: 0;
-      font-family: 'Fira Code', 'Fira Mono', Consolas, Monaco, 'Courier New', monospace;
-      font-size: 0.9em;
-      line-height: 1.6;
-      color: #24292f;
-      background-color: transparent;
-
-      .hljs-keyword {
-        color: #cf222e;
-      }
-
-      .hljs-string {
-        color: #0a3069;
-      }
-
-      .hljs-number {
-        color: #0550ae;
-      }
-
-      .hljs-comment {
-        font-style: italic;
-        color: #6e7781;
-      }
-
-      .hljs-function {
-        color: #8250df;
-      }
-
-      .hljs-title {
-        color: #8250df;
-      }
-
-      .hljs-params {
-        color: #24292f;
-      }
-
-      .hljs-variable {
-        color: #953800;
-      }
-
-      .hljs-operator {
-        color: #0550ae;
-      }
-
-      .hljs-tag {
-        color: #116329;
-      }
-
-      .hljs-attr {
-        color: #0550ae;
-      }
-
-      .hljs-value {
-        color: #0a3069;
-      }
-
-      .hljs-property {
-        color: #953800;
-      }
-
-      .hljs-built_in {
-        color: #8250df;
-      }
-
-      .hljs-class {
-        color: #8250df;
-      }
-
-      .hljs-constant {
-        color: #0550ae;
-      }
-    }
-  }
-
-  hr {
-    margin: 1.5em 0;
-    border: none;
-    border-top: 1px solid #e0e0e0;
-  }
-
-  a {
-    font-weight: 500;
-    color: #1761d2;
-    text-decoration: none;
-
-    &:hover {
-      text-decoration: underline;
-    }
-  }
-
-  img {
-    max-width: 100%;
-    margin: 0.75em 0;
-    border-radius: 4px;
-    box-shadow: 0 1px 3px rgb(0 0 0 / 10%);
-  }
-
-  table {
-    width: 100%;
-    margin: 0.75em 0;
-    overflow: hidden;
-    border-spacing: 0;
-    border-collapse: separate;
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
-
-    th {
-      padding: 0.5em 0.75em;
-      font-weight: 600;
-      vertical-align: top;
-      color: #2e2e2e;
-      text-align: left;
-      background-color: #f5f5f5;
-      border-right: 1px solid #e0e0e0;
-      border-bottom: 1px solid #e0e0e0;
-
-      &:last-child {
-        border-right: none;
-      }
-    }
-
-    td {
-      padding: 0.5em 0.75em;
-      vertical-align: top;
-      color: #2e2e2e;
-      text-align: left;
-      background-color: #fff;
-      border-right: 1px solid #e0e0e0;
-      border-bottom: 1px solid #e0e0e0;
-
-      &:last-child {
-        border-right: none;
-      }
-    }
-
-    tr:last-child td {
-      border-bottom: none;
-    }
-
-    tr:hover td {
-      background-color: #f9f9f9;
-    }
-  }
-
-  .tableWrapper {
-    width: 100%;
-    margin: 0.75em 0;
-    overflow-x: auto;
-  }
-
-  .tableWrapper table {
-    margin: 0;
-  }
-
-  .tableWrapper th,
-  .tableWrapper td {
-    min-width: 120px;
-  }
-
-  .tableWrapper th p,
-  .tableWrapper td p {
-    min-height: auto;
-    margin: 0;
-    color: inherit;
   }
 }
 </style>
