@@ -36,7 +36,7 @@ import { Icon } from '@iconify/vue';
 import BTruncateText from '../BTruncateText/index.vue';
 
 interface Props {
-  value?: string | number;
+  value?: string | number | Array<string | number>;
   /** 下拉选项列表 */
   options: T[];
   /** 下拉菜单项的类名 */
@@ -45,19 +45,19 @@ interface Props {
   width?: string | number;
 }
 
-withDefaults(defineProps<Props>(), { value: '', rowClass: '', width: 'auto' });
+withDefaults(defineProps<Props>(), { value: () => [], rowClass: '', width: 'auto' });
 
 const emit = defineEmits<{
   (e: 'update:value', value: string | number): void;
   (e: 'change', value: DropdownOptionItem): void;
 }>();
 
-const active = defineModel<string | number>('value', { default: '' });
+const active = defineModel<string | number | Array<string | number>>('value', { default: () => [] });
 
 function handleClickMenu(record: DropdownOptionItem) {
   if (record.disabled) return;
 
-  if (record.value !== active.value) {
+  if (!Array.isArray(active.value) && record.value !== active.value) {
     active.value = record.value;
   }
 
