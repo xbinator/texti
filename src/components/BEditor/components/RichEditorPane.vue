@@ -10,6 +10,7 @@
       @add-field="handleFrontMatterFieldAdd"
     />
 
+    <CurrentBlockMenu :editor="props.editor" />
     <EditorContent :key="editorId" :editor="props.editor ?? undefined" class="b-editor-content" />
   </div>
 </template>
@@ -18,6 +19,7 @@
 import type { FrontMatterData } from '../hooks/useFrontMatter';
 import type { Editor } from '@tiptap/vue-3';
 import { EditorContent } from '@tiptap/vue-3';
+import CurrentBlockMenu from './CurrentBlockMenu.vue';
 import FrontMatterCard from './FrontMatterCard.vue';
 
 interface Props {
