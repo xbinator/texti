@@ -111,24 +111,28 @@ function setupShortcuts() {
     const stopFn = whenever(keys[keyCombo], () => option.onClick?.());
     stopFns.push(stopFn);
 
-    const stopPreventDefault = useEventListener('keydown', (e) => {
-      const shortcut = option.shortcut?.toLowerCase();
-      if (!shortcut) return;
+    const stopPreventDefault = useEventListener(
+      'keydown',
+      (e) => {
+        const shortcut = option.shortcut?.toLowerCase();
+        if (!shortcut) return;
 
-      const ctrl = e.ctrlKey || e.metaKey;
-      const shift = e.shiftKey;
-      const alt = e.altKey;
+        const ctrl = e.ctrlKey || e.metaKey;
+        const shift = e.shiftKey;
+        const alt = e.altKey;
 
-      const hasCtrl = shortcut.includes('ctrl') || shortcut.includes('meta');
-      const hasShift = shortcut.includes('shift');
-      const hasAlt = shortcut.includes('alt');
+        const hasCtrl = shortcut.includes('ctrl') || shortcut.includes('meta');
+        const hasShift = shortcut.includes('shift');
+        const hasAlt = shortcut.includes('alt');
 
-      const key = shortcut.split('+').pop();
+        const key = shortcut.split('+').pop()?.trim();
 
-      if (ctrl === hasCtrl && shift === hasShift && alt === hasAlt && e.key.toLowerCase() === key) {
-        e.preventDefault();
-      }
-    });
+        if (ctrl === hasCtrl && shift === hasShift && alt === hasAlt && e.key.toLowerCase() === key) {
+          e.preventDefault();
+        }
+      },
+      { capture: true }
+    );
     stopFns.push(stopPreventDefault);
 
     if (isMacOS.value && option.shortcut.toLowerCase().includes('ctrl')) {

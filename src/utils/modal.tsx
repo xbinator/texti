@@ -3,6 +3,8 @@ import { createApp, h, ref } from 'vue';
 import { Button, Input } from 'ant-design-vue';
 import BModal from '@/components/BModal/index.vue';
 
+// ——— 类型 ———
+
 interface ModalInstance {
   close: () => void;
 }
@@ -12,19 +14,60 @@ interface ModalOptions {
   width?: string | number;
 }
 
-// ——— 基础创建 / 销毁 ———
-
-interface ModalInstance {
-  close: () => void;
+interface RenderModalProps {
+  open: boolean;
+  content: () => VNode;
+  footer?: () => VNode;
+  onClose: () => void;
+  'onUpdate:open': (val: boolean) => void;
+  title?: string;
+  width?: string | number;
 }
 
-function createModalInstance(content: VNode, options: ModalOptions = {}): ModalInstance {
+interface FooterButtonsProps {
+  onCancel: () => void;
+  onConfirm: () => void;
+  confirmText?: string;
+  danger?: boolean;
+}
+
+interface ConfirmModalOptions {
+  title?: string;
+  content: string;
+  confirmText?: string;
+  danger?: boolean;
+}
+
+interface InputOptions {
+  defaultValue?: string;
+  placeholder?: string;
+  okText?: string;
+}
+
+type DeleteOptions = Pick<ModalOptions, 'title'>;
+
+// ——— RenderModal ———
+
+function RenderModal({ open, content, footer, onClose, title, width, ...rest }: RenderModalProps) {
+  return (
+    <BModal open={open} title={title} width={width || 400} closable maskClosable onClose={onClose} {...rest}>
+      {{
+        default: content,
+        footer: footer ?? undefined
+      }}
+    </BModal>
+  );
+}
+
+// ——— createModalInstance ———
+
+function createModalInstance(renderModal: (props: { open: boolean; onClose: () => void; 'onUpdate:open': (val: boolean) => void }) => VNode): ModalInstance {
   const container = document.createElement('div');
   document.body.appendChild(container);
 
   const visible = ref(true);
-
   let closed = false;
+
   const close = (): void => {
     if (closed) return;
     closed = true;
@@ -37,21 +80,13 @@ function createModalInstance(content: VNode, options: ModalOptions = {}): ModalI
 
   const app = createApp({
     render() {
-      return h(
-        BModal,
-        {
-          open: visible.value,
-          title: options.title,
-          width: options.width || 400,
-          closable: true,
-          maskClosable: true,
-          'onUpdate:open': (val: boolean) => {
-            visible.value = val;
-          },
-          onClose: close
-        },
-        { default: () => content }
-      );
+      return renderModal({
+        open: visible.value,
+        onClose: close,
+        'onUpdate:open': (val: boolean) => {
+          visible.value = val;
+        }
+      });
     }
   });
 
@@ -59,22 +94,8 @@ function createModalInstance(content: VNode, options: ModalOptions = {}): ModalI
   return { close };
 }
 
-type DeleteOptions = Pick<ModalOptions, 'title'>;
+// ——— 内部组件 ———
 
-interface InputOptions {
-  defaultValue?: string;
-  placeholder?: string;
-  okText?: string;
-}
-
-interface FooterButtonsProps {
-  onCancel: () => void;
-  onConfirm: () => void;
-  confirmText?: string;
-  danger?: boolean;
-}
-
-/** 底部按钮区 */
 function FooterButtons({ onCancel, onConfirm, confirmText = '确定', danger = false }: FooterButtonsProps) {
   return (
     <div style={{ textAlign: 'right' }}>
@@ -86,78 +107,84 @@ function FooterButtons({ onCancel, onConfirm, confirmText = '确定', danger = f
   );
 }
 
-/** 确认类弹窗内容区 */
-interface ConfirmContentProps extends FooterButtonsProps {
-  content: string;
+// ——— Render 函数 ———
+
+function RenderConfirmModal({ content, title, confirmText, danger }: ConfirmModalOptions): Promise<[boolean, boolean]> {
+  return new Promise((resolve) => {
+    let instance: ModalInstance;
+
+    const onConfirm = (): void => {
+      resolve([false, true]);
+      instance.close();
+    };
+    const onCancel = (): void => {
+      resolve([true, false]);
+      instance.close();
+    };
+
+    instance = createModalInstance((controlProps) =>
+      h(RenderModal, {
+        ...controlProps,
+        title,
+        content: () => <div style={{ marginBottom: '16px' }}>{content}</div>,
+        footer: () => <FooterButtons onCancel={onCancel} onConfirm={onConfirm} confirmText={confirmText} danger={danger} />
+      })
+    );
+  });
 }
 
-function ConfirmContent({ content, ...footerProps }: ConfirmContentProps) {
-  return (
-    <div>
-      <div style={{ marginBottom: '16px' }}>{content}</div>
-      <FooterButtons {...footerProps} />
-    </div>
-  );
+function RenderInputModal(title: string, options: InputOptions = {}): Promise<[false, string] | [true]> {
+  const { defaultValue = '', placeholder = '', okText = '确定' } = options;
+
+  return new Promise((resolve) => {
+    let instance: ModalInstance;
+    const inputValue = ref(defaultValue);
+
+    const onCancel = (): void => {
+      resolve([true]);
+      instance.close();
+    };
+    const onConfirm = (): void => {
+      resolve([false, inputValue.value.trim()]);
+      instance.close();
+    };
+
+    instance = createModalInstance((controlProps) =>
+      h(RenderModal, {
+        ...controlProps,
+        title,
+        content: () => (
+          <Input
+            value={inputValue.value}
+            style={{ width: '100%' }}
+            onUpdate:value={(val: string) => (inputValue.value = val)}
+            placeholder={placeholder}
+            autofocus
+          />
+        ),
+        footer: () => <FooterButtons onCancel={onCancel} onConfirm={onConfirm} confirmText={okText} />
+      })
+    );
+  });
 }
 
 // ——— 公共 API ———
 
 export class Modal {
-  static #confirmBase(content: string, title: string, footerProps: Partial<FooterButtonsProps> = {}): Promise<[boolean, boolean]> {
-    return new Promise((resolve) => {
-      let instance: ModalInstance;
-      const handleConfirm = (): void => {
-        resolve([false, true]);
-        instance.close();
-      };
-      const handleCancel = (): void => {
-        resolve([true, false]);
-        instance.close();
-      };
-
-      instance = createModalInstance(<ConfirmContent content={content} onCancel={handleCancel} onConfirm={handleConfirm} {...footerProps} />, { title });
-    });
-  }
-
   static confirm(title: string, content: string): Promise<[boolean, boolean]> {
-    return Modal.#confirmBase(content, title);
+    return RenderConfirmModal({ content, title });
   }
 
   static delete(content: string, options: DeleteOptions = {}): Promise<[boolean, boolean]> {
-    return Modal.#confirmBase(content, options.title ?? '删除确认', { confirmText: '删除', danger: true });
+    return RenderConfirmModal({
+      content,
+      title: options.title ?? '删除确认',
+      confirmText: '删除',
+      danger: true
+    });
   }
 
-  static input(title: string, options: InputOptions = {}): Promise<[boolean, string | null]> {
-    const { defaultValue = '', placeholder = '', okText = '确定' } = options;
-    return new Promise((resolve) => {
-      let instance: ModalInstance;
-      const inputValue = ref(defaultValue);
-
-      const handleCancel = (): void => {
-        resolve([true, null]);
-        instance.close();
-      };
-      const onConfirm = (): void => {
-        resolve([false, inputValue.value || null]);
-        instance.close();
-      };
-
-      instance = createModalInstance(
-        <div>
-          <Input
-            value={inputValue.value}
-            style={{ width: '100%', marginBottom: '16px' }}
-            onUpdate:value={(val: string) => {
-              inputValue.value = val;
-            }}
-            placeholder={placeholder}
-            autofocus
-            onPressEnter={onConfirm}
-          />
-          <FooterButtons onCancel={handleCancel} onConfirm={onConfirm} confirmText={okText} />
-        </div>,
-        { title }
-      );
-    });
+  static input(title: string, options: InputOptions = {}) {
+    return RenderInputModal(title, options);
   }
 }

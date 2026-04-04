@@ -44,13 +44,21 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
     await indexedDB.removeRecentFile(...ids);
   }
 
+  async function confirmUnsavedChanges() {
+    if (fileState.value.path) return true;
+    if (!fileState.value.content.trim()) return true;
+
+    const [cancelled] = await Modal.confirm('提示', '当前文件未保存，是否放弃当前修改？');
+    return !cancelled;
+  }
+
   function setFileState(file: EditorFile): void {
     options.pause();
 
     fileState.value = file;
     file.id && indexedDB.setCurrentFile(file.id);
 
-    native.setWindowTitle(`${file.name || '未命名文件'}.${file.ext || 'md'}`);
+    native.setWindowTitle(`${file.name || '未命名'}.${file.ext || 'md'}`);
 
     nextTick(() => options.resume());
   }
@@ -115,6 +123,7 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
       label: '新建',
       shortcut: 'Ctrl+N',
       onClick: async () => {
+        if (!(await confirmUnsavedChanges())) return;
         await removeUnsavedFiles();
 
         const _file = { path: '', name: '', ext: 'md', content: '', id: nanoid(6) };
@@ -133,6 +142,7 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
         const file = await native.openFile();
         if (!file.path) return;
 
+        if (!(await confirmUnsavedChanges())) return;
         await removeUnsavedFiles();
 
         const _file = { ...file, id: nanoid(6) };
@@ -154,6 +164,7 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
             const stored = await indexedDB.getRecentFile(file.id);
             if (!stored) return;
 
+            if (!(await confirmUnsavedChanges())) return;
             await removeUnsavedFiles();
 
             setFileState(stored);
@@ -179,6 +190,7 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
       label: '复制为新文件',
       shortcut: 'Ctrl+Alt+N',
       onClick: async () => {
+        if (!(await confirmUnsavedChanges())) return;
         await removeUnsavedFiles();
 
         const src = fileState.value;
@@ -200,7 +212,7 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
       label: '保存',
       shortcut: 'Ctrl+S',
       onClick: async () => {
-        const { id, path, name, ext, content } = fileState.value;
+        const { id, path, name = '未命名', ext = 'md', content } = fileState.value;
 
         if (isTauri()) {
           // 桌面端：有 path 直接覆写，没有 path 走另存为流程
@@ -210,9 +222,9 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
             await tauriSaveAs();
           }
         } else if (isWeb()) {
+          fileState.value = { ...fileState.value, name, ext, path: path || `${name}.${ext}` };
           // WAP 端：将文件名覆盖到 path 字段，不触发下载
-          const filename = `${name || '未命名'}.${ext || 'md'}`;
-          await applyFileUpdate(id, { ...fileState.value, path: filename });
+          await applyFileUpdate(id, { ...fileState.value });
 
           await loadRecentFiles();
         }
@@ -240,10 +252,11 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
       value: 'rename',
       label: '重命名',
       shortcut: 'F2',
+      disabled: !fileState.value.path,
       onClick: async () => {
-        const { id, name } = fileState.value;
-        const [, newName] = await Modal.input('重命名', { defaultValue: name, placeholder: '请输入文件名' });
-        if (!newName || newName === name) return;
+        const { id, name = '' } = fileState.value;
+        const [cancel, newName] = await Modal.input('重命名', { defaultValue: name, placeholder: '请输入' });
+        if (cancel || newName === name) return;
 
         await applyFileUpdate(id, { ...fileState.value, name: newName });
         await loadRecentFiles();
