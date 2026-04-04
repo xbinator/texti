@@ -30,14 +30,14 @@
 </template>
 
 <script setup lang="ts">
-import BScrollbar from '../BScrollbar/index.vue';
-import type { SearchScrollContext } from './extensions/Search';
 import type { FrontMatterData } from './hooks/useFrontMatter';
 import type { BEditorViewMode } from './types';
 import { computed, ref, toRef } from 'vue';
 import { useTextareaAutosize, useWindowSize } from '@vueuse/core';
+import BScrollbar from '../BScrollbar/index.vue';
 import RichEditorPane from './components/RichEditorPane.vue';
 import SourceEditorPane from './components/SourceEditorPane.vue';
+import { getSearchSnapshot, type SearchScrollContext, type SearchSnapshot } from './extensions/Search';
 import { useAnchors } from './hooks/useAnchors';
 import { useEditorController } from './hooks/useEditorController';
 import { useFrontMatter } from './hooks/useFrontMatter';
@@ -190,7 +190,23 @@ function clearSearch() {
   commands?.clearSearch?.();
 }
 
-defineExpose({ setContent, undo, redo, canUndo, canRedo, setSearchTerm, findNext, findPrevious, clearSearch });
+function focusEditor(): void {
+  editorController.value.focusEditor();
+}
+
+function getSearchState(): SearchSnapshot {
+  if (!isRichMode.value) {
+    return {
+      currentIndex: 0,
+      matchCount: 0,
+      term: ''
+    };
+  }
+
+  return getSearchSnapshot(editorInstance.value);
+}
+
+defineExpose({ setContent, undo, redo, canUndo, canRedo, setSearchTerm, findNext, findPrevious, clearSearch, focusEditor, getSearchState });
 
 // @ts-ignore
 useTextareaAutosize({ element: titleTextareaRef, input: editorTitle });

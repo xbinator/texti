@@ -8,6 +8,7 @@ export interface EditorController {
   redo: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
+  focusEditor: () => void;
 }
 
 interface UseEditorControllerParams {
@@ -29,6 +30,9 @@ export function useEditorController({ isRichMode, richEditorPaneRef, sourceEdito
     },
     canRedo(): boolean {
       return false;
+    },
+    focusEditor(): void {
+      sourceEditorPaneRef.value?.focusEditor();
     }
   };
 

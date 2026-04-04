@@ -8,6 +8,12 @@ export interface SearchMatch {
   to: number;
 }
 
+export interface SearchSnapshot {
+  currentIndex: number;
+  matchCount: number;
+  term: string;
+}
+
 export interface SearchScrollContext {
   editor: Editor;
   match: SearchMatch;
@@ -108,6 +114,24 @@ function getSearchState(editor: CommandProps['editor']): SearchState {
   return searchPluginKey.getState(editor.state) ?? createSearchState(editor.state.doc);
 }
 
+export function getSearchSnapshot(editor: Editor | null | undefined): SearchSnapshot {
+  if (!editor) {
+    return {
+      currentIndex: 0,
+      matchCount: 0,
+      term: ''
+    };
+  }
+
+  const searchState = getSearchState(editor);
+
+  return {
+    currentIndex: searchState.currentIndex,
+    matchCount: searchState.matches.length,
+    term: searchState.term
+  };
+}
+
 function getMatchElement(editor: Editor, match: SearchMatch): HTMLElement | null {
   const domAtPos = editor.view.domAtPos(match.from);
   const targetNode = domAtPos.node.nodeType === Node.TEXT_NODE ? domAtPos.node.parentElement : domAtPos.node;
@@ -115,11 +139,7 @@ function getMatchElement(editor: Editor, match: SearchMatch): HTMLElement | null
   return targetNode instanceof HTMLElement ? targetNode : null;
 }
 
-function scrollMatchIntoView(
-  editor: Editor,
-  match: SearchMatch,
-  onMatchFocus: SearchOptions['onMatchFocus']
-): void {
+function scrollMatchIntoView(editor: Editor, match: SearchMatch, onMatchFocus: SearchOptions['onMatchFocus']): void {
   requestAnimationFrame(() => {
     const targetElement = getMatchElement(editor, match);
     if (!targetElement) {
@@ -186,7 +206,7 @@ export const Search = Extension.create<SearchOptions>({
   },
 
   addCommands() {
-    const onMatchFocus = this.options.onMatchFocus;
+    const { onMatchFocus } = this.options;
 
     return {
       setSearchTerm:
