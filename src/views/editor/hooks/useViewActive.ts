@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue';
 import type { BEditorViewMode } from '@/components/BEditor/types';
 import type { Props as ToolbarProps } from '@/components/Toolbar.vue';
+import { EditorShortcuts } from '../constants/shortcuts';
 
 const STORAGE_KEY = 'editor_viewState';
 
@@ -34,7 +35,7 @@ export function useViewActive() {
     {
       value: 'source',
       label: '源代码模式',
-      shortcut: 'Ctrl+E',
+      shortcut: EditorShortcuts.VIEW_SOURCE,
       selected: viewState.value.mode === 'source',
       onClick: () => {
         viewState.value.mode = viewState.value.mode === 'source' ? 'rich' : 'source';

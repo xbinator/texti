@@ -1,26 +1,25 @@
 /* eslint-disable no-restricted-syntax */
 import type { EditorFile } from '../types';
 import type { Ref } from 'vue';
-import { computed, ref, onMounted, nextTick } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import { customAlphabet } from 'nanoid';
 import type { Props as ToolbarProps } from '@/components/Toolbar.vue';
 import { isTauri, isWeb } from '@/utils/is';
 import { Modal } from '@/utils/modal';
 import { native } from '@/utils/native';
 import { indexedDB, StoredFile } from '@/utils/storage';
+import { EditorShortcuts } from '../constants/shortcuts';
 
 interface UseFileActiveOptions {
-  // 暂停自动保存
   pause: () => void;
-  // 恢复自动保存
   resume: () => void;
+  visible: { recentSearch: boolean };
 }
 
 const nanoid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz_', 6);
 
 function getRecentFileLabel(file: Pick<EditorFile, 'name' | 'content'>): string {
   const content = file.content.replace(/^\s*---[\s\S]*?---\s*\n?/, '');
-
   const match = /^#{1,6}\s+(.+)/m.exec(content);
 
   return match?.[1]?.trim() || file.name || '未命名';
@@ -33,18 +32,17 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
 
   async function loadRecentFiles(): Promise<void> {
     const files = await indexedDB.getAllRecentFiles();
-
     recentFiles.value = files;
   }
 
-  async function removeUnsavedFiles(): Promise<void> {
-    const ids = recentFiles.value.filter((v) => !v.path).map((v) => v.id);
+  async function removeUnsavedFiles(preserveIds: string[] = []): Promise<void> {
+    const ids = recentFiles.value.filter((file) => !file.path && !preserveIds.includes(file.id)).map((file) => file.id);
     if (!ids.length) return;
 
     await indexedDB.removeRecentFile(...ids);
   }
 
-  async function confirmUnsavedChanges() {
+  async function confirmUnsavedChanges(): Promise<boolean> {
     if (fileState.value.path) return true;
     if (!fileState.value.content.trim()) return true;
 
@@ -56,10 +54,11 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
     options.pause();
 
     fileState.value = file;
-    file.id && indexedDB.setCurrentFile(file.id);
+    if (file.id) {
+      indexedDB.setCurrentFile(file.id);
+    }
 
     native.setWindowTitle(`${file.name || '未命名'}.${file.ext || 'md'}`);
-
     nextTick(() => options.resume());
   }
 
@@ -67,30 +66,29 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
     const currentId = await indexedDB.getCurrentFileId();
     if (currentId) {
       const stored = await indexedDB.getRecentFile(currentId);
-      stored && setFileState(stored);
+      if (stored) {
+        setFileState(stored);
+      }
     }
 
     if (!fileState.value.id) {
-      const _file = { path: '', name: '', ext: 'md', content: '', id: nanoid(6) };
-      await indexedDB.addRecentFile(_file as StoredFile);
-
-      setFileState(_file);
+      const nextFile: EditorFile = { path: '', name: '', ext: 'md', content: '', id: nanoid(6) };
+      await indexedDB.addRecentFile(nextFile as StoredFile);
+      setFileState(nextFile);
     }
 
-    loadRecentFiles();
+    await loadRecentFiles();
   }
 
   onMounted(() => {
     restoreCurrentFile();
   });
 
-  // 持久化并更新当前文件状态
   async function applyFileUpdate(id: string, updated: EditorFile): Promise<void> {
     await indexedDB.updateRecentFile(id, updated as StoredFile);
     setFileState(updated);
   }
 
-  // 桌面端：弹系统对话框另存，成功后更新状态
   async function tauriSaveAs(): Promise<void> {
     const { id, name, ext, content } = fileState.value;
     const defaultPath = `${name || '未命名'}.${ext || 'md'}`;
@@ -111,9 +109,20 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
       return;
     }
 
-    const _file = { path: '', name: '', ext: 'md', content: '', id: nanoid(6) };
-    await indexedDB.addRecentFile(_file as StoredFile);
-    setFileState(_file);
+    const nextFile: EditorFile = { path: '', name: '', ext: 'md', content: '', id: nanoid(6) };
+    await indexedDB.addRecentFile(nextFile as StoredFile);
+    setFileState(nextFile);
+    await loadRecentFiles();
+  }
+
+  async function openRecentFile(id: string): Promise<void> {
+    const stored = await indexedDB.getRecentFile(id);
+    if (!stored) return;
+
+    if (!(await confirmUnsavedChanges())) return;
+    await removeUnsavedFiles([id]);
+
+    setFileState(stored);
     await loadRecentFiles();
   }
 
@@ -121,23 +130,23 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
     {
       value: 'new',
       label: '新建',
-      shortcut: 'Ctrl+N',
+      shortcut: EditorShortcuts.FILE_NEW,
       onClick: async () => {
         if (!(await confirmUnsavedChanges())) return;
         await removeUnsavedFiles();
 
-        const _file = { path: '', name: '', ext: 'md', content: '', id: nanoid(6) };
-        await indexedDB.addRecentFile(_file as StoredFile);
+        const nextFile: EditorFile = { path: '', name: '', ext: 'md', content: '', id: nanoid(6) };
+        await indexedDB.addRecentFile(nextFile as StoredFile);
 
-        setFileState(_file);
-        loadRecentFiles();
+        setFileState(nextFile);
+        await loadRecentFiles();
       }
     },
     { type: 'divider' },
     {
       value: 'open',
       label: '打开',
-      shortcut: 'Ctrl+O',
+      shortcut: EditorShortcuts.FILE_OPEN,
       onClick: async () => {
         const file = await native.openFile();
         if (!file.path) return;
@@ -145,11 +154,11 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
         if (!(await confirmUnsavedChanges())) return;
         await removeUnsavedFiles();
 
-        const _file = { ...file, id: nanoid(6) };
-        await indexedDB.addRecentFile(_file as StoredFile);
+        const nextFile: EditorFile = { ...file, id: nanoid(6) };
+        await indexedDB.addRecentFile(nextFile as StoredFile);
 
-        loadRecentFiles();
-        setFileState(_file);
+        setFileState(nextFile);
+        await loadRecentFiles();
       }
     },
     {
@@ -162,15 +171,19 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
           label: getRecentFileLabel(file),
           active: file.id === fileState.value.id,
           onClick: async () => {
-            const stored = await indexedDB.getRecentFile(file.id);
-            if (!stored) return;
-
-            if (!(await confirmUnsavedChanges())) return;
-            await removeUnsavedFiles();
-
-            setFileState(stored);
+            await openRecentFile(file.id);
           }
         })),
+        { type: 'divider' as const },
+        {
+          value: 'more',
+          label: '更多',
+          shortcut: EditorShortcuts.FILE_RECENT_MORE,
+          enableShortcut: false,
+          onClick: async () => {
+            options.visible.recentSearch = true;
+          }
+        },
         { type: 'divider' as const },
         {
           value: 'clear-recent',
@@ -189,34 +202,33 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
     {
       value: 'duplicate',
       label: '复制为新文件',
-      shortcut: 'Ctrl+Alt+N',
+      shortcut: EditorShortcuts.FILE_DUPLICATE,
       onClick: async () => {
         if (!(await confirmUnsavedChanges())) return;
         await removeUnsavedFiles();
 
-        const src = fileState.value;
-        const _file = {
-          path: src.path,
-          name: src.name ? `${src.name}-副本` : '',
-          ext: src.ext || 'md',
-          content: src.content,
+        const source = fileState.value;
+        const nextFile: EditorFile = {
+          path: source.path,
+          name: source.name ? `${source.name}-副本` : '',
+          ext: source.ext || 'md',
+          content: source.content,
           id: nanoid(6)
         };
 
-        await indexedDB.addRecentFile(_file as StoredFile);
-        setFileState(_file);
+        await indexedDB.addRecentFile(nextFile as StoredFile);
+        setFileState(nextFile);
         await loadRecentFiles();
       }
     },
     {
       value: 'save',
       label: '保存',
-      shortcut: 'Ctrl+S',
+      shortcut: EditorShortcuts.FILE_SAVE,
       onClick: async () => {
         const { id, path, name = '未命名', ext = 'md', content } = fileState.value;
 
         if (isTauri()) {
-          // 桌面端：有 path 直接覆写，没有 path 走另存为流程
           if (path) {
             await native.writeFile(path, content);
           } else {
@@ -224,9 +236,7 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
           }
         } else if (isWeb()) {
           fileState.value = { ...fileState.value, name, ext, path: path || `${name}.${ext}` };
-          // WAP 端：将文件名覆盖到 path 字段，不触发下载
           await applyFileUpdate(id, { ...fileState.value });
-
           await loadRecentFiles();
         }
       }
@@ -234,7 +244,7 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
     {
       value: 'saveAs',
       label: '另存为',
-      shortcut: 'Ctrl+Shift+S',
+      shortcut: EditorShortcuts.FILE_SAVE_AS,
       disabled: !canSave.value,
       onClick: async () => {
         const { name, ext, content } = fileState.value;
@@ -242,7 +252,6 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
         if (isTauri()) {
           await tauriSaveAs();
         } else if (isWeb()) {
-          // WAP 端：直接下载
           const defaultPath = `${name || '未命名'}.${ext || 'md'}`;
           await native.saveFile(content, undefined, { defaultPath });
         }
@@ -252,7 +261,7 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
     {
       value: 'rename',
       label: '重命名',
-      shortcut: 'F2',
+      shortcut: EditorShortcuts.FILE_RENAME,
       disabled: !fileState.value.path,
       onClick: async () => {
         const { id, name = '' } = fileState.value;
@@ -276,7 +285,6 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
         await loadRecentFiles();
       }
     },
-
     {
       value: 'remove-current',
       label: '从最近记录移除当前',
@@ -297,5 +305,5 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
     }
   ]);
 
-  return { toolbarFileOptions, loadRecentFiles };
+  return { toolbarFileOptions, loadRecentFiles, recentFiles, openRecentFile };
 }

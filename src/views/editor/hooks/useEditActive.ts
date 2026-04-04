@@ -5,6 +5,7 @@ import { marked } from 'marked';
 import BEditor from '@/components/BEditor/index.vue';
 import type { Props as ToolbarProps } from '@/components/Toolbar.vue';
 import { useClipboard } from '@/hooks/useClipboard';
+import { EditorShortcuts } from '../constants/shortcuts';
 
 interface UseEditActiveOptions {
   /** 查找栏是否可见 */
@@ -43,7 +44,7 @@ export function useEditActive(fileState: Ref<EditorFile>, options: UseEditActive
       {
         value: 'undo',
         label: '撤销',
-        shortcut: 'Ctrl+Z',
+        shortcut: EditorShortcuts.EDIT_UNDO,
         enableShortcut: false,
         disabled: !editorInstance.value?.canUndo(),
         onClick: () => editorInstance.value?.undo()
@@ -51,7 +52,7 @@ export function useEditActive(fileState: Ref<EditorFile>, options: UseEditActive
       {
         value: 'redo',
         label: '重做',
-        shortcut: 'Ctrl+Shift+Z',
+        shortcut: EditorShortcuts.EDIT_REDO,
         enableShortcut: false,
         disabled: !editorInstance.value?.canRedo(),
         onClick: () => editorInstance.value?.redo()
@@ -59,7 +60,7 @@ export function useEditActive(fileState: Ref<EditorFile>, options: UseEditActive
       {
         value: 'find',
         label: '查找',
-        shortcut: 'Ctrl+F',
+        shortcut: EditorShortcuts.EDIT_FIND,
         disabled: !canCopy,
         onClick: () => {
           visible.find = true;
