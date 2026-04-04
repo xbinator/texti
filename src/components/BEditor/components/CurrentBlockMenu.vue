@@ -543,6 +543,8 @@ function bindEditor(editor: Editor | null | undefined): (() => void) | undefined
     return undefined;
   }
 
+  const editorDom = editor.view.dom;
+
   const update = (): void => {
     syncCurrentBlock();
   };
@@ -556,17 +558,29 @@ function bindEditor(editor: Editor | null | undefined): (() => void) | undefined
       currentBlock.value = null;
     }
   };
+
+  // 绑定在 document 上，这样鼠标在按钮与编辑器之间的间隙中移动时也能追踪
   const handleMouseMove = (event: MouseEvent): void => {
-    if (open.value || isHoveringMenu.value) {
+    if (open.value) return;
+
+    const inEditor = editorDom instanceof HTMLElement && editorDom.contains(event.target as Node);
+    const inMenu = rootRef.value?.contains(event.target as Node);
+
+    if (inMenu) {
+      // 在菜单内，保持当前 block 不变
       return;
     }
 
-    hoveredBlockPos.value = getHoveredBlockPos(editor, event.target);
-    syncCurrentBlock();
-  };
-  const handleMouseLeave = (): void => {
+    if (inEditor) {
+      // 在编辑器内，正常更新
+      hoveredBlockPos.value = getHoveredBlockPos(editor, event.target);
+      syncCurrentBlock();
+      return;
+    }
+
+    // 真正离开编辑器和菜单（包括间隙以外的区域），才清空
     hoveredBlockPos.value = null;
-    if (!open.value && !isHoveringMenu.value) {
+    if (!isHoveringMenu.value) {
       currentBlock.value = null;
     }
   };
@@ -575,8 +589,7 @@ function bindEditor(editor: Editor | null | undefined): (() => void) | undefined
   editor.on('transaction', update);
   editor.on('focus', handleFocus);
   editor.on('blur', handleBlur);
-  editor.view.dom.addEventListener('mousemove', handleMouseMove);
-  editor.view.dom.addEventListener('mouseleave', handleMouseLeave);
+  document.addEventListener('mousemove', handleMouseMove);
 
   isFocused.value = editor.isFocused;
   syncCurrentBlock();
@@ -586,8 +599,7 @@ function bindEditor(editor: Editor | null | undefined): (() => void) | undefined
     editor.off('transaction', update);
     editor.off('focus', handleFocus);
     editor.off('blur', handleBlur);
-    editor.view.dom.removeEventListener('mousemove', handleMouseMove);
-    editor.view.dom.removeEventListener('mouseleave', handleMouseLeave);
+    document.removeEventListener('mousemove', handleMouseMove);
   };
 }
 
