@@ -80,7 +80,11 @@ function canRedo(): boolean {
   return Boolean(can?.redo());
 }
 
-defineExpose({ undo, redo, canUndo, canRedo });
+function focusEditor(): void {
+  props.editor?.commands.focus();
+}
+
+defineExpose({ undo, redo, canUndo, canRedo, focusEditor });
 </script>
 
 <style lang="less">

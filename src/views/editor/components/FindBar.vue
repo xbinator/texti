@@ -1,10 +1,20 @@
 <template>
   <div v-if="visible" class="header-right">
     <div class="find-bar" :class="{ 'is-empty': isNoMatchFound }">
-      <input v-model="keyword" v-focus class="find-input" placeholder="在文档中查找" @keyup.enter="findNext" @keydown.esc="closeFind" />
-      <span class="find-result">{{ findResultText }}</span>
-      <button v-for="action in navigationActions" :key="action.icon" type="button" class="find-action" :disabled="action.disabled" @click="action.onClick">
-        <Icon :icon="action.icon" />
+      <input
+        ref="inputRef"
+        v-model="keyword"
+        class="find-input"
+        placeholder="在文档中查找"
+        @keydown.enter.prevent="handleEnter"
+        @keydown.esc.prevent="closeFind"
+      />
+      <span class="find-result" :class="{ 'find-result--empty': isNoMatchFound }">{{ findResultText }}</span>
+      <button type="button" class="find-action" :disabled="!hasMatches" @click="findPrevious">
+        <Icon icon="lucide:chevron-up" />
+      </button>
+      <button type="button" class="find-action" :disabled="!hasMatches" @click="findNext">
+        <Icon icon="lucide:chevron-down" />
       </button>
       <span class="find-divider"></span>
       <button type="button" class="find-action" @click="closeFind">
@@ -15,12 +25,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { Icon } from '@iconify/vue';
 import type BEditor from '@/components/BEditor/index.vue';
-import { vFocus } from '@/directives/focus';
-
-// ─── Props ───────────────────────────────────────────────────────────────────
 
 interface Props {
   content: string;
@@ -32,120 +39,122 @@ const props = withDefaults(defineProps<Props>(), {
   editorInstance: null
 });
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-interface FindResult {
-  start: number;
-  end: number;
+interface SearchState {
+  currentIndex: number;
+  matchCount: number;
+  term: string;
 }
-
-interface NavigationAction {
-  icon: string;
-  disabled: boolean;
-  onClick: () => void;
-}
-
-// ─── State ───────────────────────────────────────────────────────────────────
 
 const visible = defineModel<boolean>('visible', { default: false });
+const inputRef = ref<HTMLInputElement | null>(null);
 const keyword = ref('');
-const matchIndex = ref(0);
-
-// ─── Search Logic ─────────────────────────────────────────────────────────────
-
-const trimmedKeyword = computed(() => keyword.value.trim());
-
-function collectMatches(text: string, searchKeyword: string): FindResult[] {
-  if (!searchKeyword) return [];
-
-  const results: FindResult[] = [];
-  const lowerText = text.toLowerCase();
-  const lowerKeyword = searchKeyword.toLowerCase();
-
-  let pos = lowerText.indexOf(lowerKeyword);
-  while (pos !== -1) {
-    results.push({ start: pos, end: pos + searchKeyword.length });
-    pos = lowerText.indexOf(lowerKeyword, pos + searchKeyword.length);
-  }
-
-  return results;
-}
-
-const matches = computed<FindResult[]>(() => collectMatches(props.content, trimmedKeyword.value));
-
-const matchCount = computed(() => matches.value.length);
-const hasMatches = computed(() => matchCount.value > 0);
-const isNoMatchFound = computed(() => !hasMatches.value && Boolean(trimmedKeyword.value));
-
-// ─── Display ──────────────────────────────────────────────────────────────────
-
-const findResultText = computed(() => {
-  if (!trimmedKeyword.value) return '';
-  if (!hasMatches.value) return '0/0';
-  return `${matchIndex.value + 1}/${matchCount.value}`;
+const searchState = ref<SearchState>({
+  currentIndex: 0,
+  matchCount: 0,
+  term: ''
 });
 
-// ─── Navigation ───────────────────────────────────────────────────────────────
+const trimmedKeyword = computed(() => keyword.value.trim());
+const hasKeyword = computed(() => Boolean(trimmedKeyword.value));
+const hasMatches = computed(() => searchState.value.matchCount > 0);
+const isNoMatchFound = computed(() => hasKeyword.value && !hasMatches.value);
 
-function resetSearch(): void {
-  matchIndex.value = 0;
+const findResultText = computed(() => {
+  if (!hasKeyword.value) {
+    return '';
+  }
+
+  if (!hasMatches.value) {
+    return '0/0';
+  }
+
+  return `${searchState.value.currentIndex + 1}/${searchState.value.matchCount}`;
+});
+
+function getEditorSearchState(): SearchState {
+  return (
+    props.editorInstance?.getSearchState() ?? {
+      currentIndex: 0,
+      matchCount: 0,
+      term: ''
+    }
+  );
 }
 
-function moveToNextMatch(): void {
-  if (!hasMatches.value) return;
-  matchIndex.value = (matchIndex.value + 1) % matchCount.value;
+function syncSearchState(): void {
+  searchState.value = getEditorSearchState();
 }
 
-function moveToPreviousMatch(): void {
-  if (!hasMatches.value) return;
-  matchIndex.value = matchIndex.value <= 0 ? matchCount.value - 1 : matchIndex.value - 1;
+function applySearchTerm(value: string): void {
+  const nextKeyword = value.trim();
+
+  if (!nextKeyword) {
+    props.editorInstance?.clearSearch();
+    syncSearchState();
+    return;
+  }
+
+  props.editorInstance?.setSearchTerm(nextKeyword);
+  syncSearchState();
 }
 
 function findNext(): void {
-  moveToNextMatch();
-
   props.editorInstance?.findNext();
+  syncSearchState();
 }
 
 function findPrevious(): void {
-  moveToPreviousMatch();
   props.editorInstance?.findPrevious();
+  syncSearchState();
 }
-
-const navigationActions = computed<NavigationAction[]>(() => [
-  { icon: 'lucide:chevron-up', disabled: !hasMatches.value, onClick: findPrevious },
-  { icon: 'lucide:chevron-down', disabled: !hasMatches.value, onClick: findNext }
-]);
 
 function closeFind(): void {
   visible.value = false;
   keyword.value = '';
-  resetSearch();
   props.editorInstance?.clearSearch();
+  syncSearchState();
+  props.editorInstance?.focusEditor();
 }
 
-// ─── Watchers ─────────────────────────────────────────────────────────────────
+function focusInput(selectText = false): void {
+  nextTick(() => {
+    inputRef.value?.focus();
 
-watch(keyword, (value) => {
-  resetSearch();
-  if (!value.trim()) {
-    props.editorInstance?.clearSearch();
+    if (selectText) {
+      inputRef.value?.select();
+    }
+  });
+}
+
+function handleEnter(event: KeyboardEvent): void {
+  if (event.shiftKey) {
+    findPrevious();
     return;
   }
-  props.editorInstance?.setSearchTerm(value.trim());
+
+  findNext();
+}
+
+watch(keyword, (value) => {
+  applySearchTerm(value);
 });
 
 watch(
   () => props.content,
   () => {
-    // 内容变更后，若当前索引越界则修正到末尾
-    if (matchIndex.value >= matchCount.value && matchCount.value > 0) {
-      matchIndex.value = matchCount.value - 1;
-    }
+    syncSearchState();
   }
 );
+
+watch(visible, (value) => {
+  if (!value) {
+    return;
+  }
+
+  syncSearchState();
+  focusInput(Boolean(keyword.value.trim()));
+});
 </script>
->
 
 <style scoped>
 .header-right {
@@ -196,6 +205,10 @@ watch(
   font-size: 12px;
   color: rgb(0 0 0 / 45%);
   text-align: right;
+}
+
+.find-result--empty {
+  color: #d93025;
 }
 
 .find-divider {
