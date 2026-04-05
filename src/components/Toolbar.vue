@@ -97,7 +97,7 @@ watch(
   width: 0;
 
   &.is-active {
-    color: var(--color-primary);
+    font-weight: 500;
   }
 }
 

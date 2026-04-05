@@ -1,7 +1,8 @@
 import type { VNode } from 'vue';
 import { createApp, h, ref } from 'vue';
-import { Button, Input } from 'ant-design-vue';
+import { Input } from 'ant-design-vue';
 import BModal from '@/components/BModal/index.vue';
+import BButton from '@/components/BButton/index.vue';
 
 // ——— 类型 ———
 
@@ -99,10 +100,12 @@ function createModalInstance(renderModal: (props: { open: boolean; onClose: () =
 function FooterButtons({ onCancel, onConfirm, confirmText = '确定', danger = false }: FooterButtonsProps) {
   return (
     <div style={{ textAlign: 'right' }}>
-      <Button onClick={onCancel}>取消</Button>
-      <Button type="primary" danger={danger} onClick={onConfirm} style={{ marginLeft: '8px' }}>
+      <BButton type="secondary" onClick={onCancel} style={{ marginRight: '8px' }}>
+        取消
+      </BButton>
+      <BButton type={danger ? 'secondary' : 'primary'} onClick={onConfirm}>
         {confirmText}
-      </Button>
+      </BButton>
     </div>
   );
 }
