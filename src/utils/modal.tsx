@@ -69,6 +69,8 @@ function createModalInstance(renderModal: (props: { open: boolean; onClose: () =
   const visible = ref(true);
   let closed = false;
 
+  let app: ReturnType<typeof createApp>;
+
   const close = (): void => {
     if (closed) return;
     closed = true;
@@ -79,7 +81,7 @@ function createModalInstance(renderModal: (props: { open: boolean; onClose: () =
     }, 300);
   };
 
-  const app = createApp({
+  app = createApp({
     render() {
       return renderModal({
         open: visible.value,
