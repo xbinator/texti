@@ -1,3 +1,4 @@
+import { isTauri } from '@tauri-apps/api/core';
 import Database from '@tauri-apps/plugin-sql';
 import { migrations, CURRENT_DB_VERSION, type Migration } from './migrations';
 
@@ -40,6 +41,10 @@ async function applyPendingMigrations(database: Database, currentVersion: number
 export async function initDatabase(): Promise<Database> {
   if (dbInstance) {
     return dbInstance;
+  }
+
+  if (!isTauri()) {
+    throw new Error('Database initialization requires Tauri environment');
   }
 
   dbInstance = await Database.load(DB_PATH);

@@ -3,7 +3,7 @@
     <div class="settings-header">
       <div class="header-back" @click="handleBack">
         <Icon icon="lucide:arrow-left" />
-        <span>返回</span>
+        <span>设置</span>
       </div>
     </div>
 
@@ -52,32 +52,26 @@ function handleBack(): void {
 .settings-header {
   display: flex;
   flex-shrink: 0;
-  gap: 16px;
   align-items: center;
-  height: 48px;
-  padding: 0 20px;
+  height: 60px;
+  padding: 0 24px;
   background: var(--bg-primary);
   border-bottom: 1px solid var(--border-primary);
 }
 
 .header-back {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
-  font-size: 14px;
-  color: var(--text-secondary);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
   cursor: pointer;
-  transition: color 0.2s;
+  transition: all 0.15s ease;
 
   &:hover {
-    color: var(--text-primary);
+    color: var(--color-primary);
   }
-}
-
-.header-title {
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--text-primary);
 }
 
 .settings-body {
@@ -91,23 +85,23 @@ function handleBack(): void {
   flex-shrink: 0;
   flex-direction: column;
   gap: 4px;
-  width: 200px;
-  padding: 16px 12px;
+  width: 220px;
+  padding: 20px 16px;
   background: var(--bg-primary);
   border-right: 1px solid var(--border-primary);
 }
 
 .sidebar-item {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
-  height: 40px;
-  padding: 0 12px;
+  height: 44px;
+  padding: 0 16px;
   font-size: 14px;
   color: var(--text-secondary);
   cursor: pointer;
   border-radius: 8px;
-  transition: all 0.2s;
+  transition: all 0.15s ease;
 
   &:hover {
     color: var(--text-primary);
@@ -115,7 +109,8 @@ function handleBack(): void {
   }
 
   &.active {
-    color: var(--color-primary);
+    font-weight: 500;
+    color: var(--text-primary);
     background: var(--color-primary-bg);
   }
 }
@@ -123,6 +118,10 @@ function handleBack(): void {
 .settings-content {
   flex: 1;
   padding: 24px;
+  margin: 20px;
   overflow-y: auto;
+  background: var(--bg-primary);
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
 }
 </style>

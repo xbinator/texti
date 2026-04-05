@@ -2,10 +2,7 @@
   <div class="model-manager">
     <div class="manager-header">
       <h2 class="manager-title">模型管理</h2>
-      <AButton type="primary" :disabled="!hasApiKeys" @click="handleAdd">
-        <template #icon><Icon icon="lucide:plus" /></template>
-        添加模型
-      </AButton>
+      <BButton type="primary" :disabled="!hasApiKeys" icon="lucide:plus" @click="handleAdd"> 添加模型 </BButton>
     </div>
 
     <div v-if="!hasApiKeys" class="empty-keys-hint">
@@ -52,9 +49,9 @@
 
             <div class="card-actions">
               <ASwitch :checked="model.isEnabled" size="small" @change="(checked: boolean) => handleToggleEnabled(model.id, checked)" />
-              <AButton size="small" @click="handleEdit(model)">编辑</AButton>
+              <BButton size="small" type="secondary" @click="handleEdit(model)">编辑</BButton>
               <APopconfirm title="确定要删除此模型吗？" ok-text="删除" cancel-text="取消" @confirm="handleDelete(model.id)">
-                <AButton size="small" danger>删除</AButton>
+                <BButton size="small" type="secondary" @click="$event.preventDefault()">删除</BButton>
               </APopconfirm>
             </div>
           </div>
@@ -122,6 +119,7 @@
 import { ref, reactive, computed, onMounted } from 'vue';
 import { Icon } from '@iconify/vue';
 import { message } from 'ant-design-vue';
+import BButton from '@/components/BButton/index.vue';
 import type { Model, Provider } from '@/services/settings/types';
 import { useModelStore, useApiKeyStore } from '@/stores/settings';
 import { providerGroups } from '../constants';
@@ -315,6 +313,7 @@ onMounted(() => {
   color: var(--color-warning);
   background: var(--color-warning-bg);
   border-radius: 8px;
+  transition: all 0.15s ease;
 }
 
 .manager-content {
@@ -351,10 +350,11 @@ onMounted(() => {
   background: var(--bg-primary);
   border: 1px solid var(--border-primary);
   border-radius: 12px;
-  transition: box-shadow 0.2s;
+  transition: all 0.15s ease;
 
   &:hover {
     box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
+    border-color: var(--border-primary);
   }
 }
 
@@ -421,5 +421,18 @@ onMounted(() => {
   justify-content: flex-end;
   padding-top: 12px;
   border-top: 1px solid var(--border-primary);
+}
+
+// 覆盖 Ant Design 组件样式
+:deep(.ant-tag) {
+  font-size: 12px;
+  border-radius: 4px;
+  padding: 0 8px;
+  height: 20px;
+  line-height: 18px;
+}
+
+:deep(.ant-switch) {
+  margin-right: 4px;
 }
 </style>

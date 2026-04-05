@@ -2,10 +2,7 @@
   <div class="assistant-manager">
     <div class="manager-header">
       <h2 class="manager-title">助理服务</h2>
-      <AButton type="primary" :disabled="!hasModels" @click="handleAdd">
-        <template #icon><Icon icon="lucide:plus" /></template>
-        添加助理
-      </AButton>
+      <BButton type="primary" :disabled="!hasModels" icon="lucide:plus" @click="handleAdd"> 添加助理 </BButton>
     </div>
 
     <div v-if="!hasModels" class="empty-models-hint">
@@ -41,9 +38,9 @@
             </div>
 
             <div class="card-actions">
-              <AButton size="small" @click="handleEdit(assistant)">编辑</AButton>
+              <BButton size="small" type="secondary" @click="handleEdit(assistant)">编辑</BButton>
               <APopconfirm title="确定要删除此助理吗？" ok-text="删除" cancel-text="取消" @confirm="handleDelete(assistant.id)">
-                <AButton size="small" danger>删除</AButton>
+                <BButton size="small" type="secondary" @click="$event.preventDefault()">删除</BButton>
               </APopconfirm>
             </div>
           </div>
@@ -76,8 +73,8 @@
 
       <template #footer>
         <div class="drawer-footer">
-          <AButton @click="handleCancel">取消</AButton>
-          <AButton type="primary" :loading="saving" @click="handleSave">保存</AButton>
+          <BButton type="secondary" @click="handleCancel">取消</BButton>
+          <BButton type="primary" :loading="saving" @click="handleSave">保存</BButton>
         </div>
       </template>
     </ADrawer>
@@ -88,6 +85,7 @@
 import { ref, reactive, computed, onMounted } from 'vue';
 import { Icon } from '@iconify/vue';
 import { message } from 'ant-design-vue';
+import BButton from '@/components/BButton/index.vue';
 import type { Assistant } from '@/services/settings/types';
 import { useAssistantStore, useModelStore } from '@/stores/settings';
 import { providerGroups } from '../constants';
@@ -259,6 +257,7 @@ onMounted(() => {
   color: var(--color-warning);
   background: var(--color-warning-bg);
   border-radius: 8px;
+  transition: all 0.15s ease;
 }
 
 .manager-content {
@@ -295,9 +294,10 @@ onMounted(() => {
   background: var(--bg-primary);
   border: 1px solid var(--border-primary);
   border-radius: 12px;
-  transition: box-shadow 0.2s;
+  transition: all 0.15s ease;
 
   &:hover {
+    border-color: var(--border-primary);
     box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
   }
 }
@@ -352,19 +352,24 @@ onMounted(() => {
 }
 
 .prompt-text {
+  display: -webkit-box;
+  padding: 8px 12px;
+  overflow: hidden;
+  -webkit-line-clamp: 3;
   font-size: 13px;
   line-height: 1.6;
   color: var(--text-secondary);
   white-space: pre-wrap;
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-line-clamp: 3;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
   -webkit-box-orient: vertical;
 }
 
 .card-actions {
   display: flex;
   gap: 8px;
+  align-items: center;
   justify-content: flex-end;
   padding-top: 12px;
   border-top: 1px solid var(--border-primary);
@@ -373,6 +378,32 @@ onMounted(() => {
 .drawer-footer {
   display: flex;
   gap: 8px;
+  align-items: center;
   justify-content: flex-end;
+  padding: 16px;
+  margin-top: 8px;
+  border-top: 1px solid var(--border-primary);
+}
+
+// 覆盖 Ant Design 组件样式
+:deep(.ant-tag) {
+  height: 20px;
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 18px;
+  border-radius: 4px;
+}
+
+:deep(.ant-drawer-content) {
+  border-radius: 12px;
+}
+
+:deep(.ant-drawer-header) {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-primary);
+}
+
+:deep(.ant-drawer-body) {
+  padding: 20px;
 }
 </style>

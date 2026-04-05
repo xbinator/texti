@@ -1,3 +1,4 @@
+import { isTauri } from '@tauri-apps/api/core';
 import { appDataDir, join } from '@tauri-apps/api/path';
 import { Stronghold, Client } from '@tauri-apps/plugin-stronghold';
 
@@ -25,6 +26,10 @@ async function getVaultPath(): Promise<string> {
 export async function initStronghold(): Promise<void> {
   if (stronghold && client) {
     return;
+  }
+
+  if (!isTauri()) {
+    throw new Error('Stronghold initialization requires Tauri environment');
   }
 
   const vaultPath = await getVaultPath();

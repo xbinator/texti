@@ -2,10 +2,7 @@
   <div class="api-key-manager">
     <div class="manager-header">
       <h2 class="manager-title">秘钥管理</h2>
-      <AButton type="primary" @click="handleAdd">
-        <template #icon><Icon icon="lucide:plus" /></template>
-        添加秘钥
-      </AButton>
+      <BButton type="primary" icon="lucide:plus" @click="handleAdd"> 添加秘钥 </BButton>
     </div>
 
     <div class="manager-content">
@@ -50,10 +47,10 @@
             </div>
 
             <div class="card-actions">
-              <AButton size="small" :loading="testingId === profile.id" @click="handleTest(profile.id)"> 测试连接 </AButton>
-              <AButton size="small" @click="handleEdit(profile)">编辑</AButton>
+              <BButton size="small" :loading="testingId === profile.id" @click="handleTest(profile.id)">测试连接</BButton>
+              <BButton size="small" type="secondary" @click="handleEdit(profile)">编辑</BButton>
               <APopconfirm title="确定要删除此秘钥吗？" ok-text="删除" cancel-text="取消" @confirm="handleDelete(profile.id)">
-                <AButton size="small" danger>删除</AButton>
+                <BButton size="small" type="secondary" @click="$event.preventDefault()">删除</BButton>
               </APopconfirm>
             </div>
           </div>
@@ -101,6 +98,7 @@ import { ref, reactive, onMounted } from 'vue';
 import { Icon } from '@iconify/vue';
 import { message } from 'ant-design-vue';
 import dayjs from 'dayjs';
+import BButton from '@/components/BButton/index.vue';
 import type { ApiKeyProfile, Provider, ConnectionStatus } from '@/services/settings/types';
 import { useApiKeyStore } from '@/stores/settings';
 import { providerGroups, defaultBaseUrls, connectionStatusConfig } from '../constants';
@@ -327,9 +325,10 @@ onMounted(() => {
   background: var(--bg-primary);
   border: 1px solid var(--border-primary);
   border-radius: 12px;
-  transition: box-shadow 0.2s;
+  transition: all 0.15s ease;
 
   &:hover {
+    border-color: var(--border-primary);
     box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
   }
 }
@@ -365,6 +364,7 @@ onMounted(() => {
 
 .card-tags {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -402,8 +402,18 @@ onMounted(() => {
 .card-actions {
   display: flex;
   gap: 8px;
+  align-items: center;
   justify-content: flex-end;
   padding-top: 12px;
   border-top: 1px solid var(--border-primary);
+}
+
+// 覆盖 Ant Design 组件样式
+:deep(.ant-tag) {
+  height: 20px;
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 18px;
+  border-radius: 4px;
 }
 </style>
