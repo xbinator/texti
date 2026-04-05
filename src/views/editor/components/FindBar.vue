@@ -1,5 +1,5 @@
 <template>
-  <div v-if="visible" class="header-right">
+  <div v-show="visible" class="header-right">
     <div class="find-bar" :class="{ 'is-empty': isNoMatchFound }">
       <input
         ref="inputRef"
@@ -28,6 +28,8 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import { Icon } from '@iconify/vue';
 import type BEditor from '@/components/BEditor/index.vue';
+import { useShortcuts } from '@/hooks/useShortcuts';
+import { EditorShortcuts } from '../constants/shortcuts';
 
 interface Props {
   content: string;
@@ -153,6 +155,19 @@ watch(visible, (value) => {
 
   syncSearchState();
   focusInput(Boolean(keyword.value.trim()));
+});
+
+// 快捷键支持
+const { registerShortcut } = useShortcuts();
+
+registerShortcut({
+  key: EditorShortcuts.EDIT_FIND,
+  handler: () => {
+    visible.value = true;
+    focusInput(Boolean(keyword.value.trim()));
+  },
+  enabled: true,
+  preventDefault: true
 });
 </script>
 

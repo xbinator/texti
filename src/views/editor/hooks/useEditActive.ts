@@ -61,6 +61,7 @@ export function useEditActive(fileState: Ref<EditorFile>, options: UseEditActive
         value: 'find',
         label: '查找',
         shortcut: EditorShortcuts.EDIT_FIND,
+        enableShortcut: false,
         disabled: !canCopy,
         onClick: () => {
           visible.find = true;
