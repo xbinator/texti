@@ -68,7 +68,7 @@ function handleAnchorClick(item: AnchorItem) {
   flex-direction: column;
   width: 280px;
   height: 100%;
-  background: var(--bg-elevated);
+  background: var(--bg-primary);
   border-right: 1px solid var(--border-primary);
   backdrop-filter: blur(10px);
 }
@@ -84,7 +84,7 @@ function handleAnchorClick(item: AnchorItem) {
 .toc-panel__title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--anchor-text);
+  color: var(--text-primary);
   letter-spacing: 0.08em;
 }
 </style>
