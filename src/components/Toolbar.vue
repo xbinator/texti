@@ -6,10 +6,8 @@
       <span v-if="props.showSelectedCheck" class="toolbar-menu-item-check">
         <Icon v-if="(record as ToolbarOption).selected" icon="lucide:check" />
       </span>
-      <span class="toolbar-menu-item-label" :class="{ 'is-active': (record as ToolbarOption).active }">
-        {{ (record as ToolbarOption).label }}
-      </span>
-      <span v-if="(record as ToolbarOption).shortcut" class="toolbar-menu-item-shortcut">
+      <BTruncateText :text="(record as ToolbarOption).label" class="toolbar-menu-item-label" :class="{ 'is-active': (record as ToolbarOption).active }" />
+      <div v-if="(record as ToolbarOption).shortcut" class="toolbar-menu-item-shortcut">
         <span
           v-for="(part, index) in getShortcutParts((record as ToolbarOption).shortcut as string)"
           :key="`${part}-${index}`"
@@ -17,7 +15,7 @@
         >
           {{ part }}
         </span>
-      </span>
+      </div>
     </template>
   </BDropdownButton>
 </template>
@@ -144,9 +142,7 @@ watch(
 
 .toolbar-menu-item-label {
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  width: 0;
 
   &.is-active {
     color: #1890ff;

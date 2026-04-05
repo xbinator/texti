@@ -23,7 +23,7 @@ export default defineConfig(async () => ({
       // 允许子目录作为组件的命名空间前缀。
       directoryAsNamespace: true,
       // 组件目录
-      dirs: ['src/components', 'src/components/BDropdown', 'src/components/BEditor', 'src/components/BScrollbar'],
+      dirs: ['src/components', 'src/components/BDropdown', 'src/components/BEditor', 'src/components/BScrollbar', 'src/components/BTruncateText'],
       resolvers: [
         AntDesignVueResolver({
           importStyle: false

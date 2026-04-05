@@ -166,7 +166,7 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
       label: '打开最近的文件',
       disabled: !savedRecentFiles.value.length,
       children: [
-        ...savedRecentFiles.value.map((file) => ({
+        ...savedRecentFiles.value.slice(0, 10).map((file) => ({
           value: file.id,
           label: getRecentFileLabel(file),
           active: file.id === fileState.value.id,
