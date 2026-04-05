@@ -149,18 +149,16 @@ watch(
   align-items: center;
   min-height: 32px;
   padding: 0 12px;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   cursor: pointer;
   border-radius: 6px;
   transition: background-color 0.15s ease, color 0.15s ease;
 
   &:hover {
-    color: var(--text-primary);
     background: var(--bg-hover);
   }
 
   &.active {
-    color: var(--text-primary);
     background: var(--color-primary-bg);
   }
 }
@@ -179,18 +177,16 @@ watch(
   align-items: center;
   min-height: 32px;
   padding-right: 12px;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   cursor: pointer;
   border-radius: 6px;
   transition: background-color 0.15s ease, color 0.15s ease;
 
   &:hover {
-    color: var(--text-primary);
     background: var(--bg-hover);
   }
 
   &.active {
-    color: var(--text-primary);
     background: var(--color-primary-bg);
   }
 }

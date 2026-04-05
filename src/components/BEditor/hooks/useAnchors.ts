@@ -39,7 +39,7 @@ export function useAnchors(layoutRef: Ref<HTMLElement | null>): UseBEditorAnchor
 
     const element = layoutRef.value?.querySelector<HTMLElement>(`#${CSS.escape(record.id)}`);
     if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      element.scrollIntoView({ block: 'start' });
     }
   }
 
