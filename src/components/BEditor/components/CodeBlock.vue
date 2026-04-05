@@ -132,10 +132,10 @@ onUnmounted(() => {
 .b-code-block {
   margin: 0.75em 0;
   overflow: hidden;
-  background: #f6f8fa;
-  border: 1px solid #d0d7de;
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
   border-radius: 6px;
-  box-shadow: 0 1px 2px rgb(31 35 40 / 6%);
+  box-shadow: var(--shadow-sm);
   transition: all 0.2s ease;
 
   &.is-collapsed {
@@ -161,7 +161,7 @@ onUnmounted(() => {
   justify-content: space-between;
   height: 42px;
   padding: 0 14px;
-  background: #f6f8fa;
+  background: var(--code-header-bg);
 }
 
 .b-code-block__control-btn {
@@ -170,7 +170,7 @@ onUnmounted(() => {
   justify-content: center;
   width: 26px;
   height: 26px;
-  color: #57606a;
+  color: var(--code-line-number);
   cursor: pointer;
   background: transparent;
   border: none;
@@ -178,13 +178,13 @@ onUnmounted(() => {
   transition: all 0.2s ease;
 
   &:hover {
-    color: #24292f;
-    background: fade(#000, 6);
+    color: var(--code-text);
+    background: var(--code-line-bg);
   }
 
   &.is-active {
-    color: #0969da;
-    background: fade(#0969da, 10);
+    color: var(--color-info);
+    background: var(--code-line-hover-bg);
   }
 
   &:disabled {
@@ -213,7 +213,7 @@ onUnmounted(() => {
   justify-content: center;
   width: 26px;
   height: 26px;
-  color: #24292f;
+  color: var(--code-text);
   cursor: pointer;
   background: transparent;
   border-radius: 4px;
@@ -225,7 +225,7 @@ onUnmounted(() => {
 }
 
 .b-code-block__copy:hover {
-  background: fade(#000, 6);
+  background: var(--code-line-bg);
 }
 
 .b-code-block__body-wrapper {
@@ -236,8 +236,8 @@ onUnmounted(() => {
   padding: 16px;
   margin: 0;
   overflow-x: auto;
-  background: #f6f8fa;
-  border-top: 1px solid #d8dee4;
+  background: var(--code-bg);
+  border-top: 1px solid var(--code-border);
 
   code {
     display: block;

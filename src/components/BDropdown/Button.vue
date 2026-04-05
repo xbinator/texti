@@ -93,20 +93,20 @@ watch(
   height: 28px;
   padding: 0 10px;
   font-size: 14px;
-  color: rgb(0 0 0 / 65%);
+  color: var(--text-secondary);
   cursor: pointer;
   border-radius: 6px;
   transition: all 0.3s;
 }
 
 .b-dropdown-button:hover {
-  color: rgb(0 0 0 / 88%);
-  background-color: rgb(68 83 130 / 10%);
+  color: var(--text-primary);
+  background-color: var(--bg-active);
 }
 
 .b-dropdown-button.is-active {
-  color: rgb(0 0 0 / 88%);
-  background-color: rgb(68 83 130 / 10%);
+  color: var(--text-primary);
+  background-color: var(--bg-active);
 }
 
 .b-dropdown-button.is-small {
@@ -114,7 +114,7 @@ watch(
 }
 
 .b-dropdown-button.is-bordered {
-  border: 1px solid #d9d9d9;
+  border: 1px solid var(--input-border);
 }
 
 .b-dropdown-button-content {
@@ -128,20 +128,20 @@ watch(
 }
 
 :deep(.dark) .b-dropdown-button {
-  color: rgb(255 255 255 / 65%);
+  color: var(--text-secondary);
 }
 
 :deep(.dark) .b-dropdown-button:hover {
-  color: rgb(255 255 255 / 88%);
-  background-color: rgb(255 255 255 / 10%);
+  color: var(--text-primary);
+  background-color: var(--bg-active);
 }
 
 :deep(.dark) .b-dropdown-button.is-active {
-  color: rgb(255 255 255 / 88%);
-  background-color: rgb(255 255 255 / 10%);
+  color: var(--text-primary);
+  background-color: var(--bg-active);
 }
 
 :deep(.dark) .b-dropdown-button.is-bordered {
-  border-color: #4b5563;
+  border-color: var(--border-primary);
 }
 </style>

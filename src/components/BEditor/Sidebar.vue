@@ -68,8 +68,8 @@ function handleAnchorClick(item: AnchorItem) {
   flex-direction: column;
   width: 280px;
   height: 100%;
-  background: rgb(255 255 255 / 72%);
-  border-right: 1px solid rgb(208 215 222 / 85%);
+  background: var(--bg-elevated);
+  border-right: 1px solid var(--border-primary);
   backdrop-filter: blur(10px);
 }
 
@@ -78,13 +78,13 @@ function handleAnchorClick(item: AnchorItem) {
   align-items: center;
   height: 52px;
   padding: 0 14px;
-  border-bottom: 1px solid #eaeef2;
+  border-bottom: 1px solid var(--border-primary);
 }
 
 .toc-panel__title {
   font-size: 13px;
   font-weight: 600;
-  color: #57606a;
+  color: var(--anchor-text);
   letter-spacing: 0.08em;
 }
 </style>

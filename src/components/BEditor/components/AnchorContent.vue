@@ -149,18 +149,18 @@ watch(
   align-items: center;
   min-height: 32px;
   padding: 0 12px;
-  color: #57606a;
+  color: var(--anchor-text);
   cursor: pointer;
   border-radius: 8px;
   transition: background-color 0.2s ease, color 0.2s ease;
 
   &:hover {
-    color: #0969da;
-    background: rgb(9 105 218 / 8%);
+    color: var(--anchor-hover-text);
+    background: var(--anchor-hover-bg);
   }
 
   &.active {
-    color: #0969da;
+    color: var(--anchor-hover-text);
   }
 }
 
@@ -168,7 +168,6 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 13px;
-  font-weight: 600;
   letter-spacing: 0.08em;
   white-space: nowrap;
 }
@@ -179,18 +178,18 @@ watch(
   align-items: center;
   min-height: 32px;
   padding-right: 12px;
-  color: #57606a;
+  color: var(--anchor-text);
   cursor: pointer;
   border-radius: 8px;
   transition: background-color 0.2s ease, color 0.2s ease;
 
   &:hover {
-    color: #0969da;
-    background: rgb(9 105 218 / 8%);
+    color: var(--anchor-hover-text);
+    background: var(--anchor-hover-bg);
   }
 
   &.active {
-    color: #0969da;
+    color: var(--anchor-hover-text);
   }
 }
 

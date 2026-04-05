@@ -26,8 +26,8 @@ withDefaults(defineProps<Props>(), {
 .b-dropdown-overlay {
   padding: 4px;
   outline: none;
-  background-color: #fff;
-  border: 1px solid #e5e6eb;
+  background-color: var(--dropdown-bg);
+  border: 1px solid var(--dropdown-border);
   border-radius: 8px;
 }
 </style>

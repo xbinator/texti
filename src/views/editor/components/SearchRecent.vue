@@ -143,17 +143,17 @@ registerShortcut({
   height: 38px;
   padding: 0 12px;
   font-size: 14px;
-  color: rgb(32 33 36 / 92%);
+  color: var(--text-primary);
   outline: none;
-  background: #fff;
-  border: 1px solid #d9d9d9;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
   border-radius: 8px;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .search-recent-input:focus {
-  border-color: #1677ff;
-  box-shadow: 0 0 0 3px rgb(22 119 255 / 12%);
+  border-color: var(--input-focus-border);
+  box-shadow: var(--input-focus-shadow);
 }
 
 .search-recent-list {
@@ -171,18 +171,18 @@ registerShortcut({
   padding: 10px 12px;
   text-align: left;
   cursor: pointer;
-  background: #fff;
+  background: var(--bg-primary);
   border: none;
   border-radius: 10px;
   transition: background-color 0.15s ease;
 }
 
 .search-recent-item:hover {
-  background: #f5f7fa;
+  background: var(--bg-hover);
 }
 
 .search-recent-item.is-active {
-  background: rgb(22 119 255 / 8%);
+  background: var(--bg-selected);
 }
 
 .search-recent-item-main {
@@ -198,7 +198,7 @@ registerShortcut({
   text-overflow: ellipsis;
   font-size: 14px;
   font-weight: 500;
-  color: rgb(0 0 0 / 88%);
+  color: var(--text-primary);
   white-space: nowrap;
 }
 
@@ -206,27 +206,27 @@ registerShortcut({
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 12px;
-  color: rgb(0 0 0 / 45%);
+  color: var(--text-tertiary);
   white-space: nowrap;
 }
 
 .search-recent-item-path.is-unsaved {
-  color: #fa8c16;
+  color: var(--color-orange);
 }
 
 .search-recent-item-ext {
   flex-shrink: 0;
   padding: 2px 8px;
   font-size: 12px;
-  color: rgb(0 0 0 / 56%);
-  background: rgb(0 0 0 / 4%);
+  color: var(--text-secondary);
+  background: var(--bg-active);
   border-radius: 999px;
 }
 
 .search-recent-empty {
   padding: 36px 0;
   font-size: 13px;
-  color: rgb(0 0 0 / 45%);
+  color: var(--text-tertiary);
   text-align: center;
 }
 </style>

@@ -137,7 +137,7 @@ watch(
   justify-content: center;
   width: 16px;
   margin-right: 6px;
-  color: rgb(0 0 0 / 78%);
+  color: var(--text-primary);
 }
 
 .toolbar-menu-item-label {
@@ -145,7 +145,7 @@ watch(
   width: 0;
 
   &.is-active {
-    color: #1890ff;
+    color: var(--color-primary);
   }
 }
 
@@ -155,7 +155,7 @@ watch(
   align-items: center;
   margin-left: 24px;
   font-size: 12px;
-  color: rgb(0 0 0 / 45%);
+  color: var(--text-tertiary);
 }
 
 .toolbar-menu-item-shortcut-key {
@@ -163,10 +163,10 @@ watch(
   padding: 0 6px;
   font-variant-numeric: tabular-nums;
   line-height: 18px;
-  color: rgb(0 0 0 / 65%);
+  color: var(--text-secondary);
   white-space: nowrap;
-  background: rgb(0 0 0 / 2%);
-  border: 1px solid rgb(0 0 0 / 12%);
+  background: var(--bg-hover);
+  border: 1px solid var(--border-primary);
   border-radius: 4px;
 }
 </style>

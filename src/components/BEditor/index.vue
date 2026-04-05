@@ -239,7 +239,7 @@ useTextareaAutosize({ element: titleTextareaRef, input: editorTitle });
   margin: 0;
   font-size: 28px;
   font-weight: 600;
-  color: #2e2e2e;
+  color: var(--editor-text);
   cursor: text;
   resize: none;
   outline: none;
@@ -248,7 +248,7 @@ useTextareaAutosize({ element: titleTextareaRef, input: editorTitle });
 
   &::placeholder {
     font-weight: 600;
-    color: #bfbfbf;
+    color: var(--editor-placeholder);
   }
 }
 </style>

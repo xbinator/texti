@@ -108,8 +108,8 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
     margin: 0;
     font-size: 14px;
     line-height: 1.74;
-    color: #2e2e2e;
-    caret-color: #2e2e2e;
+    color: var(--editor-text);
+    caret-color: var(--editor-caret);
     outline: none;
 
     > *:first-child {
@@ -117,13 +117,13 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
     }
 
     .search-match {
-      background: rgb(250 204 21 / 28%);
+      background: var(--editor-search-highlight);
       border-radius: 2px;
     }
 
     .search-match-current {
-      background: rgb(59 130 246 / 24%);
-      box-shadow: 0 0 0 1px rgb(59 130 246 / 22%);
+      background: var(--editor-search-active);
+      box-shadow: var(--editor-search-active-border);
     }
 
     .is-editor-empty:first-child::before {
@@ -131,7 +131,7 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
       height: 0;
       font-size: 14px;
       line-height: 1.74;
-      color: #bfbfbf;
+      color: var(--editor-placeholder);
       pointer-events: none;
       content: attr(data-placeholder);
     }
@@ -144,21 +144,21 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
   h5,
   h6 {
     font-weight: 600;
-    color: #2e2e2e;
+    color: var(--editor-text);
   }
 
   h1 {
     padding-bottom: 0.3em;
     margin: 1.5em 0 0.75em;
     font-size: 24px;
-    border-bottom: 1px solid #e0e0e0;
+    border-bottom: 1px solid var(--editor-heading-border);
   }
 
   h2 {
     padding-bottom: 0.2em;
     margin: 1.25em 0 0.625em;
     font-size: 20px;
-    border-bottom: 1px solid #e0e0e0;
+    border-bottom: 1px solid var(--editor-heading-border);
   }
 
   h3 {
@@ -222,7 +222,7 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
     margin: 0.25em 0;
 
     &::marker {
-      color: #6b7280;
+      color: var(--text-tertiary);
     }
 
     > p {
@@ -238,9 +238,9 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
   blockquote {
     padding: 0.5em 1em 0.5em 1.25em;
     margin: 0.75em 0;
-    color: #585858;
-    background-color: #f5f5f5;
-    border-left: 4px solid #d0d0d0;
+    color: var(--editor-blockquote-text);
+    background-color: var(--editor-blockquote-bg);
+    border-left: 4px solid var(--editor-blockquote-border);
     border-radius: 0 4px 4px 0;
   }
 
@@ -248,8 +248,8 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
     padding: 0.125em 0.25em;
     font-family: Menlo, Monaco, 'Courier New', monospace;
     font-size: 0.85em;
-    color: #e83e8c;
-    background-color: #f1f1f1;
+    color: var(--color-error);
+    background-color: var(--bg-disabled);
     border-radius: 3px;
   }
 
@@ -264,72 +264,72 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
       font-family: 'Fira Code', 'Fira Mono', Consolas, Monaco, 'Courier New', monospace;
       font-size: 0.9em;
       line-height: 1.6;
-      color: #24292f;
+      color: var(--code-text);
       background-color: transparent;
 
       .hljs-keyword {
-        color: #cf222e;
+        color: var(--code-keyword);
       }
 
       .hljs-string {
-        color: #0a3069;
+        color: var(--code-string);
       }
 
       .hljs-number {
-        color: #0550ae;
+        color: var(--code-number);
       }
 
       .hljs-comment {
         font-style: italic;
-        color: #6e7781;
+        color: var(--code-comment);
       }
 
       .hljs-function {
-        color: #8250df;
+        color: var(--code-function);
       }
 
       .hljs-title {
-        color: #8250df;
+        color: var(--code-function);
       }
 
       .hljs-params {
-        color: #24292f;
+        color: var(--code-text);
       }
 
       .hljs-variable {
-        color: #953800;
+        color: var(--code-variable);
       }
 
       .hljs-operator {
-        color: #0550ae;
+        color: var(--code-number);
       }
 
       .hljs-tag {
-        color: #116329;
+        color: var(--code-tag);
       }
 
       .hljs-attr {
-        color: #0550ae;
+        color: var(--code-attr-name);
       }
 
       .hljs-value {
-        color: #0a3069;
+        color: var(--code-attr-value);
       }
 
       .hljs-property {
-        color: #953800;
+        color: var(--code-variable);
       }
 
       .hljs-built_in {
-        color: #8250df;
+        color: var(--code-builtin);
       }
 
       .hljs-class {
-        color: #8250df;
+        color: var(--code-class);
       }
 
       .hljs-constant {
-        color: #0550ae;
+        color: var(--code-constant);
       }
     }
   }
@@ -337,12 +337,12 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
   hr {
     margin: 1.5em 0;
     border: none;
-    border-top: 1px solid #e0e0e0;
+    border-top: 1px solid var(--editor-hr);
   }
 
   a {
     font-weight: 500;
-    color: #1761d2;
+    color: var(--editor-link);
     text-decoration: none;
 
     &:hover {
@@ -354,7 +354,7 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
     max-width: 100%;
     margin: 0.75em 0;
     border-radius: 4px;
-    box-shadow: 0 1px 3px rgb(0 0 0 / 10%);
+    box-shadow: var(--shadow-md);
   }
 
   table {
@@ -363,18 +363,18 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
     overflow: hidden;
     border-spacing: 0;
     border-collapse: separate;
-    border: 1px solid #e0e0e0;
+    border: 1px solid var(--editor-table-border);
     border-radius: 8px;
 
     th {
       padding: 0.5em 0.75em;
       font-weight: 600;
       vertical-align: top;
-      color: #2e2e2e;
+      color: var(--editor-text);
       text-align: left;
-      background-color: #f5f5f5;
-      border-right: 1px solid #e0e0e0;
-      border-bottom: 1px solid #e0e0e0;
+      background-color: var(--editor-table-header-bg);
+      border-right: 1px solid var(--editor-table-border);
+      border-bottom: 1px solid var(--editor-table-border);
 
       &:last-child {
         border-right: none;
@@ -384,11 +384,11 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
     td {
       padding: 0.5em 0.75em;
       vertical-align: top;
-      color: #2e2e2e;
+      color: var(--editor-text);
       text-align: left;
-      background-color: #fff;
-      border-right: 1px solid #e0e0e0;
-      border-bottom: 1px solid #e0e0e0;
+      background-color: var(--bg-primary);
+      border-right: 1px solid var(--editor-table-border);
+      border-bottom: 1px solid var(--editor-table-border);
 
       &:last-child {
         border-right: none;
@@ -400,7 +400,7 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
     }
 
     tr:hover td {
-      background-color: #f9f9f9;
+      background-color: var(--editor-table-even-bg);
     }
   }
 

@@ -43,13 +43,13 @@ useTextareaAutosize({ element: sourceTextareaRef, input: editorContent });
   padding: 0;
   font-size: 14px;
   line-height: 1.74;
-  color: #2e2e2e;
+  color: var(--editor-text);
   resize: none;
   outline: none;
   border: 0;
 
   &::placeholder {
-    color: #bfbfbf;
+    color: var(--editor-placeholder);
   }
 }
 </style>

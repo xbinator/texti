@@ -185,15 +185,15 @@ registerShortcut({
   max-width: 100%;
   height: 32px;
   padding: 0 6px 0 8px;
-  background: #fff;
-  border: 1px solid #dadce0;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-secondary);
   border-radius: 8px;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 6%);
+  box-shadow: var(--shadow-sm);
 }
 
 .find-bar.is-empty {
-  border-color: #f59e0b;
-  box-shadow: 0 0 0 1px rgb(245 158 11 / 12%);
+  border-color: var(--color-warning-border);
+  box-shadow: 0 0 0 1px var(--color-warning-border);
 }
 
 .find-input {
@@ -203,7 +203,7 @@ registerShortcut({
   padding: 0;
   font-size: 12px;
   line-height: 24px;
-  color: rgb(32 33 36 / 92%);
+  color: var(--text-primary);
   outline: none;
   background: transparent;
   border: none;
@@ -212,24 +212,24 @@ registerShortcut({
 }
 
 .find-input::placeholder {
-  color: rgb(0 0 0 / 35%);
+  color: var(--text-placeholder);
 }
 
 .find-result {
   min-width: 40px;
   font-size: 12px;
-  color: rgb(0 0 0 / 45%);
+  color: var(--text-tertiary);
   text-align: right;
 }
 
 .find-result--empty {
-  color: #d93025;
+  color: var(--input-error-text);
 }
 
 .find-divider {
   width: 1px;
   height: 16px;
-  background: rgb(0 0 0 / 8%);
+  background: var(--bg-active);
 }
 
 .find-action {
@@ -239,7 +239,7 @@ registerShortcut({
   width: 24px;
   height: 24px;
   padding: 0;
-  color: rgb(0 0 0 / 56%);
+  color: var(--text-secondary);
   cursor: pointer;
   background: transparent;
   border: none;
@@ -248,12 +248,12 @@ registerShortcut({
 }
 
 .find-action:hover:not(:disabled) {
-  color: rgb(0 0 0 / 85%);
-  background: rgb(0 0 0 / 5%);
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 
 .find-action:disabled {
-  color: rgb(0 0 0 / 22%);
+  color: var(--text-quaternary);
   cursor: not-allowed;
 }
 </style>

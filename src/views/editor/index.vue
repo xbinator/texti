@@ -65,7 +65,7 @@ const { viewState, toolbarViewOptions } = useViewActive();
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: #f5f5f5;
+  background: var(--bg-secondary);
 }
 
 .editor-header {
@@ -75,7 +75,7 @@ const { viewState, toolbarViewOptions } = useViewActive();
   justify-content: space-between;
   height: 40px;
   padding: 0 20px;
-  background: #fff;
+  background: var(--bg-primary);
 }
 
 .header-left {
@@ -95,7 +95,7 @@ const { viewState, toolbarViewOptions } = useViewActive();
   height: 0;
   margin: 6px;
   overflow: hidden;
-  background: #fff;
+  background: var(--bg-primary);
   border-radius: 8px;
 }
 </style>

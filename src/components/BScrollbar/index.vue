@@ -329,28 +329,28 @@ defineExpose({
 .scrollbar__thumb {
   position: absolute;
   cursor: pointer;
-  background: rgb(0 0 0 / 10%);
+  background: var(--scrollbar-bg);
   border-radius: 3px;
   transition: background 0.2s;
 
   &:hover {
-    background: rgb(0 0 0 / 20%);
+    background: var(--scrollbar-hover);
   }
 
   &:active {
-    background: rgb(0 0 0 / 25%);
+    background: var(--scrollbar-active);
   }
 }
 
 .dark .scrollbar__thumb {
-  background: rgb(255 255 255 / 15%);
+  background: var(--scrollbar-light-bg);
 
   &:hover {
-    background: rgb(255 255 255 / 25%);
+    background: var(--scrollbar-light-hover);
   }
 
   &:active {
-    background: rgb(255 255 255 / 30%);
+    background: var(--scrollbar-light-active);
   }
 }
 </style>

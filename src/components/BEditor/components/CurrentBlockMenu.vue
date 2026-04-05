@@ -654,20 +654,20 @@ onBeforeUnmount(() => {
   justify-content: center;
   width: 28px;
   height: 28px;
-  color: rgb(0 0 0 / 56%);
+  color: var(--text-secondary);
   cursor: pointer;
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
   border-radius: 8px;
-  box-shadow: 0 4px 10px rgb(15 23 42 / 8%);
+  box-shadow: var(--shadow-dropdown);
   transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 .current-block-menu__trigger:hover,
 .current-block-menu__trigger.is-open {
-  color: rgb(0 0 0 / 78%);
-  background: #f8fafc;
-  border-color: #cbd5e1;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border-color: var(--border-primary);
 }
 
 .current-block-menu__panel {
@@ -676,10 +676,10 @@ onBeforeUnmount(() => {
   right: calc(100% + 8px);
   min-width: 172px;
   padding: 6px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--dropdown-bg);
+  border: 1px solid var(--dropdown-border);
   border-radius: 10px;
-  box-shadow: 0 12px 32px rgb(15 23 42 / 12%);
+  box-shadow: var(--shadow-lg);
 }
 
 .current-block-menu__scrollbar {
@@ -700,7 +700,7 @@ onBeforeUnmount(() => {
   height: 32px;
   padding: 0 8px;
   font-size: 13px;
-  color: rgb(15 23 42 / 86%);
+  color: var(--text-primary);
   cursor: pointer;
   background: transparent;
   border: none;
@@ -708,28 +708,28 @@ onBeforeUnmount(() => {
 }
 
 .current-block-menu__item:hover {
-  background: #f8fafc;
+  background: var(--bg-hover);
 }
 
 .current-block-menu__item.is-disabled,
 .current-block-menu__item:disabled {
-  color: rgb(15 23 42 / 35%);
+  color: var(--text-disabled);
   cursor: not-allowed;
   background: transparent;
 }
 
 .current-block-menu__item.is-active {
-  background: #eff6ff;
+  background: var(--color-primary-bg);
 }
 
 .current-block-menu__item.is-danger {
-  color: #dc2626;
+  color: var(--color-error);
 }
 
 .current-block-menu__divider {
   height: 1px;
   margin: 4px 6px;
-  background: #e5e7eb;
+  background: var(--dropdown-divider);
 }
 
 .current-block-menu__item-icon,

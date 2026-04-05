@@ -220,8 +220,8 @@ function confirmComplexEditInline(): void {
 <style lang="less" scoped>
 .front-matter-card {
   margin: 16px 40px;
-  background-color: #f8f9fa;
-  border: 1px solid #e9ecef;
+  background-color: var(--frontmatter-bg);
+  border: 1px solid var(--frontmatter-border);
   border-radius: 8px;
 }
 
@@ -235,7 +235,7 @@ function confirmComplexEditInline(): void {
 .front-matter-title {
   font-size: 12px;
   font-weight: 600;
-  color: #6b7280;
+  color: var(--frontmatter-key-text);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -254,7 +254,7 @@ function confirmComplexEditInline(): void {
   height: 24px;
   padding: 0;
   font-size: 16px;
-  color: #6b7280;
+  color: var(--tag-secondary-text);
   cursor: pointer;
   background: transparent;
   border: none;
@@ -262,14 +262,14 @@ function confirmComplexEditInline(): void {
   transition: all 0.2s;
 
   &:hover {
-    color: #374151;
-    background-color: #e5e7eb;
+    color: var(--tag-text);
+    background-color: var(--tag-hover-bg);
   }
 }
 
 .front-matter-content {
   padding: 8px 14px;
-  border-top: 1px solid #e9ecef;
+  border-top: 1px solid var(--frontmatter-border);
 }
 
 .front-matter-item {
@@ -290,22 +290,22 @@ function confirmComplexEditInline(): void {
   font-size: 12px;
   font-weight: 500;
   line-height: 28px;
-  color: #7c3aed;
+  color: var(--color-purple);
   cursor: pointer;
-  background-color: #ede9fe;
+  background-color: var(--color-purple-bg);
   border: 1px solid transparent;
   border-radius: 4px;
   transition: border-color 0.2s;
 
   &:hover {
-    border-color: #c4b5fd;
+    border-color: var(--color-purple-border);
   }
 
   &.editing {
     width: 120px;
     outline: none;
-    background-color: #fff;
-    border-color: #7c3aed;
+    background-color: var(--bg-primary);
+    border-color: var(--color-purple);
   }
 }
 
@@ -321,27 +321,27 @@ function confirmComplexEditInline(): void {
   padding: 0 8px;
   font-size: 13px;
   line-height: 24px;
-  color: #374151;
+  color: var(--frontmatter-value-text);
   outline: none;
-  background-color: #fff;
-  border: 1px solid #e5e7eb;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-primary);
   border-radius: 4px;
   transition: border-color 0.2s;
 
   &:focus {
-    border-color: #7c3aed;
+    border-color: var(--color-purple);
   }
 
   &.complex {
     font-family: 'SF Mono', Monaco, 'Courier New', monospace;
     font-size: 12px;
     line-height: 24px;
-    color: #6b7280;
+    color: var(--tag-secondary-text);
     cursor: pointer;
-    background-color: #f3f4f6;
+    background-color: var(--tag-bg);
 
     &:hover {
-      background-color: #e5e7eb;
+      background-color: var(--tag-hover-bg);
     }
   }
 }
@@ -355,7 +355,7 @@ function confirmComplexEditInline(): void {
   height: 24px;
   padding: 0;
   font-size: 14px;
-  color: #9ca3af;
+  color: var(--tag-placeholder);
   cursor: pointer;
   background: transparent;
   border: none;
@@ -364,8 +364,8 @@ function confirmComplexEditInline(): void {
   transition: all 0.2s;
 
   &:hover {
-    color: #ef4444;
-    background-color: #fee2e2;
+    color: var(--color-error);
+    background-color: var(--color-error-bg);
   }
 }
 
@@ -379,24 +379,24 @@ function confirmComplexEditInline(): void {
   align-items: center;
   padding: 8px 0 0;
   margin-top: 8px;
-  border-top: 1px dashed #e5e7eb;
+  border-top: 1px dashed var(--frontmatter-divider);
 }
 
 .new-key {
-  background-color: #fff;
-  border: 1px solid #e5e7eb;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-primary);
 }
 
 .new-value {
-  background-color: #fff;
+  background-color: var(--bg-primary);
 }
 
 .add-btn {
   opacity: 0.5;
 
   &:not(:disabled):hover {
-    color: #10b981;
-    background-color: #d1fae5;
+    color: var(--color-success);
+    background-color: var(--color-success-bg);
     opacity: 1;
   }
 
@@ -412,10 +412,10 @@ function confirmComplexEditInline(): void {
   width: 320px;
   padding: 12px;
   margin-top: 4px;
-  background-color: #fff;
-  border: 1px solid #e5e7eb;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-primary);
   border-radius: 8px;
-  box-shadow: 0 4px 12px rgb(0 0 0 / 10%);
+  box-shadow: var(--shadow-md);
 }
 
 .complex-textarea-inline {
@@ -426,11 +426,11 @@ function confirmComplexEditInline(): void {
   font-size: 12px;
   resize: vertical;
   outline: none;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--border-primary);
   border-radius: 4px;
 
   &:focus {
-    border-color: #7c3aed;
+    border-color: var(--color-purple);
   }
 }
 
@@ -449,22 +449,22 @@ function confirmComplexEditInline(): void {
   transition: all 0.2s;
 
   &.cancel {
-    color: #6b7280;
-    background-color: #f3f4f6;
+    color: var(--tag-secondary-text);
+    background-color: var(--tag-bg);
     border: none;
 
     &:hover {
-      background-color: #e5e7eb;
+      background-color: var(--tag-hover-bg);
     }
   }
 
   &.confirm {
-    color: #fff;
-    background-color: #7c3aed;
+    color: var(--bg-primary);
+    background-color: var(--color-purple);
     border: none;
 
     &:hover {
-      background-color: #6d28d9;
+      background-color: var(--color-purple-hover);
     }
   }
 }
@@ -472,7 +472,7 @@ function confirmComplexEditInline(): void {
 .front-matter-empty {
   padding: 12px 0;
   font-size: 13px;
-  color: #9ca3af;
+  color: var(--tag-placeholder);
   text-align: center;
 }
 

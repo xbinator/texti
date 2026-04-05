@@ -110,8 +110,8 @@ watch(
 
   &.is-fill-color {
     :deep(.ant-select-selector) {
-      background-color: #f2f3f5;
-      border-color: #f2f3f5;
+      background-color: var(--bg-disabled);
+      border-color: var(--bg-disabled);
     }
 
     &.ant-select-focused {

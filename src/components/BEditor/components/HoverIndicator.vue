@@ -39,16 +39,16 @@ withDefaults(defineProps<Props>(), {
   font-size: 12px;
   font-weight: 700;
   line-height: 1;
-  color: #5f6368;
+  color: var(--hover-indicator-text);
   pointer-events: none;
-  background: rgb(255 255 255 / 96%);
-  border: 1px solid #d9dde3;
+  background: var(--hover-indicator-bg);
+  border: 1px solid var(--hover-indicator-border);
   border-radius: 6px;
   transform: translateY(-50%);
 
   &.is-heading {
-    color: #1761d2;
-    border-color: rgb(23 97 210 / 22%);
+    color: var(--hover-indicator-hover-text);
+    border-color: var(--hover-indicator-hover-border);
   }
 }
 

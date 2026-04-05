@@ -107,12 +107,12 @@ function handleClosable(): void {
   width: 25px;
   height: 25px;
   font-size: 18px;
-  color: #333;
+  color: var(--modal-text);
   cursor: pointer;
   border-radius: 6px;
 
   &:hover {
-    background-color: #f7f8fa;
+    background-color: var(--modal-header-bg);
   }
 }
 
