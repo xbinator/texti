@@ -55,6 +55,7 @@ export function useViewActive() {
         saveViewState(viewState.value);
       }
     },
+    { type: 'divider' },
     {
       value: 'theme',
       label: '主题',

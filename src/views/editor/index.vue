@@ -10,8 +10,6 @@
       </div>
 
       <div class="header-right">
-        <SearchRecent v-model:visible="visible.recentSearch" :files="recentFiles" :active-id="fileState.id" @select="handleSelectRecentFile" />
-
         <FindBar v-model:visible="visible.find" :content="fileState.content" :editor-instance="editorInstance" />
       </div>
     </div>
@@ -27,6 +25,8 @@
         :show-outline="viewState.showOutline"
       />
     </div>
+
+    <SearchRecent v-model:visible="visible.recentSearch" :files="recentFiles" :active-id="fileState.id" @select="handleSelectRecentFile" />
   </div>
 </template>
 

@@ -2,14 +2,24 @@ import type { AnyExtension, JSONContent, MarkdownParseHelpers, MarkdownParseResu
 import { Ref } from 'vue';
 import _Code from '@tiptap/extension-code';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
+import { Color } from '@tiptap/extension-color';
 import { Heading as BaseHeading } from '@tiptap/extension-heading';
+import { Highlight } from '@tiptap/extension-highlight';
+import { Image } from '@tiptap/extension-image';
+import { Link } from '@tiptap/extension-link';
 import { ListItem as BaseListItem } from '@tiptap/extension-list';
 import { Paragraph as BaseParagraph } from '@tiptap/extension-paragraph';
 import { Placeholder } from '@tiptap/extension-placeholder';
+import { Strike } from '@tiptap/extension-strike';
 import { Table } from '@tiptap/extension-table';
 import { TableCell } from '@tiptap/extension-table-cell';
 import { TableHeader } from '@tiptap/extension-table-header';
 import { TableRow } from '@tiptap/extension-table-row';
+import { TaskItem } from '@tiptap/extension-task-item';
+import { TaskList } from '@tiptap/extension-task-list';
+import { TextStyle } from '@tiptap/extension-text-style';
+import { Typography } from '@tiptap/extension-typography';
+import { Underline } from '@tiptap/extension-underline';
 import { Markdown } from '@tiptap/markdown';
 import StarterKit from '@tiptap/starter-kit';
 import { VueNodeViewRenderer } from '@tiptap/vue-3';
@@ -206,7 +216,14 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
   });
 
   const editorExtensions = [
-    StarterKit.configure({ code: false, codeBlock: false, heading: false, listItem: false, paragraph: false }),
+    StarterKit.configure({
+      code: false,
+      codeBlock: false,
+      heading: false,
+      listItem: false,
+      paragraph: false,
+      strike: false
+    }),
     Placeholder.configure({ emptyEditorClass: 'is-editor-empty', placeholder: '请输入内容' }),
     Markdown,
     Heading,
@@ -220,7 +237,34 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
     TableCell,
     Search.configure({
       onMatchFocus: options.onSearchMatchFocus ?? null
-    })
+    }),
+    Image.configure({
+      inline: false,
+      allowBase64: true,
+      HTMLAttributes: {
+        class: 'editor-image'
+      }
+    }),
+    Link.configure({
+      openOnClick: false,
+      HTMLAttributes: {
+        class: 'editor-link',
+        rel: 'noopener noreferrer',
+        target: '_blank'
+      }
+    }),
+    TaskList,
+    TaskItem.configure({
+      nested: true
+    }),
+    Highlight.configure({
+      multicolor: true
+    }),
+    Underline,
+    Strike,
+    TextStyle,
+    Color,
+    Typography
   ];
 
   function assignHeadingIds(editor: Editor): void {
