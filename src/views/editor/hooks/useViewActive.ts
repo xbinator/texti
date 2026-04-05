@@ -1,17 +1,14 @@
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 import type { BEditorViewMode } from '@/components/BEditor/types';
 import type { Props as ToolbarProps } from '@/components/Toolbar.vue';
+import { useSettingStore } from '@/stores/setting';
 import { EditorShortcuts } from '../constants/shortcuts';
 
 const STORAGE_KEY = 'editor_viewState';
 
 interface EditorViewState {
-  // 视图模式
   mode: BEditorViewMode;
-  // 是否显示大纲
   showOutline: boolean;
-  // 主题
-  theme: 'dark' | 'light';
 }
 
 function loadViewState(): EditorViewState {
@@ -24,7 +21,7 @@ function loadViewState(): EditorViewState {
       //
     }
   }
-  return { mode: 'rich', showOutline: true, theme: 'light' };
+  return { mode: 'rich', showOutline: true };
 }
 
 function saveViewState(state: EditorViewState): void {
@@ -33,20 +30,9 @@ function saveViewState(state: EditorViewState): void {
 
 export function useViewActive() {
   const viewState = ref<EditorViewState>(loadViewState());
+  const settingStore = useSettingStore();
 
   const canShowOutline = computed<boolean>(() => viewState.value.mode === 'rich');
-
-  watch(
-    () => viewState.value.theme,
-    (theme) => {
-      if (theme === 'dark') {
-        document.documentElement.setAttribute('data-theme', 'dark');
-      } else {
-        document.documentElement.removeAttribute('data-theme');
-      }
-    },
-    { immediate: true }
-  );
 
   const toolbarViewOptions = computed<ToolbarProps['options']>(() => [
     {
@@ -77,19 +63,25 @@ export function useViewActive() {
         {
           value: 'light',
           label: '浅色模式',
-          selected: viewState.value.theme === 'light',
+          selected: settingStore.theme === 'light',
           onClick: () => {
-            viewState.value.theme = 'light';
-            saveViewState(viewState.value);
+            settingStore.setTheme('light');
           }
         },
         {
           value: 'dark',
           label: '深色模式',
-          selected: viewState.value.theme === 'dark',
+          selected: settingStore.theme === 'dark',
           onClick: () => {
-            viewState.value.theme = 'dark';
-            saveViewState(viewState.value);
+            settingStore.setTheme('dark');
+          }
+        },
+        {
+          value: 'system',
+          label: '跟随系统',
+          selected: settingStore.theme === 'system',
+          onClick: () => {
+            settingStore.setTheme('system');
           }
         }
       ]
