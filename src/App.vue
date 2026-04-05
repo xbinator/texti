@@ -9,12 +9,17 @@ import { computed, onMounted } from 'vue';
 import zhCN from 'ant-design-vue/es/locale/zh_CN';
 import theme from 'ant-design-vue/es/theme';
 import { useSettingStore } from '@/stores/setting';
+import { initDatabase } from '@/utils/database';
+import { initStronghold } from '@/utils/stronghold';
 
 const { darkAlgorithm, defaultAlgorithm } = theme;
 const settingStore = useSettingStore();
 
-onMounted(() => {
+onMounted(async () => {
   settingStore.initTheme();
+
+  await initDatabase();
+  await initStronghold();
 });
 
 const antdTheme = computed(() => ({

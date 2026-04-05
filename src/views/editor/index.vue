@@ -13,6 +13,9 @@
 
       <div class="header-right">
         <FindBar v-model:visible="visible.find" :content="fileState.content" :editor-instance="editorInstance" />
+        <div class="settings-btn" @click="handleOpenSettings">
+          <Icon icon="lucide:settings" />
+        </div>
       </div>
     </div>
 
@@ -37,6 +40,8 @@
 <script setup lang="ts">
 import type { EditorFile } from './types';
 import { reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { Icon } from '@iconify/vue';
 import BEditor from '@/components/BEditor/index.vue';
 import Toolbar from '@/components/Toolbar.vue';
 import FindBar from './components/FindBar.vue';
@@ -50,8 +55,13 @@ import { useViewActive } from './hooks/useViewActive';
 
 const fileState = ref<EditorFile>({ id: '', path: '', content: '', name: '', ext: 'md' });
 const editorInstance = ref<InstanceType<typeof BEditor> | null>(null);
+const router = useRouter();
 
 const visible = reactive({ find: false, recentSearch: false, shortcuts: false });
+
+function handleOpenSettings(): void {
+  router.push('/settings');
+}
 
 const { pause, resume } = useAutoSave(fileState);
 
@@ -100,6 +110,24 @@ const { toolbarHelpOptions } = useHelp({
   display: flex;
   gap: 12px;
   align-items: center;
+}
+
+.settings-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 16px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.settings-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 
 .editor-content {
