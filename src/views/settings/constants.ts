@@ -8,8 +8,8 @@ export interface MenuItem {
 }
 
 export const menuItems: MenuItem[] = [
-  { key: 'provider', label: 'AI服务商', icon: 'lucide:cpu', path: '/settings/provider' },
-  { key: 'service-model', label: '服务模型', icon: 'lucide:bot', path: '/settings/service-model' }
+  { key: 'provider', label: 'AI服务商', icon: 'lucide:brain', path: '/settings/provider' },
+  { key: 'service-model', label: '服务模型', icon: 'lucide:sparkles', path: '/settings/service-model' }
 ];
 
 export interface ProviderOption {

@@ -2,7 +2,9 @@
   <div class="info-section">
     <div class="section-header">
       <div class="provider-logo">
-        <BModelIcon :provider="provider.id" :size="32" />
+        <img v-if="provider.logo" :src="provider.logo" :alt="provider.name" class="provider-logo-img" />
+        <Icon v-else-if="provider.isCustom" icon="lucide:bot" width="32" height="32" />
+        <BModelIcon v-else :provider="provider.id" :size="32" />
       </div>
       <div class="provider-meta">
         <h3 class="provider-name">{{ provider.name }}</h3>
@@ -15,6 +17,7 @@
 
 <script setup lang="ts">
 import type { Provider } from '../types';
+import { Icon } from '@iconify/vue';
 import BModelIcon from '@/components/BModelIcon/index.vue';
 
 interface Props {
@@ -47,6 +50,13 @@ withDefaults(defineProps<Props>(), { provider: () => ({}) });
   height: 50px;
   background: var(--bg-primary);
   border-radius: 12px;
+}
+
+.provider-logo-img {
+  width: 32px;
+  height: 32px;
+  object-fit: cover;
+  border-radius: 8px;
 }
 
 .provider-meta {

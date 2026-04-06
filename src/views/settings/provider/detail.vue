@@ -72,19 +72,11 @@ const persistProviderConfig = debounce(async () => {
   });
 }, 300);
 
-watch(
-  providerId,
-  () => {
-    void loadProvider();
-  },
-  { immediate: true }
-);
+watch(providerId, () => loadProvider(), { immediate: true });
 
 watch(
   () => [provider.value?.apiKey, provider.value?.baseUrl],
-  () => {
-    void persistProviderConfig();
-  }
+  () => persistProviderConfig()
 );
 
 function handleBack(): void {

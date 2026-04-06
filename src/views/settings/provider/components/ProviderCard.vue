@@ -2,7 +2,9 @@
   <div class="provider-card" @click="handleClick">
     <div class="card-header">
       <div class="provider-logo">
-        <BModelIcon :provider="provider.id" :size="28" />
+        <img v-if="provider.logo" :src="provider.logo" :alt="provider.name" class="provider-logo-img" />
+        <Icon v-else-if="provider.isCustom" icon="lucide:bot" width="28" height="28" />
+        <BModelIcon v-else :provider="provider.id" :size="28" />
       </div>
       <ASwitch :checked="provider.isEnabled" size="small" @change="(checked) => handleToggle(checked as boolean)" />
     </div>
@@ -19,6 +21,7 @@
 <script setup lang="ts">
 import type { Provider } from '../types';
 import { useRouter } from 'vue-router';
+import { Icon } from '@iconify/vue';
 import BModelIcon from '@/components/BModelIcon/index.vue';
 
 const router = useRouter();
@@ -79,6 +82,13 @@ function handleClick(): void {
   height: 40px;
   background: var(--bg-secondary);
   border-radius: 10px;
+}
+
+.provider-logo-img {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 6px;
 }
 
 .card-body {
