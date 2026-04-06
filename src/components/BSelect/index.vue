@@ -63,7 +63,7 @@ const props = withDefaults(defineProps<Props>(), {
   loading: false,
   placeholder: '请选择',
   options: undefined,
-  suffixIconSize: 12,
+  suffixIconSize: 16,
   isFillColor: undefined,
   defaultValue: undefined,
   disabled: false,

@@ -82,7 +82,7 @@ const { toolbarHelpOptions } = useHelp({
 });
 </script>
 
-<style scoped>
+<style lang="less" scoped>
 .editor-layout {
   display: flex;
   flex-direction: column;

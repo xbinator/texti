@@ -1,8 +1,8 @@
 <template>
-  <div class="assistant-manager">
+  <div class="service-manager">
     <div class="manager-header">
-      <h2 class="manager-title">助理服务</h2>
-      <BButton type="primary" :disabled="!hasModels" icon="lucide:plus" @click="handleAdd"> 添加助理 </BButton>
+      <h2 class="manager-title">模型服务</h2>
+      <BButton type="primary" :disabled="!hasModels" @click="handleAdd"> 添加服务 </BButton>
     </div>
 
     <div v-if="!hasModels" class="empty-models-hint">
@@ -14,16 +14,16 @@
       <ASpin :spinning="isLoading">
         <div v-if="assistants.length === 0 && hasModels" class="empty-state">
           <Icon icon="lucide:bot" class="empty-icon" />
-          <p>暂无助理配置</p>
-          <p class="empty-hint">点击上方按钮添加您的第一个助理</p>
+          <p>暂无模型服务配置</p>
+          <p class="empty-hint">点击上方按钮添加您的第一个模型服务</p>
         </div>
 
-        <div v-else class="assistant-list">
-          <div v-for="assistant in assistants" :key="assistant.id" class="assistant-card">
+        <div v-else class="service-list">
+          <div v-for="assistant in assistants" :key="assistant.id" class="service-card">
             <div class="card-header">
               <div class="card-title">
                 <span v-if="assistant.isDefault" class="default-badge">默认</span>
-                <span class="assistant-name">{{ assistant.name }}</span>
+                <span class="service-name">{{ assistant.name }}</span>
               </div>
               <div class="card-tags">
                 <ATag :color="getModelColor(assistant.modelId)">{{ getModelName(assistant.modelId) }}</ATag>
@@ -48,10 +48,10 @@
       </ASpin>
     </div>
 
-    <ADrawer v-model:open="drawerVisible" :title="editingAssistant ? '编辑助理' : '添加助理'" :width="520" :destroy-on-close="true">
+    <ADrawer v-model:open="drawerVisible" :title="editingAssistant ? '编辑服务' : '添加服务'" :width="520" :destroy-on-close="true">
       <AForm ref="formRef" :model="formData" :rules="formRules" layout="vertical">
-        <AFormItem label="助理名称" name="name">
-          <AInput v-model:value="formData.name" placeholder="写作助理" />
+        <AFormItem label="服务名称" name="name">
+          <AInput v-model:value="formData.name" placeholder="写作服务" />
         </AFormItem>
 
         <AFormItem label="关联模型" name="modelId">
@@ -63,11 +63,11 @@
         </AFormItem>
 
         <AFormItem label="System Prompt" name="systemPrompt">
-          <ATextarea v-model:value="formData.systemPrompt" :rows="10" placeholder="你是一位专业的写作助理，帮助用户改进文章质量和表达..." />
+          <ATextarea v-model:value="formData.systemPrompt" :rows="10" placeholder="你是一位专业的写作服务，帮助用户改进文章质量和表达..." />
         </AFormItem>
 
         <AFormItem name="isDefault">
-          <ACheckbox v-model:checked="formData.isDefault">设为默认助理</ACheckbox>
+          <ACheckbox v-model:checked="formData.isDefault">设为默认服务</ACheckbox>
         </AFormItem>
       </AForm>
 
@@ -112,7 +112,7 @@ const formData = reactive({
 });
 
 const formRules = {
-  name: [{ required: true, message: '请输入助理名称' }],
+  name: [{ required: true, message: '请输入服务名称' }],
   modelId: [{ required: true, message: '请选择模型' }]
 };
 
@@ -161,7 +161,7 @@ async function handleSave(): Promise<void> {
       await assistantStore.updateAssistant(editingAssistant.value.id, {
         name: formData.name,
         modelId: formData.modelId,
-        systemPrompt: formData.systemPrompt || null,
+        systemPrompt: formData.systemPrompt || undefined,
         isDefault: formData.isDefault
       });
       message.success('更新成功');
@@ -228,7 +228,7 @@ onMounted(() => {
 </script>
 
 <style scoped lang="less">
-.assistant-manager {
+.service-manager {
   height: 100%;
 }
 
@@ -283,13 +283,13 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.assistant-list {
+.service-list {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.assistant-card {
+.service-card {
   padding: 16px;
   background: var(--bg-primary);
   border: 1px solid var(--border-primary);
@@ -325,7 +325,7 @@ onMounted(() => {
   border-radius: 4px;
 }
 
-.assistant-name {
+.service-name {
   font-size: 16px;
   font-weight: 500;
   color: var(--text-primary);

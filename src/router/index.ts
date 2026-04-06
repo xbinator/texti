@@ -1,22 +1,17 @@
-import { createRouter, createWebHistory } from 'vue-router';
+import type { App } from 'vue';
 import type { RouteRecordRaw } from 'vue-router';
-
-const routes: RouteRecordRaw[] = [
-  {
-    path: '/',
-    name: 'Editor',
-    component: () => import('../views/editor/index.vue')
-  },
-  {
-    path: '/settings',
-    name: 'Settings',
-    component: () => import('../views/settings/index.vue')
-  }
-];
+import { createRouter, createWebHistory } from 'vue-router';
+import { basicRoutes } from './routes';
 
 const router = createRouter({
   history: createWebHistory(),
-  routes
+  routes: basicRoutes as RouteRecordRaw[],
+  strict: true,
+  scrollBehavior: (to, from, saved) => (to.name !== from.name ? saved || { left: 0, top: 0 } : undefined)
 });
+
+export function setupRouter(app: App<Element>): void {
+  app.use(router);
+}
 
 export default router;

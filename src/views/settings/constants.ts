@@ -1,15 +1,15 @@
-export type SettingsMenuKey = 'apiKeys' | 'models' | 'assistants';
+export type SettingsMenuKey = 'provider' | 'service-model';
 
 export interface MenuItem {
   key: SettingsMenuKey;
   label: string;
   icon: string;
+  path: string;
 }
 
 export const menuItems: MenuItem[] = [
-  { key: 'apiKeys', label: '秘钥管理', icon: 'lucide:key' },
-  { key: 'models', label: '模型管理', icon: 'lucide:cpu' },
-  { key: 'assistants', label: '助理服务', icon: 'lucide:bot' }
+  { key: 'provider', label: 'AI服务商', icon: 'lucide:cpu', path: '/settings/provider' },
+  { key: 'service-model', label: '服务模型', icon: 'lucide:bot', path: '/settings/service-model' }
 ];
 
 export interface ProviderOption {
