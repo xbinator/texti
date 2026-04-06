@@ -2,16 +2,14 @@
  * 服务商存储的 SQLite 实现
  * 用于在 Tauri 环境中持久化服务商配置
  */
-import type { Provider, ProviderModel, StoredProviderSettings } from '../types';
+import type { CustomProviderPayload, Provider, ProviderModel, ProviderRequestFormat, StoredProviderSettings } from './types';
 import { isTauri } from '@tauri-apps/api/core';
 import Database from '@tauri-apps/plugin-sql';
 import { DEFAULT_PROVIDERS } from './defaults';
 
-// ─── 常量 ────────────────────────────────────────────────────────────────────
-
 const SETTINGS_DB_PATH = 'sqlite:texti.db';
 
-const CREATE_TABLE_SQL = `
+const CREATE_PROVIDER_SETTINGS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS provider_settings (
     id          TEXT    PRIMARY KEY,
     is_enabled  INTEGER NOT NULL,
@@ -22,15 +20,39 @@ const CREATE_TABLE_SQL = `
   )
 `;
 
-const SELECT_ALL_SQL = 'SELECT id, is_enabled, api_key, base_url, models_json FROM provider_settings';
-const SELECT_ONE_SQL = `${SELECT_ALL_SQL} WHERE id = ? LIMIT 1`;
-const UPSERT_SQL = `
+const CREATE_CUSTOM_PROVIDERS_TABLE_SQL = `
+  CREATE TABLE IF NOT EXISTS custom_providers (
+    id          TEXT    PRIMARY KEY,
+    name        TEXT    NOT NULL,
+    description TEXT    NOT NULL,
+    type        TEXT    NOT NULL,
+    logo        TEXT,
+    is_enabled  INTEGER NOT NULL,
+    api_key     TEXT,
+    base_url    TEXT,
+    models_json TEXT,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+  )
+`;
+
+const SELECT_ALL_SETTINGS_SQL = 'SELECT id, is_enabled, api_key, base_url, models_json FROM provider_settings';
+const SELECT_ONE_SETTING_SQL = `${SELECT_ALL_SETTINGS_SQL} WHERE id = ? LIMIT 1`;
+const UPSERT_SETTINGS_SQL = `
   INSERT OR REPLACE INTO provider_settings
     (id, is_enabled, api_key, base_url, models_json, updated_at)
   VALUES (?, ?, ?, ?, ?, ?)
 `;
 
-// ─── 类型 ────────────────────────────────────────────────────────────────────
+const SELECT_ALL_CUSTOM_PROVIDERS_SQL = 'SELECT id, name, description, type, logo, is_enabled, api_key, base_url, models_json FROM custom_providers';
+const SELECT_ONE_CUSTOM_PROVIDER_SQL = `${SELECT_ALL_CUSTOM_PROVIDERS_SQL} WHERE id = ? LIMIT 1`;
+const UPSERT_CUSTOM_PROVIDER_SQL = `
+  INSERT OR REPLACE INTO custom_providers
+    (id, name, description, type, logo, is_enabled, api_key, base_url, models_json, created_at, updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`;
+
+const REQUEST_FORMATS: ProviderRequestFormat[] = ['openai', 'anthropic', 'google'];
 
 interface ProviderSettingsRow {
   id: string;
@@ -40,15 +62,21 @@ interface ProviderSettingsRow {
   models_json: string | null;
 }
 
-// ─── 数据库单例 ───────────────────────────────────────────────────────────────
+interface CustomProviderRow {
+  id: string;
+  name: string;
+  description: string;
+  type: string;
+  logo: string | null;
+  is_enabled: number;
+  api_key: string | null;
+  base_url: string | null;
+  models_json: string | null;
+}
 
 let dbInstance: Database | null = null;
 let dbInitPromise: Promise<Database | null> | null = null;
 
-/**
- * 获取（并懒初始化）数据库实例。
- * 并发调用共享同一个初始化 Promise，避免重复建表。
- */
 async function getDatabase(): Promise<Database | null> {
   if (!isTauri()) return null;
   if (dbInstance) return dbInstance;
@@ -56,11 +84,12 @@ async function getDatabase(): Promise<Database | null> {
   dbInitPromise ??= (async () => {
     try {
       const db = await Database.load(SETTINGS_DB_PATH);
-      await db.execute(CREATE_TABLE_SQL);
+      await db.execute(CREATE_PROVIDER_SETTINGS_TABLE_SQL);
+      await db.execute(CREATE_CUSTOM_PROVIDERS_TABLE_SQL);
       dbInstance = db;
       return db;
     } catch (err) {
-      dbInitPromise = null; // 允许下次重试
+      dbInitPromise = null;
       console.error('[providerStorage] 数据库初始化失败:', err);
       return null;
     }
@@ -68,8 +97,6 @@ async function getDatabase(): Promise<Database | null> {
 
   return dbInitPromise;
 }
-
-// ─── 克隆工具 ─────────────────────────────────────────────────────────────────
 
 function cloneModel(model: ProviderModel): ProviderModel {
   return { ...model, tags: model.tags ? [...model.tags] : [] };
@@ -83,24 +110,26 @@ function cloneProvider(provider: Provider): Provider {
   return { ...provider, models: cloneModels(provider.models ?? []) };
 }
 
-// ─── 校验 ────────────────────────────────────────────────────────────────────
-
 function isProviderModel(value: unknown): value is ProviderModel {
   if (!value || typeof value !== 'object') return false;
-  const c = value as Record<string, unknown>;
+  const candidate = value as Record<string, unknown>;
+
   return (
-    typeof c.id === 'string' &&
-    typeof c.name === 'string' &&
-    typeof c.description === 'string' &&
-    typeof c.isEnabled === 'boolean' &&
-    (c.tags === undefined || (Array.isArray(c.tags) && c.tags.every((t) => typeof t === 'string')))
+    typeof candidate.id === 'string' &&
+    typeof candidate.name === 'string' &&
+    typeof candidate.description === 'string' &&
+    typeof candidate.isEnabled === 'boolean' &&
+    (candidate.tags === undefined || (Array.isArray(candidate.tags) && candidate.tags.every((tag) => typeof tag === 'string')))
   );
 }
 
-// ─── 序列化 / 反序列化 ────────────────────────────────────────────────────────
+function isProviderRequestFormat(value: unknown): value is ProviderRequestFormat {
+  return typeof value === 'string' && REQUEST_FORMATS.includes(value as ProviderRequestFormat);
+}
 
 function parseModelsJson(json: string | null): ProviderModel[] | undefined {
   if (!json) return undefined;
+
   try {
     const parsed: unknown = JSON.parse(json);
     if (!Array.isArray(parsed)) return undefined;
@@ -114,11 +143,6 @@ function stringifyModels(models?: ProviderModel[]): string | null {
   return models ? JSON.stringify(cloneModels(models)) : null;
 }
 
-// ─── 设置映射 ─────────────────────────────────────────────────────────────────
-
-/**
- * 从任意输入中提取合法字段，过滤掉类型不符或 undefined 的值。
- */
 function sanitizeProviderSettings(raw: Partial<StoredProviderSettings>): StoredProviderSettings {
   const result: StoredProviderSettings = {};
 
@@ -139,10 +163,29 @@ function mapRowToStoredSettings(row: ProviderSettingsRow): StoredProviderSetting
   });
 }
 
-// ─── 合并逻辑 ─────────────────────────────────────────────────────────────────
+function mapRowToCustomProvider(row: CustomProviderRow): Provider | null {
+  if (!isProviderRequestFormat(row.type)) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    type: row.type,
+    logo: row.logo ?? undefined,
+    isEnabled: Boolean(row.is_enabled),
+    apiKey: row.api_key ?? undefined,
+    baseUrl: row.base_url ?? undefined,
+    models: parseModelsJson(row.models_json) ?? [],
+    isCustom: true,
+    readonly: false
+  };
+}
 
 function mergeProvider(base: Provider, stored?: StoredProviderSettings): Provider {
   const overrides = stored ? sanitizeProviderSettings(stored) : {};
+
   return {
     ...cloneProvider(base),
     ...overrides,
@@ -150,43 +193,34 @@ function mergeProvider(base: Provider, stored?: StoredProviderSettings): Provide
   };
 }
 
-// ─── 默认服务商查找 ───────────────────────────────────────────────────────────
-
-const DEFAULT_PROVIDERS_MAP = new Map(DEFAULT_PROVIDERS.map((p) => [p.id, p]));
+const DEFAULT_PROVIDERS_MAP = new Map(DEFAULT_PROVIDERS.map((provider) => [provider.id, provider]));
 
 function getDefaultProvider(id: string): Provider | undefined {
   return DEFAULT_PROVIDERS_MAP.get(id);
 }
 
-// ─── 数据库读写 ───────────────────────────────────────────────────────────────
+function sanitizeProviderId(id: string): string {
+  return id.trim().toLowerCase();
+}
 
-/**
- * 全量读取存储设置（id → settings）。
- */
 async function loadAllStoredSettings(): Promise<Map<string, StoredProviderSettings>> {
   const db = await getDatabase();
   if (!db) return new Map();
 
-  const rows = await db.select<ProviderSettingsRow[]>(SELECT_ALL_SQL);
+  const rows = await db.select<ProviderSettingsRow[]>(SELECT_ALL_SETTINGS_SQL);
   return new Map(rows.map((row) => [row.id, mapRowToStoredSettings(row)]));
 }
 
-/**
- * 读取单条存储设置，找不到返回 undefined。
- */
 async function loadStoredSetting(id: string): Promise<StoredProviderSettings | undefined> {
   const db = await getDatabase();
   if (!db) return undefined;
 
-  const rows = await db.select<ProviderSettingsRow[]>(SELECT_ONE_SQL, [id]);
+  const rows = await db.select<ProviderSettingsRow[]>(SELECT_ONE_SETTING_SQL, [id]);
   return rows[0] ? mapRowToStoredSettings(rows[0]) : undefined;
 }
 
-/**
- * 将合并后的设置写入数据库（UPSERT）。
- */
 async function persistSettings(db: Database, id: string, settings: StoredProviderSettings): Promise<void> {
-  await db.execute(UPSERT_SQL, [
+  await db.execute(UPSERT_SETTINGS_SQL, [
     id,
     settings.isEnabled ? 1 : 0,
     settings.apiKey ?? null,
@@ -196,62 +230,152 @@ async function persistSettings(db: Database, id: string, settings: StoredProvide
   ]);
 }
 
-// ─── 公开 API ─────────────────────────────────────────────────────────────────
+async function loadAllCustomProviders(): Promise<Provider[]> {
+  const db = await getDatabase();
+  if (!db) return [];
+
+  const rows = await db.select<CustomProviderRow[]>(SELECT_ALL_CUSTOM_PROVIDERS_SQL);
+  return rows
+    .map(mapRowToCustomProvider)
+    .filter((provider): provider is Provider => Boolean(provider))
+    .map(cloneProvider);
+}
+
+async function loadCustomProvider(id: string): Promise<Provider | null> {
+  const db = await getDatabase();
+  if (!db) return null;
+
+  const rows = await db.select<CustomProviderRow[]>(SELECT_ONE_CUSTOM_PROVIDER_SQL, [id]);
+  if (!rows[0]) return null;
+
+  const provider = mapRowToCustomProvider(rows[0]);
+  return provider ? cloneProvider(provider) : null;
+}
+
+async function persistCustomProvider(db: Database, provider: Provider, createdAt?: number): Promise<void> {
+  const now = Date.now();
+
+  await db.execute(UPSERT_CUSTOM_PROVIDER_SQL, [
+    provider.id,
+    provider.name,
+    provider.description,
+    provider.type,
+    provider.logo ?? null,
+    provider.isEnabled ? 1 : 0,
+    provider.apiKey ?? null,
+    provider.baseUrl ?? null,
+    stringifyModels(provider.models),
+    createdAt ?? now,
+    now
+  ]);
+}
+
+function normalizeCustomProviderPayload(payload: CustomProviderPayload): CustomProviderPayload {
+  return {
+    id: sanitizeProviderId(payload.id),
+    name: payload.name.trim(),
+    description: payload.description?.trim(),
+    type: payload.type,
+    logo: payload.logo?.trim(),
+    isEnabled: payload.isEnabled,
+    apiKey: payload.apiKey,
+    baseUrl: payload.baseUrl
+  };
+}
 
 export const providerStorage = {
-  /**
-   * 获取所有服务商列表（默认列表 + 已存储的覆盖设置合并）。
-   */
   async listProviders(): Promise<Provider[]> {
-    const stored = await loadAllStoredSettings();
+    const [stored, customProviders] = await Promise.all([loadAllStoredSettings(), loadAllCustomProviders()]);
 
-    return DEFAULT_PROVIDERS.map((provider) => mergeProvider(provider, stored.get(provider.id)));
+    const defaults = DEFAULT_PROVIDERS.map((provider) => mergeProvider(provider, stored.get(provider.id)));
+    return [...defaults, ...customProviders];
   },
 
-  /**
-   * 根据 ID 获取单个服务商，未找到返回 null。
-   */
   async getProvider(id: string): Promise<Provider | null> {
-    const base = getDefaultProvider(id);
-    if (!base) return null;
+    const normalizedId = sanitizeProviderId(id);
+    const base = getDefaultProvider(normalizedId);
 
-    const stored = await loadStoredSetting(id);
-    return mergeProvider(base, stored);
+    if (base) {
+      const stored = await loadStoredSetting(normalizedId);
+      return mergeProvider(base, stored);
+    }
+
+    return loadCustomProvider(normalizedId);
   },
 
-  /**
-   * 更新服务商的部分字段，返回合并后的完整服务商。
-   * 若 id 不存在于默认列表或数据库不可用，返回 null。
-   */
-  async updateProvider(id: string, patch: StoredProviderSettings): Promise<Provider | null> {
-    const base = getDefaultProvider(id);
+  async createOrUpdateCustomProvider(payload: CustomProviderPayload): Promise<Provider | null> {
     const db = await getDatabase();
-    if (!base || !db) return null;
+    if (!db) return null;
 
-    const current = (await loadStoredSetting(id)) ?? {};
-    const next = sanitizeProviderSettings({ ...current, ...patch });
+    const normalizedPayload = normalizeCustomProviderPayload(payload);
+    const { id } = normalizedPayload;
 
-    await persistSettings(db, id, next);
-    return mergeProvider(base, next);
+    if (!id || !normalizedPayload.name || !isProviderRequestFormat(normalizedPayload.type) || getDefaultProvider(id)) {
+      return null;
+    }
+
+    const current = await loadCustomProvider(id);
+    const nextProvider: Provider = {
+      id,
+      name: normalizedPayload.name,
+      description: normalizedPayload.description || current?.description || '自定义服务商',
+      type: normalizedPayload.type,
+      logo: normalizedPayload.logo || undefined,
+      isEnabled: normalizedPayload.isEnabled ?? current?.isEnabled ?? true,
+      apiKey: normalizedPayload.apiKey ?? current?.apiKey,
+      baseUrl: normalizedPayload.baseUrl ?? current?.baseUrl,
+      models: cloneModels(current?.models ?? []),
+      isCustom: true,
+      readonly: false
+    };
+
+    await persistCustomProvider(db, nextProvider);
+    return cloneProvider(nextProvider);
   },
 
-  /**
-   * 切换服务商的启用状态。
-   */
+  async updateProvider(id: string, patch: StoredProviderSettings): Promise<Provider | null> {
+    const normalizedId = sanitizeProviderId(id);
+    const db = await getDatabase();
+    if (!db) return null;
+
+    const base = getDefaultProvider(normalizedId);
+
+    if (base) {
+      const current = (await loadStoredSetting(normalizedId)) ?? {};
+      const next = sanitizeProviderSettings({ ...current, ...patch });
+
+      await persistSettings(db, normalizedId, next);
+      return mergeProvider(base, next);
+    }
+
+    const currentCustom = await loadCustomProvider(normalizedId);
+    if (!currentCustom) return null;
+
+    const nextCustom: Provider = {
+      ...currentCustom,
+      ...sanitizeProviderSettings({ ...currentCustom, ...patch }),
+      id: currentCustom.id,
+      name: currentCustom.name,
+      description: currentCustom.description,
+      type: currentCustom.type,
+      logo: currentCustom.logo,
+      isCustom: true,
+      readonly: false,
+      models: patch.models ? cloneModels(patch.models) : cloneModels(currentCustom.models ?? [])
+    };
+
+    await persistCustomProvider(db, nextCustom);
+    return cloneProvider(nextCustom);
+  },
+
   async toggleProvider(id: string, enabled: boolean): Promise<Provider | null> {
     return this.updateProvider(id, { isEnabled: enabled });
   },
 
-  /**
-   * 保存服务商的 API 配置（apiKey / baseUrl）。
-   */
   async saveProviderConfig(id: string, config: Pick<StoredProviderSettings, 'apiKey' | 'baseUrl'>): Promise<Provider | null> {
     return this.updateProvider(id, config);
   },
 
-  /**
-   * 保存服务商的模型列表。
-   */
   async saveProviderModels(id: string, models: ProviderModel[]): Promise<Provider | null> {
     return this.updateProvider(id, { models: cloneModels(models) });
   }
