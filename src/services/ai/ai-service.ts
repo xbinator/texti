@@ -17,6 +17,7 @@ export class AIService {
 
   async generateText(input: { providerId: string } & GenerateTextInput): AIServiceResult<GenerateTextResult> {
     const [error, resolved] = await asyncTo(this.resolver.resolve(input.providerId, input.modelId));
+
     if (error) return [toAIServiceError(error)];
 
     const driver = this.registry.get(resolved.provider.type);

@@ -120,5 +120,15 @@ export const DEFAULT_PROVIDERS: Provider[] = [
     isEnabled: false,
     readonly: true,
     models: []
+  },
+  {
+    id: 'longcat',
+    name: 'LongCat',
+    description: '提供 LongCat 系列大模型，擅长长上下文、多模态与角色扮演。',
+    baseUrl: 'https://api.longcat.chat/openai/v1',
+    type: 'openai',
+    isEnabled: false,
+    readonly: true,
+    models: []
   }
 ];

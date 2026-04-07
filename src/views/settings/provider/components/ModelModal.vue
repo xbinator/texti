@@ -4,7 +4,7 @@
       <AForm layout="vertical">
         <div class="dataItem-section">
           <AFormItem label="模型 ID" required v-bind="validateInfos.id">
-            <AInput v-model:value="dataItem.id" :disabled="isEditMode" placeholder="例如: gpt-4o" @blur="handleModelIdBlur" />
+            <AInput v-model:value="dataItem.id" :disabled="isEditMode" placeholder="例如: gpt-4o" />
           </AFormItem>
 
           <AFormItem label="模型名称" required v-bind="validateInfos.name">
@@ -65,13 +65,7 @@ const dataItem = reactive<ProviderModel>({ id: '', name: '', type: 'chat', isEna
 const isEditMode = computed(() => Boolean(props.model));
 
 const rules = reactive<Record<string, Rule[]>>({
-  id: [
-    { required: true, message: '请输入模型 ID' },
-    {
-      pattern: /^[a-z0-9][a-z0-9-_.]*$/,
-      message: '模型 ID 仅支持小写字母、数字、中划线、下划线和点'
-    }
-  ],
+  id: [{ required: true, message: '请输入模型 ID' }],
   name: [{ required: true, message: '请输入模型名称' }],
   type: [{ required: true, message: '请选择模型类型' }]
 });
@@ -79,9 +73,6 @@ const rules = reactive<Record<string, Rule[]>>({
 const { resetFields, validate, validateInfos } = Form.useForm(dataItem, rules);
 
 const onValidate = () => asyncTo(validate());
-function handleModelIdBlur(): void {
-  dataItem.id = dataItem.id.trim().toLowerCase();
-}
 
 function handleCancel(): void {
   visible.value = false;
@@ -127,7 +118,7 @@ async function handleSubmit(): Promise<void> {
   const [valid] = await onValidate();
   if (valid) return;
 
-  const id = isEditMode.value ? props.model!.id : dataItem.id.trim().toLowerCase();
+  const id = isEditMode.value ? props.model!.id : dataItem.id.trim();
 
   saving.value = true;
 

@@ -455,7 +455,6 @@ export const providerStorage = {
       // 内置服务商：读取现有配置 → 合并 patch → 写回
       const current = (await loadStoredSetting(normalizedId)) ?? {};
       const next = sanitizeProviderSettings({ ...current, ...patch });
-      console.log('🚀 ~ updateProvider ~ next:', next);
 
       await persistSettings(db, normalizedId, next);
       return mergeProvider(base, next);

@@ -13,8 +13,8 @@
     "lint:style": "stylelint 'src/**/*.{vue,less,css}' --fix"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.66",
-    "@ai-sdk/google": "^3.0.58",
+    "@ai-sdk/anthropic": "^3.0.67",
+    "@ai-sdk/google": "^3.0.59",
     "@ai-sdk/openai": "^3.0.50",
     "@iconify/vue": "^5.0.0",
     "@tauri-apps/api": "^2",
@@ -52,7 +52,7 @@
     "@tiptap/vue-3": "^3.21.0",
     "@types/js-yaml": "^4.0.9",
     "@vueuse/core": "^14.2.1",
-    "ai": "^4",
+    "ai": "^6.0.149",
     "ant-design-vue": "^4.2.6",
     "dayjs": "^1.11.20",
     "js-beautify": "^1.15.4",

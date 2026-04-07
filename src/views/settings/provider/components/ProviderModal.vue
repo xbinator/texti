@@ -19,7 +19,7 @@
       <div class="dataItem-section">
         <div class="section-title">配置信息</div>
         <AFormItem label="请求格式" required v-bind="validateInfos.type">
-          <BSelect v-model:value="dataItem.type" :label="selectedFormatLabel" :options="requestFormatOptions" placeholder="请选择请求格式">
+          <BSelect v-model:value="dataItem.type" :label="selectedFormatLabel" :options="providerFormatOptions" placeholder="请选择请求格式">
             <template #option="{ value, label }">
               <div class="format-option">
                 <BModelIcon :provider="value" :size="12" />
@@ -55,6 +55,7 @@ import { useRouter } from 'vue-router';
 import { message, Form } from 'ant-design-vue';
 import { asyncTo } from '@/utils/asyncTo';
 import type { ProviderRequestFormat } from '@/utils/storage';
+import { providerFormatOptions } from '../../constants';
 import { useProviders } from '../hooks/useProviders';
 
 interface CustomProviderForm {
@@ -74,12 +75,6 @@ const visible = defineModel<boolean>('open', { default: false });
 
 const router = useRouter();
 const { saveCustomProvider, providers } = useProviders();
-
-const requestFormatOptions: Array<{ label: string; value: ProviderRequestFormat }> = [
-  { label: 'OpenAI', value: 'openai' },
-  { label: 'Anthropic', value: 'anthropic' },
-  { label: 'Google', value: 'google' }
-];
 
 const saving = ref<boolean>(false);
 
@@ -117,7 +112,7 @@ const { resetFields, validate, validateInfos } = Form.useForm(dataItem, rules);
 const onValidate = () => asyncTo(validate());
 
 const selectedFormatLabel = computed(() => {
-  const option = requestFormatOptions.find((opt) => opt.value === dataItem.type);
+  const option = providerFormatOptions.find((opt) => opt.value === dataItem.type);
   return option?.label || '';
 });
 
