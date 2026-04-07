@@ -1,31 +1,27 @@
 <template>
-  <div class="provider-manager">
-    <ProviderSidebar />
+  <div class="provider-content">
+    <div class="provider-header">
+      <div class="header-left">
+        <h2 class="content-title">AI 服务商</h2>
+        <span class="enabled-count">已启用 {{ enabledCount }} 个服务商</span>
+      </div>
+      <div class="header-right">
+        <AInput v-model:value="searchText" placeholder="搜索服务商" allow-clear class="search-input">
+          <template #prefix>
+            <Icon icon="lucide:search" />
+          </template>
+        </AInput>
+      </div>
+    </div>
 
-    <div class="provider-content">
-      <div class="provider-header">
-        <div class="header-left">
-          <h2 class="content-title">AI 服务商</h2>
-          <span class="enabled-count">已启用 {{ enabledCount }} 个服务商</span>
-        </div>
-        <div class="header-right">
-          <AInput v-model:value="searchText" placeholder="搜索服务商" allow-clear class="search-input">
-            <template #prefix>
-              <Icon icon="lucide:search" />
-            </template>
-          </AInput>
-        </div>
+    <div class="provider-scroll">
+      <div class="provider-grid">
+        <ProviderCard v-for="provider in filteredProviders" :key="provider.id" :provider="provider" @toggle="handleToggleProvider" />
       </div>
 
-      <div class="provider-scroll">
-        <div class="provider-grid">
-          <ProviderCard v-for="provider in filteredProviders" :key="provider.id" :provider="provider" @toggle="handleToggleProvider" />
-        </div>
-
-        <div v-if="filteredProviders.length === 0" class="empty-state">
-          <Icon icon="lucide:search-x" class="empty-icon" />
-          <p>未找到匹配的服务商</p>
-        </div>
+      <div v-if="filteredProviders.length === 0" class="empty-state">
+        <Icon icon="lucide:search-x" class="empty-icon" />
+        <p>未找到匹配的服务商</p>
       </div>
     </div>
   </div>
@@ -38,7 +34,6 @@ import { useRoute } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { message } from 'ant-design-vue';
 import ProviderCard from './components/ProviderCard.vue';
-import ProviderSidebar from './components/ProviderSidebar.vue';
 import { useProviders } from './hooks/useProviders';
 
 const route = useRoute();
@@ -77,13 +72,6 @@ async function handleToggleProvider(id: string, enabled: boolean): Promise<void>
 </script>
 
 <style scoped lang="less">
-.provider-manager {
-  display: flex;
-  gap: 16px;
-  height: 100%;
-  padding: 20px;
-}
-
 .provider-content {
   display: flex;
   flex: 1;

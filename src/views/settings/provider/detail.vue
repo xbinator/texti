@@ -1,36 +1,32 @@
 <template>
-  <div class="provider-detail-page">
-    <ProviderSidebar />
-
-    <div class="detail-container">
-      <div class="detail-header">
-        <div class="flex flex-wrap gap-3 items-center cursor-pointer" @click="handleBack">
-          <Icon icon="lucide:arrow-left" class="back-icon" />
-          <h2 class="page-title">{{ headerTitle }}</h2>
-          <span v-if="provider" class="provider-type-tag">{{ providerTypeLabel }}</span>
+  <div class="detail-container">
+    <div class="detail-header">
+      <div class="flex flex-wrap gap-3 items-center cursor-pointer" @click="handleBack">
+        <Icon icon="lucide:arrow-left" class="back-icon" />
+        <h2 class="page-title">{{ headerTitle }}</h2>
+        <span v-if="provider" class="provider-type-tag">{{ providerTypeLabel }}</span>
+      </div>
+      <div class="flex flex-wrap gap-3 items-center">
+        <div v-if="provider?.isCustom" class="edit-btn" @click="handleEdit">
+          <Icon icon="lucide:settings" width="14" height="14" />
         </div>
-        <div class="flex flex-wrap gap-3 items-center">
-          <div v-if="provider?.isCustom" class="edit-btn" @click="handleEdit">
-            <Icon icon="lucide:settings" width="14" height="14" />
-          </div>
 
-          <ASwitch :checked="provider?.isEnabled ?? false" size="small" @change="(checked) => handleToggle(checked as boolean)" />
-        </div>
+        <ASwitch :checked="provider?.isEnabled ?? false" size="small" @change="(checked) => handleToggle(checked as boolean)" />
+      </div>
+    </div>
+
+    <div class="flex-1 p-4 overflow-y-auto">
+      <div v-if="!provider" class="loading-state">
+        <Icon icon="lucide:loader-2" class="loading-icon" />
+        <p>加载中...</p>
       </div>
 
-      <div class="flex-1 p-4 overflow-y-auto">
-        <div v-if="!provider" class="loading-state">
-          <Icon icon="lucide:loader-2" class="loading-icon" />
-          <p>加载中...</p>
-        </div>
+      <div v-else class="flex flex-col gap-6">
+        <ProviderInfo :provider="provider" />
 
-        <div v-else class="flex flex-col gap-6">
-          <ProviderInfo :provider="provider" />
+        <ApiConfig v-model:value="provider" :models="models" />
 
-          <ApiConfig v-model:value="provider" :models="models" />
-
-          <ModelList :provider-id="provider.id" :models="models" @refresh="handleRefreshModels" />
-        </div>
+        <ModelList :provider-id="provider.id" :models="models" @refresh="handleRefreshModels" />
       </div>
     </div>
 
@@ -50,7 +46,6 @@ import ApiConfig from './components/ApiConfig.vue';
 import ModelList from './components/ModelList.vue';
 import ProviderInfo from './components/ProviderInfo.vue';
 import ProviderModal from './components/ProviderModal.vue';
-import ProviderSidebar from './components/ProviderSidebar.vue';
 import { useProviders } from './hooks/useProviders';
 
 const router = useRouter();
@@ -129,13 +124,6 @@ async function handleRefreshModels(): Promise<void> {
 </script>
 
 <style scoped lang="less">
-.provider-detail-page {
-  display: flex;
-  gap: 16px;
-  height: 100%;
-  padding: 20px;
-}
-
 .detail-container {
   display: flex;
   flex: 1;
