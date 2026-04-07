@@ -22,10 +22,8 @@ export interface ProviderModel {
   id: string;
   /** 模型显示名称 */
   name: string;
-  /** 模型描述 */
-  description: string;
-  /** 模型标签，用于分类或筛选 */
-  tags?: string[];
+  /** 模型类型 */
+  type: string;
   /** 是否启用该模型 */
   isEnabled: boolean;
 }
