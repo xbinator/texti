@@ -1,4 +1,4 @@
-import type { AppRouteRecordRaw } from '../type';
+import type { AppRouteRecordRaw } from '../../type';
 
 const routes: AppRouteRecordRaw[] = [
   {
