@@ -26,6 +26,8 @@ export default defineConfig(async () => ({
       dirs: [
         'src/components',
         'src/components/BSelect',
+        'src/components/BModal',
+        'src/components/BModelIcon',
         'src/components/BButton',
         'src/components/BDropdown',
         'src/components/BEditor',
