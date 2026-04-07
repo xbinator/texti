@@ -8,7 +8,9 @@
       { 'b-button--loading': loading },
       { 'b-button--icon': $slots.icon || icon },
       { 'b-button--block': block },
-      { 'b-button--rounded': rounded }
+      { 'b-button--rounded': rounded },
+      { 'b-button--square': square },
+      { 'b-button--danger': danger }
     ]"
     :disabled="disabled || loading"
     @click="handleClick"
@@ -44,10 +46,14 @@ interface Props {
   block?: boolean;
   /** 是否圆角 */
   rounded?: boolean;
+  /** 是否方形 */
+  square?: boolean;
   /** 图标 */
   icon?: string;
   /** 按钮文本 */
   text?: string;
+  /** 危险按钮 */
+  danger?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -57,8 +63,10 @@ const props = withDefaults(defineProps<Props>(), {
   loading: false,
   block: false,
   rounded: false,
+  square: false,
   icon: '',
-  text: ''
+  text: '',
+  danger: false
 });
 
 const emit = defineEmits(['click']);
@@ -146,6 +154,34 @@ function handleClick(event: MouseEvent) {
     border-radius: 9999px;
   }
 
+  &--square {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border-radius: 6px;
+
+    &.b-button--small {
+      width: 28px;
+    }
+
+    &.b-button--middle {
+      width: 32px;
+    }
+
+    &.b-button--large {
+      width: 44px;
+    }
+
+    .b-button__text {
+      display: none;
+    }
+
+    .b-button__icon {
+      margin: 0;
+    }
+  }
+
   // 尺寸
   &--small {
     height: 28px;
@@ -231,6 +267,76 @@ function handleClick(event: MouseEvent) {
     }
   }
 
+  // danger 修饰符
+  &--danger {
+    &.b-button--primary {
+      color: #fff;
+      background-color: var(--color-danger);
+
+      &:hover:not(.b-button--disabled, .b-button--loading) {
+        background-color: var(--color-danger-hover);
+      }
+
+      &:active:not(.b-button--disabled, .b-button--loading) {
+        background-color: var(--color-danger-active);
+      }
+    }
+
+    &.b-button--secondary {
+      color: var(--color-danger);
+      background-color: var(--bg-secondary);
+
+      &:hover:not(.b-button--disabled, .b-button--loading) {
+        background-color: var(--bg-active);
+      }
+
+      &:active:not(.b-button--disabled, .b-button--loading) {
+        background-color: var(--bg-selected);
+      }
+    }
+
+    &.b-button--outline {
+      color: var(--color-danger);
+      background-color: transparent;
+      border: 1px solid var(--color-danger-border);
+
+      &:hover:not(.b-button--disabled, .b-button--loading) {
+        background-color: var(--color-danger-bg);
+        border-color: var(--color-danger);
+      }
+
+      &:active:not(.b-button--disabled, .b-button--loading) {
+        background-color: var(--color-danger-bg-hover);
+      }
+    }
+
+    &.b-button--text {
+      padding: 0 8px;
+      color: var(--color-danger);
+      background-color: transparent;
+
+      &:hover:not(.b-button--disabled, .b-button--loading) {
+        background-color: var(--color-primary-bg);
+      }
+
+      &:active:not(.b-button--disabled, .b-button--loading) {
+        background-color: var(--color-primary-bg-hover);
+      }
+    }
+
+    .b-button__loading-spinner {
+      border-color: rgb(255 255 255 / 30%);
+      border-top-color: #fff;
+    }
+
+    &.b-button--outline .b-button__loading-spinner,
+    &.b-button--text .b-button__loading-spinner,
+    &.b-button--secondary .b-button__loading-spinner {
+      border-color: rgb(0 0 0 / 10%);
+      border-top-color: var(--color-danger);
+    }
+  }
+
   // 图标
   &--icon {
     .b-button__text {
@@ -309,6 +415,64 @@ function handleClick(event: MouseEvent) {
 
       &:hover:not(.b-button--disabled, .b-button--loading) {
         background-color: var(--color-primary-bg);
+      }
+    }
+
+    &--danger {
+      &.b-button--primary {
+        color: #fff;
+        background-color: var(--color-danger);
+
+        &:hover:not(.b-button--disabled, .b-button--loading) {
+          background-color: var(--color-danger-hover);
+        }
+
+        &:active:not(.b-button--disabled, .b-button--loading) {
+          background-color: var(--color-danger-active);
+        }
+      }
+
+      &.b-button--secondary {
+        color: var(--color-danger);
+        background-color: var(--bg-secondary);
+
+        &:hover:not(.b-button--disabled, .b-button--loading) {
+          background-color: var(--bg-active);
+        }
+
+        &:active:not(.b-button--disabled, .b-button--loading) {
+          background-color: var(--bg-selected);
+        }
+      }
+
+      &.b-button--outline {
+        color: var(--color-danger);
+        border-color: var(--color-danger-border);
+
+        &:hover:not(.b-button--disabled, .b-button--loading) {
+          background-color: var(--color-danger-bg);
+          border-color: var(--color-danger);
+        }
+      }
+
+      &.b-button--text {
+        color: var(--color-danger);
+
+        &:hover:not(.b-button--disabled, .b-button--loading) {
+          background-color: var(--color-danger-bg);
+        }
+      }
+
+      .b-button__loading-spinner {
+        border-color: rgb(255 255 255 / 10%);
+        border-top-color: #fff;
+      }
+
+      &.b-button--outline .b-button__loading-spinner,
+      &.b-button--text .b-button__loading-spinner,
+      &.b-button--secondary .b-button__loading-spinner {
+        border-color: rgb(255 255 255 / 10%);
+        border-top-color: var(--color-danger);
       }
     }
 
