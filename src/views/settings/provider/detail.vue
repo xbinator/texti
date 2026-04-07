@@ -7,6 +7,7 @@
         <div class="flex flex-wrap gap-3 items-center cursor-pointer" @click="handleBack">
           <Icon icon="lucide:arrow-left" class="back-icon" />
           <h2 class="page-title">{{ headerTitle }}</h2>
+          <span v-if="provider" class="provider-type-tag">{{ providerTypeLabel }}</span>
         </div>
         <div class="flex flex-wrap gap-3 items-center">
           <div v-if="provider?.isCustom" class="edit-btn" @click="handleEdit">
@@ -44,6 +45,7 @@ import { useRouter, useRoute } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { message } from 'ant-design-vue';
 import { debounce } from 'lodash-es';
+import { providerFormatLabels } from '../constants';
 import ApiConfig from './components/ApiConfig.vue';
 import ModelList from './components/ModelList.vue';
 import ProviderInfo from './components/ProviderInfo.vue';
@@ -64,6 +66,12 @@ const isLoadingProvider = ref(false);
 const modalVisible = ref<boolean>(false);
 
 const headerTitle = computed(() => (provider.value ? `${provider.value.name} 配置` : '配置'));
+
+const providerTypeLabel = computed(() => {
+  if (!provider.value) return '';
+
+  return providerFormatLabels[provider.value.type] || provider.value.type;
+});
 
 async function loadProvider(): Promise<void> {
   isLoadingProvider.value = true;
@@ -194,6 +202,15 @@ async function handleRefreshModels(): Promise<void> {
   font-size: 18px;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.provider-type-tag {
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-primary);
+  background: var(--color-primary-bg);
+  border-radius: 4px;
 }
 
 .loading-state {

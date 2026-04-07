@@ -14,12 +14,16 @@
 
     <div class="model-grid">
       <div v-for="model in filteredModels" :key="model.id" class="model-item">
+        <div class="model-image">
+          <BModelIcon :provider="providerId" :model="model.id" :size="40" />
+        </div>
         <div class="model-info">
           <h4 class="model-name">{{ model.name }}</h4>
           <p class="model-id">{{ model.id }}</p>
         </div>
         <div class="model-actions">
-          <BButton type="text" size="small" style="margin-right: 8px" @click="handleEditModel(model)"> 编辑 </BButton>
+          <BButton type="text" size="small" square icon="lucide:edit" @click="handleEditModel(model)" />
+          <BButton type="text" size="small" square danger icon="lucide:trash-2" @click="handleDeleteModel(model.id)" />
           <ASwitch :checked="model.isEnabled" size="small" @change="(checked) => handleToggleModel(model.id, checked as boolean)" />
         </div>
       </div>
@@ -39,6 +43,7 @@ import { ref, computed } from 'vue';
 import { Icon } from '@iconify/vue';
 import { message } from 'ant-design-vue';
 import BButton from '@/components/BButton/index.vue';
+import BModelIcon from '@/components/BModelIcon/index.vue';
 import type { ProviderModel } from '@/utils/storage/providers/types';
 import { useProviders } from '../hooks/useProviders';
 import ModelModal from './ModelModal.vue';
@@ -75,12 +80,7 @@ const modalVisible = ref(false);
 const currentModel = ref<ProviderModel | null>(null);
 const { saveProviderModels } = useProviders();
 
-const categoryOptions = computed(() => {
-  return props.categories.map((category) => ({
-    label: category.label,
-    value: category.key
-  }));
-});
+const categoryOptions = computed(() => props.categories.map((category) => ({ label: category.label, value: category.key })));
 
 const filteredModels = computed(() => {
   let result = props.models;
@@ -123,6 +123,19 @@ async function handleToggleModel(modelId: string, enabled: boolean): Promise<voi
   }
 
   message.success(enabled ? '已启用模型' : '已禁用模型');
+  emit('refresh');
+}
+
+async function handleDeleteModel(modelId: string): Promise<void> {
+  const nextModels = props.models.filter((item: ProviderModel) => item.id !== modelId);
+  const savedProvider = await saveProviderModels(props.providerId, nextModels);
+
+  if (!savedProvider) {
+    message.error('删除模型失败');
+    return;
+  }
+
+  message.success('已删除模型');
   emit('refresh');
 }
 </script>
@@ -187,8 +200,36 @@ async function handleToggleModel(modelId: string, enabled: boolean): Promise<voi
   transition: all 0.15s;
 
   &:hover {
-    border-color: var(--color-primary-border);
-    box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
+    background: var(--bg-active);
+
+    .model-actions .b-button {
+      opacity: 1;
+    }
+  }
+
+  .model-image {
+    width: 40px;
+    height: 40px;
+    margin-right: 12px;
+    overflow: hidden;
+    border-radius: 6px;
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+  }
+
+  .model-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+
+    .b-button {
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
   }
 }
 
@@ -208,12 +249,18 @@ async function handleToggleModel(modelId: string, enabled: boolean): Promise<voi
 }
 
 .model-id {
+  display: inline-block;
+  max-width: fit-content;
+  padding: 2px 6px;
   margin: 0 0 6px;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 12px;
-  color: var(--text-tertiary);
+  font-family: 'SF Mono', Monaco, Inconsolata, 'Fira Code', monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
   white-space: nowrap;
+  background: var(--bg-secondary);
+  border-radius: 4px;
 }
 
 .model-tags {
