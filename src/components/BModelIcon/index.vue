@@ -11,8 +11,6 @@ import { useSettingStore } from '@/stores/setting';
 
 type IconTheme = 'light' | 'dark';
 
-const LOBE_ICONS_CDN = 'https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-png';
-
 interface Props {
   provider?: string;
   model?: string;
@@ -29,7 +27,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const settingStore = useSettingStore();
 
-const providerIconMap: Record<string, string> = {
+const providerIcons: Record<string, string> = {
   openai: 'openai',
   anthropic: 'anthropic',
   google: 'google-color',
@@ -47,53 +45,38 @@ const providerIconMap: Record<string, string> = {
   meta: 'meta-color',
   mistral: 'mistral-color',
   cohere: 'cohere-color',
-  perplexity: 'perplexity-color',
   stability: 'stability-color',
-  midjourney: 'midjourney-color',
+  midjourney: 'midjourney',
   siliconflow: 'siliconcloud-color',
-  custom: 'model'
+  hunyuan: 'hunyuan-color'
 };
 
-const modelProviderMap: Record<string, string> = {
-  'gpt-4': 'openai',
-  'gpt-4o': 'openai',
-  'gpt-4-turbo': 'openai',
-  'gpt-3.5-turbo': 'openai',
-  o1: 'openai',
-  'o1-mini': 'openai',
-  'o1-preview': 'openai',
-  'claude-3-opus': 'anthropic',
-  'claude-3-sonnet': 'anthropic',
-  'claude-3-haiku': 'anthropic',
-  'claude-3.5-sonnet': 'anthropic',
-  'claude-3.5-haiku': 'anthropic',
-  'gemini-pro': 'google',
-  'gemini-1.5-pro': 'google',
-  'gemini-1.5-flash': 'google',
-  'gemini-2.0-flash': 'google',
-  'deepseek-chat': 'deepseek',
-  'deepseek-coder': 'deepseek',
-  'moonshot-v1': 'moonshot',
-  'glm-4': 'zhipu',
-  qwen: 'alibaba',
-  'qwen-max': 'alibaba',
-  'qwen-turbo': 'alibaba',
-  ernie: 'baidu',
-  doubao: 'byteDance',
-  abab: 'minimax',
-  baichuan: 'baichuan'
+const modelIcons: Record<string, string> = {
+  gpt: 'openai',
+  glm: 'zai',
+  claude: 'claude-color',
+  chatglm: 'chatglm-color',
+  kimi: 'kimi',
+  qwen: 'qwen-color',
+  doubao: 'doubao',
+  mimo: 'xiaomimimo',
+  minimax: 'minimax-color'
 };
 
 const iconId = computed(() => {
   if (props.provider) {
-    return providerIconMap[props.provider] || props.provider;
+    return providerIcons[props.provider] || props.provider;
   }
+
   if (props.model) {
-    const modelLower = props.model.toLowerCase();
-    const matchedEntry = Object.entries(modelProviderMap).find(([key]) => modelLower.includes(key.toLowerCase()));
+    const model = (props.model?.match(/^[a-zA-Z]+/i) || [])[0]?.toLocaleLowerCase();
+
+    const matchedEntry = Object.entries(modelIcons).find(([key]) => model?.includes(key));
+
     if (matchedEntry) {
       const [, value] = matchedEntry;
-      return providerIconMap[value] || value;
+
+      return modelIcons[value] || value;
     }
   }
   return 'model';
@@ -102,7 +85,11 @@ const iconId = computed(() => {
 const theme = computed((): IconTheme => settingStore.resolvedTheme);
 
 const iconUrl = computed(() => {
-  return `${LOBE_ICONS_CDN}/${theme.value}/${iconId.value}.png`;
+  try {
+    return new URL(`./icons/${theme.value}/${iconId.value}.png`, import.meta.url).href;
+  } catch {
+    return '';
+  }
 });
 
 const containerStyle = computed(() => ({
@@ -122,7 +109,7 @@ const fallbackText = computed(() => {
 });
 
 function handleError(): void {
-  console.warn(`Failed to load icon: ${iconUrl.value}`);
+  console.warn(`Failed to load icon: ${iconId.value}`);
 }
 </script>
 
