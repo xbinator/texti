@@ -1,4 +1,4 @@
-import type { AIProviderConfig, AIServiceResult, GenerateTextInput, GenerateTextResult, TestConnectionInput, TestConnectionResult } from './types';
+import type { AIProviderConfig, AIServiceResult, GenerateTextInput, GenerateTextResult } from './types';
 import { asyncTo } from '@/utils/asyncTo';
 import type { Provider } from '@/utils/storage';
 import { toAIServiceError } from './errors';
@@ -16,11 +16,8 @@ export class AIService {
   }
 
   async generateText(input: { providerId: string } & GenerateTextInput): AIServiceResult<GenerateTextResult> {
-    const [resolveError, resolved] = await asyncTo(this.resolver.resolve(input.providerId, input.modelId));
-
-    if (resolveError || !resolved) {
-      return [toAIServiceError(resolveError)];
-    }
+    const [error, resolved] = await asyncTo(this.resolver.resolve(input.providerId, input.modelId));
+    if (error) return [toAIServiceError(error)];
 
     const driver = this.registry.get(resolved.provider.type);
     const providerConfig = this.buildProviderConfig(resolved.provider);
@@ -28,24 +25,6 @@ export class AIService {
 
     if (generateError || !result) {
       return [toAIServiceError(generateError)];
-    }
-
-    return [undefined, result];
-  }
-
-  async testConnection(input: TestConnectionInput): AIServiceResult<TestConnectionResult> {
-    const [resolveError, resolved] = await asyncTo(this.resolver.resolve(input.providerId, input.modelId));
-
-    if (resolveError || !resolved) {
-      return [toAIServiceError(resolveError)];
-    }
-
-    const driver = this.registry.get(resolved.provider.type);
-    const providerConfig = this.buildProviderConfig(resolved.provider);
-    const [testError, result] = await asyncTo(driver.testConnection(providerConfig, resolved.model.id));
-
-    if (testError || !result) {
-      return [toAIServiceError(testError)];
     }
 
     return [undefined, result];

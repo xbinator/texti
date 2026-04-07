@@ -24,7 +24,9 @@
 <script setup lang="ts">
 import type { Provider } from '../types';
 import { computed, ref, watch } from 'vue';
+import { message } from 'ant-design-vue';
 import BButton from '@/components/BButton/index.vue';
+import { aiService } from '@/services/ai';
 
 interface TestModelOption {
   id: string;
@@ -34,20 +36,14 @@ interface TestModelOption {
 
 interface Props {
   models: TestModelOption[];
-  testing?: boolean;
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  testing: false
-});
-
-const emit = defineEmits<{
-  (e: 'test', modelId: string): void;
-}>();
+const props = defineProps<Props>();
 
 const dataItem = defineModel<Partial<Provider>>('value', { default: () => ({}) });
 
 const testModel = ref<string | undefined>(undefined);
+const testing = ref(false);
 
 const modelOptions = computed(() =>
   props.models
@@ -58,18 +54,32 @@ const modelOptions = computed(() =>
     }))
 );
 
-function handleTestClick(): void {
-  if (!testModel.value) {
-    return;
-  }
+async function handleTestClick(): Promise<void> {
+  if (!testModel.value || !dataItem.value.id) return;
 
-  emit('test', testModel.value);
+  testing.value = true;
+
+  const [error, result] = await aiService.generateText({
+    providerId: dataItem.value.id,
+    modelId: testModel.value,
+    prompt: 'Hello',
+    maxTokens: 10
+  });
+
+  testing.value = false;
+
+  if (error) {
+    message.error(error.message);
+  } else {
+    message.success(`连通性检查成功: ${result.text}`);
+  }
 }
 
 watch(
   () => props.models,
   (nextModels: TestModelOption[]) => {
     const enabledModel = nextModels.find((model: TestModelOption) => model.isEnabled);
+
     const hasSelectedModel = nextModels.some((model: TestModelOption) => model.id === testModel.value && model.isEnabled);
 
     if (!hasSelectedModel) {

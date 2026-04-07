@@ -26,7 +26,7 @@
         <div v-else class="flex flex-col gap-6">
           <ProviderInfo :provider="provider" />
 
-          <ApiConfig v-model:value="provider" :models="models" :testing="isTestingConnection" @test="handleTestConnection" />
+          <ApiConfig v-model:value="provider" :models="models" />
 
           <ModelList :provider-id="provider.id" :models="models" @refresh="handleRefreshModels" />
         </div>
@@ -44,7 +44,6 @@ import { useRouter, useRoute } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { message } from 'ant-design-vue';
 import { debounce } from 'lodash-es';
-import { aiService, getAIErrorMessage } from '@/services/ai';
 import ApiConfig from './components/ApiConfig.vue';
 import ModelList from './components/ModelList.vue';
 import ProviderInfo from './components/ProviderInfo.vue';
@@ -62,7 +61,6 @@ const { getProviderById, loadProviders, toggleProvider, saveProviderConfig } = u
 const provider = ref<Provider | null>(null);
 const models = ref<Model[]>([]);
 const isLoadingProvider = ref(false);
-const isTestingConnection = ref(false);
 const modalVisible = ref<boolean>(false);
 
 const headerTitle = computed(() => (provider.value ? `${provider.value.name} 配置` : '配置'));
@@ -84,10 +82,7 @@ const persistProviderConfig = debounce(async () => {
     return;
   }
 
-  await saveProviderConfig(provider.value.id, {
-    apiKey: provider.value.apiKey,
-    baseUrl: provider.value.baseUrl
-  });
+  await saveProviderConfig(provider.value.id, { apiKey: provider.value.apiKey, baseUrl: provider.value.baseUrl });
 }, 300);
 
 watch(providerId, () => loadProvider(), { immediate: true });
@@ -118,28 +113,6 @@ async function handleToggle(enabled: boolean): Promise<void> {
   await toggleProvider(provider.value.id, enabled);
   provider.value = { ...provider.value, isEnabled: enabled };
   message.success(enabled ? '已启用服务商' : '已禁用服务商');
-}
-
-async function handleTestConnection(modelId: string): Promise<void> {
-  if (!provider.value) {
-    return;
-  }
-
-  isTestingConnection.value = true;
-
-  const [error, result] = await aiService.testConnection({
-    providerId: provider.value.id,
-    modelId
-  });
-
-  isTestingConnection.value = false;
-
-  if (error) {
-    message.error(getAIErrorMessage(error));
-    return;
-  }
-
-  message.success(`连通性检查成功: ${result.text}`);
 }
 
 async function handleRefreshModels(): Promise<void> {

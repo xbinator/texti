@@ -1,14 +1,14 @@
 import type { AIError } from '../errors';
-import type { AIProvider, AIProviderConfig, CreateLanguageModelInput, GenerateTextInput, GenerateTextResult, TestConnectionResult } from '../types';
+import type { AIProvider, AIProviderConfig, CreateLanguageModelInput, GenerateTextInput, GenerateTextResult } from '../types';
 import type { LanguageModel } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { normalizeOpenAIError } from '../errors';
-import { executeDefaultTestConnection, executeGenerateText } from '../provider-helpers';
+import { executeGenerateText } from '../provider-helpers';
 
 export class OpenAIProvider implements AIProvider {
   readonly type = 'openai' as const;
 
-  private normalizeError(error: unknown): AIError {
+  normalizeError(error: unknown): AIError {
     return normalizeOpenAIError(error, 'OpenAI 兼容服务调用失败');
   }
 
@@ -21,10 +21,6 @@ export class OpenAIProvider implements AIProvider {
   }
 
   async generateText(config: AIProviderConfig, input: GenerateTextInput): Promise<GenerateTextResult> {
-    return executeGenerateText(this, config, input, (error: unknown) => this.normalizeError(error));
-  }
-
-  async testConnection(config: AIProviderConfig, modelId: string): Promise<TestConnectionResult> {
-    return executeDefaultTestConnection(this, config, modelId, (error: unknown) => this.normalizeError(error));
+    return executeGenerateText(this, config, input);
   }
 }

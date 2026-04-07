@@ -112,7 +112,7 @@ export const DEFAULT_PROVIDERS: Provider[] = [
     models: []
   },
   {
-    id: 'tencent',
+    id: 'hunyuan',
     name: '腾讯混元',
     description: '提供混元系列大模型，擅长对话、创作、代码与企业级智能服务。',
     baseUrl: 'https://api.hunyuan.cloud.tencent.com/v1',

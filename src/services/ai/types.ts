@@ -41,26 +41,6 @@ export interface GenerateTextResult {
 export type AIServiceResult<T> = Promise<[error: Error] | [undefined, T]>;
 
 /**
- * 测试连接的输入参数
- */
-export interface TestConnectionInput {
-  /** 服务商 ID */
-  providerId: string;
-  /** 模型 ID */
-  modelId: string;
-}
-
-/**
- * 测试连接的结果
- */
-export interface TestConnectionResult {
-  /** 连接是否成功 */
-  ok: boolean;
-  /** 结果描述文本 */
-  text: string;
-}
-
-/**
  * 解析后的服务商模型信息
  */
 export interface ResolvedProviderModel {
@@ -101,14 +81,6 @@ export interface AIProviderDriver {
    * @returns 生成文本的结果
    */
   generateText(config: AIProviderConfig, input: GenerateTextInput): Promise<GenerateTextResult>;
-
-  /**
-   * 测试连接
-   * @param config AI 服务商配置
-   * @param modelId 模型 ID
-   * @returns 测试连接的结果
-   */
-  testConnection(config: AIProviderConfig, modelId: string): Promise<TestConnectionResult>;
 }
 
 export type AIProvider = AIProviderDriver;

@@ -16,7 +16,7 @@ const aiModelResolver = new AIModelResolver();
 export const aiService = new AIService(aiProviderRegistry, aiModelResolver);
 
 export { AIService } from './ai-service';
-export { AI_ERROR_CODE, AIError, AIServiceError, getAIErrorMessage, isAIError, isAIServiceError, toAIError, toAIServiceError } from './errors';
+export { AI_ERROR_CODE, AIError, AIServiceError, isAIError, isAIServiceError, toAIError, toAIServiceError } from './errors';
 export { AIModelResolver } from './model-resolver';
 export { AIProviderRegistry } from './provider-registry';
 export type {
@@ -28,7 +28,5 @@ export type {
   CreateLanguageModelInput,
   GenerateTextInput,
   GenerateTextResult,
-  ResolvedProviderModel,
-  TestConnectionInput,
-  TestConnectionResult
+  ResolvedProviderModel
 } from './types';

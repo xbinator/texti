@@ -250,18 +250,6 @@ export function toAIError(error: unknown, fallbackMessage = 'AI 请求失败'): 
   return createAIError(AI_ERROR_CODE.REQUEST_FAILED, details.message || fallbackMessage, error);
 }
 
-export function getAIErrorMessage(error: unknown): string {
-  if (error instanceof AIError) {
-    return error.message;
-  }
-
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return 'AI 操作失败';
-}
-
 export { AIError as AIServiceError };
 export type { AIErrorCode as AIServiceErrorCode };
 export const isAIServiceError = isAIError;

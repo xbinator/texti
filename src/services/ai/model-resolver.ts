@@ -29,9 +29,6 @@ export class AIModelResolver {
       throw new AIError(AI_ERROR_CODE.MODEL_DISABLED, '模型未启用');
     }
 
-    return {
-      provider,
-      model
-    };
+    return { provider, model };
   }
 }

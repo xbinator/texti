@@ -1,7 +1,7 @@
 import type { CustomProviderPayload, Provider, ProviderModel, ProviderRequestFormat, StoredProviderSettings } from './types';
 import { isTauri } from '@tauri-apps/api/core';
 import Database from '@tauri-apps/plugin-sql';
-import { cloneDeep, omitBy, isUndefined, pick, isBoolean, isString } from 'lodash-es';
+import { cloneDeep, omitBy, isUndefined, pick, isBoolean, isString, isArray } from 'lodash-es';
 import { DEFAULT_PROVIDERS } from './defaults';
 
 // ─────────────────────────────────────────────
@@ -189,6 +189,8 @@ function sanitizeProviderSettings(raw: Partial<StoredProviderSettings>): StoredP
   if (isString(raw.apiKey)) result.apiKey = raw.apiKey;
 
   if (isString(raw.baseUrl)) result.baseUrl = raw.baseUrl;
+
+  if (isArray(raw.models)) result.models = raw.models;
 
   return result;
 }
@@ -453,7 +455,7 @@ export const providerStorage = {
       // 内置服务商：读取现有配置 → 合并 patch → 写回
       const current = (await loadStoredSetting(normalizedId)) ?? {};
       const next = sanitizeProviderSettings({ ...current, ...patch });
-      console.log('🚀 ~ updateProvider ~ next:', patch);
+      console.log('🚀 ~ updateProvider ~ next:', next);
 
       await persistSettings(db, normalizedId, next);
       return mergeProvider(base, next);
