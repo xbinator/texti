@@ -79,7 +79,7 @@ async function handleToggleProvider(id: string, enabled: boolean): Promise<void>
 <style scoped lang="less">
 .provider-manager {
   display: flex;
-  gap: 20px;
+  gap: 16px;
   height: 100%;
   padding: 20px;
 }

@@ -131,7 +131,7 @@ async function handleRefreshModels(): Promise<void> {
 <style scoped lang="less">
 .provider-detail-page {
   display: flex;
-  gap: 20px;
+  gap: 16px;
   height: 100%;
   padding: 20px;
 }

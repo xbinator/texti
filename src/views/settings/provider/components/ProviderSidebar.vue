@@ -1,84 +1,96 @@
 <template>
   <div class="provider-sidebar">
-    <div class="sidebar-section">
-      <div class="section-title">分类</div>
-      <div
-        v-for="category in categories"
-        :key="category.key"
-        class="sidebar-item"
-        :class="{ active: activeCategory === category.key && activeProvider === 'all' }"
-        @click="handleCategoryClick(category.key)"
-      >
-        <Icon :icon="category.icon" />
-        <span>{{ category.label }}</span>
-        <span class="count">{{ categoryCountMap[category.key] }}</span>
-      </div>
-    </div>
-
-    <!-- 自定义服务商 -->
-    <div class="sidebar-section">
-      <div class="section-header">
-        <div class="section-title">自定义服务商</div>
-        <div class="section-actions" @click="handleAddProvider">
-          <Icon icon="lucide:plus" width="14" height="14" />
+    <BScrollbar inset>
+      <div class="sidebar-section">
+        <div class="section-title">分类</div>
+        <div
+          v-for="category in categories"
+          :key="category.key"
+          class="sidebar-item"
+          :class="{ active: activeCategory === category.key && activeProvider === 'all' }"
+          @click="handleCategoryClick(category.key)"
+        >
+          <Icon :icon="category.icon" />
+          <span>{{ category.label }}</span>
+          <span class="count">{{ categoryCountMap[category.key] }}</span>
         </div>
       </div>
-      <div v-if="customProviders.length === 0" class="empty-state">
-        <Icon icon="lucide:inbox" width="24" height="24" />
-        <span>暂无自定义服务商</span>
-      </div>
-      <div
-        v-for="provider in customProviders"
-        :key="provider.value"
-        class="sidebar-item"
-        :class="{ active: activeProvider === provider.value && activeCategory === 'all' }"
-        @click="handleProviderClick(provider.value)"
-      >
-        <img v-if="getProviderLogo(provider.value)" class="provider-logo" :src="getProviderLogo(provider.value)" :alt="provider.label" />
-        <Icon v-else icon="lucide:bot" width="16" height="16" />
-        <span>{{ provider.label }}</span>
 
-        <BDropdown>
-          <button type="button" class="edit-btn" title="更多">
-            <Icon icon="lucide:more-vertical" width="12" height="12" />
-          </button>
-          <template #overlay>
-            <BDropdownMenu :options="getProviderDropdownOptions(provider.value)">
-              <template #menu="{ record }">
-                <div class="dropdown-menu-item" :class="{ danger: record.danger }">
-                  <Icon :icon="record.icon" />
-                  <span>{{ record.label }}</span>
-                </div>
+      <!-- 自定义服务商 -->
+      <div class="sidebar-section">
+        <div class="section-header">
+          <div class="section-title-wrapper" @click="customCollapsed = !customCollapsed">
+            <div class="section-title">自定义服务商</div>
+            <Icon :icon="customCollapsed ? 'lucide:chevron-right' : 'lucide:chevron-down'" width="12" height="12" class="collapse-icon" />
+          </div>
+          <div class="section-actions" @click.stop="handleAddProvider">
+            <Icon icon="lucide:plus" width="14" height="14" />
+          </div>
+        </div>
+        <div v-show="!customCollapsed">
+          <div v-if="customProviders.length === 0" class="empty-state">
+            <Icon icon="lucide:inbox" width="24" height="24" />
+            <span>暂无自定义服务商</span>
+          </div>
+          <div
+            v-for="provider in customProviders"
+            :key="provider.value"
+            class="sidebar-item"
+            :class="{ active: activeProvider === provider.value && activeCategory === 'all' }"
+            @click="handleProviderClick(provider.value)"
+          >
+            <img v-if="providerLogos[provider.value]" class="provider-logo" :src="providerLogos[provider.value]" :alt="provider.label" />
+            <Icon v-else icon="lucide:bot" width="16" height="16" />
+            <span>{{ provider.label }}</span>
+
+            <BDropdown>
+              <button type="button" class="edit-btn" title="更多">
+                <Icon icon="lucide:more-vertical" width="12" height="12" />
+              </button>
+              <template #overlay>
+                <BDropdownMenu :options="providerDropdownOptionsMap.get(provider.value) || []">
+                  <template #menu="{ record }">
+                    <div class="dropdown-menu-item" :class="{ danger: record.danger }">
+                      <Icon :icon="record.icon" />
+                      <span>{{ record.label }}</span>
+                    </div>
+                  </template>
+                </BDropdownMenu>
               </template>
-            </BDropdownMenu>
-          </template>
-        </BDropdown>
+            </BDropdown>
+          </div>
+        </div>
       </div>
-    </div>
 
-    <!-- 默认服务商 -->
-    <div class="sidebar-section">
-      <div class="section-header">
-        <div class="section-title">服务商</div>
+      <!-- 默认服务商 -->
+      <div class="sidebar-section">
+        <div class="section-header">
+          <div class="section-title-wrapper" @click="defaultCollapsed = !defaultCollapsed">
+            <div class="section-title">服务商</div>
+            <Icon :icon="defaultCollapsed ? 'lucide:chevron-right' : 'lucide:chevron-down'" width="12" height="12" class="collapse-icon" />
+          </div>
+        </div>
+        <div v-show="!defaultCollapsed">
+          <div
+            v-for="provider in defaultProviders"
+            :key="provider.value"
+            class="sidebar-item"
+            :class="{ active: activeProvider === provider.value && activeCategory === 'all' }"
+            @click="handleProviderClick(provider.value)"
+          >
+            <img v-if="providerLogos[provider.value]" class="provider-logo" :src="providerLogos[provider.value]" :alt="provider.label" />
+            <BModelIcon v-else :provider="provider.value" :size="16" />
+            <span>{{ provider.label }}</span>
+          </div>
+        </div>
       </div>
-      <div
-        v-for="provider in defaultProviders"
-        :key="provider.value"
-        class="sidebar-item"
-        :class="{ active: activeProvider === provider.value && activeCategory === 'all' }"
-        @click="handleProviderClick(provider.value)"
-      >
-        <img v-if="getProviderLogo(provider.value)" class="provider-logo" :src="getProviderLogo(provider.value)" :alt="provider.label" />
-        <BModelIcon v-else :provider="provider.value" :size="16" />
-        <span>{{ provider.label }}</span>
-      </div>
-    </div>
+    </BScrollbar>
   </div>
 
   <ProviderModal v-model:open="modalVisible" :provider="editingProvider" />
 </template>
 
-<script setup lang="ts">
+<script setup lang="tsx">
 import type { Provider } from '../types';
 import { computed, ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
@@ -101,13 +113,52 @@ const router = useRouter();
 const route = useRoute();
 const { providers, deleteCustomProvider } = useProviders();
 
-const customProviders = computed(() => {
-  return providers.value.filter((provider: Provider) => provider.isCustom).map((provider: Provider) => ({ label: provider.name, value: provider.id }));
+interface ProviderOption {
+  label: string;
+  value: string;
+}
+
+interface ProviderComputedData {
+  customProviders: ProviderOption[];
+  defaultProviders: ProviderOption[];
+  providerMap: Record<string, Provider>;
+  categoryCountMap: Record<string, number>;
+}
+
+const providerComputedData = computed<ProviderComputedData>(() => {
+  const custom: ProviderOption[] = [];
+  const default_: ProviderOption[] = [];
+  const map: Record<string, Provider> = {};
+  let enabledCount = 0;
+
+  providers.value.forEach((provider: Provider) => {
+    map[provider.id] = provider;
+
+    if (provider.isCustom) {
+      custom.push({ label: provider.name, value: provider.id });
+    } else {
+      default_.push({ label: provider.name, value: provider.id });
+    }
+
+    if (provider.isEnabled) {
+      enabledCount++;
+    }
+  });
+
+  return {
+    customProviders: custom,
+    defaultProviders: default_,
+    providerMap: map,
+    categoryCountMap: {
+      all: providers.value.length,
+      enabled: enabledCount,
+      disabled: providers.value.length - enabledCount
+    }
+  };
 });
 
-const defaultProviders = computed(() => {
-  return providers.value.filter((provider: Provider) => !provider.isCustom).map((provider: Provider) => ({ label: provider.name, value: provider.id }));
-});
+const customProviders = computed(() => providerComputedData.value.customProviders);
+const defaultProviders = computed(() => providerComputedData.value.defaultProviders);
 
 const categories: Category[] = [
   { key: 'all', label: '全部', icon: 'lucide:layout-grid' },
@@ -116,6 +167,8 @@ const categories: Category[] = [
 
 const modalVisible = ref<boolean>(false);
 const editingProvider = ref<Provider | null>(null);
+const customCollapsed = ref<boolean>(false);
+const defaultCollapsed = ref<boolean>(false);
 
 const activeCategory = computed(() => {
   const category = route.query.category as string;
@@ -131,18 +184,8 @@ const activeProvider = computed(() => {
   return 'all';
 });
 
-const providerMap = computed<Record<string, Provider>>(() => {
-  return providers.value.reduce<Record<string, Provider>>((acc, provider) => {
-    acc[provider.id] = provider;
-    return acc;
-  }, {});
-});
-
-const categoryCountMap = computed<Record<string, number>>(() => ({
-  all: providers.value.length,
-  enabled: providers.value.filter((provider: Provider) => provider.isEnabled).length,
-  disabled: providers.value.filter((provider: Provider) => !provider.isEnabled).length
-}));
+const providerMap = computed(() => providerComputedData.value.providerMap);
+const categoryCountMap = computed(() => providerComputedData.value.categoryCountMap);
 
 function handleCategoryClick(value: string): void {
   if (value === 'all') {
@@ -160,9 +203,13 @@ function handleProviderClick(value: string): void {
   }
 }
 
-function getProviderLogo(providerId: string): string {
-  return providerMap.value[providerId]?.logo || '';
-}
+const providerLogos = computed<Record<string, string>>(() => {
+  const logos: Record<string, string> = {};
+  providers.value.forEach((provider: Provider) => {
+    logos[provider.id] = provider.logo || '';
+  });
+  return logos;
+});
 
 function handleAddProvider(): void {
   editingProvider.value = null;
@@ -196,41 +243,47 @@ async function handleDeleteProvider(providerId: string): Promise<void> {
   }
 }
 
-function getProviderDropdownOptions(providerId: string): DropdownOptionItem[] {
-  return [
-    {
-      type: 'item',
-      value: 'edit',
-      label: '编辑',
-      icon: 'lucide:pencil',
-      onClick: () => handleEditProvider(providerId)
-    },
-    {
-      type: 'item',
-      value: 'delete',
-      label: '删除',
-      icon: 'lucide:trash-2',
-      danger: true,
-      onClick: () => handleDeleteProvider(providerId)
+const providerDropdownOptionsMap = computed<Map<string, DropdownOptionItem[]>>(() => {
+  const optionsMap = new Map<string, DropdownOptionItem[]>();
+  providers.value.forEach((provider: Provider) => {
+    if (provider.isCustom) {
+      optionsMap.set(provider.id, [
+        {
+          type: 'item',
+          value: 'edit',
+          label: '编辑',
+          icon: 'lucide:pencil',
+          onClick: () => handleEditProvider(provider.id)
+        },
+        {
+          type: 'item',
+          value: 'delete',
+          label: '删除',
+          icon: 'lucide:trash-2',
+          danger: true,
+          onClick: () => handleDeleteProvider(provider.id)
+        }
+      ]);
     }
-  ];
-}
+  });
+  return optionsMap;
+});
 </script>
 
 <style scoped lang="less">
 .provider-sidebar {
-  display: flex;
   flex-shrink: 0;
-  flex-direction: column;
-  gap: 20px;
   width: 220px;
-  overflow: auto;
 }
 
 .sidebar-section {
   display: flex;
   flex-direction: column;
   gap: 4px;
+
+  & + .sidebar-section {
+    margin-top: 20px;
+  }
 }
 
 .section-header {
@@ -239,6 +292,19 @@ function getProviderDropdownOptions(providerId: string): DropdownOptionItem[] {
   justify-content: space-between;
   padding: 0 8px;
   margin-bottom: 8px;
+}
+
+.section-title-wrapper {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.collapse-icon {
+  color: var(--text-tertiary);
+  transition: transform 0.2s ease;
 }
 
 .section-title {
