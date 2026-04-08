@@ -6,6 +6,7 @@ import { Color } from '@tiptap/extension-color';
 import { Heading as BaseHeading } from '@tiptap/extension-heading';
 import { Highlight } from '@tiptap/extension-highlight';
 import { Image } from '@tiptap/extension-image';
+import { Link } from '@tiptap/extension-link';
 import { ListItem as BaseListItem } from '@tiptap/extension-list';
 import { Mathematics } from '@tiptap/extension-mathematics';
 import { Paragraph as BaseParagraph } from '@tiptap/extension-paragraph';
@@ -19,6 +20,7 @@ import { TaskItem } from '@tiptap/extension-task-item';
 import { TaskList } from '@tiptap/extension-task-list';
 import { TextStyle } from '@tiptap/extension-text-style';
 import { Typography } from '@tiptap/extension-typography';
+import { Underline } from '@tiptap/extension-underline';
 import { Markdown } from '@tiptap/markdown';
 import StarterKit from '@tiptap/starter-kit';
 import { VueNodeViewRenderer } from '@tiptap/vue-3';
@@ -214,14 +216,31 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
     }
   });
 
+  const MarkdownLink = Link.extend({
+    parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
+      const content = helpers.parseInline(token.tokens || []);
+      const href = typeof token.href === 'string' ? token.href : '';
+      const title = typeof token.title === 'string' ? token.title : undefined;
+
+      if (content.length) {
+        return { mark: 'link', content, attrs: { href, title } };
+      }
+
+      const text = typeof token.text === 'string' ? token.text : '';
+      return { mark: 'link', content: text ? [helpers.createTextNode(text)] : [], attrs: { href, title } };
+    }
+  });
+
   const editorExtensions = [
     StarterKit.configure({
       code: false,
       codeBlock: false,
       heading: false,
+      link: false,
       listItem: false,
       paragraph: false,
-      strike: false
+      strike: false,
+      underline: false
     }),
     Placeholder.configure({ emptyEditorClass: 'is-editor-empty', placeholder: '请输入内容' }),
     Markdown,
@@ -255,6 +274,13 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
     TextStyle,
     Color,
     Typography,
+    Underline,
+    MarkdownLink.configure({
+      openOnClick: false,
+      HTMLAttributes: {
+        class: 'editor-link'
+      }
+    }),
     Mathematics.configure({
       katexOptions: {
         throwOnError: false

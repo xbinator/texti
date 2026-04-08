@@ -210,6 +210,11 @@ useTextareaAutosize({ element: titleTextareaRef, input: editorTitle });
 .b-editor-layout {
   display: flex;
   height: 100%;
+
+  ::selection {
+    color: #fff;
+    background: #ff6b6b;
+  }
 }
 
 .b-editor-scrollbar {

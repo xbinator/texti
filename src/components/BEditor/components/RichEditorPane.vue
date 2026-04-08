@@ -11,6 +11,8 @@
     />
 
     <CurrentBlockMenu :editor="props.editor" />
+    <SelectionToolbar :editor="props.editor" @ai-input-toggle="handleAIInputToggle" />
+    <SelectionAIInput v-model:visible="visible.aiInput" :editor="props.editor" />
     <EditorContent :key="editorId" :editor="props.editor ?? undefined" class="b-editor-content" />
   </div>
 </template>
@@ -18,9 +20,12 @@
 <script setup lang="ts">
 import type { FrontMatterData } from '../hooks/useFrontMatter';
 import type { Editor } from '@tiptap/vue-3';
+import { reactive } from 'vue';
 import { EditorContent } from '@tiptap/vue-3';
 import CurrentBlockMenu from './CurrentBlockMenu.vue';
 import FrontMatterCard from './FrontMatterCard.vue';
+import SelectionAIInput from './SelectionAIInput.vue';
+import SelectionToolbar from './SelectionToolbar.vue';
 
 interface Props {
   editor?: Editor | null;
@@ -35,6 +40,12 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const frontMatterData = defineModel<FrontMatterData>('frontMatterData', { default: () => ({}) });
+
+const visible = reactive({ aiInput: false });
+
+function handleAIInputToggle(value: boolean): void {
+  visible.aiInput = value;
+}
 
 function handleFrontMatterUpdate(data: FrontMatterData): void {
   frontMatterData.value = { ...data };
