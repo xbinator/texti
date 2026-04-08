@@ -33,7 +33,7 @@
 
     <SearchRecent v-model:visible="visible.recentSearch" :files="recentFiles" :active-id="fileState.id" @select="handleSelectRecentFile" />
 
-    <ShortcutsDialog v-model:visible="visible.shortcuts" />
+    <ShortcutsHelp v-model:visible="visible.shortcuts" />
   </div>
 </template>
 
@@ -46,7 +46,7 @@ import BEditor from '@/components/BEditor/index.vue';
 import Toolbar from '@/components/Toolbar.vue';
 import FindBar from './components/FindBar.vue';
 import SearchRecent from './components/SearchRecent.vue';
-import ShortcutsDialog from './components/ShortcutsDialog.vue';
+import ShortcutsHelp from './components/ShortcutsHelp.vue';
 import { useAutoSave } from './hooks/useAutoSave';
 import { useEditActive } from './hooks/useEditActive';
 import { useFileActive } from './hooks/useFileActive';

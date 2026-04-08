@@ -45,14 +45,11 @@ const dataItem = defineModel<Partial<Provider>>('value', { default: () => ({}) }
 const testModel = ref<string | undefined>(undefined);
 const testing = ref(false);
 
-const modelOptions = computed(() =>
-  props.models
-    .filter((model: TestModelOption) => model.isEnabled)
-    .map((model: TestModelOption) => ({
-      label: model.name,
-      value: model.id
-    }))
-);
+const modelOptions = computed(() => {
+  const _models = props.models.filter((model: TestModelOption) => model.isEnabled);
+
+  return _models.map((model: TestModelOption) => ({ label: model.name, value: model.id }));
+});
 
 async function handleTestClick(): Promise<void> {
   if (!testModel.value || !dataItem.value.id) return;
@@ -63,7 +60,8 @@ async function handleTestClick(): Promise<void> {
     providerId: dataItem.value.id,
     modelId: testModel.value,
     prompt: 'Hello',
-    maxTokens: 10
+    maxTokens: 10,
+    ignoreEnabled: true
   });
 
   testing.value = false;

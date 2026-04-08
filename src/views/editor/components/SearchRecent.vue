@@ -1,8 +1,8 @@
-﻿<template>
+<template>
   <BModal v-model:open="visible" :width="560" :main-style="{ padding: '16px' }">
     <div class="search-recent">
-      <div class="search-recent-toolbar">
-        <input ref="inputRef" v-model="keyword" class="search-recent-input" :placeholder="placeholder" @keydown.esc.prevent="handleClose" />
+      <div ref="inputRef" class="search-recent-toolbar">
+        <AInput ref="" v-model="keyword" :placeholder="placeholder" @keydown.esc.prevent="handleClose" />
       </div>
 
       <BScrollbar :max-height="420" inset>
@@ -60,7 +60,7 @@ const emit = defineEmits<{
 
 const visible = defineModel<boolean>('visible', { default: false });
 const keyword = ref('');
-const inputRef = ref<HTMLInputElement | null>(null);
+const inputRef = ref<HTMLElement | null>(null);
 
 function getFileLabel(file: Pick<EditorFile, 'name' | 'content'>): string {
   const content = file.content.replace(/^\s*---[\s\S]*?---\s*\n?/, '');
@@ -88,8 +88,12 @@ const filteredFiles = computed<EditorFile[]>(() => {
 
 function focusInput(): void {
   nextTick(() => {
-    inputRef.value?.focus();
-    inputRef.value?.select();
+    const input = inputRef.value?.querySelector('input');
+
+    if (!input) return;
+
+    input.focus();
+    input.select();
   });
 }
 
@@ -136,24 +140,6 @@ registerShortcut({
 .search-recent-toolbar {
   display: flex;
   align-items: center;
-}
-
-.search-recent-input {
-  width: 100%;
-  height: 38px;
-  padding: 0 12px;
-  font-size: 14px;
-  color: var(--text-primary);
-  outline: none;
-  background: var(--input-bg);
-  border: 1px solid var(--input-border);
-  border-radius: 8px;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.search-recent-input:focus {
-  border-color: var(--input-focus-border);
-  box-shadow: var(--input-focus-shadow);
 }
 
 .search-recent-list {

@@ -95,6 +95,7 @@ watch(
   font-size: 14px;
   color: var(--text-secondary);
   cursor: pointer;
+  user-select: none;
   border-radius: 6px;
   transition: all 0.3s;
 }

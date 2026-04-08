@@ -49,7 +49,8 @@ const providerIcons: Record<string, string> = {
   midjourney: 'midjourney',
   siliconflow: 'siliconcloud-color',
   hunyuan: 'hunyuan-color',
-  longcat: 'longcat-color'
+  longcat: 'longcat-color',
+  tencentcloud: 'tencentcloud-color'
 };
 
 const modelIcons: Record<string, string> = {
@@ -62,7 +63,8 @@ const modelIcons: Record<string, string> = {
   doubao: 'doubao',
   mimo: 'xiaomimimo',
   minimax: 'minimax-color',
-  longcat: 'longcat-color'
+  longcat: 'longcat-color',
+  hunyuan: 'hunyuan-color'
 };
 
 const iconId = computed(() => {

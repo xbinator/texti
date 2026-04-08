@@ -55,7 +55,7 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
 
     fileState.value = file;
     if (file.id) {
-      void recentFilesStorage.setCurrentFile(file.id);
+      recentFilesStorage.setCurrentFile(file.id);
     }
 
     native.setWindowTitle(`${file.name || '未命名'}.${file.ext || 'md'}`);
@@ -174,16 +174,20 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
             await openRecentFile(file.id);
           }
         })),
-        { type: 'divider' as const },
-        {
-          value: 'more',
-          label: '更多',
-          shortcut: EditorShortcuts.FILE_RECENT_MORE,
-          enableShortcut: false,
-          onClick: async () => {
-            options.visible.recentSearch = true;
-          }
-        },
+        ...(savedRecentFiles.value.length > 10
+          ? [
+              { type: 'divider' as const },
+              {
+                value: 'more',
+                label: '更多',
+                shortcut: EditorShortcuts.FILE_RECENT_MORE,
+                enableShortcut: false,
+                onClick: async () => {
+                  options.visible.recentSearch = true;
+                }
+              }
+            ]
+          : []),
         { type: 'divider' as const },
         {
           value: 'clear-recent',
@@ -277,7 +281,7 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
       value: 'clear-content',
       label: '清空内容',
       onClick: async () => {
-        const [, confirmed] = await Modal.confirm('确认清空', '将清空当前文件内容，是否继续？');
+        const [, confirmed] = await Modal.delete('将清空当前文件内容，是否继续？', { title: '清空内容' });
         if (!confirmed) return;
 
         const { id } = fileState.value;

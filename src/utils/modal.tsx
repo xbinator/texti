@@ -105,7 +105,7 @@ function FooterButtons({ onCancel, onConfirm, confirmText = '确定', danger = f
       <BButton type="secondary" onClick={onCancel} style={{ marginRight: '8px' }}>
         取消
       </BButton>
-      <BButton type={danger ? 'primary' : 'secondary'} onClick={onConfirm}>
+      <BButton type="primary" onClick={onConfirm} danger={danger}>
         {confirmText}
       </BButton>
     </div>
