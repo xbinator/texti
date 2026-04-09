@@ -62,12 +62,14 @@ function handleAIInputToggle(value: boolean, nextSelectionRange?: SelectionRange
 }
 
 watch(
-  () => visible.aiInput,
-  (isVisible) => {
+  () => [visible.aiInput, selectionRange.from, selectionRange.to] as const,
+  ([isVisible, from, to]) => {
     if (!props.editor) return;
 
-    if (isVisible && selectionRange.from !== selectionRange.to) {
-      setAISelectionHighlight(props.editor, { from: selectionRange.from, to: selectionRange.to });
+    if (isVisible && from !== to) {
+      requestAnimationFrame(() => {
+        setAISelectionHighlight(props.editor, { from, to });
+      });
       return;
     }
 
@@ -166,9 +168,10 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
     }
 
     .ai-selection-highlight {
-      background: rgb(24 144 255 / 22%);
+      color: inherit !important;
+      background: rgba(24, 144, 255, 0.22) !important;
       border-radius: 2px;
-      box-shadow: inset 0 0 0 1px rgb(24 144 255 / 40%);
+      box-shadow: inset 0 0 0 1px rgba(24, 144, 255, 0.4) !important;
     }
 
     .is-editor-empty:first-child::before {
