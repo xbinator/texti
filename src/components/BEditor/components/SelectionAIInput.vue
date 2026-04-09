@@ -1,28 +1,47 @@
 <template>
   <div v-if="editor && visible" ref="wrapperRef" class="ai-input-wrapper" :style="wrapperStyle">
-    <AInput ref="inputRef" v-model:value="inputValue" size="large" placeholder="输入指令..." @keydown="handleKeydown" />
+    <!-- 确认区：生成结果展示，等待用户操作 -->
+    <div v-if="previewText" class="ai-preview">
+      <div class="ai-preview-header">
+        <span class="ai-preview-dot"></span>
+        <span>AI 结果</span>
+      </div>
+      <div class="ai-preview-text">{{ previewText }}</div>
+      <div class="ai-preview-actions">
+        <AButton type="primary" size="small" @click="handleApply">✓ 应用</AButton>
+        <AButton size="small" @click="handleDiscard">✕ 丢弃</AButton>
+      </div>
+    </div>
+
+    <!-- 生成中：隐藏输入框，显示 loading -->
+    <div v-else-if="isLoading" class="ai-loading-row">
+      <Icon icon="svg-spinners:ring-resize" class="ai-loading-icon" />
+      <span class="ai-loading-text">正在生成...</span>
+      <span class="ai-cancel" @click="handleCancel">取消</span>
+    </div>
+
+    <!-- 空闲：正常输入框 -->
+    <AInput v-else ref="inputRef" v-model:value="inputValue" size="large" placeholder="输入指令..." @keydown="handleKeydown" />
   </div>
 </template>
 
 <script setup lang="ts">
+import type { SelectionRange } from '../types';
 import type { Editor } from '@tiptap/vue-3';
 import type { CSSProperties } from 'vue';
-import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { nextTick, ref, watch } from 'vue';
+import { Icon } from '@iconify/vue';
 import { TextSelection } from '@tiptap/pm/state';
-import { onClickOutside } from '@vueuse/core';
-import { aiService } from '@/services/ai';
-import { serviceModelsStorage } from '@/utils/storage';
-import type { ServiceModelConfig } from '@/utils/storage/service-models';
+import { onClickOutside, useEventListener } from '@vueuse/core';
+import { useStream } from '@/hooks/useStream';
+import { useServiceModelStore } from '@/stores/service-model';
+import type { AvailableServiceModelConfig } from '@/stores/service-model';
 import type { ServiceModelUpdatedDetail } from '@/utils/storage/service-models/events';
 import { SERVICE_MODEL_UPDATED_EVENT } from '@/utils/storage/service-models/events';
 
 interface Props {
   editor?: Editor | null;
-  selectionRange?: {
-    from: number;
-    to: number;
-    text: string;
-  };
+  selectionRange?: SelectionRange;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -33,48 +52,34 @@ const props = withDefaults(defineProps<Props>(), {
 const visible = defineModel<boolean>('visible', { default: false });
 
 const inputValue = ref('');
+const previewText = ref('');
 const inputRef = ref<{ focus: () => void } | null>(null);
 const wrapperRef = ref<HTMLElement | null>(null);
 const wrapperStyle = ref<CSSProperties>({});
-const modelConfig = ref<ServiceModelConfig | null>(null);
-const isLoading = ref(false);
+const modelConfig = ref<AvailableServiceModelConfig | null>(null);
+const serviceModelStore = useServiceModelStore();
+const { isLoading, streamText } = useStream();
+
+// ---- Model Config ----
 
 async function loadModelConfig(): Promise<void> {
-  const config = await serviceModelsStorage.getConfig('polish');
-
-  modelConfig.value = config
-    ? {
-        providerId: config.providerId,
-        modelId: config.modelId,
-        customPrompt: config.customPrompt,
-        updatedAt: config.updatedAt
-      }
-    : null;
-}
-
-function refreshModelConfig(): void {
-  loadModelConfig().catch((error: unknown) => {
-    console.error('加载模型配置失败:', error);
-  });
+  modelConfig.value = await serviceModelStore.getAvailableServiceConfig('polish');
 }
 
 function handleServiceModelUpdated(event: Event): void {
-  const customEvent = event as CustomEvent<ServiceModelUpdatedDetail>;
-  if (customEvent.detail.serviceType !== 'polish') return;
-
-  refreshModelConfig();
+  const { detail } = event as CustomEvent<ServiceModelUpdatedDetail>;
+  if (detail.serviceType !== 'polish') return;
+  loadModelConfig();
 }
 
-onClickOutside(wrapperRef, () => {
-  if (!isLoading.value) {
-    visible.value = false;
-  }
-});
+useEventListener(window, SERVICE_MODEL_UPDATED_EVENT, handleServiceModelUpdated);
+
+// ---- Position ----
 
 function updatePosition(): void {
   if (!props.editor) return;
 
-  const { from, to } = props.selectionRange;
+  const { from, to } = props.selectionRange!;
   if (from === to) return;
 
   requestAnimationFrame(() => {
@@ -88,54 +93,39 @@ function updatePosition(): void {
   });
 }
 
+// ---- Selection ----
+
 function restoreSelection(): void {
   if (!props.editor) return;
 
-  const { from, to } = props.selectionRange;
+  const { from, to } = props.selectionRange!;
   if (from === to) return;
 
-  const transaction = props.editor.state.tr.setSelection(TextSelection.create(props.editor.state.doc, from, to));
-  props.editor.view.dispatch(transaction);
+  const { state, view } = props.editor;
+  view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, from, to)));
+}
+
+// ---- AI Submit ----
+
+interface PromptReplacement {
+  pattern: RegExp;
+  replacement: string;
 }
 
 function buildPrompt(selectedText: string, userInput: string): string {
-  const template = modelConfig.value?.customPrompt || '';
+  const template = modelConfig.value?.customPrompt ?? '';
 
-  return template.replace(/\{\{SELECTED_TEXT\}\}/g, selectedText).replace(/\{\{USER_INPUT\}\}/g, userInput);
+  const replacements: PromptReplacement[] = [
+    { pattern: /\{\{SELECTED_TEXT\}\}/g, replacement: selectedText },
+    { pattern: /\{\{USER_INPUT\}\}/g, replacement: userInput }
+  ];
+
+  return replacements.reduce((result, { pattern, replacement }) => result.replace(pattern, replacement), template);
 }
 
-watch(visible, (newValue) => {
-  if (newValue) {
-    refreshModelConfig();
-    updatePosition();
-    nextTick(() => inputRef.value?.focus());
-  } else {
-    inputValue.value = '';
-  }
-});
-
-onMounted(() => {
-  refreshModelConfig();
-  window.addEventListener(SERVICE_MODEL_UPDATED_EVENT, handleServiceModelUpdated);
-});
-
-onUnmounted(() => {
+function reset(): void {
   inputValue.value = '';
-  window.removeEventListener(SERVICE_MODEL_UPDATED_EVENT, handleServiceModelUpdated);
-});
-
-async function readStreamText(stream: AsyncIterable<string>): Promise<string> {
-  const iterator = stream[Symbol.asyncIterator]();
-  async function consume(accumulatedText: string): Promise<string> {
-    const result = await iterator.next();
-    if (result.done) {
-      return accumulatedText;
-    }
-
-    return consume(accumulatedText + result.value);
-  }
-
-  return consume('');
+  previewText.value = '';
 }
 
 async function handleSubmit(): Promise<void> {
@@ -143,57 +133,50 @@ async function handleSubmit(): Promise<void> {
   if (!value || !props.editor) return;
 
   await loadModelConfig();
-  if (!modelConfig.value) return;
 
-  const { from, to } = props.selectionRange;
+  const config = modelConfig.value;
+  if (!config?.providerId || !config?.modelId) return;
+
+  const { from, to, text } = props.selectionRange!;
   if (from === to) return;
 
-  const selectedText = props.selectionRange.text || props.editor.state.doc.textBetween(from, to, '');
-  console.log('🚀 ~ handleSubmit ~ selectedText:', selectedText);
-
-  if (!modelConfig.value.providerId || !modelConfig.value.modelId) {
-    console.error('未配置模型');
-    return;
-  }
-
+  const selectedText = text || props.editor.state.doc.textBetween(from, to, '');
   const prompt = buildPrompt(selectedText, value);
 
-  isLoading.value = true;
-
-  const [error, stream] = await aiService.streamText({
-    providerId: modelConfig.value.providerId,
-    modelId: modelConfig.value.modelId,
+  const accumulatedText = await streamText({
+    providerId: config.providerId,
+    modelId: config.modelId,
     prompt
   });
 
-  if (error) {
-    console.error('AI 调用失败:', error);
-    isLoading.value = false;
+  if (!accumulatedText) {
+    reset();
     return;
   }
 
-  let accumulatedText = '';
+  previewText.value = accumulatedText;
+}
 
-  try {
-    accumulatedText = await readStreamText(stream.textStream);
-  } catch (streamError) {
-    console.error('流式输出错误:', streamError);
-    isLoading.value = false;
-    return;
-  }
+function handleApply(): void {
+  if (!props.editor || !previewText.value) return;
 
+  const { from, to } = props.selectionRange!;
   restoreSelection();
-  props.editor.chain().focus().insertContentAt({ from, to }, accumulatedText).run();
+  props.editor.chain().focus().insertContentAt({ from, to }, previewText.value).run();
   props.editor.commands.focus();
-  isLoading.value = false;
-  inputValue.value = '';
+
+  reset();
   visible.value = false;
+}
+
+function handleDiscard(): void {
+  previewText.value = '';
+  nextTick(() => inputRef.value?.focus());
 }
 
 function handleCancel(): void {
   if (isLoading.value) return;
-
-  inputValue.value = '';
+  reset();
   visible.value = false;
   props.editor?.commands.focus();
 }
@@ -201,10 +184,7 @@ function handleCancel(): void {
 function handleKeydown(event: KeyboardEvent): void {
   if (event.key === 'Enter') {
     event.preventDefault();
-    handleSubmit().catch((error: unknown) => {
-      console.error('处理 AI 输入提交失败:', error);
-    });
-    return;
+    handleSubmit();
   }
 
   if (event.key === 'Escape') {
@@ -212,6 +192,26 @@ function handleKeydown(event: KeyboardEvent): void {
     handleCancel();
   }
 }
+
+// ---- Lifecycle ----
+
+onClickOutside(wrapperRef, () => {
+  if (!isLoading.value && !previewText.value) {
+    visible.value = false;
+  }
+});
+
+watch(visible, (newValue) => {
+  if (newValue) {
+    loadModelConfig();
+    updatePosition();
+    nextTick(() => inputRef.value?.focus());
+  } else {
+    reset();
+  }
+});
+
+loadModelConfig();
 </script>
 
 <style lang="less" scoped>
@@ -220,11 +220,86 @@ function handleKeydown(event: KeyboardEvent): void {
   left: 50px;
   z-index: 1000;
   display: flex;
+  flex-direction: column;
+  gap: 6px;
   width: calc(100% - 100px);
-  padding: 4px;
+  padding: 6px;
   background: var(--bg-primary);
   border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border-radius: 10px;
   box-shadow: var(--shadow-lg);
+}
+
+// ---- 预览确认区 ----
+.ai-preview {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-secondary);
+  border-radius: 8px;
+}
+
+.ai-preview-header {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-tertiary);
+}
+
+.ai-preview-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  background: var(--color-success);
+  border-radius: 50%;
+}
+
+.ai-preview-text {
+  padding: 9px 12px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+
+.ai-preview-actions {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border-tertiary);
+}
+
+// ---- 生成中 loading 行 ----
+.ai-loading-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.ai-loading-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.ai-loading-text {
+  flex: 1;
+}
+
+.ai-cancel {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.ai-cancel:hover {
+  color: var(--text-secondary);
 }
 </style>

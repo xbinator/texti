@@ -12,15 +12,16 @@
 
     <CurrentBlockMenu :editor="props.editor" />
     <SelectionToolbar :editor="props.editor" @ai-input-toggle="handleAIInputToggle" />
-    <SelectionAIInput v-model:visible="visible.aiInput" :editor="props.editor" :selection-range="selectionRange" />
+    <SelectionAIInput v-model:visible="aiInputVisible" :editor="props.editor" :selection-range="selectionRange" />
     <EditorContent :key="editorId" :editor="props.editor ?? undefined" class="b-editor-content" />
   </div>
 </template>
 
 <script setup lang="ts">
 import type { FrontMatterData } from '../hooks/useFrontMatter';
+import type { SelectionRange } from '../types';
 import type { Editor } from '@tiptap/vue-3';
-import { reactive, watch } from 'vue';
+import { ref, watch } from 'vue';
 import { EditorContent } from '@tiptap/vue-3';
 import { clearAISelectionHighlight, setAISelectionHighlight } from '../extensions/AISelectionHighlight';
 import CurrentBlockMenu from './CurrentBlockMenu.vue';
@@ -29,15 +30,12 @@ import SelectionAIInput from './SelectionAIInput.vue';
 import SelectionToolbar from './SelectionToolbar.vue';
 
 interface Props {
+  // Editor Instance
   editor?: Editor | null;
+  // Editor ID
   editorId?: string;
+  // 是否显示 Front Matter 卡片
   shouldShowFrontMatterCard?: boolean;
-}
-
-interface SelectionRange {
-  from: number;
-  to: number;
-  text: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -48,88 +46,61 @@ const props = withDefaults(defineProps<Props>(), {
 
 const frontMatterData = defineModel<FrontMatterData>('frontMatterData', { default: () => ({}) });
 
-const visible = reactive({ aiInput: false });
-const selectionRange = reactive<SelectionRange>({ from: 0, to: 0, text: '' });
+const aiInputVisible = ref(false);
+const selectionRange = ref<SelectionRange>({ from: 0, to: 0, text: '' });
+
+// ---- AI Input ----
 
 function handleAIInputToggle(value: boolean, nextSelectionRange?: SelectionRange): void {
   if (nextSelectionRange) {
-    selectionRange.from = nextSelectionRange.from;
-    selectionRange.to = nextSelectionRange.to;
-    selectionRange.text = nextSelectionRange.text;
+    selectionRange.value = { ...nextSelectionRange };
   }
-
-  visible.aiInput = value;
+  aiInputVisible.value = value;
 }
 
 watch(
-  () => [visible.aiInput, selectionRange.from, selectionRange.to] as const,
+  () => [aiInputVisible.value, selectionRange.value.from, selectionRange.value.to],
   ([isVisible, from, to]) => {
     if (!props.editor) return;
 
     if (isVisible && from !== to) {
       requestAnimationFrame(() => {
-        setAISelectionHighlight(props.editor, { from, to });
+        setAISelectionHighlight(props.editor, { from: from as number, to: to as number });
       });
-      return;
+    } else {
+      clearAISelectionHighlight(props.editor);
     }
-
-    clearAISelectionHighlight(props.editor);
   }
 );
 
+// ---- Front Matter ----
 function handleFrontMatterUpdate(data: FrontMatterData): void {
   frontMatterData.value = { ...data };
 }
 
 function handleFrontMatterFieldUpdate(key: string, value: unknown): void {
-  frontMatterData.value = {
-    ...frontMatterData.value,
-    [key]: value
-  };
+  frontMatterData.value = { ...frontMatterData.value, [key]: value };
 }
 
 function handleFrontMatterFieldRemove(key: string): void {
-  const nextData: FrontMatterData = { ...frontMatterData.value };
-  delete nextData[key];
-  frontMatterData.value = nextData;
+  const rest = Object.fromEntries(Object.entries(frontMatterData.value).filter(([k]) => k !== key));
+
+  frontMatterData.value = rest;
 }
 
 function handleFrontMatterFieldAdd(key: string, value: unknown): void {
-  if (frontMatterData.value[key] !== undefined) {
-    return;
-  }
-
-  frontMatterData.value = {
-    ...frontMatterData.value,
-    [key]: value
-  };
+  if (key in frontMatterData.value) return;
+  frontMatterData.value = { ...frontMatterData.value, [key]: value };
 }
 
-function undo(): void {
-  props.editor?.commands.undo();
-}
+// ---- Editor Commands ----
 
-function redo(): void {
-  props.editor?.commands.redo();
-}
-
-function canUndo(): boolean {
-  const can = props.editor?.can();
-  return Boolean(can?.undo());
-}
-
-function canRedo(): boolean {
-  const can = props.editor?.can();
-  return Boolean(can?.redo());
-}
-
-function focusEditor(): void {
-  props.editor?.commands.focus();
-}
-
-function focusEditorAtStart(): void {
-  props.editor?.commands.focus('start');
-}
+const undo = () => props.editor?.commands.undo();
+const redo = () => props.editor?.commands.redo();
+const canUndo = () => Boolean(props.editor?.can().undo());
+const canRedo = () => Boolean(props.editor?.can().redo());
+const focusEditor = () => props.editor?.commands.focus();
+const focusEditorAtStart = () => props.editor?.commands.focus('start');
 
 defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
 </script>
@@ -147,7 +118,6 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
     min-height: 100%;
     padding: 20px 40px 90px;
     margin: 0;
-    font-size: 14px;
     line-height: 1.74;
     color: var(--editor-text);
     caret-color: var(--editor-caret);
@@ -168,10 +138,8 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
     }
 
     .ai-selection-highlight {
-      color: inherit !important;
-      background: rgba(24, 144, 255, 0.22) !important;
-      border-radius: 2px;
-      box-shadow: inset 0 0 0 1px rgba(24, 144, 255, 0.4) !important;
+      color: var(--selection-color);
+      background: var(--selection-bg);
     }
 
     .is-editor-empty:first-child::before {
