@@ -2,6 +2,7 @@ import { computed, ref } from 'vue';
 import type { BEditorViewMode } from '@/components/BEditor/types';
 import type { Props as ToolbarProps } from '@/components/Toolbar.vue';
 import { useSettingStore } from '@/stores/setting';
+import { local } from '@/utils/storage/_base';
 import { EditorShortcuts } from '../constants/shortcuts';
 
 const STORAGE_KEY = 'editor_viewState';
@@ -12,20 +13,11 @@ interface EditorViewState {
 }
 
 function loadViewState(): EditorViewState {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) {
-    try {
-      const state = JSON.parse(saved) as EditorViewState;
-      return state;
-    } catch {
-      //
-    }
-  }
-  return { mode: 'rich', showOutline: true };
+  return local.getItem<EditorViewState>(STORAGE_KEY) ?? { mode: 'rich', showOutline: true };
 }
 
 function saveViewState(state: EditorViewState): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  local.setItem(STORAGE_KEY, state);
 }
 
 export function useViewActive() {
