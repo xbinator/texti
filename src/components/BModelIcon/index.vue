@@ -12,9 +12,13 @@ import { useSettingStore } from '@/stores/setting';
 type IconTheme = 'light' | 'dark';
 
 interface Props {
+  // 模型提供方
   provider?: string;
+  // 模型名称
   model?: string;
+  // 图标大小
   size?: number;
+  // 图标替代文本
   alt?: string;
 }
 
@@ -64,7 +68,8 @@ const modelIcons: Record<string, string> = {
   mimo: 'xiaomimimo',
   minimax: 'minimax-color',
   longcat: 'longcat-color',
-  hunyuan: 'hunyuan-color'
+  hunyuan: 'hunyuan-color',
+  deepseek: 'deepseek-color'
 };
 
 const iconId = computed(() => {

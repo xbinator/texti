@@ -56,13 +56,7 @@ async function handleTestClick(): Promise<void> {
 
   testing.value = true;
 
-  const [error, result] = await aiService.generateText({
-    providerId: dataItem.value.id,
-    modelId: testModel.value,
-    prompt: 'Hello',
-    maxTokens: 10,
-    ignoreEnabled: true
-  });
+  const [error, result] = await aiService.generateText({ providerId: dataItem.value.id, modelId: testModel.value, prompt: 'Hello', ignoreEnabled: true });
 
   testing.value = false;
 
