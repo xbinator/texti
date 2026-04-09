@@ -111,6 +111,7 @@ function handleClick(event: MouseEvent) {
 
 <style scoped lang="less">
 .b-button {
+  position: relative;
   display: inline-flex;
   gap: 8px;
   align-items: center;
@@ -385,103 +386,6 @@ function handleClick(event: MouseEvent) {
 
   100% {
     transform: rotate(360deg);
-  }
-}
-
-// 深色模式
-:deep(.dark) {
-  .b-button {
-    &--secondary {
-      color: var(--text-primary);
-      background-color: var(--bg-secondary);
-
-      &:hover:not(.b-button--disabled, .b-button--loading) {
-        background-color: var(--bg-active);
-      }
-    }
-
-    &--outline {
-      color: var(--color-primary);
-      border-color: var(--color-primary-border);
-
-      &:hover:not(.b-button--disabled, .b-button--loading) {
-        background-color: var(--color-primary-bg);
-        border-color: var(--color-primary);
-      }
-    }
-
-    &--text {
-      color: var(--color-primary);
-
-      &:hover:not(.b-button--disabled, .b-button--loading) {
-        background-color: var(--color-primary-bg);
-      }
-    }
-
-    &--danger {
-      &.b-button--primary {
-        color: #fff;
-        background-color: var(--color-danger);
-
-        &:hover:not(.b-button--disabled, .b-button--loading) {
-          background-color: var(--color-danger-hover);
-        }
-
-        &:active:not(.b-button--disabled, .b-button--loading) {
-          background-color: var(--color-danger-active);
-        }
-      }
-
-      &.b-button--secondary {
-        color: var(--color-danger);
-        background-color: var(--bg-secondary);
-
-        &:hover:not(.b-button--disabled, .b-button--loading) {
-          background-color: var(--bg-active);
-        }
-
-        &:active:not(.b-button--disabled, .b-button--loading) {
-          background-color: var(--bg-selected);
-        }
-      }
-
-      &.b-button--outline {
-        color: var(--color-danger);
-        border-color: var(--color-danger-border);
-
-        &:hover:not(.b-button--disabled, .b-button--loading) {
-          background-color: var(--color-danger-bg);
-          border-color: var(--color-danger);
-        }
-      }
-
-      &.b-button--text {
-        color: var(--color-danger);
-
-        &:hover:not(.b-button--disabled, .b-button--loading) {
-          background-color: var(--color-danger-bg);
-        }
-      }
-
-      .b-button__loading-spinner {
-        border-color: rgb(255 255 255 / 10%);
-        border-top-color: #fff;
-      }
-
-      &.b-button--outline .b-button__loading-spinner,
-      &.b-button--text .b-button__loading-spinner,
-      &.b-button--secondary .b-button__loading-spinner {
-        border-color: rgb(255 255 255 / 10%);
-        border-top-color: var(--color-danger);
-      }
-    }
-
-    &--secondary .b-button__loading-spinner,
-    &--outline .b-button__loading-spinner,
-    &--text .b-button__loading-spinner {
-      border-color: rgb(255 255 255 / 10%);
-      border-top-color: var(--color-primary);
-    }
   }
 }
 </style>
