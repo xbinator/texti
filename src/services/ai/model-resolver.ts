@@ -1,5 +1,5 @@
 import type { ResolvedProviderModel } from './types';
-import { providerStorage } from '@/utils/storage';
+import { providerStorage } from '@/shared/storage';
 import { AI_ERROR_CODE, AIError } from './errors';
 
 export class AIModelResolver {

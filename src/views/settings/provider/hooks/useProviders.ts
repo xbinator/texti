@@ -5,8 +5,8 @@
 import type { Provider, Model } from '../types';
 import { computed, ref } from 'vue';
 import { cloneDeep } from 'lodash-es';
-import type { CustomProviderPayload } from '@/utils/storage';
-import { DEFAULT_PROVIDERS, providerStorage } from '@/utils/storage';
+import type { CustomProviderPayload } from '@/shared/storage';
+import { DEFAULT_PROVIDERS, providerStorage } from '@/shared/storage';
 
 /**
  * 模块级共享的服务商列表状态

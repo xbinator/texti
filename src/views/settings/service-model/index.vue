@@ -20,6 +20,7 @@
 </template>
 
 <script setup lang="ts">
+import BScrollbar from '@/components/BScrollbar/index.vue';
 import ServiceConfig from './components/ServiceConfig.vue';
 import { POLISH_DEFAULT_PROMPT, POLISH_SERVICE_CONFIG_OPTIONS } from './constants';
 </script>

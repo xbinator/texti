@@ -2,8 +2,8 @@ import type { EditorFile } from '../types';
 import type { Ref } from 'vue';
 import { computed } from 'vue';
 import { marked } from 'marked';
-import BEditor from '@/components/BEditor/index.vue';
-import type { Props as ToolbarProps } from '@/components/Toolbar.vue';
+import type { BEditorPublicInstance } from '@/components/BEditor/types';
+import type { ToolbarOptions } from '@/components/Toolbar/types';
 import { useClipboard } from '@/hooks/useClipboard';
 import { EditorShortcuts } from '../constants/shortcuts';
 
@@ -11,7 +11,7 @@ interface UseEditActiveOptions {
   /** 查找栏是否可见 */
   visible: { find: boolean };
   /** 编辑器实例 */
-  editorInstance: Ref<InstanceType<typeof BEditor> | null>;
+  editorInstance: Ref<BEditorPublicInstance | null>;
 }
 
 export function useEditActive(fileState: Ref<EditorFile>, options: UseEditActiveOptions) {
@@ -37,7 +37,7 @@ export function useEditActive(fileState: Ref<EditorFile>, options: UseEditActive
     return documentNode.body.textContent?.trim() ?? '';
   }
 
-  const toolbarEditOptions = computed<ToolbarProps['options']>(() => {
+  const toolbarEditOptions = computed<ToolbarOptions>(() => {
     const { content } = fileState.value;
     const canCopy = Boolean(content.trim());
     return [

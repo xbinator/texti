@@ -30,31 +30,9 @@
 </template>
 
 <script setup lang="ts">
+import type { BButtonProps as Props } from './types';
 import { computed, useSlots } from 'vue';
 import { Icon } from '@iconify/vue';
-
-interface Props {
-  /** 按钮类型 */
-  type?: 'primary' | 'secondary' | 'outline' | 'text';
-  /** 按钮尺寸 */
-  size?: 'small' | 'middle' | 'large';
-  /** 是否禁用 */
-  disabled?: boolean;
-  /** 是否加载中 */
-  loading?: boolean;
-  /** 是否显示为块级元素 */
-  block?: boolean;
-  /** 是否圆角 */
-  rounded?: boolean;
-  /** 是否方形 */
-  square?: boolean;
-  /** 图标 */
-  icon?: string;
-  /** 按钮文本 */
-  text?: string;
-  /** 危险按钮 */
-  danger?: boolean;
-}
 
 const props = withDefaults(defineProps<Props>(), {
   type: 'primary',

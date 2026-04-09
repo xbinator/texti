@@ -36,6 +36,7 @@
 
 <script setup lang="ts">
 import type { Model, Provider } from './types';
+import type { ComputedRef, Ref } from 'vue';
 import { ref, computed, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { Icon } from '@iconify/vue';
@@ -51,19 +52,21 @@ import { useProviders } from './hooks/useProviders';
 const router = useRouter();
 const route = useRoute();
 
-const providerId = computed(() => route.params.provider as string);
+const providerId: ComputedRef<string> = computed(() => route.params.provider as string);
 
 const { getProviderById, loadProviders, toggleProvider, saveProviderConfig } = useProviders();
 
-const provider = ref<Provider | null>(null);
-const models = ref<Model[]>([]);
-const isLoadingProvider = ref(false);
-const modalVisible = ref<boolean>(false);
+const provider: Ref<Provider | null> = ref(null);
+const models: Ref<Model[]> = ref([]);
+const isLoadingProvider: Ref<boolean> = ref(false);
+const modalVisible: Ref<boolean> = ref(false);
 
-const headerTitle = computed(() => (provider.value ? `${provider.value.name} 配置` : '配置'));
+const headerTitle: ComputedRef<string> = computed(() => (provider.value ? `${provider.value.name} 配置` : '配置'));
 
-const providerTypeLabel = computed(() => {
-  if (!provider.value) return '';
+const providerTypeLabel: ComputedRef<string> = computed((): string => {
+  if (!provider.value) {
+    return '';
+  }
 
   return providerFormatLabels[provider.value.type] || provider.value.type;
 });
@@ -80,6 +83,10 @@ async function loadProvider(): Promise<void> {
   isLoadingProvider.value = false;
 }
 
+function syncProviderState(): void {
+  loadProvider().catch(() => undefined);
+}
+
 const persistProviderConfig = debounce(async () => {
   if (!provider.value || isLoadingProvider.value) {
     return;
@@ -88,11 +95,19 @@ const persistProviderConfig = debounce(async () => {
   await saveProviderConfig(provider.value.id, { apiKey: provider.value.apiKey, baseUrl: provider.value.baseUrl });
 }, 300);
 
-watch(providerId, () => loadProvider(), { immediate: true });
+watch(
+  providerId,
+  (): void => {
+    syncProviderState();
+  },
+  { immediate: true }
+);
 
 watch(
   () => [provider.value?.apiKey, provider.value?.baseUrl],
-  () => persistProviderConfig()
+  (): void => {
+    persistProviderConfig();
+  }
 );
 
 function handleBack(): void {

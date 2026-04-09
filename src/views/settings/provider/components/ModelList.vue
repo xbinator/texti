@@ -44,7 +44,7 @@ import { Icon } from '@iconify/vue';
 import { message } from 'ant-design-vue';
 import BButton from '@/components/BButton/index.vue';
 import BModelIcon from '@/components/BModelIcon/index.vue';
-import type { ProviderModel } from '@/utils/storage/providers/types';
+import type { ProviderModel } from '@/shared/storage/providers/types';
 import { useProviders } from '../hooks/useProviders';
 import ModelModal from './ModelModal.vue';
 

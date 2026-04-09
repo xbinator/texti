@@ -53,11 +53,11 @@ import { Icon } from '@iconify/vue';
 import BPromptEditor from '@/components/BPromptEditor/index.vue';
 import type { VariableOptionGroup } from '@/components/BPromptEditor/types';
 import BSelect from '@/components/BSelect/index.vue';
+import { providerStorage, serviceModelsStorage } from '@/shared/storage';
+import type { Provider } from '@/shared/storage';
+import type { ServiceModelType } from '@/shared/storage/service-models';
+import { dispatchServiceModelUpdated } from '@/shared/storage/service-models/events';
 import { useServiceModelStore } from '@/stores/service-model';
-import { providerStorage, serviceModelsStorage } from '@/utils/storage';
-import type { Provider } from '@/utils/storage';
-import type { ServiceModelType } from '@/utils/storage/service-models';
-import { dispatchServiceModelUpdated } from '@/utils/storage/service-models/events';
 
 interface Props {
   serviceType: ServiceModelType;

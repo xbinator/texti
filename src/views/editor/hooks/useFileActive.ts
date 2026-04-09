@@ -3,11 +3,11 @@ import type { EditorFile } from '../types';
 import type { Ref } from 'vue';
 import { computed, nextTick, onMounted, ref } from 'vue';
 import { customAlphabet } from 'nanoid';
-import type { Props as ToolbarProps } from '@/components/Toolbar.vue';
-import { isTauri, isWeb } from '@/utils/is';
+import type { ToolbarOptions } from '@/components/Toolbar/types';
+import { native } from '@/shared/platform';
+import { isElectron, isWeb } from '@/shared/platform/env';
+import { recentFilesStorage, type StoredFile } from '@/shared/storage';
 import { Modal } from '@/utils/modal';
-import { native } from '@/utils/native';
-import { recentFilesStorage, type StoredFile } from '@/utils/storage';
 import { EditorShortcuts } from '../constants/shortcuts';
 
 interface UseFileActiveOptions {
@@ -89,7 +89,7 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
     setFileState(updated);
   }
 
-  async function tauriSaveAs(): Promise<void> {
+  async function electronSaveAs(): Promise<void> {
     const { id, name, ext, content } = fileState.value;
     const defaultPath = `${name || '未命名'}.${ext || 'md'}`;
     const savedPath = await native.saveFile(content, undefined, { defaultPath });
@@ -126,7 +126,7 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
     await loadRecentFiles();
   }
 
-  const toolbarFileOptions = computed<ToolbarProps['options']>(() => [
+  const toolbarFileOptions = computed<ToolbarOptions>(() => [
     {
       value: 'new',
       label: '新建',
@@ -232,11 +232,11 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
       onClick: async () => {
         const { id, path, name = '未命名', ext = 'md', content } = fileState.value;
 
-        if (isTauri()) {
+        if (isElectron()) {
           if (path) {
             await native.writeFile(path, content);
           } else {
-            await tauriSaveAs();
+            await electronSaveAs();
           }
         } else if (isWeb()) {
           fileState.value = { ...fileState.value, name, ext, path: path || `${name}.${ext}` };
@@ -253,8 +253,8 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
       onClick: async () => {
         const { name, ext, content } = fileState.value;
 
-        if (isTauri()) {
-          await tauriSaveAs();
+        if (isElectron()) {
+          await electronSaveAs();
         } else if (isWeb()) {
           const defaultPath = `${name || '未命名'}.${ext || 'md'}`;
           await native.saveFile(content, undefined, { defaultPath });

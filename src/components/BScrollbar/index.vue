@@ -157,6 +157,19 @@ function update() {
   if (showHorizontal.value) updateX();
 }
 
+let resizeFrame: number | null = null;
+
+function scheduleUpdate(): void {
+  if (resizeFrame !== null) {
+    cancelAnimationFrame(resizeFrame);
+  }
+
+  resizeFrame = requestAnimationFrame(() => {
+    update();
+    resizeFrame = null;
+  });
+}
+
 /* ================= scroll ================= */
 let frame: number | null = null;
 
@@ -237,16 +250,32 @@ let ro: ResizeObserver | null = null;
 
 onMounted(async () => {
   await nextTick();
-  update();
+  scheduleUpdate();
 
   if (view.value) {
-    ro = new ResizeObserver(update);
+    ro = new ResizeObserver(() => {
+      scheduleUpdate();
+    });
     ro.observe(view.value);
   }
 });
 
 onUnmounted(() => {
-  if (ro && view.value) ro.unobserve(view.value);
+  if (frame !== null) {
+    cancelAnimationFrame(frame);
+    frame = null;
+  }
+
+  if (resizeFrame !== null) {
+    cancelAnimationFrame(resizeFrame);
+    resizeFrame = null;
+  }
+
+  if (ro && view.value) {
+    ro.unobserve(view.value);
+  }
+
+  ro?.disconnect();
 });
 
 function getWrapElement(): HTMLDivElement | null {

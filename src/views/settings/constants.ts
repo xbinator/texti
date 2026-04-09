@@ -1,4 +1,4 @@
-import type { ProviderRequestFormat } from '@/utils/storage';
+import type { ProviderRequestFormat } from '@/shared/storage';
 
 export type SettingsMenuKey = 'provider' | 'service-model';
 

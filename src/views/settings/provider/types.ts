@@ -1,4 +1,4 @@
-import type { Provider, ProviderModel } from '@/utils/storage';
+import type { Provider, ProviderModel } from '@/shared/storage';
 
 export type { Provider };
 export type Model = ProviderModel;

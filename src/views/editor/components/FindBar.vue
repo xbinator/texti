@@ -27,25 +27,19 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
 import { Icon } from '@iconify/vue';
-import type BEditor from '@/components/BEditor/index.vue';
+import type { BEditorPublicInstance, EditorSearchState as SearchState } from '@/components/BEditor/types';
 import { useShortcuts } from '@/hooks/useShortcuts';
 import { EditorShortcuts } from '../constants/shortcuts';
 
 interface Props {
   content: string;
-  editorInstance: InstanceType<typeof BEditor> | null;
+  editorInstance: BEditorPublicInstance | null;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   content: '',
   editorInstance: null
 });
-
-interface SearchState {
-  currentIndex: number;
-  matchCount: number;
-  term: string;
-}
 
 const visible = defineModel<boolean>('visible', { default: false });
 const inputRef = ref<HTMLInputElement | null>(null);

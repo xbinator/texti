@@ -2,13 +2,13 @@
   <div class="editor-layout">
     <div class="editor-header">
       <div class="header-left">
-        <Toolbar :title="'文件'" :options="toolbarFileOptions" />
+        <BToolbar :title="'文件'" :options="toolbarFileOptions" />
 
-        <Toolbar :title="'编辑'" :options="toolbarEditOptions" />
+        <BToolbar :title="'编辑'" :options="toolbarEditOptions" />
 
-        <Toolbar :title="'视图'" show-selected-check :options="toolbarViewOptions" />
+        <BToolbar :title="'视图'" show-selected-check :options="toolbarViewOptions" />
 
-        <Toolbar :title="'帮助'" :options="toolbarHelpOptions" />
+        <BToolbar :title="'帮助'" :options="toolbarHelpOptions" />
       </div>
 
       <div class="header-right">
@@ -43,7 +43,7 @@ import { reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import BEditor from '@/components/BEditor/index.vue';
-import Toolbar from '@/components/Toolbar.vue';
+import type { BEditorPublicInstance } from '@/components/BEditor/types';
 import FindBar from './components/FindBar.vue';
 import SearchRecent from './components/SearchRecent.vue';
 import ShortcutsHelp from './components/ShortcutsHelp.vue';
@@ -54,7 +54,7 @@ import { useHelp } from './hooks/useHelp';
 import { useViewActive } from './hooks/useViewActive';
 
 const fileState = ref<EditorFile>({ id: '', path: '', content: '', name: '', ext: 'md' });
-const editorInstance = ref<InstanceType<typeof BEditor> | null>(null);
+const editorInstance = ref<BEditorPublicInstance | null>(null);
 const router = useRouter();
 
 const visible = reactive({ find: false, recentSearch: false, shortcuts: false });

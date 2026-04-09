@@ -1,5 +1,5 @@
 import { computed } from 'vue';
-import type { Props as ToolbarProps } from '@/components/Toolbar.vue';
+import type { ToolbarOptions } from '@/components/Toolbar/types';
 
 interface UseHelpOptions {
   onShowShortcuts: () => void;
@@ -8,7 +8,7 @@ interface UseHelpOptions {
 export function useHelp(options: UseHelpOptions) {
   const { onShowShortcuts } = options;
 
-  const toolbarHelpOptions = computed<ToolbarProps['options']>(() => [
+  const toolbarHelpOptions = computed<ToolbarOptions>(() => [
     {
       value: 'shortcuts',
       label: '快捷键',

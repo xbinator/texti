@@ -1,8 +1,10 @@
-import type { VNode } from 'vue';
+import type { DefineComponent, VNode } from 'vue';
 import { createApp, h, ref } from 'vue';
 import { Input } from 'ant-design-vue';
 import BButton from '@/components/BButton/index.vue';
+import type { BButtonProps } from '@/components/BButton/types';
 import BModal from '@/components/BModal/index.vue';
+import type { BModalProps } from '@/components/BModal/types';
 
 // ——— 类型 ———
 
@@ -47,16 +49,28 @@ interface InputOptions {
 
 type DeleteOptions = Pick<ModalOptions, 'title'>;
 
+type BModalComponentProps = BModalProps & {
+  onClose?: () => void;
+  'onUpdate:open'?: (val: boolean) => void;
+};
+
+type BButtonComponentProps = BButtonProps & {
+  onClick?: () => void;
+};
+
+const BModalComponent = BModal as DefineComponent<BModalComponentProps>;
+const BButtonComponent = BButton as DefineComponent<BButtonComponentProps>;
+
 // ——— RenderModal ———
 
 function RenderModal({ open, content, footer, onClose, title, width, ...rest }: RenderModalProps) {
   return (
-    <BModal open={open} title={title} width={width || 400} closable maskClosable onClose={onClose} {...rest}>
+    <BModalComponent open={open} title={title} width={width || 400} closable maskClosable onClose={onClose} {...rest}>
       {{
         default: content,
         footer: footer ?? undefined
       }}
-    </BModal>
+    </BModalComponent>
   );
 }
 
@@ -102,12 +116,12 @@ function createModalInstance(renderModal: (props: { open: boolean; onClose: () =
 function FooterButtons({ onCancel, onConfirm, confirmText = '确定', danger = false }: FooterButtonsProps) {
   return (
     <div style={{ textAlign: 'right' }}>
-      <BButton type="secondary" onClick={onCancel} style={{ marginRight: '8px' }}>
+      <BButtonComponent type="secondary" onClick={onCancel} style={{ marginRight: '8px' }}>
         取消
-      </BButton>
-      <BButton type="primary" onClick={onConfirm} danger={danger}>
+      </BButtonComponent>
+      <BButtonComponent type="primary" onClick={onConfirm} danger={danger}>
         {confirmText}
-      </BButton>
+      </BButtonComponent>
     </div>
   );
 }

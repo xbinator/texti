@@ -28,6 +28,7 @@
 </template>
 
 <script setup lang="ts">
+import type { EditorController } from './hooks/useEditorController';
 import type { FrontMatterData } from './hooks/useFrontMatter';
 import type { BEditorViewMode } from './types';
 import { computed, ref, toRef } from 'vue';
@@ -74,8 +75,8 @@ const editorContent = defineModel<string>('value', { default: '' });
 
 const editorTitle = defineModel<string>('title', { default: '' });
 
-const richEditorPaneRef = ref<InstanceType<typeof RichEditorPane> | null>(null);
-const sourceEditorPaneRef = ref<InstanceType<typeof SourceEditorPane> | null>(null);
+const richEditorPaneRef = ref<EditorController | null>(null);
+const sourceEditorPaneRef = ref<Pick<EditorController, 'focusEditor' | 'focusEditorAtStart'> | null>(null);
 
 const { activeAnchorId, handleChangeAnchor, handleEditorScroll } = useAnchors(layoutRef);
 

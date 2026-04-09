@@ -30,8 +30,8 @@ import type { ModelSubmitResult } from '../types';
 import type { Rule } from 'ant-design-vue/es/form';
 import { computed, reactive, ref, watch } from 'vue';
 import { message, Form } from 'ant-design-vue';
+import type { ProviderModel } from '@/shared/storage/providers/types';
 import { asyncTo } from '@/utils/asyncTo';
-import type { ProviderModel } from '@/utils/storage/providers/types';
 import { useProviders } from '../hooks/useProviders';
 
 interface Props {

@@ -8,3 +8,22 @@ export interface SelectionRange {
   // 选中的文本内容
   text: string;
 }
+
+export interface EditorSearchState {
+  currentIndex: number;
+  matchCount: number;
+  term: string;
+}
+
+export interface BEditorPublicInstance {
+  undo: () => void;
+  redo: () => void;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
+  setSearchTerm: (term: string) => void;
+  findNext: () => void;
+  findPrevious: () => void;
+  clearSearch: () => void;
+  focusEditor: () => void;
+  getSearchState: () => EditorSearchState;
+}

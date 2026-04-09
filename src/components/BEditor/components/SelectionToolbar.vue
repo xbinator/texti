@@ -29,9 +29,9 @@ import { computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { BubbleMenu } from '@tiptap/vue-3/menus';
 import { useEventListener } from '@vueuse/core';
+import type { ServiceModelUpdatedDetail } from '@/shared/storage/service-models/events';
+import { SERVICE_MODEL_UPDATED_EVENT } from '@/shared/storage/service-models/events';
 import { useServiceModelStore } from '@/stores/service-model';
-import type { ServiceModelUpdatedDetail } from '@/utils/storage/service-models/events';
-import { SERVICE_MODEL_UPDATED_EVENT } from '@/utils/storage/service-models/events';
 
 interface SelectionRange {
   from: number;

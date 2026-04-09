@@ -1,5 +1,6 @@
 import type { AnyExtension, JSONContent, MarkdownParseHelpers, MarkdownParseResult, MarkdownToken, Editor } from '@tiptap/core';
-import { Ref } from 'vue';
+import type { NodeViewProps } from '@tiptap/vue-3';
+import type { Component, Ref } from 'vue';
 import _Code from '@tiptap/extension-code';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { Color } from '@tiptap/extension-color';
@@ -72,7 +73,7 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
   const Code = _Code.extend({ excludes: '' });
 
   const CodeBlock = CodeBlockLowlight.extend({
-    addNodeView: () => VueNodeViewRenderer(CodeBlockView)
+    addNodeView: () => VueNodeViewRenderer(CodeBlockView as unknown as Component<NodeViewProps>)
   }).configure({ lowlight });
 
   const Heading = BaseHeading.extend({

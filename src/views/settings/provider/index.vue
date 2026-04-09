@@ -29,6 +29,7 @@
 
 <script setup lang="ts">
 import type { Provider } from './types';
+import type { ComputedRef, Ref } from 'vue';
 import { ref, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { Icon } from '@iconify/vue';
@@ -37,17 +38,17 @@ import ProviderCard from './components/ProviderCard.vue';
 import { useProviders } from './hooks/useProviders';
 
 const route = useRoute();
-const searchText = ref<string>('');
+const searchText: Ref<string> = ref('');
 const { providers, toggleProvider } = useProviders();
 
-const enabledCount = computed(() => providers.value.filter((provider: Provider) => provider.isEnabled).length);
+const enabledCount: ComputedRef<number> = computed(() => providers.value.filter((provider: Provider) => provider.isEnabled).length);
 
-const activeCategory = computed(() => {
+const activeCategory: ComputedRef<string> = computed((): string => {
   const category = route.query.category as string;
   return category || 'all';
 });
 
-const filteredProviders = computed(() => {
+const filteredProviders: ComputedRef<Provider[]> = computed((): Provider[] => {
   let result = providers.value;
 
   if (activeCategory.value === 'enabled') {

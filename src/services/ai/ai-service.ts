@@ -1,7 +1,7 @@
 import type { AIProviderConfig, AIServiceResult, GenerateTextInput, GenerateTextResult } from './types';
 import type { StreamTextResult } from 'ai';
+import type { Provider } from '@/shared/storage';
 import { asyncTo } from '@/utils/asyncTo';
-import type { Provider } from '@/utils/storage';
 import { toAIServiceError } from './errors';
 import { AIModelResolver } from './model-resolver';
 import { AIProviderRegistry } from './provider-registry';

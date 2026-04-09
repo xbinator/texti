@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { local } from '@/utils/storage/_base';
+import { local } from '@/shared/storage/base';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 

@@ -53,8 +53,8 @@ import type { Rule } from 'ant-design-vue/es/form';
 import { computed, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { message, Form } from 'ant-design-vue';
+import type { ProviderRequestFormat } from '@/shared/storage';
 import { asyncTo } from '@/utils/asyncTo';
-import type { ProviderRequestFormat } from '@/utils/storage';
 import { providerFormatOptions } from '../../constants';
 import { useProviders } from '../hooks/useProviders';
 

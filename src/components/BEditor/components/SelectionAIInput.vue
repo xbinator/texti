@@ -34,10 +34,10 @@ import { Icon } from '@iconify/vue';
 import { TextSelection } from '@tiptap/pm/state';
 import { onClickOutside, useEventListener } from '@vueuse/core';
 import { useStream } from '@/hooks/useStream';
-import { useServiceModelStore } from '@/stores/service-model';
+import type { ServiceModelUpdatedDetail } from '@/shared/storage/service-models/events';
+import { SERVICE_MODEL_UPDATED_EVENT } from '@/shared/storage/service-models/events';
 import type { AvailableServiceModelConfig } from '@/stores/service-model';
-import type { ServiceModelUpdatedDetail } from '@/utils/storage/service-models/events';
-import { SERVICE_MODEL_UPDATED_EVENT } from '@/utils/storage/service-models/events';
+import { useServiceModelStore } from '@/stores/service-model';
 
 interface Props {
   editor?: Editor | null;

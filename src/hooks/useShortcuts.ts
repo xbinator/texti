@@ -1,5 +1,5 @@
 import { useMagicKeys, whenever, useEventListener } from '@vueuse/core';
-import { isMac } from '@/utils/is';
+import { isMac } from '@/shared/platform/env';
 
 interface ShortcutOptions {
   /** 快捷键组合，如 'Ctrl+S'、'Ctrl+Shift+Z' */

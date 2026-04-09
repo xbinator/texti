@@ -21,9 +21,9 @@ dist-ssr
 *.sln
 *.sw?
 
-# Tauri
-src-tauri/target
-src-tauri/.tauri
+# Electron
+dist-electron
+release
 
 # Auto-generated files
 types/components.d.ts

@@ -1,8 +1,8 @@
 import { computed, ref } from 'vue';
 import type { BEditorViewMode } from '@/components/BEditor/types';
-import type { Props as ToolbarProps } from '@/components/Toolbar.vue';
+import type { ToolbarOptions } from '@/components/Toolbar/types';
+import { local } from '@/shared/storage/base';
 import { useSettingStore } from '@/stores/setting';
-import { local } from '@/utils/storage/_base';
 import { EditorShortcuts } from '../constants/shortcuts';
 
 const STORAGE_KEY = 'editor_viewState';
@@ -26,7 +26,7 @@ export function useViewActive() {
 
   const canShowOutline = computed<boolean>(() => viewState.value.mode === 'rich');
 
-  const toolbarViewOptions = computed<ToolbarProps['options']>(() => [
+  const toolbarViewOptions = computed<ToolbarOptions>(() => [
     {
       value: 'source',
       label: '源代码模式',

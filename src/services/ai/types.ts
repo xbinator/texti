@@ -1,5 +1,5 @@
 import type { LanguageModel, StreamTextResult } from 'ai';
-import type { Provider, ProviderModel, ProviderRequestFormat } from '@/utils/storage';
+import type { Provider, ProviderModel, ProviderRequestFormat } from '@/shared/storage';
 
 export type AIProviderType = ProviderRequestFormat;
 

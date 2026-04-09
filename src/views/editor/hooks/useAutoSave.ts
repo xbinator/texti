@@ -2,7 +2,7 @@ import type { EditorFile } from '../types';
 import type { Ref } from 'vue';
 import { watch, onUnmounted, ref } from 'vue';
 import { debounce } from 'lodash-es';
-import { recentFilesStorage } from '@/utils/storage';
+import { recentFilesStorage } from '@/shared/storage';
 
 export interface AutoSaveOptions {
   delay?: number;

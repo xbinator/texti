@@ -28,7 +28,7 @@ import { menuItems, type SettingsMenuKey } from './constants';
 const router = useRouter();
 const route = useRoute();
 
-function isActive(key: SettingsMenuKey) {
+function isActive(key: SettingsMenuKey): boolean {
   const prefix = `/settings/${key}`;
 
   return route.path === prefix || route.path.startsWith(`${prefix}/`);

@@ -30,25 +30,11 @@
 </template>
 
 <script setup lang="ts">
-import type { CSSProperties } from 'vue';
+import type { BModalProps as Props } from './types';
 import { computed } from 'vue';
 import { Icon } from '@iconify/vue';
 import { Modal } from 'ant-design-vue';
 import { addCssUnit } from '@/utils/css';
-
-export interface Props {
-  open?: boolean;
-  title?: string;
-  width?: string | number;
-  closable?: boolean;
-  mainClass?: string;
-  mainStyle?: CSSProperties | string;
-  centered?: boolean;
-  maskClosable?: boolean;
-  close?: () => void;
-  afterClose?: () => void;
-  keyboard?: boolean;
-}
 
 const props = withDefaults(defineProps<Props>(), {
   open: false,

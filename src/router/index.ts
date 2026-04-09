@@ -1,7 +1,7 @@
 import type { App } from 'vue';
 import type { RouteRecordRaw } from 'vue-router';
 import { createRouter, createWebHistory } from 'vue-router';
-import { native } from '@/utils/native';
+import { native } from '@/shared/platform';
 import { basicRoutes } from './routes';
 
 const router = createRouter({

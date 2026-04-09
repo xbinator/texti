@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
-import { providerStorage, serviceModelsStorage } from '@/utils/storage';
-import { local } from '@/utils/storage/_base';
-import type { ServiceModelConfig, ServiceModelType } from '@/utils/storage/service-models';
+import { providerStorage, serviceModelsStorage } from '@/shared/storage';
+import { local } from '@/shared/storage/base';
+import type { ServiceModelConfig, ServiceModelType } from '@/shared/storage/service-models';
 
 /** 本地存储键名 */
 const STORAGE_KEY = 'service_model_settings';

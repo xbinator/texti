@@ -14,7 +14,6 @@
     "noEmit": true,
     "jsx": "preserve",
     "jsxImportSource": "vue",
-    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]

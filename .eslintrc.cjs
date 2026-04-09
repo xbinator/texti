@@ -211,7 +211,9 @@ module.exports = {
     //
     '@typescript-eslint/no-non-null-assertion': 'off',
     // 禁止在类方法中使用this
-    'class-methods-use-this': 'off'
+    'class-methods-use-this': 'off',
+    // 禁止使用指定的语法
+    'no-restricted-syntax': 'off'
   },
   overrides: [
     {

@@ -1,5 +1,3 @@
-import type RichEditorPane from '../components/RichEditorPane.vue';
-import type SourceEditorPane from '../components/SourceEditorPane.vue';
 import type { ComputedRef, Ref } from 'vue';
 import { computed } from 'vue';
 
@@ -14,8 +12,8 @@ export interface EditorController {
 
 interface UseEditorControllerParams {
   isRichMode: ComputedRef<boolean>;
-  richEditorPaneRef: Ref<InstanceType<typeof RichEditorPane> | null>;
-  sourceEditorPaneRef: Ref<InstanceType<typeof SourceEditorPane> | null>;
+  richEditorPaneRef: Ref<EditorController | null>;
+  sourceEditorPaneRef: Ref<Pick<EditorController, 'focusEditor' | 'focusEditorAtStart'> | null>;
 }
 
 export function useEditorController({ isRichMode, richEditorPaneRef, sourceEditorPaneRef }: UseEditorControllerParams): ComputedRef<EditorController> {
