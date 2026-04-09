@@ -1,4 +1,4 @@
-import type { LanguageModel } from 'ai';
+import type { LanguageModel, StreamTextResult } from 'ai';
 import type { Provider, ProviderModel, ProviderRequestFormat } from '@/utils/storage';
 
 export type AIProviderType = ProviderRequestFormat;
@@ -26,8 +26,6 @@ export interface GenerateTextInput {
   prompt: string;
   /** 温度参数，控制输出的随机性 */
   temperature?: number;
-  /** 最大生成 token 数 */
-  maxTokens?: number;
 }
 
 /**
@@ -81,6 +79,14 @@ export interface AIProviderDriver {
    * @returns 生成文本的结果
    */
   generateText(config: AIProviderConfig, input: GenerateTextInput): Promise<GenerateTextResult>;
+
+  /**
+   * 流式生成文本
+   * @param config AI 服务商配置
+   * @param input 生成文本的输入参数
+   * @returns 流式生成文本的结果
+   */
+  streamText(config: AIProviderConfig, input: GenerateTextInput): Promise<StreamTextResult<any, any>>;
 }
 
 export type AIProvider = AIProviderDriver;

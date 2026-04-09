@@ -26,6 +26,7 @@ import StarterKit from '@tiptap/starter-kit';
 import { VueNodeViewRenderer } from '@tiptap/vue-3';
 import { common, createLowlight } from 'lowlight';
 import CodeBlockView from '../components/CodeBlock.vue';
+import { AISelectionHighlight } from '../extensions/AISelectionHighlight';
 import { Search, type SearchScrollContext } from '../extensions/Search';
 
 const lowlight = createLowlight(common);
@@ -244,6 +245,7 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
     }),
     Placeholder.configure({ emptyEditorClass: 'is-editor-empty', placeholder: '请输入内容' }),
     Markdown,
+    AISelectionHighlight,
     Heading,
     Paragraph,
     Code,

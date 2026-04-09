@@ -12,7 +12,7 @@
 
     <CurrentBlockMenu :editor="props.editor" />
     <SelectionToolbar :editor="props.editor" @ai-input-toggle="handleAIInputToggle" />
-    <SelectionAIInput v-model:visible="visible.aiInput" :editor="props.editor" />
+    <SelectionAIInput v-model:visible="visible.aiInput" :editor="props.editor" :selection-range="selectionRange" />
     <EditorContent :key="editorId" :editor="props.editor ?? undefined" class="b-editor-content" />
   </div>
 </template>
@@ -20,8 +20,9 @@
 <script setup lang="ts">
 import type { FrontMatterData } from '../hooks/useFrontMatter';
 import type { Editor } from '@tiptap/vue-3';
-import { reactive } from 'vue';
+import { reactive, watch } from 'vue';
 import { EditorContent } from '@tiptap/vue-3';
+import { clearAISelectionHighlight, setAISelectionHighlight } from '../extensions/AISelectionHighlight';
 import CurrentBlockMenu from './CurrentBlockMenu.vue';
 import FrontMatterCard from './FrontMatterCard.vue';
 import SelectionAIInput from './SelectionAIInput.vue';
@@ -33,6 +34,12 @@ interface Props {
   shouldShowFrontMatterCard?: boolean;
 }
 
+interface SelectionRange {
+  from: number;
+  to: number;
+  text: string;
+}
+
 const props = withDefaults(defineProps<Props>(), {
   editor: null,
   editorId: '',
@@ -42,10 +49,31 @@ const props = withDefaults(defineProps<Props>(), {
 const frontMatterData = defineModel<FrontMatterData>('frontMatterData', { default: () => ({}) });
 
 const visible = reactive({ aiInput: false });
+const selectionRange = reactive<SelectionRange>({ from: 0, to: 0, text: '' });
 
-function handleAIInputToggle(value: boolean): void {
+function handleAIInputToggle(value: boolean, nextSelectionRange?: SelectionRange): void {
+  if (nextSelectionRange) {
+    selectionRange.from = nextSelectionRange.from;
+    selectionRange.to = nextSelectionRange.to;
+    selectionRange.text = nextSelectionRange.text;
+  }
+
   visible.aiInput = value;
 }
+
+watch(
+  () => visible.aiInput,
+  (isVisible) => {
+    if (!props.editor) return;
+
+    if (isVisible && selectionRange.from !== selectionRange.to) {
+      setAISelectionHighlight(props.editor, { from: selectionRange.from, to: selectionRange.to });
+      return;
+    }
+
+    clearAISelectionHighlight(props.editor);
+  }
+);
 
 function handleFrontMatterUpdate(data: FrontMatterData): void {
   frontMatterData.value = { ...data };
@@ -135,6 +163,12 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
     .search-match-current {
       background: var(--editor-search-active);
       box-shadow: var(--editor-search-active-border);
+    }
+
+    .ai-selection-highlight {
+      background: rgb(24 144 255 / 22%);
+      border-radius: 2px;
+      box-shadow: inset 0 0 0 1px rgb(24 144 255 / 40%);
     }
 
     .is-editor-empty:first-child::before {

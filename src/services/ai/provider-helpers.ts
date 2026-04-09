@@ -1,6 +1,6 @@
 import type { AIProviderConfig, CreateLanguageModelInput, GenerateTextInput } from './types';
 import type { LanguageModel } from 'ai';
-import { generateText } from 'ai';
+import { generateText, streamText } from 'ai';
 import { asyncTo } from '@/utils/asyncTo';
 import { AIError, AI_ERROR_CODE } from './errors';
 
@@ -19,11 +19,11 @@ export interface AIProviderExecutor extends LanguageModelFactory {
 }
 
 export async function executeGenerateText(executor: AIProviderExecutor, config: AIProviderConfig, input: GenerateTextInput) {
-  const { modelId, system, prompt, temperature, maxTokens } = input;
+  const { modelId, system, prompt, temperature } = input;
 
   const model = executor.createLanguageModel({ config, modelId });
 
-  const [error, result] = await asyncTo(generateText({ model, system, prompt, temperature, maxTokens }));
+  const [error, result] = await asyncTo(generateText({ model, system, prompt, temperature }));
 
   if (error) {
     throw executor.normalizeError(error, { fallbackMessage: '文本生成失败' });
@@ -34,4 +34,17 @@ export async function executeGenerateText(executor: AIProviderExecutor, config: 
   }
 
   return { text: result.text };
+}
+
+export async function executeStreamText(executor: AIProviderExecutor, config: AIProviderConfig, input: GenerateTextInput) {
+  const { modelId, system, prompt, temperature } = input;
+
+  const model = executor.createLanguageModel({ config, modelId });
+
+  try {
+    const result = streamText({ model, system, prompt, temperature });
+    return result;
+  } catch (error) {
+    throw executor.normalizeError(error, { fallbackMessage: '流式文本生成失败' });
+  }
 }

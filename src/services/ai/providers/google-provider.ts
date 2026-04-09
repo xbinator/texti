@@ -1,9 +1,9 @@
 import type { AIError } from '../errors';
 import type { AIProvider, AIProviderConfig, CreateLanguageModelInput, GenerateTextInput, GenerateTextResult } from '../types';
-import type { LanguageModel } from 'ai';
+import type { LanguageModel, StreamTextResult } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { normalizeGoogleError } from '../errors';
-import { executeGenerateText } from '../provider-helpers';
+import { executeGenerateText, executeStreamText } from '../provider-helpers';
 
 export class GoogleProvider implements AIProvider {
   readonly type = 'google' as const;
@@ -22,5 +22,9 @@ export class GoogleProvider implements AIProvider {
 
   async generateText(config: AIProviderConfig, input: GenerateTextInput): Promise<GenerateTextResult> {
     return executeGenerateText(this, config, input);
+  }
+
+  async streamText(config: AIProviderConfig, input: GenerateTextInput): Promise<StreamTextResult<any, any>> {
+    return executeStreamText(this, config, input);
   }
 }

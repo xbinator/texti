@@ -1,4 +1,5 @@
 import type { AIProviderConfig, AIServiceResult, GenerateTextInput, GenerateTextResult } from './types';
+import type { StreamTextResult } from 'ai';
 import { asyncTo } from '@/utils/asyncTo';
 import type { Provider } from '@/utils/storage';
 import { toAIServiceError } from './errors';
@@ -26,5 +27,21 @@ export class AIService {
     if (generateError) return [toAIServiceError(generateError)];
 
     return [undefined, result];
+  }
+
+  async streamText(input: { providerId: string; ignoreEnabled?: boolean } & GenerateTextInput): Promise<AIServiceResult<StreamTextResult<any, any>>> {
+    const [error, resolved] = await asyncTo(this.resolver.resolve(input.providerId, input.modelId, { ignoreEnabled: input.ignoreEnabled }));
+    if (error) return [toAIServiceError(error)];
+
+    const driver = this.registry.get(resolved.provider.type);
+    const providerConfig = this.buildProviderConfig(resolved.provider);
+
+    try {
+      const result = await driver.streamText(providerConfig, input);
+
+      return [undefined, result];
+    } catch (streamError) {
+      return [toAIServiceError(streamError)];
+    }
   }
 }
