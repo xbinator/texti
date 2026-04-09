@@ -1,27 +1,23 @@
 <template>
   <BubbleMenu v-if="editor" :editor="editor" :options="bubbleMenuOptions" class="bubble-menu-wrapper">
     <div class="selection-toolbar" :class="{ 'is-hidden': !visible }">
-      <div v-if="isModelAvailable" type="button" class="selection-toolbar__ai-btn" @mousedown.prevent="toggleAIInput">
-        <Icon icon="lucide:sparkles" />
-        <span>AI 助手</span>
-      </div>
+      <template v-if="isModelAvailable">
+        <div class="selection-toolbar__ai-btn" @mousedown.prevent="toggleAIInput">
+          <Icon icon="lucide:sparkles" />
+          <span>AI 助手</span>
+        </div>
+        <div class="selection-toolbar__divider"></div>
+      </template>
 
-      <div v-if="isModelAvailable" class="selection-toolbar__divider"></div>
-
-      <button type="button" class="selection-toolbar__btn" :class="{ 'is-active': editor.isActive('bold') }" @mousedown.prevent="toggleBold">
-        <Icon icon="lucide:bold" />
-      </button>
-      <button type="button" class="selection-toolbar__btn" :class="{ 'is-active': editor.isActive('italic') }" @mousedown.prevent="toggleItalic">
-        <Icon icon="lucide:italic" />
-      </button>
-      <button type="button" class="selection-toolbar__btn" :class="{ 'is-active': editor.isActive('underline') }" @mousedown.prevent="toggleUnderline">
-        <Icon icon="lucide:underline" />
-      </button>
-      <button type="button" class="selection-toolbar__btn" :class="{ 'is-active': editor.isActive('strike') }" @mousedown.prevent="toggleStrike">
-        <Icon icon="lucide:strikethrough" />
-      </button>
-      <button type="button" class="selection-toolbar__btn" :class="{ 'is-active': editor.isActive('code') }" @mousedown.prevent="toggleCode">
-        <Icon icon="lucide:code" />
+      <button
+        v-for="btn in formatButtons"
+        :key="btn.command"
+        type="button"
+        class="selection-toolbar__btn"
+        :class="{ 'is-active': editor.isActive(btn.command) }"
+        @mousedown.prevent="btn.action"
+      >
+        <Icon :icon="btn.icon" />
       </button>
     </div>
   </BubbleMenu>
@@ -29,21 +25,22 @@
 
 <script setup lang="ts">
 import type { Editor } from '@tiptap/vue-3';
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { BubbleMenu } from '@tiptap/vue-3/menus';
-import { providerStorage, serviceModelsStorage } from '@/utils/storage';
+import { useEventListener } from '@vueuse/core';
+import { useServiceModelStore } from '@/stores/service-model';
 import type { ServiceModelUpdatedDetail } from '@/utils/storage/service-models/events';
 import { SERVICE_MODEL_UPDATED_EVENT } from '@/utils/storage/service-models/events';
-
-interface Props {
-  editor?: Editor | null;
-}
 
 interface SelectionRange {
   from: number;
   to: number;
   text: string;
+}
+
+interface Props {
+  editor?: Editor | null;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -56,87 +53,61 @@ const emit = defineEmits<{
 
 const visible = ref(false);
 const isModelAvailable = ref(false);
+const serviceModelStore = useServiceModelStore();
+
+// ---- Model Availability ----
 
 async function checkModelAvailability(): Promise<void> {
-  const config = await serviceModelsStorage.getConfig('polish');
-  if (!config?.providerId || !config?.modelId) {
-    isModelAvailable.value = false;
-    return;
-  }
-
-  const provider = await providerStorage.getProvider(config.providerId);
-  if (!provider || !provider.isEnabled || !provider.apiKey) {
-    isModelAvailable.value = false;
-    return;
-  }
-
-  isModelAvailable.value = true;
+  isModelAvailable.value = await serviceModelStore.isServiceAvailable('polish');
 }
 
-function refreshModelAvailability(): void {
-  checkModelAvailability().catch((error: unknown) => {
-    console.error('检查模型可用性失败:', error);
-  });
+function handleServiceModelUpdated(event: Event): void {
+  const { detail } = event as CustomEvent<ServiceModelUpdatedDetail>;
+  if (detail.serviceType !== 'polish') return;
+
+  checkModelAvailability();
 }
+
+useEventListener(window, SERVICE_MODEL_UPDATED_EVENT, handleServiceModelUpdated);
+
+// ---- Bubble Menu ----
 
 const bubbleMenuOptions = computed(() => ({
   placement: 'top-start' as const,
-  onShow: async () => {
-    await checkModelAvailability();
+  onShow: () => {
+    checkModelAvailability();
     visible.value = true;
     emit('ai-input-toggle', false);
   }
 }));
 
+// ---- AI Input ----
+
 function toggleAIInput(): void {
-  const selection = props.editor?.state.selection;
-  const selectionRange =
-    selection && selection.from !== selection.to
-      ? {
-          from: selection.from,
-          to: selection.to,
-          text: props.editor?.state.doc.textBetween(selection.from, selection.to, '') || ''
-        }
-      : undefined;
   visible.value = false;
-  emit('ai-input-toggle', true, selectionRange);
+
+  const selection = props.editor?.state.selection;
+  if (!selection || selection.from === selection.to) {
+    emit('ai-input-toggle', true);
+    return;
+  }
+
+  const text = props.editor?.state.doc.textBetween(selection.from, selection.to, '') ?? '';
+
+  emit('ai-input-toggle', true, { from: selection.from, to: selection.to, text });
 }
 
-function toggleBold(): void {
-  props.editor?.chain().focus().toggleBold().run();
-}
+// ---- Format Buttons ----
 
-function toggleItalic(): void {
-  props.editor?.chain().focus().toggleItalic().run();
-}
+const formatButtons = computed(() => [
+  { command: 'bold', icon: 'lucide:bold', action: () => props.editor?.chain().focus().toggleBold().run() },
+  { command: 'italic', icon: 'lucide:italic', action: () => props.editor?.chain().focus().toggleItalic().run() },
+  { command: 'underline', icon: 'lucide:underline', action: () => props.editor?.chain().focus().toggleUnderline().run() },
+  { command: 'strike', icon: 'lucide:strikethrough', action: () => props.editor?.chain().focus().toggleStrike().run() },
+  { command: 'code', icon: 'lucide:code', action: () => props.editor?.chain().focus().toggleCode().run() }
+]);
 
-function toggleUnderline(): void {
-  props.editor?.chain().focus().toggleUnderline().run();
-}
-
-function toggleStrike(): void {
-  props.editor?.chain().focus().toggleStrike().run();
-}
-
-function toggleCode(): void {
-  props.editor?.chain().focus().toggleCode().run();
-}
-
-function handleServiceModelUpdated(event: Event): void {
-  const customEvent = event as CustomEvent<ServiceModelUpdatedDetail>;
-  if (customEvent.detail.serviceType !== 'polish') return;
-
-  refreshModelAvailability();
-}
-
-onMounted(() => {
-  refreshModelAvailability();
-  window.addEventListener(SERVICE_MODEL_UPDATED_EVENT, handleServiceModelUpdated);
-});
-
-onUnmounted(() => {
-  window.removeEventListener(SERVICE_MODEL_UPDATED_EVENT, handleServiceModelUpdated);
-});
+checkModelAvailability();
 </script>
 
 <style lang="less" scoped>

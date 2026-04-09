@@ -10,8 +10,8 @@
       @change="handleChangeAnchor"
     />
 
-    <BScrollbar ref="scrollbarRef" class="b-editor-scrollbar" @scroll="handleEditorScroll">
-      <div ref="containerRef" :class="['b-editor-container']">
+    <BScrollbar ref="scrollbarRef" @scroll="handleEditorScroll">
+      <div ref="containerRef" class="b-editor-container">
         <RichEditorPane
           v-if="isRichMode"
           ref="richEditorPaneRef"
@@ -190,11 +190,7 @@ function focusEditor(): void {
 
 function getSearchState(): SearchSnapshot {
   if (!isRichMode.value) {
-    return {
-      currentIndex: 0,
-      matchCount: 0,
-      term: ''
-    };
+    return { currentIndex: 0, matchCount: 0, term: '' };
   }
 
   return getSearchSnapshot(editorInstance.value);
@@ -211,9 +207,12 @@ useTextareaAutosize({ element: titleTextareaRef, input: editorTitle });
   display: flex;
   height: 100%;
 
+  --selection-color: #fff;
+  --selection-bg: #ff6b6b;
+
   ::selection {
-    color: #fff;
-    background: #ff6b6b;
+    color: var(--selection-color);
+    background: var(--selection-bg);
   }
 }
 
@@ -226,6 +225,7 @@ useTextareaAutosize({ element: titleTextareaRef, input: editorTitle });
   position: relative;
   max-width: 800px;
   margin: 0 auto;
+  font-size: 16px;
 }
 
 .b-editor-title {

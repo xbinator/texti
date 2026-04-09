@@ -636,7 +636,6 @@ onUnmounted(() => {
 .variable-editor {
   min-height: 80px;
   padding: 12px;
-  font-family: inherit;
   font-size: 14px;
   line-height: 1.6;
   word-break: break-all;

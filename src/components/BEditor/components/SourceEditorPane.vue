@@ -41,7 +41,6 @@ useTextareaAutosize({ element: sourceTextareaRef, input: editorContent });
   width: 100%;
   min-height: 100%;
   padding: 0;
-  font-size: 14px;
   line-height: 1.74;
   color: var(--editor-text);
   resize: none;
