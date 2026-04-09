@@ -10,15 +10,8 @@
             service-type="polish"
             title="内容编辑助手"
             description="根据用户输入的文本内容，自动编辑并返回编辑后的文本。"
-            :options="[
-              {
-                type: 'variable',
-                options: [
-                  { value: 'SELECTED_TEXT', label: 'SELECTED_TEXT' },
-                  { value: 'USER_INPUT', label: 'USER_INPUT' }
-                ]
-              }
-            ]"
+            :options="POLISH_SERVICE_CONFIG_OPTIONS"
+            :default-prompt="POLISH_DEFAULT_PROMPT"
           />
         </div>
       </BScrollbar>
@@ -28,6 +21,7 @@
 
 <script setup lang="ts">
 import ServiceConfig from './components/ServiceConfig.vue';
+import { POLISH_DEFAULT_PROMPT, POLISH_SERVICE_CONFIG_OPTIONS } from './constants';
 </script>
 
 <style scoped lang="less">

@@ -1,0 +1,40 @@
+export interface VariableOption {
+  value: 'SELECTED_TEXT' | 'USER_INPUT';
+  label: string;
+}
+
+export interface ServiceConfigOption {
+  type: 'variable';
+  options: VariableOption[];
+}
+
+export const variableOptions: VariableOption[] = [
+  { value: 'SELECTED_TEXT', label: 'SELECTED_TEXT' },
+  { value: 'USER_INPUT', label: 'USER_INPUT' }
+];
+
+export const POLISH_SERVICE_CONFIG_OPTIONS: ServiceConfigOption[] = [
+  {
+    type: 'variable',
+    options: variableOptions
+  }
+];
+
+export const POLISH_DEFAULT_PROMPT = `# Role
+你是一个 Markdown 内容编辑助手。
+
+# Task
+根据用户的指令，对下方 Markdown 内容进行修改。
+
+# Rules
+1. 仅输出修改后的 Markdown 内容
+2. 保持原有 Markdown 语法结构
+3. 不要新增解释性文字
+
+# Original Content
+---
+{{SELECTED_TEXT}}
+---
+
+# User Instruction
+{{USER_INPUT}}`;
