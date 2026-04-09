@@ -1,6 +1,5 @@
 <template>
   <div class="service-card">
-    <!-- Header Section -->
     <div class="card-header">
       <div class="flex flex-col">
         <div class="service-title">{{ title }}</div>
@@ -11,7 +10,7 @@
         <BSelect v-model:value="selectedModel" :options="modelOptions" placeholder="请选择模型">
           <template #option="{ modelId, modelName, providerName }">
             <div class="flex items-center gap-2">
-              <BModelIcon :model="modelId" class="model-icon" />
+              <BModelIcon :model="modelId" :size="18" />
               <div class="flex-1 w-0 truncate">{{ modelName }}</div>
               <div class="fs-12">{{ providerName }}</div>
             </div>
@@ -20,26 +19,27 @@
       </div>
     </div>
 
-    <!-- Configuration Content -->
     <div class="card-content">
-      <!-- Custom Prompt -->
       <div class="config-section">
-        <div class="section-header">
+        <div class="section-header" @click="togglePromptCollapsed">
           <div class="section-label">
             <Icon icon="lucide:terminal" class="label-icon" />
             <span>Prompt</span>
           </div>
-          <div class="save-status" :class="{ saving: saveState === 'saving', error: saveState === 'error' }">
-            {{ saveStatusText }}
+          <div class="header-actions">
+            <button v-if="showResetButton" class="reset-btn" type="button" @click.stop="resetToDefault">
+              <Icon icon="lucide:rotate-ccw" class="reset-icon" />
+              <span>恢复默认</span>
+            </button>
+            <Icon :icon="promptCollapsed ? 'lucide:chevron-down' : 'lucide:chevron-up'" class="collapse-icon" />
           </div>
         </div>
 
-        <div class="section-control">
+        <div v-show="!promptCollapsed" class="section-control">
           <BPromptEditor v-model:value="customPrompt" :placeholder="placeholder" :options="options" />
         </div>
       </div>
 
-      <!-- Extra Slot -->
       <div v-if="$slots.extra" class="config-section extra-section">
         <slot name="extra"></slot>
       </div>
@@ -53,21 +53,19 @@ import { Icon } from '@iconify/vue';
 import BPromptEditor from '@/components/BPromptEditor/index.vue';
 import type { VariableOptionGroup } from '@/components/BPromptEditor/types';
 import BSelect from '@/components/BSelect/index.vue';
+import { useServiceModelStore } from '@/stores/service-model';
 import { providerStorage, serviceModelsStorage } from '@/utils/storage';
 import type { Provider } from '@/utils/storage';
 import type { ServiceModelType } from '@/utils/storage/service-models';
+import { dispatchServiceModelUpdated } from '@/utils/storage/service-models/events';
 
 interface Props {
-  // 服务类型
   serviceType: ServiceModelType;
-  // 服务标题
   title: string;
-  // 服务描述
   description: string;
-  // 自定义提示词占位符
   placeholder?: string;
-  // 可用分组选项
   options?: VariableOptionGroup[];
+  defaultPrompt?: string;
 }
 
 interface ModelOption {
@@ -80,65 +78,67 @@ interface ModelOption {
 
 const props = withDefaults(defineProps<Props>(), {
   placeholder: '请输入自定义 Prompt 指令...',
+  defaultPrompt: '可以使用{{变量名}}格式的变量，例如{{SELECTED_TEXT}}、{{USER_INPUT}}等',
   options: () => []
 });
+
+const serviceModelStore = useServiceModelStore();
 
 const loading = ref(false);
 const providers = ref<Provider[]>([]);
 const selectedModel = ref<string>();
 const customPrompt = ref<string>();
 const initialized = ref(false);
-const saveState = ref<'idle' | 'saving' | 'saved' | 'error'>('idle');
-const saveStatusMessage = ref('未保存');
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
+const promptCollapsed = computed<boolean>({
+  get: () => serviceModelStore.isSectionCollapsed(props.serviceType, 'prompt'),
+  set: () => serviceModelStore.toggleSectionCollapsed(props.serviceType, 'prompt')
+});
+
 const modelOptions = computed<ModelOption[]>(() => {
-  const result: ModelOption[] = [];
+  return providers.value.flatMap((provider) => {
+    if (!provider.isEnabled || !provider.models?.length) {
+      return [];
+    }
 
-  // eslint-disable-next-line no-restricted-syntax
-  for (const provider of providers.value) {
-    if (!provider.isEnabled || !provider.models?.length) continue;
-
-    // eslint-disable-next-line no-restricted-syntax
-    for (const model of provider.models) {
-      if (!model.isEnabled) continue;
-
-      result.push({
+    return provider.models
+      .filter((model) => model.isEnabled)
+      .map((model) => ({
         value: `${provider.id}:${model.id}`,
         modelId: model.id,
         modelName: model.name,
         providerName: provider.name,
         providerLogo: provider.logo
-      });
-    }
+      }));
+  });
+});
+
+const showResetButton = computed<boolean>(() => {
+  return Boolean(props.defaultPrompt && customPrompt.value !== props.defaultPrompt);
+});
+
+function togglePromptCollapsed(): void {
+  serviceModelStore.toggleSectionCollapsed(props.serviceType, 'prompt');
+}
+
+function resetToDefault(): void {
+  if (props.defaultPrompt) {
+    customPrompt.value = props.defaultPrompt;
   }
-
-  return result;
-});
-
-const saveStatusText = computed<string>(() => {
-  if (saveState.value === 'saving') return '保存中...';
-  if (saveState.value === 'saved') return '已自动保存';
-  if (saveState.value === 'error') return saveStatusMessage.value;
-
-  return '未保存';
-});
+}
 
 async function loadProviders(): Promise<void> {
   loading.value = true;
-
   providers.value = await providerStorage.listProviders();
-
   loading.value = false;
 }
 
 async function loadSavedConfig(): Promise<void> {
   const config = await serviceModelsStorage.getConfig(props.serviceType);
-  if (!config) return;
 
-  selectedModel.value = config.providerId && config.modelId ? `${config.providerId}:${config.modelId}` : undefined;
-  customPrompt.value = config.customPrompt || '';
-  saveState.value = 'saved';
+  selectedModel.value = config?.providerId && config?.modelId ? `${config.providerId}:${config.modelId}` : undefined;
+  customPrompt.value = config?.customPrompt ?? props.defaultPrompt ?? '';
 }
 
 function buildConfigPayload(): { providerId?: string; modelId?: string; customPrompt?: string } {
@@ -158,28 +158,21 @@ function buildConfigPayload(): { providerId?: string; modelId?: string; customPr
 }
 
 async function persistConfig(): Promise<void> {
-  saveState.value = 'saving';
-
-  try {
-    await serviceModelsStorage.saveConfig(props.serviceType, buildConfigPayload());
-    saveState.value = 'saved';
-  } catch (error: unknown) {
-    saveState.value = 'error';
-    saveStatusMessage.value = error instanceof Error ? error.message : '保存失败';
-  }
+  await serviceModelsStorage.saveConfig(props.serviceType, buildConfigPayload());
+  dispatchServiceModelUpdated(props.serviceType);
 }
 
 function queueSave(): void {
   if (!initialized.value) return;
-
-  saveState.value = 'idle';
 
   if (saveTimer) {
     clearTimeout(saveTimer);
   }
 
   saveTimer = setTimeout(() => {
-    persistConfig();
+    persistConfig().catch((error: unknown) => {
+      console.error('保存服务模型配置失败:', error);
+    });
   }, 300);
 }
 
@@ -203,14 +196,16 @@ onUnmounted(() => {
 .service-card {
   width: 100%;
   max-width: 800px;
-  background: var(--bg-primary);
+  overflow: hidden;
+  background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-tertiary) 100%);
   border: 1px solid var(--border-secondary);
   border-radius: 12px;
+  box-shadow: 0 10px 30px -24px rgb(0 0 0 / 20%);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 
   &:hover {
     border-color: var(--color-primary-light, var(--border-primary));
-    box-shadow: 0 4px 20px -4px rgb(0 0 0 / 8%);
+    box-shadow: 0 16px 36px -26px rgb(0 0 0 / 24%);
   }
 }
 
@@ -220,6 +215,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 20px;
+  background: linear-gradient(135deg, var(--bg-primary) 0%, var(--color-primary-bg) 100%);
 }
 
 .service-icon-wrapper {
@@ -261,6 +257,7 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 24px;
   padding: 20px;
+  background: var(--bg-secondary);
   border-top: 1px solid var(--border-secondary);
 }
 
@@ -268,12 +265,20 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  padding: 14px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 12px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 24%);
 }
 
 .section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding: 2px;
+  cursor: pointer;
+  user-select: none;
 }
 
 .save-status {
@@ -304,10 +309,46 @@ onUnmounted(() => {
   }
 }
 
-.section-control {
+.collapse-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--text-tertiary);
+  transition: transform 0.2s;
+}
+
+.header-actions {
   display: flex;
-  flex-direction: column;
   gap: 8px;
+  align-items: center;
+  padding-left: 12px;
+}
+
+.reset-btn {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  transition: all 0.2s;
+
+  &:hover {
+    color: var(--color-primary);
+    background: var(--color-primary-bg);
+  }
+}
+
+.reset-icon {
+  width: 12px;
+  height: 12px;
+}
+
+.extra-section {
+  background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-tertiary) 100%);
 }
 
 .prompt-textarea {

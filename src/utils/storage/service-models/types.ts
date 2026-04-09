@@ -1,3 +1,4 @@
+//
 export type ServiceModelType = 'polish';
 
 export interface ServiceModelConfig {
