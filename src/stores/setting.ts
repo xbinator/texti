@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia';
+import { local } from '@/utils/storage/_base';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 
@@ -11,7 +12,7 @@ interface SettingState {
 }
 
 function loadTheme(): ThemeMode {
-  const saved = localStorage.getItem(STORAGE_KEY);
+  const saved = local.getItem<string>(STORAGE_KEY);
   if (saved === 'dark' || saved === 'light' || saved === 'system') {
     return saved;
   }
@@ -55,7 +56,7 @@ export const useSettingStore = defineStore('setting', {
     // 设置主题
     setTheme(newTheme: ThemeMode): void {
       this.theme = newTheme;
-      localStorage.setItem(STORAGE_KEY, newTheme);
+      local.setItem(STORAGE_KEY, newTheme);
       applyTheme(newTheme);
     },
 
@@ -65,7 +66,7 @@ export const useSettingStore = defineStore('setting', {
       const currentIndex = themes.indexOf(this.theme);
       const newTheme = themes[(currentIndex + 1) % themes.length];
       this.theme = newTheme;
-      localStorage.setItem(STORAGE_KEY, newTheme);
+      local.setItem(STORAGE_KEY, newTheme);
       applyTheme(newTheme);
     },
 
