@@ -42,7 +42,6 @@ function handleBack(): void {
 <style scoped lang="less">
 .settings-layout {
   display: flex;
-  height: 100vh;
   background: var(--bg-secondary);
 }
 
@@ -58,7 +57,7 @@ function handleBack(): void {
   display: flex;
   gap: 8px;
   align-items: center;
-  height: 52px;
+  height: 40px;
   padding: 0 14px;
   font-size: 14px;
   font-weight: 600;
@@ -73,7 +72,7 @@ function handleBack(): void {
 
 .sidebar-content {
   flex: 1;
-  padding: 8px;
+  padding: 6px 8px 8px;
   overflow-y: auto;
 }
 

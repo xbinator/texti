@@ -10,9 +10,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   setWindowTitle: (title: string) => ipcRenderer.invoke('window:setTitle', title),
 
+  windowMinimize: () => ipcRenderer.invoke('window:minimize'),
+
+  windowMaximize: () => ipcRenderer.invoke('window:maximize'),
+
+  windowClose: () => ipcRenderer.invoke('window:close'),
+
+  windowIsMaximized: () => ipcRenderer.invoke('window:isMaximized'),
+
   dbExecute: (sql: string, params?: unknown[]) => ipcRenderer.invoke('db:execute', sql, params),
 
-  dbSelect: <T>(sql: string, params?: unknown[]) => ipcRenderer.invoke('db:select', sql, params) as Promise<T[]>,
+  dbSelect: (sql: string, params?: unknown[]) => ipcRenderer.invoke('db:select', sql, params),
 
   storeGet: (key: string) => ipcRenderer.invoke('store:get', key),
 

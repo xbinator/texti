@@ -3,7 +3,7 @@ import type { EditorFile } from '../types';
 import type { Ref } from 'vue';
 import { computed, nextTick, onMounted, ref } from 'vue';
 import { customAlphabet } from 'nanoid';
-import type { ToolbarOptions } from '@/components/Toolbar/types';
+import type { ToolbarOptions } from '@/components/BToolbar/types';
 import { native } from '@/shared/platform';
 import { isElectron, isWeb } from '@/shared/platform/env';
 import { recentFilesStorage, type StoredFile } from '@/shared/storage';

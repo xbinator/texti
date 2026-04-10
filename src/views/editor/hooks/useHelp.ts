@@ -1,5 +1,5 @@
 import { computed } from 'vue';
-import type { ToolbarOptions } from '@/components/Toolbar/types';
+import type { ToolbarOptions } from '@/components/BToolbar/types';
 
 interface UseHelpOptions {
   onShowShortcuts: () => void;

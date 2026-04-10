@@ -1,6 +1,9 @@
 <template>
   <AConfigProvider :locale="zhCN" :theme="antdTheme">
-    <RouterView />
+    <BTitleBar />
+    <div class="app-container" :class="{ 'app-container--with-titlebar': showTitleBar }">
+      <RouterView />
+    </div>
   </AConfigProvider>
 </template>
 
@@ -8,6 +11,8 @@
 import { computed, onMounted } from 'vue';
 import zhCN from 'ant-design-vue/es/locale/zh_CN';
 import theme from 'ant-design-vue/es/theme';
+import BTitleBar from '@/components/BTitleBar/index.vue';
+import { isElectron, isMac } from '@/shared/platform/env';
 import { useSettingStore } from '@/stores/setting';
 
 const { darkAlgorithm, defaultAlgorithm } = theme;
@@ -23,6 +28,16 @@ const antdTheme = computed(() => ({
     colorPrimary: '#1677ff'
   }
 }));
+
+const showTitleBar = computed(() => isElectron() && !isMac());
 </script>
 
-<style></style>
+<style>
+.app-container {
+  min-height: 100vh;
+}
+
+.app-container--with-titlebar {
+  padding-top: 32px;
+}
+</style>

@@ -1,21 +1,29 @@
-import { promises as fs } from 'fs';
-import * as path from 'path';
+import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
-import { initDatabase, closeDatabase, dbExecute, dbSelect } from './database';
-import { migrateFromTauri } from './migration';
-import { initStore, getStore } from './store';
+import { initDatabase, closeDatabase, dbExecute, dbSelect } from './database.mjs';
+import { migrateFromTauri } from './migration.mjs';
+import { initStore, getStore } from './store.mjs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): void {
+  const isMac = process.platform === 'darwin';
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
     minHeight: 600,
     title: 'Texti',
+    frame: !isMac,
+    titleBarStyle: 'hidden',
     webPreferences: {
-      preload: path.join(__dirname, '../preload/index.js'),
+      preload: path.join(__dirname, '../preload/index.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false
@@ -110,6 +118,36 @@ function setupIpcHandlers(): void {
 
   ipcMain.handle('shell:openExternal', async (_event, url: string) => {
     await shell.openExternal(url);
+  });
+
+  ipcMain.handle('window:minimize', async () => {
+    const win = BrowserWindow.getFocusedWindow();
+    if (win) {
+      win.minimize();
+    }
+  });
+
+  ipcMain.handle('window:maximize', async () => {
+    const win = BrowserWindow.getFocusedWindow();
+    if (win) {
+      if (win.isMaximized()) {
+        win.unmaximize();
+      } else {
+        win.maximize();
+      }
+    }
+  });
+
+  ipcMain.handle('window:close', async () => {
+    const win = BrowserWindow.getFocusedWindow();
+    if (win) {
+      win.close();
+    }
+  });
+
+  ipcMain.handle('window:isMaximized', async () => {
+    const win = BrowserWindow.getFocusedWindow();
+    return win ? win.isMaximized() : false;
   });
 }
 

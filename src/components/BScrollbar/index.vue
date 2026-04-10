@@ -23,7 +23,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick, CSSProperties } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick, watch, CSSProperties } from 'vue';
 import { useTimeoutFn, useEventListener, useElementSize } from '@vueuse/core';
 import { addCssUnit } from '../../utils/css';
 import { isDefined } from '../../utils/is';
@@ -245,20 +245,25 @@ const thumbStyleX = computed(() => ({
   transform: `translateX(${thumbX.value.offset}px)`
 }));
 
-/* ================= mounted ================= */
-let ro: ResizeObserver | null = null;
-
 onMounted(async () => {
   await nextTick();
   scheduleUpdate();
-
-  if (view.value) {
-    ro = new ResizeObserver(() => {
-      scheduleUpdate();
-    });
-    ro.observe(view.value);
-  }
 });
+
+watch(
+  [
+    () => wrapSize.width.value,
+    () => wrapSize.height.value,
+    () => viewSize.width.value,
+    () => viewSize.height.value,
+    () => showHorizontal.value,
+    () => showVertical.value
+  ],
+  () => {
+    scheduleUpdate();
+  },
+  { flush: 'post' }
+);
 
 onUnmounted(() => {
   if (frame !== null) {
@@ -270,12 +275,6 @@ onUnmounted(() => {
     cancelAnimationFrame(resizeFrame);
     resizeFrame = null;
   }
-
-  if (ro && view.value) {
-    ro.unobserve(view.value);
-  }
-
-  ro?.disconnect();
 });
 
 function getWrapElement(): HTMLDivElement | null {

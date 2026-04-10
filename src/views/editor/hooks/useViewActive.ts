@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue';
 import type { BEditorViewMode } from '@/components/BEditor/types';
-import type { ToolbarOptions } from '@/components/Toolbar/types';
+import type { ToolbarOptions } from '@/components/BToolbar/types';
 import { local } from '@/shared/storage/base';
 import { useSettingStore } from '@/stores/setting';
 import { EditorShortcuts } from '../constants/shortcuts';

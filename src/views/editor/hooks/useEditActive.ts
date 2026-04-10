@@ -3,7 +3,7 @@ import type { Ref } from 'vue';
 import { computed } from 'vue';
 import { marked } from 'marked';
 import type { BEditorPublicInstance } from '@/components/BEditor/types';
-import type { ToolbarOptions } from '@/components/Toolbar/types';
+import type { ToolbarOptions } from '@/components/BToolbar/types';
 import { useClipboard } from '@/hooks/useClipboard';
 import { EditorShortcuts } from '../constants/shortcuts';
 

@@ -15,6 +15,10 @@ export interface ElectronAPI {
   ) => Promise<string | null>;
   writeFile: (filePath: string, content: string) => Promise<void>;
   setWindowTitle: (title: string) => Promise<void>;
+  windowMinimize: () => Promise<void>;
+  windowMaximize: () => Promise<void>;
+  windowClose: () => Promise<void>;
+  windowIsMaximized: () => Promise<boolean>;
   dbExecute: (sql: string, params?: unknown[]) => Promise<{ changes: number; lastInsertRowid: number }>;
   dbSelect: <T>(sql: string, params?: unknown[]) => Promise<T[]>;
   storeGet: (key: string) => Promise<unknown>;

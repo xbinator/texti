@@ -10,10 +10,11 @@ import { onMounted, onUnmounted, ref, watch } from 'vue';
 interface Props {
   text?: string;
 }
-withDefaults(defineProps<Props>(), { text: '' });
+const props = withDefaults(defineProps<Props>(), { text: '' });
 
 const textRef = ref<HTMLElement | null>(null);
 const isTruncated = ref(false);
+let observedElement: HTMLElement | null = null;
 
 function checkTruncation(): void {
   if (!textRef.value) {
@@ -36,19 +37,20 @@ function scheduleCheckTruncation(): void {
   });
 }
 
-const resizeObserver = new ResizeObserver(() => {
+const resizeObserver = new ResizeObserver((): void => {
   scheduleCheckTruncation();
 });
 
 onMounted(() => {
   scheduleCheckTruncation();
-  if (textRef.value) {
-    resizeObserver.observe(textRef.value);
+  observedElement = textRef.value?.parentElement ?? textRef.value;
+  if (observedElement) {
+    resizeObserver.observe(observedElement);
   }
 });
 
 watch(
-  () => textRef.value?.textContent,
+  () => props.text,
   () => {
     scheduleCheckTruncation();
   }
@@ -61,6 +63,7 @@ onUnmounted(() => {
   }
 
   resizeObserver.disconnect();
+  observedElement = null;
 });
 </script>
 
