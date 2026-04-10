@@ -53,7 +53,7 @@ const visible = defineModel<boolean>('visible', { default: false });
 
 const inputValue = ref('');
 const previewText = ref('');
-const inputRef = ref<{ focus: () => void } | null>(null);
+const inputRef = ref<{ focus: (options?: FocusOptions) => void } | null>(null);
 const wrapperRef = ref<HTMLElement | null>(null);
 const wrapperStyle = ref<CSSProperties>({});
 const modelConfig = ref<AvailableServiceModelConfig | null>(null);
@@ -143,11 +143,7 @@ async function handleSubmit(): Promise<void> {
   const selectedText = text || props.editor.state.doc.textBetween(from, to, '');
   const prompt = buildPrompt(selectedText, value);
 
-  const accumulatedText = await streamText({
-    providerId: config.providerId,
-    modelId: config.modelId,
-    prompt
-  });
+  const accumulatedText = await streamText({ providerId: config.providerId, modelId: config.modelId, prompt });
 
   if (!accumulatedText) {
     reset();
@@ -171,7 +167,9 @@ function handleApply(): void {
 
 function handleDiscard(): void {
   previewText.value = '';
-  nextTick(() => inputRef.value?.focus());
+  requestAnimationFrame(() => {
+    nextTick(() => inputRef.value?.focus({ preventScroll: true }));
+  });
 }
 
 function handleCancel(): void {
@@ -205,7 +203,9 @@ watch(visible, (newValue) => {
   if (newValue) {
     loadModelConfig();
     updatePosition();
-    nextTick(() => inputRef.value?.focus());
+    requestAnimationFrame(() => {
+      nextTick(() => inputRef.value?.focus({ preventScroll: true }));
+    });
   } else {
     reset();
   }
