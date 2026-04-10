@@ -3,11 +3,7 @@ import type { JSONContent } from '@tiptap/core';
 export function createEmptyParagraphDoc(): JSONContent {
   return {
     type: 'doc',
-    content: [
-      {
-        type: 'paragraph'
-      }
-    ]
+    content: [{ type: 'paragraph' }]
   };
 }
 

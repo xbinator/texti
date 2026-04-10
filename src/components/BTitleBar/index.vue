@@ -1,20 +1,25 @@
 <template>
-  <div v-if="showTitleBar" class="title-bar">
+  <div class="title-bar" :class="`title-bar--${platform}`">
     <div class="title-bar__drag-area">
-      <span class="title-bar__title">{{ title }}</span>
+      <!-- 使用 store 中的标题 -->
+      <span class="title-bar__title">{{ settingStore.title }}</span>
     </div>
-    <div class="title-bar__controls">
-      <button class="title-bar__button title-bar__button--minimize" @click="handleMinimize">
-        <Icon icon="lucide:minus" width="16" height="16" />
-      </button>
-      <button class="title-bar__button title-bar__button--maximize" @click="handleMaximize">
-        <Icon v-if="isMaximized" icon="lucide:copy" width="14" height="14" />
-        <Icon v-else icon="lucide:square" width="14" height="14" />
-      </button>
-      <button class="title-bar__button title-bar__button--close" @click="handleClose">
-        <Icon icon="lucide:x" width="16" height="16" />
-      </button>
-    </div>
+
+    <!-- Windows layout -->
+    <template v-if="platform === 'win'">
+      <div class="title-bar__controls title-bar__controls--win">
+        <button class="title-bar__button title-bar__button--minimize" @click="handleMinimize">
+          <Icon icon="lucide:minus" width="16" height="16" />
+        </button>
+        <button class="title-bar__button title-bar__button--maximize" @click="handleMaximize">
+          <Icon v-if="isMaximized" icon="lucide:copy" width="14" height="14" />
+          <Icon v-else icon="lucide:square" width="14" height="14" />
+        </button>
+        <button class="title-bar__button title-bar__button--close" @click="handleClose">
+          <Icon icon="lucide:x" width="16" height="16" />
+        </button>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -22,19 +27,19 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { hasElectronAPI, getElectronAPI } from '@/shared/platform/electron-api';
-import { isElectron, isMac } from '@/shared/platform/env';
+import { isMac } from '@/shared/platform/env';
+import { useSettingStore } from '@/stores/setting';
 
-withDefaults(
-  defineProps<{
-    title?: string;
-  }>(),
-  {
-    title: 'Texti'
-  }
-);
+/**
+ * 标题栏组件
+ * 显示窗口标题和窗口控制按钮（最小化、最大化、关闭）
+ * 标题从 setting store 中获取，支持响应式更新
+ */
+
+const settingStore = useSettingStore();
+const platform = computed(() => (isMac() ? 'mac' : 'win'));
 
 const isMaximized = ref(false);
-const showTitleBar = computed(() => isElectron() && !isMac());
 
 async function checkMaximized(): Promise<void> {
   if (hasElectronAPI()) {
@@ -43,9 +48,7 @@ async function checkMaximized(): Promise<void> {
 }
 
 async function handleMinimize(): Promise<void> {
-  if (hasElectronAPI()) {
-    await getElectronAPI().windowMinimize();
-  }
+  if (hasElectronAPI()) await getElectronAPI().windowMinimize();
 }
 
 async function handleMaximize(): Promise<void> {
@@ -56,9 +59,7 @@ async function handleMaximize(): Promise<void> {
 }
 
 async function handleClose(): Promise<void> {
-  if (hasElectronAPI()) {
-    await getElectronAPI().windowClose();
-  }
+  if (hasElectronAPI()) await getElectronAPI().windowClose();
 }
 
 function handleResize(): void {
@@ -83,12 +84,14 @@ onUnmounted(() => {
   z-index: 9999;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   width: 100%;
-  height: 32px;
+  height: 36px;
+  -webkit-user-select: none;
+  user-select: none;
   background-color: var(--bg-primary);
-  border-bottom: 1px solid var(--border-secondary);
+  // border-bottom: 1px solid var(--border-secondary);
 
+  // ── Drag area ──────────────────────────────────────
   &__drag-area {
     display: flex;
     flex: 1;
@@ -96,49 +99,43 @@ onUnmounted(() => {
     justify-content: center;
     height: 100%;
     -webkit-app-region: drag;
+
+    &--win {
+      justify-content: flex-start;
+      padding-left: 12px;
+    }
   }
 
   &__title {
     font-size: 13px;
-    color: var(--text-secondary);
+    font-weight: 500;
+    color: var(--text-primary);
   }
 
+  // ── Controls ───────────────────────────────────────
   &__controls {
     display: flex;
     height: 100%;
-    -webkit-app-region: no-drag;
-  }
 
-  &__button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 46px;
-    height: 100%;
-    padding: 0;
-    color: var(--text-secondary);
-    cursor: pointer;
-    outline: none;
-    background: transparent;
-    border: none;
-    transition: background-color 0.1s ease;
+    &--win {
+      .title-bar__button {
+        width: 46px;
+        height: 100%;
+        color: var(--text-primary);
+        cursor: pointer;
+        outline: none;
+        background: transparent;
+        border: none;
+        transition: background-color 0.2s;
 
-    &:hover {
-      background-color: rgb(255 255 255 / 10%);
-    }
+        &:hover {
+          background-color: var(--bg-hover);
+        }
 
-    &:active {
-      background-color: rgb(255 255 255 / 5%);
-    }
-
-    &--close {
-      &:hover {
-        color: #fff;
-        background-color: #e81123;
-      }
-
-      &:active {
-        background-color: #c50f1f;
+        &--close:hover {
+          color: white;
+          background-color: #e81123;
+        }
       }
     }
   }

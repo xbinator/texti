@@ -2,7 +2,7 @@ import type { SearchScrollContext } from '../extensions/Search';
 import type { Ref } from 'vue';
 import { ref, watch } from 'vue';
 import { useEditor, type Editor } from '@tiptap/vue-3';
-import { normalizeEditorContent } from './emptyContent';
+import { normalizeEditorContent } from '../extensions/emptyContent';
 import { useContent } from './useContent';
 import { useExtensions } from './useExtensions';
 

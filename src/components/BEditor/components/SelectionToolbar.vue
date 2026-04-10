@@ -47,9 +47,7 @@ const props = withDefaults(defineProps<Props>(), {
   editor: null
 });
 
-const emit = defineEmits<{
-  (e: 'ai-input-toggle', value: boolean, selectionRange?: SelectionRange): void;
-}>();
+const emit = defineEmits<{ (e: 'ai-input-toggle', value: boolean, selectionRange?: SelectionRange): void }>();
 
 const visible = ref(false);
 const isModelAvailable = ref(false);

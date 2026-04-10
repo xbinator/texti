@@ -1,5 +1,6 @@
 <template>
   <div class="rich-editor-pane">
+    <!-- Front Matter 卡片 -->
     <FrontMatterCard
       v-if="shouldShowFrontMatterCard"
       :data="frontMatterData"
@@ -10,9 +11,13 @@
       @add-field="handleFrontMatterFieldAdd"
     />
 
+    <!-- 当前选中块菜单 -->
     <CurrentBlockMenu :editor="props.editor" />
+    <!-- 选择工具栏 -->
     <SelectionToolbar :editor="props.editor" @ai-input-toggle="handleAIInputToggle" />
+    <!-- 选择 AI 输入框 -->
     <SelectionAIInput v-model:visible="aiInputVisible" :editor="props.editor" :selection-range="selectionRange" />
+    <!-- 编辑器内容 -->
     <EditorContent :key="editorId" :editor="props.editor ?? undefined" class="b-editor-content" />
   </div>
 </template>
@@ -138,8 +143,11 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
     }
 
     .ai-selection-highlight {
+      padding: 0.25em 0;
       color: var(--selection-color);
       background: var(--selection-bg);
+      -webkit-box-decoration-break: clone;
+      box-decoration-break: clone;
     }
 
     .is-editor-empty:first-child::before {

@@ -74,6 +74,10 @@ function setItemRef(el: HTMLElement, id: string): void {
 
 const collapsedIds = ref<Record<string, boolean>>({});
 
+/**
+ * 点击文档标题
+ * 传递空 id，由父组件处理滚动到顶部逻辑
+ */
 function handleTitleClick(): void {
   emit('click', { id: '', text: '', level: 0 });
 }

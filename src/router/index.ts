@@ -1,7 +1,7 @@
 import type { App } from 'vue';
 import type { RouteRecordRaw } from 'vue-router';
 import { createRouter, createWebHistory } from 'vue-router';
-import { native } from '@/shared/platform';
+import { useSettingStore } from '@/stores/setting';
 import { basicRoutes } from './routes';
 
 const router = createRouter({
@@ -11,10 +11,15 @@ const router = createRouter({
   scrollBehavior: (to, from, saved) => (to.name !== from.name ? saved || { left: 0, top: 0 } : undefined)
 });
 
+/**
+ * 路由后置守卫
+ * 根据路由元信息设置窗口标题
+ */
 router.afterEach((to) => {
   const title = to.meta?.title as string | undefined;
   if (title) {
-    native.setWindowTitle(title);
+    const settingStore = useSettingStore();
+    settingStore.setWindowTitle(title);
   }
 });
 

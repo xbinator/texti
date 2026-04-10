@@ -277,7 +277,7 @@ onUnmounted(() => {
   }
 });
 
-function getWrapElement(): HTMLDivElement | null {
+function getScrollElement(): HTMLDivElement | null {
   return wrap.value ?? null;
 }
 
@@ -286,7 +286,7 @@ function scrollTo(options: ScrollToOptions): void {
 }
 
 defineExpose({
-  getWrapElement,
+  getScrollElement,
   scrollTo,
   update
 });

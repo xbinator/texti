@@ -1,7 +1,7 @@
 import type { Editor } from '@tiptap/core';
 import type { Ref } from 'vue';
 import { watch } from 'vue';
-import { normalizeEditorContent } from './emptyContent';
+import { normalizeEditorContent } from '../extensions/emptyContent';
 
 interface UseBEditorContentParams {
   assignHeadingIds: (editor: Editor) => void;

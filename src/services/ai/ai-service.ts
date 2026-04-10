@@ -23,6 +23,7 @@ export class AIService {
     const driver = this.registry.get(resolved.provider.type);
     const providerConfig = this.buildProviderConfig(resolved.provider);
     const [generateError, result] = await asyncTo(driver.generateText(providerConfig, input));
+    console.log('🚀 ~ AIService ~ generateText ~ generateError:', generateError);
 
     if (generateError) return [toAIServiceError(generateError)];
 

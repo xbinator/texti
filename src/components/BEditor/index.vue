@@ -32,8 +32,8 @@ import type { EditorController } from './hooks/useEditorController';
 import type { FrontMatterData } from './hooks/useFrontMatter';
 import type { BEditorViewMode } from './types';
 import { computed, ref, toRef } from 'vue';
-import { useTextareaAutosize, useWindowSize } from '@vueuse/core';
-import BScrollbar from '../BScrollbar/index.vue';
+import { useTextareaAutosize } from '@vueuse/core';
+import BScrollbar from '@/components/BScrollbar/index.vue';
 import RichEditorPane from './components/RichEditorPane.vue';
 import SourceEditorPane from './components/SourceEditorPane.vue';
 import { getSearchSnapshot, type SearchScrollContext, type SearchSnapshot } from './extensions/Search';
@@ -42,11 +42,8 @@ import { useEditorController } from './hooks/useEditorController';
 import { useFrontMatter } from './hooks/useFrontMatter';
 import { useRichEditor } from './hooks/useRichEditor';
 
-// 视图宽度 + 侧边栏宽度 + 视图间距
-const MIN_WIDTH_FOR_SIDEBAR = 800 + 560;
 const editorInstanceCounter = ref(0);
 
-const { width } = useWindowSize();
 const layoutRef = ref<HTMLElement | null>(null);
 const scrollbarRef = ref<InstanceType<typeof BScrollbar> | null>(null);
 const titleTextareaRef = ref<HTMLTextAreaElement | null>(null);
@@ -69,7 +66,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const editorInstanceId = computed(() => `${props.editorId || ''}`);
 const isRichMode = computed(() => props.viewMode === 'rich');
-const showSidebar = computed(() => isRichMode.value && props.showOutline && width.value >= MIN_WIDTH_FOR_SIDEBAR);
+const showSidebar = computed(() => isRichMode.value && props.showOutline);
 
 const editorContent = defineModel<string>('value', { default: '' });
 
@@ -78,7 +75,7 @@ const editorTitle = defineModel<string>('title', { default: '' });
 const richEditorPaneRef = ref<EditorController | null>(null);
 const sourceEditorPaneRef = ref<Pick<EditorController, 'focusEditor' | 'focusEditorAtStart'> | null>(null);
 
-const { activeAnchorId, handleChangeAnchor, handleEditorScroll } = useAnchors(layoutRef);
+const { activeAnchorId, handleChangeAnchor, handleEditorScroll } = useAnchors(layoutRef, scrollbarRef);
 
 const { bodyContent, frontMatterData, hasFrontMatter, updateFrontMatter, reconstructContent } = useFrontMatter(editorContent);
 
@@ -104,25 +101,19 @@ function scrollSearchMatchIntoView({ targetElement }: SearchScrollContext): void
     return;
   }
 
-  const wrapElement = scrollbarRef.value?.getWrapElement();
-  if (!wrapElement) {
-    targetElement.scrollIntoView({
-      block: 'center',
-      inline: 'nearest'
-    });
+  const scrollElement = scrollbarRef.value?.getScrollElement();
+  if (!scrollElement) {
+    targetElement.scrollIntoView({ block: 'center', inline: 'nearest' });
     return;
   }
 
-  const wrapRect = wrapElement.getBoundingClientRect();
+  const scrollRect = scrollElement.getBoundingClientRect();
   const targetRect = targetElement.getBoundingClientRect();
-  const centeredTop = wrapElement.scrollTop + (targetRect.top - wrapRect.top) - (wrapElement.clientHeight - targetRect.height) / 2;
-  const maxScrollTop = Math.max(0, wrapElement.scrollHeight - wrapElement.clientHeight);
+  const centeredTop = scrollElement.scrollTop + (targetRect.top - scrollRect.top) - (scrollElement.clientHeight - targetRect.height) / 2;
+  const maxScrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
   const nextTop = Math.min(Math.max(centeredTop, 0), maxScrollTop);
 
-  scrollbarRef.value?.scrollTo({
-    top: nextTop,
-    behavior: 'auto'
-  });
+  scrollbarRef.value?.scrollTo({ top: nextTop, behavior: 'auto' });
 }
 
 const { editorInstance, setContent: setRichEditorContent } = useRichEditor({

@@ -7,6 +7,7 @@ import type { ToolbarOptions } from '@/components/BToolbar/types';
 import { native } from '@/shared/platform';
 import { isElectron, isWeb } from '@/shared/platform/env';
 import { recentFilesStorage, type StoredFile } from '@/shared/storage';
+import { useSettingStore } from '@/stores/setting';
 import { Modal } from '@/utils/modal';
 import { EditorShortcuts } from '../constants/shortcuts';
 
@@ -50,6 +51,8 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
     return !cancelled;
   }
 
+  const settingStore = useSettingStore();
+
   function setFileState(file: EditorFile): void {
     options.pause();
 
@@ -58,7 +61,8 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
       recentFilesStorage.setCurrentFile(file.id);
     }
 
-    native.setWindowTitle(`${file.name || '未命名'}.${file.ext || 'md'}`);
+    // 使用 setting store 设置窗口标题
+    settingStore.setWindowTitle(`${file.name || '未命名'}.${file.ext || 'md'}`);
     nextTick(() => options.resume());
   }
 

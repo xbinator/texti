@@ -42,6 +42,7 @@ function handleBack(): void {
 <style scoped lang="less">
 .settings-layout {
   display: flex;
+  height: 100%;
   background: var(--bg-secondary);
 }
 
@@ -50,7 +51,7 @@ function handleBack(): void {
   flex-shrink: 0;
   flex-direction: column;
   width: 280px;
-  height: 100vh;
+  height: 100%;
 }
 
 .sidebar-header {

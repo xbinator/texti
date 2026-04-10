@@ -1,6 +1,7 @@
 import type { Ref } from 'vue';
 import { ref } from 'vue';
 import { useThrottleFn } from '@vueuse/core';
+import BScrollbar from '@/components/BScrollbar/index.vue';
 
 export interface AnchorRecord {
   id: string;
@@ -16,12 +17,8 @@ interface UseBEditorAnchorsResult {
 
 const HEADING_SELECTOR = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].map((tag) => `.b-editor-content ${tag}`).join(', ');
 
-export function useAnchors(layoutRef: Ref<HTMLElement | null>): UseBEditorAnchorsResult {
+export function useAnchors(layoutRef: Ref<HTMLElement | null>, scrollbarRef: Ref<InstanceType<typeof BScrollbar> | null>): UseBEditorAnchorsResult {
   const activeAnchorId = ref('');
-
-  function getScrollContainer(): HTMLDivElement | null {
-    return layoutRef.value?.querySelector('.b-editor-scrollbar .scrollbar__wrap') ?? null;
-  }
 
   function getHeadingElements(): HTMLHeadingElement[] {
     return Array.from(layoutRef.value?.querySelectorAll(HEADING_SELECTOR) ?? []).filter(
@@ -33,7 +30,7 @@ export function useAnchors(layoutRef: Ref<HTMLElement | null>): UseBEditorAnchor
     activeAnchorId.value = record.id;
 
     if (!record.id) {
-      getScrollContainer()?.scrollTo({ top: 0, behavior: 'smooth' });
+      scrollbarRef.value?.scrollTo({ top: 0 });
       return;
     }
 
@@ -44,10 +41,8 @@ export function useAnchors(layoutRef: Ref<HTMLElement | null>): UseBEditorAnchor
   }
 
   const updateActiveAnchor = useThrottleFn(() => {
-    const container = getScrollContainer();
-    if (!container) {
-      return;
-    }
+    const container = scrollbarRef.value?.getScrollElement();
+    if (!container) return;
 
     if (container.scrollTop < 50) {
       activeAnchorId.value = '';
