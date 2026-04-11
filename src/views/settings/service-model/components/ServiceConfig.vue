@@ -23,7 +23,7 @@
       <div class="config-section">
         <div class="section-header" @click="togglePromptCollapsed">
           <div class="section-label">
-            <Icon icon="lucide:terminal" class="label-icon" />
+            <Icon :icon="promptCollapsed ? 'lucide:chevron-right' : 'lucide:chevron-down'" class="label-icon" />
             <span>Prompt</span>
           </div>
           <div class="header-actions">
@@ -31,7 +31,6 @@
               <Icon icon="lucide:rotate-ccw" class="reset-icon" />
               <span>恢复默认</span>
             </button>
-            <Icon :icon="promptCollapsed ? 'lucide:chevron-down' : 'lucide:chevron-up'" class="collapse-icon" />
           </div>
         </div>
 
@@ -215,7 +214,6 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 20px;
-  background: linear-gradient(135deg, var(--bg-primary) 0%, var(--color-primary-bg) 100%);
 }
 
 .service-icon-wrapper {
