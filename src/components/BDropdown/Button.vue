@@ -91,9 +91,8 @@ watch(
   gap: 10px;
   align-items: center;
   height: 28px;
-  padding: 0 10px;
+  padding: 0 8px;
   font-size: 14px;
-  color: var(--text-secondary);
   cursor: pointer;
   user-select: none;
   border-radius: 6px;
@@ -126,23 +125,5 @@ watch(
   width: 12px;
   height: 12px;
   transition: transform 0.3s;
-}
-
-:deep(.dark) .b-dropdown-button {
-  color: var(--text-secondary);
-}
-
-:deep(.dark) .b-dropdown-button:hover {
-  color: var(--text-primary);
-  background-color: var(--bg-active);
-}
-
-:deep(.dark) .b-dropdown-button.is-active {
-  color: var(--text-primary);
-  background-color: var(--bg-active);
-}
-
-:deep(.dark) .b-dropdown-button.is-bordered {
-  border-color: var(--border-primary);
 }
 </style>
