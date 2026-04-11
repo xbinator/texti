@@ -28,7 +28,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Provider } from './types';
+import type { AIProvider } from 'types/ai';
 import type { ComputedRef, Ref } from 'vue';
 import { ref, computed } from 'vue';
 import { useRoute } from 'vue-router';
@@ -41,25 +41,25 @@ const route = useRoute();
 const searchText: Ref<string> = ref('');
 const { providers, toggleProvider } = useProviders();
 
-const enabledCount: ComputedRef<number> = computed(() => providers.value.filter((provider: Provider) => provider.isEnabled).length);
+const enabledCount: ComputedRef<number> = computed(() => providers.value.filter((provider: AIProvider) => provider.isEnabled).length);
 
 const activeCategory: ComputedRef<string> = computed((): string => {
   const category = route.query.category as string;
   return category || 'all';
 });
 
-const filteredProviders: ComputedRef<Provider[]> = computed((): Provider[] => {
+const filteredProviders: ComputedRef<AIProvider[]> = computed((): AIProvider[] => {
   let result = providers.value;
 
   if (activeCategory.value === 'enabled') {
-    result = result.filter((provider: Provider) => provider.isEnabled);
+    result = result.filter((provider: AIProvider) => provider.isEnabled);
   } else if (activeCategory.value === 'disabled') {
-    result = result.filter((provider: Provider) => !provider.isEnabled);
+    result = result.filter((provider: AIProvider) => !provider.isEnabled);
   }
 
   if (searchText.value) {
     const regex = new RegExp(searchText.value, 'i');
-    result = result.filter((provider: Provider) => regex.test(provider.name) || regex.test(provider.description));
+    result = result.filter((provider: AIProvider) => regex.test(provider.name) || regex.test(provider.description));
   }
 
   return result;

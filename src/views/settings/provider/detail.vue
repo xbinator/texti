@@ -35,7 +35,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Model, Provider } from './types';
+import type { AIProvider, AIProviderModel } from 'types/ai';
 import type { ComputedRef, Ref } from 'vue';
 import { ref, computed, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
@@ -56,8 +56,8 @@ const providerId: ComputedRef<string> = computed(() => route.params.provider as 
 
 const { getProviderById, loadProviders, toggleProvider, saveProviderConfig } = useProviders();
 
-const provider: Ref<Provider | null> = ref(null);
-const models: Ref<Model[]> = ref([]);
+const provider: Ref<AIProvider | null> = ref(null);
+const models: Ref<AIProviderModel[]> = ref([]);
 const isLoadingProvider: Ref<boolean> = ref(false);
 const modalVisible: Ref<boolean> = ref(false);
 
@@ -78,7 +78,7 @@ async function loadProvider(): Promise<void> {
 
   provider.value = await getProviderById(providerId.value);
 
-  models.value = provider.value?.models ? provider.value.models.map((model: Model) => ({ ...model })) : [];
+  models.value = provider.value?.models ? provider.value.models.map((model) => ({ ...model })) : [];
 
   isLoadingProvider.value = false;
 }
@@ -118,7 +118,7 @@ function handleEdit(): void {
   modalVisible.value = true;
 }
 
-function handleModalSuccess(updatedProvider: Provider): void {
+function handleModalSuccess(updatedProvider: AIProvider): void {
   provider.value = updatedProvider;
   modalVisible.value = false;
 }
