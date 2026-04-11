@@ -1,128 +1,89 @@
-import type { AIRequest } from '../../types/electron-api';
-import { ref, onUnmounted } from 'vue';
+import type { ElectronAIRequestPayload } from 'types/electron-api';
+import { ref, onUnmounted, type Ref } from 'vue';
+import { getElectronAPI } from '@/shared/platform/electron-api';
 
-export interface UseElectronStreamOptions {
-  /** 错误回调 */
-  onError?: (error: string) => void;
-  /** 流式数据回调 */
-  onChunk?: (chunk: string) => void;
-  /** 完成回调 */
-  onComplete?: (text: string) => void;
+export interface UseElectronStreamResult {
+  content: Ref<string>;
+  isStreaming: Ref<boolean>;
+  error: Ref<string | null>;
+  startStream: (payload: ElectronAIRequestPayload) => Promise<void>;
+  abortStream: () => Promise<void>;
+  reset: () => void;
 }
 
-/**
- * Electron AI 流式文本生成 Hook
- * 通过 IPC 与主进程通信，实现安全的 AI 调用
- */
-export function useElectronStream(options: UseElectronStreamOptions = {}) {
-  const isLoading = ref(false);
+export function useElectronStream(): UseElectronStreamResult {
+  const content = ref<string>('');
+  const isStreaming = ref<boolean>(false);
   const error = ref<string | null>(null);
-  const text = ref('');
 
-  let cleanupChunk: (() => void) | null = null;
-  let cleanupComplete: (() => void) | null = null;
-  let cleanupError: (() => void) | null = null;
+  let cleanupFns: Array<() => void> = [];
 
-  const cleanup = (): void => {
-    cleanupChunk?.();
-    cleanupComplete?.();
-    cleanupError?.();
-    cleanupChunk = null;
-    cleanupComplete = null;
-    cleanupError = null;
+  const cleanupListeners = () => {
+    cleanupFns.forEach((cleanup) => cleanup());
+    cleanupFns = [];
+  };
+
+  const reset = () => {
+    content.value = '';
+    isStreaming.value = false;
+    error.value = null;
+    cleanupListeners();
+  };
+
+  const startStream = async (payload: ElectronAIRequestPayload) => {
+    const api = getElectronAPI();
+
+    reset();
+    isStreaming.value = true;
+
+    const onChunkCleanup = api.onAiChunk((chunk: string) => {
+      content.value += chunk;
+    });
+
+    const onCompleteCleanup = api.onAiComplete(() => {
+      isStreaming.value = false;
+      cleanupListeners();
+    });
+
+    const onErrorCleanup = api.onAiError((err: string) => {
+      error.value = err;
+      isStreaming.value = false;
+      cleanupListeners();
+    });
+
+    cleanupFns = [onChunkCleanup, onCompleteCleanup, onErrorCleanup];
+
+    try {
+      await api.aiStream(payload);
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      error.value = errorMessage;
+      isStreaming.value = false;
+      cleanupListeners();
+    }
+  };
+
+  const abortStream = async () => {
+    try {
+      await Promise.resolve();
+    } catch (err: unknown) {
+      // 忽略中断时的错误
+    } finally {
+      isStreaming.value = false;
+      cleanupListeners();
+    }
   };
 
   onUnmounted(() => {
-    cleanup();
+    cleanupListeners();
   });
 
-  /**
-   * 配置 AI Provider
-   * @param providerId 服务商 ID
-   * @returns 是否配置成功
-   */
-  async function configure(providerId: string): Promise<boolean> {
-    return window.electronAPI.aiConfigure(providerId);
-  }
-
-  /**
-   * 非流式文本生成
-   * @param request AI 请求参数
-   * @returns 生成的文本
-   */
-  async function generate(request: AIRequest): Promise<string | null> {
-    isLoading.value = true;
-    error.value = null;
-
-    try {
-      const result = await window.electronAPI.aiGenerate(request);
-      return result.text;
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      error.value = errorMessage;
-      options.onError?.(errorMessage);
-      return null;
-    } finally {
-      isLoading.value = false;
-    }
-  }
-
-  /**
-   * 流式文本生成
-   * @param request AI 请求参数
-   * @returns 生成的文本
-   */
-  async function stream(request: AIRequest): Promise<string | null> {
-    isLoading.value = true;
-    error.value = null;
-    text.value = '';
-
-    cleanup();
-
-    cleanupChunk = window.electronAPI.onAiChunk((chunk) => {
-      text.value += chunk;
-      options.onChunk?.(chunk);
-    });
-
-    cleanupComplete = window.electronAPI.onAiComplete(() => {
-      isLoading.value = false;
-      options.onComplete?.(text.value);
-    });
-
-    cleanupError = window.electronAPI.onAiError((err) => {
-      error.value = err;
-      isLoading.value = false;
-      options.onError?.(err);
-    });
-
-    try {
-      await window.electronAPI.aiStream(request);
-      return text.value;
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      error.value = errorMessage;
-      isLoading.value = false;
-      options.onError?.(errorMessage);
-      return null;
-    }
-  }
-
-  /**
-   * 中止流式生成
-   */
-  async function abort(): Promise<void> {
-    await window.electronAPI.aiAbort();
-    cleanup();
-    isLoading.value = false;
-  }
-
   return {
-    isLoading,
+    content,
+    isStreaming,
     error,
-    text,
-    configure,
-    generate,
-    stream,
-    abort
+    startStream,
+    abortStream,
+    reset
   };
 }

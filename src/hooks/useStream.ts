@@ -1,5 +1,7 @@
 import { ref } from 'vue';
-import { aiService } from '@/services/ai';
+import type { AITextRequestInput } from '@/shared/platform/ai';
+import { buildElectronAIRequestPayload } from '@/shared/platform/ai';
+import { getElectronAPI } from '@/shared/platform/electron-api';
 
 export interface UseStreamOptions {
   /** 错误回调 */
@@ -11,7 +13,7 @@ export interface UseStreamOptions {
 }
 
 /** 流式文本生成输入参数 */
-export type StreamTextInput = Parameters<typeof aiService.streamText>[0];
+export type StreamTextInput = AITextRequestInput;
 
 /**
  * AI 流式文本生成 Hook
@@ -20,23 +22,6 @@ export type StreamTextInput = Parameters<typeof aiService.streamText>[0];
 export function useStream(options: UseStreamOptions = {}) {
   const isLoading = ref(false);
   const error = ref<{ message: string; code?: string } | null>(null);
-
-  /**
-   * 消费异步流，逐块收集文本
-   * 使用 for-await 替代递归，避免深流场景下的调用栈溢出
-   * @param stream - 异步可迭代流
-   * @returns 完整的文本内容
-   */
-  async function readStreamText(stream: AsyncIterable<string>): Promise<string> {
-    const chunks: string[] = [];
-    // eslint-disable-next-line no-restricted-syntax
-    for await (const chunk of stream) {
-      chunks.push(chunk);
-      options.onChunk?.(chunk);
-    }
-
-    return chunks.join('');
-  }
 
   /**
    * 流式生成文本
@@ -48,16 +33,42 @@ export function useStream(options: UseStreamOptions = {}) {
     error.value = null;
 
     try {
-      const [streamError, stream] = await aiService.streamText(input);
+      const api = getElectronAPI();
+      const payload = await buildElectronAIRequestPayload(input);
+      const text = await new Promise<string>((resolve, reject) => {
+        let accumulatedText = '';
+        let cleanup = (): void => undefined;
 
-      if (streamError) {
-        throw streamError;
-      }
+        const cleanupChunk = api.onAiChunk((chunk: string) => {
+          accumulatedText += chunk;
+          options.onChunk?.(chunk);
+        });
 
-      const text = await readStreamText(stream.textStream);
+        const cleanupComplete = api.onAiComplete(() => {
+          cleanup();
+          resolve(accumulatedText);
+        });
+
+        const cleanupError = api.onAiError((message: string) => {
+          cleanup();
+          reject(new Error(message));
+        });
+
+        cleanup = (): void => {
+          cleanupChunk();
+          cleanupComplete();
+          cleanupError();
+        };
+
+        api.aiStream(payload).catch((streamError: unknown) => {
+          cleanup();
+          reject(streamError);
+        });
+      });
+
       options.onComplete?.(text);
       return text;
-    } catch (err) {
+    } catch (err: unknown) {
       const normalizedError = {
         message: err instanceof Error ? err.message : String(err),
         code: (err as { code?: string }).code
@@ -73,7 +84,6 @@ export function useStream(options: UseStreamOptions = {}) {
   return {
     isLoading,
     error,
-    streamText,
-    readStreamText
+    streamText
   };
 }
