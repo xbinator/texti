@@ -48,13 +48,13 @@
 </template>
 
 <script setup lang="ts">
+import type { AIProvider } from 'types/ai';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { Icon } from '@iconify/vue';
 import BPromptEditor from '@/components/BPromptEditor/index.vue';
 import type { VariableOptionGroup } from '@/components/BPromptEditor/types';
 import BSelect from '@/components/BSelect/index.vue';
 import { providerStorage, serviceModelsStorage } from '@/shared/storage';
-import type { Provider } from '@/shared/storage';
 import type { ServiceModelType } from '@/shared/storage/service-models';
 import { dispatchServiceModelUpdated } from '@/shared/storage/service-models/events';
 import { useServiceModelStore } from '@/stores/service-model';
@@ -85,7 +85,7 @@ const props = withDefaults(defineProps<Props>(), {
 const serviceModelStore = useServiceModelStore();
 
 const loading = ref(false);
-const providers = ref<Provider[]>([]);
+const providers = ref<AIProvider[]>([]);
 const selectedModel = ref<string>();
 const customPrompt = ref<string>();
 const initialized = ref(false);

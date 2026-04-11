@@ -1,4 +1,4 @@
-import type { ProviderRequestFormat } from '@/shared/storage';
+import type { AIProviderType } from 'types/ai';
 
 export type SettingsMenuKey = 'provider' | 'service-model';
 
@@ -15,7 +15,7 @@ export const menuItems: MenuItem[] = [
 ];
 
 export interface ProviderFormatOption {
-  value: ProviderRequestFormat;
+  value: AIProviderType;
   label: string;
 }
 

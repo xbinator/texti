@@ -1,10 +1,4 @@
-import type { AIProvider, AIProviderModel, AIProviderType } from 'types/ai';
-
-export type ProviderRequestFormat = AIProviderType;
-
-export type ProviderModel = AIProviderModel;
-
-export type Provider = AIProvider;
+import type { AIProviderModel } from 'types/ai';
 
 /**
  * 存储的文件信息
