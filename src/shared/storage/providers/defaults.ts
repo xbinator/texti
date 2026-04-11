@@ -95,7 +95,7 @@ export const DEFAULT_PROVIDERS: AIProvider[] = [
     id: 'minimax',
     name: 'MiniMax',
     description: '提供 MiniMax 系列模型，支持长上下文、多模态与角色扮演。',
-    baseUrl: 'https://api.minimaxi.com/anthropic',
+    baseUrl: 'https://api.minimaxi.com/anthropic/v1',
     type: 'anthropic',
     isEnabled: false,
     readonly: true,
