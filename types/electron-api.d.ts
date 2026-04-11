@@ -36,11 +36,6 @@ export interface AIGenerateResult {
   text: string;
 }
 
-export interface ElectronAIRequestPayload {
-  createOptions: AICreateOptions;
-  request: AIRequestOptions;
-}
-
 export interface ElectronAPI {
   // 文件对话框操作
   openFile: (options?: ElectronOpenFileOptions) => Promise<ElectronFileResult>;
@@ -70,13 +65,8 @@ export interface ElectronAPI {
   openExternal: (url: string) => Promise<void>;
 
   // AI 服务操作
-  aiGenerate: (payload: ElectronAIRequestPayload) => Promise<AIGenerateResult>;
-  aiStream: (payload: ElectronAIRequestPayload) => Promise<void>;
-
-  // AI 事件监听
-  onAiChunk: (callback: (chunk: string) => void) => () => void;
-  onAiComplete: (callback: () => void) => () => void;
-  onAiError: (callback: (error: string) => void) => () => void;
+  aiGenerate: (createOptions: AICreateOptions, request: AIRequestOptions) => Promise<AIGenerateResult>;
+  aiStream: (createOptions: AICreateOptions, request: AIRequestOptions) => Promise<void>;
 }
 
 declare global {

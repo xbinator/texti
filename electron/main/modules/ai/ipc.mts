@@ -25,9 +25,9 @@ export function registerAIHandlers(): void {
 
       win.webContents.send('ai:complete');
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-
-      win.webContents.send('ai:error', errorMessage);
+      // 在 aiService.streamText 抛出的错误已经被 normalizeError 转换成了 AIServiceError 格式（包含 code 和 message）
+      // 我们直接将这个错误对象发送给前端，以便前端可以根据 code 进行差异化处理
+      win.webContents.send('ai:error', error);
     }
   });
 }

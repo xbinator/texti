@@ -1,3 +1,5 @@
+import type { AIServiceError } from 'types/ai';
+
 /**
  * AI 服务错误代码常量
  * 定义了所有可能的 AI 服务错误类型
@@ -44,17 +46,6 @@ export interface ExtractedErrorDetails {
 }
 
 /**
- * AI 服务错误类型
- * 扩展了标准 Error 对象，添加了错误代码和原因字段
- */
-export type AIServiceError = Error & {
-  /** 错误代码 */
-  code: AIErrorCode;
-  /** 错误原因 */
-  cause?: unknown;
-};
-
-/**
  * 类型守卫函数，检查给定的错误是否为 AIServiceError 类型
  * @param error - 要检查的错误对象
  * @returns 如果是 AIServiceError 类型返回 true，否则返回 false
@@ -63,7 +54,6 @@ export function isAIServiceError(error: unknown): error is AIServiceError {
   return (
     typeof error === 'object' &&
     error !== null &&
-    (error as Record<string, unknown>).name === 'AIServiceError' &&
     typeof (error as Record<string, unknown>).message === 'string' &&
     typeof (error as Record<string, unknown>).code === 'string'
   );
@@ -73,13 +63,8 @@ export function isAIServiceError(error: unknown): error is AIServiceError {
  * 创建 AI 服务错误对象
  * @param code - 错误代码
  * @param message - 错误消息
- * @param cause - 错误原因（可选）
  * @returns AIServiceError 错误对象
  */
-export function createAIServiceError(code: AIErrorCode, message: string, cause?: unknown): AIServiceError {
-  const error = new Error(message) as AIServiceError;
-  error.name = 'AIServiceError';
-  error.code = code;
-  error.cause = cause;
-  return error;
+export function createAIServiceError(code: AIErrorCode, message: string): AIServiceError {
+  return { code, message };
 }

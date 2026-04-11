@@ -14,7 +14,7 @@ export interface AICreateOptions {
   // 提供商 名称
   providerName: string;
   // 服务商 API 密钥
-  apiKey: string;
+  apiKey?: string;
   // 自定义 API 基础地址
   baseUrl?: string;
 }
@@ -42,6 +42,17 @@ export interface AIProviderModel {
   type: string;
   /** 是否启用该模型 */
   isEnabled: boolean;
+}
+
+/**
+ * AI 服务错误类型
+ * 扩展了标准 Error 对象，添加了错误代码和原因字段
+ */
+export interface AIServiceError {
+  /** 错误代码 */
+  code: AIErrorCode;
+  /** 错误原因 */
+  message: string;
 }
 
 /**
