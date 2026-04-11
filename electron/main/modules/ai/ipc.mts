@@ -6,9 +6,7 @@ import { aiService } from './service.mjs';
 
 export function registerAIHandlers(): void {
   ipcMain.handle('ai:generate', async (_event, createOptions: AICreateOptions, request: AIRequestOptions) => {
-    const result = await aiService.generateText(createOptions, request);
-
-    return { text: result.text } satisfies AIGenerateResult;
+    return (await aiService.generateText(createOptions, request)) satisfies AIGenerateResult;
   });
 
   ipcMain.handle('ai:stream', async (event, createOptions: AICreateOptions, request: AIRequestOptions) => {
