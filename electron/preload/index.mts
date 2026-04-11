@@ -4,13 +4,14 @@
  * 通过 contextBridge 将 electronAPI 注入到 window 对象
  */
 
+import type { ElectronAPI } from 'types/electron-api';
 import { contextBridge, ipcRenderer } from 'electron';
 
 /**
  * 通过 contextBridge 暴露 Electron API 到渲染进程
  * 所有 IPC 调用都通过这里进行，确保安全隔离
  */
-contextBridge.exposeInMainWorld('electronAPI', {
+const electronAPI: ElectronAPI = {
   // ==================== 文件对话框操作 ====================
 
   /**
@@ -18,7 +19,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
    * @param options 文件过滤选项
    * @returns 选择的文件信息（路径、内容、文件名等）
    */
-  openFile: (options?: { filters?: Array<{ name: string; extensions: string[] }> }) => ipcRenderer.invoke('dialog:openFile', options),
+  openFile: (options) => ipcRenderer.invoke('dialog:openFile', options),
 
   /**
    * 保存文件对话框或直接保存到指定路径
@@ -27,8 +28,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
    * @param options 保存选项（过滤器、默认路径等）
    * @returns 保存的文件路径
    */
-  saveFile: (content: string, filePath?: string, options?: { filters?: Array<{ name: string; extensions: string[] }>; defaultPath?: string }) =>
-    ipcRenderer.invoke('dialog:saveFile', content, filePath, options),
+  saveFile: (content, filePath, options) => ipcRenderer.invoke('dialog:saveFile', content, filePath, options),
 
   /**
    * 直接写入文件（已知路径时使用）
@@ -65,6 +65,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
    * @returns 是否最大化
    */
   windowIsMaximized: () => ipcRenderer.invoke('window:isMaximized'),
+
+  /**
+   * 查询窗口是否全屏
+   * @returns 是否全屏
+   */
+  windowIsFullScreen: () => ipcRenderer.invoke('window:isFullScreen'),
 
   // ==================== 数据库操作 ====================
 
@@ -117,37 +123,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ==================== AI 服务操作 ====================
 
   /**
-   * 配置 AI Provider
-   * @param providerId 服务商 ID
-   * @returns 是否配置成功
-   */
-  aiConfigure: (providerId: string) => ipcRenderer.invoke('ai:configure', providerId),
-
-  /**
-   * 移除 AI Provider 配置
-   * @param providerId 服务商 ID
-   */
-  aiRemoveProvider: (providerId: string) => ipcRenderer.invoke('ai:removeProvider', providerId),
-
-  /**
    * 非流式文本生成
-   * @param request AI 请求参数
+   * @param payload AI 创建参数与请求参数
    * @returns 生成的文本结果
    */
-  aiGenerate: (request: { providerId: string; modelId: string; prompt: string; system?: string; temperature?: number }) =>
-    ipcRenderer.invoke('ai:generate', request),
+  aiGenerate: (payload) => ipcRenderer.invoke('ai:generate', payload.createOptions, payload.request),
 
   /**
    * 流式文本生成
-   * @param request AI 请求参数
+   * @param payload AI 创建参数与请求参数
    */
-  aiStream: (request: { providerId: string; modelId: string; prompt: string; system?: string; temperature?: number }) =>
-    ipcRenderer.invoke('ai:stream', request),
-
-  /**
-   * 中止流式生成
-   */
-  aiAbort: () => ipcRenderer.invoke('ai:abort'),
+  aiStream: (payload) => ipcRenderer.invoke('ai:stream', payload.createOptions, payload.request),
 
   /**
    * 监听 AI 流式数据块
@@ -178,4 +164,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('ai:error', handler);
     return () => ipcRenderer.removeListener('ai:error', handler);
   }
-});
+};
+
+contextBridge.exposeInMainWorld('electronAPI', electronAPI);

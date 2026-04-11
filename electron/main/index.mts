@@ -16,10 +16,13 @@ function handleWindowAllClosed(): void {
 }
 
 async function bootstrap(): Promise<void> {
+  // 初始化存储
   await initStore();
   migrateFromTauri();
+  // 初始化数据库
   await initDatabase();
   registerAllIpcHandlers();
+  // 创建窗口
   createWindow();
 
   app.on('activate', handleActivate);

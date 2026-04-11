@@ -1,16 +1,10 @@
-export interface FileFilter {
-  name: string;
-  extensions: string[];
-}
+import type { ElectronDialogFilter, ElectronOpenFileOptions, ElectronSaveFileOptions } from 'types/electron-api';
 
-export interface OpenFileOptions {
-  filters?: FileFilter[];
-}
+export type FileFilter = ElectronDialogFilter;
 
-export interface SaveFileOptions {
-  filters?: FileFilter[];
-  defaultPath?: string;
-}
+export type OpenFileOptions = ElectronOpenFileOptions;
+
+export type SaveFileOptions = ElectronSaveFileOptions;
 
 export interface File {
   path: string | null;

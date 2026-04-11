@@ -38,4 +38,9 @@ export function registerWindowHandlers(): void {
     const win = getFocusedWindow();
     return win ? win.isMaximized() : false;
   });
+
+  ipcMain.handle('window:isFullScreen', async () => {
+    const win = getFocusedWindow();
+    return win ? win.isFullScreen() : false;
+  });
 }

@@ -28,7 +28,7 @@ export function createWindow(): BrowserWindow {
     title: 'Texti',
     frame: false,
     titleBarStyle: 'hidden',
-    trafficLightPosition: { x: 12, y: 12 },
+    trafficLightPosition: { x: 12, y: 10 },
     webPreferences: {
       preload: getPreloadPath(),
       contextIsolation: true,

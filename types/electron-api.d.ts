@@ -1,35 +1,51 @@
+import type { AICreateOptions, AIRequestOptions } from './ai';
+
 /**
  * Electron API 类型定义
  * 为 window.electronAPI 提供类型支持
  */
 
-export interface AIRequest {
-  providerId: string;
-  modelId: string;
-  prompt: string;
-  system?: string;
-  temperature?: number;
+export interface ElectronDialogFilter {
+  name: string;
+  extensions: string[];
+}
+
+export interface ElectronOpenFileOptions {
+  filters?: ElectronDialogFilter[];
+}
+
+export interface ElectronSaveFileOptions {
+  filters?: ElectronDialogFilter[];
+  defaultPath?: string;
+}
+
+export interface ElectronFileResult {
+  canceled: boolean;
+  filePath: string | null;
+  content: string;
+  fileName: string;
+  ext: string;
+}
+
+export interface DbExecuteResult {
+  changes: number;
+  lastInsertRowid: number;
 }
 
 export interface AIGenerateResult {
   text: string;
 }
 
+export interface ElectronAIRequestPayload {
+  createOptions: AICreateOptions;
+  request: AIRequestOptions;
+}
+
 export interface ElectronAPI {
   // 文件对话框操作
-  openFile: (options?: { filters?: Array<{ name: string; extensions: string[] }> }) => Promise<{
-    canceled: boolean;
-    filePath: string | null;
-    content: string;
-    fileName: string;
-    ext: string;
-  }>;
+  openFile: (options?: ElectronOpenFileOptions) => Promise<ElectronFileResult>;
 
-  saveFile: (
-    content: string,
-    filePath?: string,
-    options?: { filters?: Array<{ name: string; extensions: string[] }>; defaultPath?: string }
-  ) => Promise<string | null>;
+  saveFile: (content: string, filePath?: string, options?: ElectronSaveFileOptions) => Promise<string | null>;
 
   writeFile: (filePath: string, content: string) => Promise<void>;
 
@@ -39,9 +55,10 @@ export interface ElectronAPI {
   windowMaximize: () => Promise<void>;
   windowClose: () => Promise<void>;
   windowIsMaximized: () => Promise<boolean>;
+  windowIsFullScreen: () => Promise<boolean>;
 
   // 数据库操作
-  dbExecute: (sql: string, params?: unknown[]) => Promise<{ changes: number; lastInsertRowid: number }>;
+  dbExecute: (sql: string, params?: unknown[]) => Promise<DbExecuteResult>;
   dbSelect: <T = unknown>(sql: string, params?: unknown[]) => Promise<T[]>;
 
   // 安全存储操作
@@ -53,11 +70,8 @@ export interface ElectronAPI {
   openExternal: (url: string) => Promise<void>;
 
   // AI 服务操作
-  aiConfigure: (providerId: string) => Promise<boolean>;
-  aiRemoveProvider: (providerId: string) => Promise<void>;
-  aiGenerate: (request: AIRequest) => Promise<AIGenerateResult>;
-  aiStream: (request: AIRequest) => Promise<void>;
-  aiAbort: () => Promise<void>;
+  aiGenerate: (payload: ElectronAIRequestPayload) => Promise<AIGenerateResult>;
+  aiStream: (payload: ElectronAIRequestPayload) => Promise<void>;
 
   // AI 事件监听
   onAiChunk: (callback: (chunk: string) => void) => () => void;
@@ -67,7 +81,7 @@ export interface ElectronAPI {
 
 declare global {
   interface Window {
-    electronAPI: ElectronAPI;
+    electronAPI?: ElectronAPI;
   }
 }
 
