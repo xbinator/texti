@@ -1,23 +1,23 @@
 <template>
-  <div class="settings-layout">
-    <div class="settings-sidebar">
-      <div class="sidebar-header" @click="handleBack">
+  <BLayout class="settings-layout" content-class="settings-container">
+    <template #header-left>
+      <div class="settings-header-back" @click="handleBack">
         <Icon icon="uis:angle-left" width="24" height="24" />
         <span>设置</span>
       </div>
+    </template>
 
-      <div class="sidebar-content">
-        <RouterLink v-for="item in menuItems" :key="item.key" :to="item.path" class="sidebar-item" :class="{ active: isActive(item.key) }">
-          <Icon :icon="item.icon" />
-          <span>{{ item.label }}</span>
-        </RouterLink>
-      </div>
+    <div class="settings-sidebar">
+      <RouterLink v-for="item in menuItems" :key="item.key" :to="item.path" class="sidebar-item" :class="{ active: isActive(item.key) }">
+        <Icon :icon="item.icon" />
+        <span>{{ item.label }}</span>
+      </RouterLink>
     </div>
 
-    <div class="settings-container">
+    <div class="settings-content">
       <RouterView />
     </div>
-  </div>
+  </BLayout>
 </template>
 
 <script setup lang="ts">
@@ -41,8 +41,6 @@ function handleBack(): void {
 
 <style scoped lang="less">
 .settings-layout {
-  display: flex;
-  height: 100%;
   background: var(--bg-secondary);
 }
 
@@ -52,9 +50,11 @@ function handleBack(): void {
   flex-direction: column;
   width: 280px;
   height: 100%;
+  padding: 6px 8px 8px;
+  overflow-y: auto;
 }
 
-.sidebar-header {
+.settings-header-back {
   display: flex;
   gap: 8px;
   align-items: center;
@@ -69,12 +69,6 @@ function handleBack(): void {
   &:hover {
     color: var(--color-primary);
   }
-}
-
-.sidebar-content {
-  flex: 1;
-  padding: 6px 8px 8px;
-  overflow-y: auto;
 }
 
 .sidebar-item {
@@ -103,9 +97,13 @@ function handleBack(): void {
   }
 }
 
-.settings-container {
+:deep(.settings-container) {
+  display: flex;
+}
+
+.settings-content {
   flex: 1;
-  margin: 8px;
+  margin: 0 8px 8px 0;
   background: var(--bg-primary);
   border-radius: 8px;
 }

@@ -1,27 +1,29 @@
 <template>
-  <div v-show="visible" class="header-right">
-    <div class="find-bar" :class="{ 'is-empty': isNoMatchFound }">
-      <input
-        ref="inputRef"
-        v-model="keyword"
-        class="find-input"
-        placeholder="在文档中查找"
-        @keydown.enter.prevent="handleEnter"
-        @keydown.esc.prevent="closeFind"
-      />
-      <span class="find-result" :class="{ 'find-result--empty': isNoMatchFound }">{{ findResultText }}</span>
-      <button type="button" class="find-action" :disabled="!hasMatches" @click="findPrevious">
-        <Icon icon="lucide:chevron-up" />
-      </button>
-      <button type="button" class="find-action" :disabled="!hasMatches" @click="findNext">
-        <Icon icon="lucide:chevron-down" />
-      </button>
-      <span class="find-divider"></span>
-      <button type="button" class="find-action" @click="closeFind">
-        <Icon icon="lucide:x" />
-      </button>
+  <Transition name="find-bar-flip">
+    <div v-if="visible" class="find-bar">
+      <div class="find-bar-container" :class="{ 'no-match': isNoMatchFound }">
+        <input
+          ref="inputRef"
+          v-model="keyword"
+          class="find-bar-input"
+          placeholder="在文档中查找"
+          @keydown.enter.prevent="handleEnter"
+          @keydown.esc.prevent="closeFind"
+        />
+        <span class="find-bar-result" :class="{ 'find-bar-result--empty': isNoMatchFound }">{{ findResultText }}</span>
+        <button type="button" class="find-bar-btn" :disabled="!hasMatches" @click="findPrevious">
+          <Icon icon="lucide:chevron-up" />
+        </button>
+        <button type="button" class="find-bar-btn" :disabled="!hasMatches" @click="findNext">
+          <Icon icon="lucide:chevron-down" />
+        </button>
+        <span class="find-bar-divider"></span>
+        <button type="button" class="find-bar-btn" @click="closeFind">
+          <Icon icon="lucide:x" />
+        </button>
+      </div>
     </div>
-  </div>
+  </Transition>
 </template>
 
 <script setup lang="ts">
@@ -166,12 +168,34 @@ registerShortcut({
 </script>
 
 <style scoped>
-.header-right {
+.find-bar {
+  position: absolute;
+  top: 20px;
+  right: 20px;
   display: flex;
   align-items: center;
+  transform-origin: top center;
 }
 
-.find-bar {
+.find-bar-flip-enter-active {
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.find-bar-flip-leave-active {
+  transition: all 0.2s ease-in;
+}
+
+.find-bar-flip-enter-from {
+  opacity: 0;
+  transform: perspective(400px) rotateX(-15deg) translateY(-10px);
+}
+
+.find-bar-flip-leave-to {
+  opacity: 0;
+  transform: perspective(400px) rotateX(15deg) translateY(-10px);
+}
+
+.find-bar-container {
   display: flex;
   gap: 4px;
   align-items: center;
@@ -185,12 +209,12 @@ registerShortcut({
   box-shadow: var(--shadow-sm);
 }
 
-.find-bar.is-empty {
+.find-bar-container.no-match {
   border-color: var(--color-warning-border);
   box-shadow: 0 0 0 1px var(--color-warning-border);
 }
 
-.find-input {
+.find-bar-input {
   flex: 1;
   min-width: 0;
   height: 24px;
@@ -205,28 +229,28 @@ registerShortcut({
   box-shadow: none;
 }
 
-.find-input::placeholder {
+.find-bar-input::placeholder {
   color: var(--text-placeholder);
 }
 
-.find-result {
+.find-bar-result {
   min-width: 40px;
   font-size: 12px;
   color: var(--text-tertiary);
   text-align: right;
 }
 
-.find-result--empty {
+.find-bar-result--empty {
   color: var(--input-error-text);
 }
 
-.find-divider {
+.find-bar-divider {
   width: 1px;
   height: 16px;
   background: var(--bg-active);
 }
 
-.find-action {
+.find-bar-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -241,12 +265,12 @@ registerShortcut({
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-.find-action:hover:not(:disabled) {
+.find-bar-btn:hover:not(:disabled) {
   color: var(--text-primary);
   background: var(--bg-hover);
 }
 
-.find-action:disabled {
+.find-bar-btn:disabled {
   color: var(--text-quaternary);
   cursor: not-allowed;
 }

@@ -1,6 +1,6 @@
 <template>
-  <div class="editor-layout">
-    <div class="editor-header">
+  <BLayout class="editor-layout" content-class="editor-content">
+    <template #header-left>
       <div class="header-left">
         <BToolbar :title="'文件'" :options="toolbarFileOptions" />
 
@@ -10,31 +10,31 @@
 
         <BToolbar :title="'帮助'" :options="toolbarHelpOptions" />
       </div>
-
+    </template>
+    <template #header-right>
       <div class="header-right">
-        <FindBar v-model:visible="visible.find" :content="fileState.content" :editor-instance="editorInstance" />
         <div class="settings-btn" @click="handleOpenSettings">
           <Icon icon="lucide:settings" />
         </div>
       </div>
-    </div>
+    </template>
 
-    <div class="editor-content">
-      <BEditor
-        :key="fileState.id"
-        ref="editorInstance"
-        v-model:value="fileState.content"
-        v-model:title="fileState.name"
-        :editor-id="fileState?.id"
-        :view-mode="viewState.mode"
-        :show-outline="viewState.showOutline"
-      />
-    </div>
+    <BEditor
+      :key="fileState.id"
+      ref="editorInstance"
+      v-model:value="fileState.content"
+      v-model:title="fileState.name"
+      :editor-id="fileState?.id"
+      :view-mode="viewState.mode"
+      :show-outline="viewState.showOutline"
+    />
+    <!-- 查找栏 -->
+    <FindBar v-model:visible="visible.find" :content="fileState.content" :editor-instance="editorInstance" />
 
     <SearchRecent v-model:visible="visible.recentSearch" :files="recentFiles" :active-id="fileState.id" @select="handleSelectRecentFile" />
 
     <ShortcutsHelp v-model:visible="visible.shortcuts" />
-  </div>
+  </BLayout>
 </template>
 
 <script setup lang="ts">
@@ -84,26 +84,14 @@ const { toolbarHelpOptions } = useHelp({
 
 <style lang="less" scoped>
 .editor-layout {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
   background: var(--bg-secondary);
-}
-
-.editor-header {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: space-between;
-  height: 40px;
-  padding: 0 20px;
-  background: var(--bg-primary);
 }
 
 .header-left {
   display: flex;
   gap: 10px;
   align-items: center;
+  padding: 0 20px;
 }
 
 .header-right {
@@ -116,9 +104,9 @@ const { toolbarHelpOptions } = useHelp({
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  font-size: 16px;
+  width: 28px;
+  height: 28px;
+  font-size: 14px;
   color: var(--text-secondary);
   cursor: pointer;
   border-radius: 6px;
@@ -130,10 +118,9 @@ const { toolbarHelpOptions } = useHelp({
   background: var(--bg-hover);
 }
 
-.editor-content {
-  flex: 1;
-  height: 0;
-  margin: 6px;
+:deep(.editor-content) {
+  position: relative;
+  margin: 0 6px 6px;
   overflow: hidden;
   background: var(--bg-primary);
   border-radius: 8px;
