@@ -65,7 +65,7 @@ export interface ElectronAPI {
   openExternal: (url: string) => Promise<void>;
 
   // AI 服务操作
-  aiGenerate: (createOptions: AICreateOptions, request: AIRequestOptions) => Promise<AIGenerateResult>;
+  aiInvoke: (createOptions: AICreateOptions, request: AIRequestOptions) => Promise<AIGenerateResult>;
   aiStream: (createOptions: AICreateOptions, request: AIRequestOptions) => Promise<void>;
 }
 

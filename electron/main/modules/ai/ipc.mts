@@ -5,7 +5,7 @@ import { getWindowFromWebContents } from '../../window.mjs';
 import { aiService } from './service.mjs';
 
 export function registerAIHandlers(): void {
-  ipcMain.handle('ai:generate', async (_event, createOptions: AICreateOptions, request: AIRequestOptions) => {
+  ipcMain.handle('ai:invoke', async (_event, createOptions: AICreateOptions, request: AIRequestOptions) => {
     return (await aiService.generateText(createOptions, request)) satisfies AIGenerateResult;
   });
 

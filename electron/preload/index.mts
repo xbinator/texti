@@ -127,7 +127,7 @@ const electronAPI: ElectronAPI = {
    * @param payload AI 创建参数与请求参数
    * @returns 生成的文本结果
    */
-  aiGenerate: (createOptions, request) => ipcRenderer.invoke('ai:generate', createOptions, request),
+  aiInvoke: (createOptions, request) => ipcRenderer.invoke('ai:invoke', createOptions, request),
 
   /**
    * 流式文本生成

@@ -53,7 +53,7 @@ export function useAgent(options: UseStreamOptions) {
 
     if (error) return [error];
 
-    return asyncTo(electronAPI.aiGenerate(provider, payload));
+    return asyncTo(electronAPI.aiInvoke(provider, payload));
   };
 
   return { agent: { invoke: onInvoke } };
