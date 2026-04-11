@@ -3,9 +3,14 @@ import type { AITextRequestInput } from '@/shared/platform/ai';
 import { buildElectronAIRequestPayload } from '@/shared/platform/ai';
 import { getElectronAPI } from '@/shared/platform/electron-api';
 
+export interface StreamErrorState {
+  message: string;
+  code?: string;
+}
+
 export interface UseStreamOptions {
   /** 错误回调 */
-  onError?: (error: { message: string; code?: string }) => void;
+  onError?: (error: StreamErrorState) => void;
   /** 流式数据回调 */
   onChunk?: (chunk: string) => void;
   /** 完成回调 */
@@ -21,7 +26,14 @@ export type StreamTextInput = AITextRequestInput;
  */
 export function useStream(options: UseStreamOptions = {}) {
   const isLoading = ref(false);
-  const error = ref<{ message: string; code?: string } | null>(null);
+  const error = ref<StreamErrorState | null>(null);
+
+  function normalizeStreamError(err: unknown): StreamErrorState {
+    return {
+      message: err instanceof Error ? err.message : String(err),
+      code: typeof err === 'object' && err !== null && 'code' in err && typeof err.code === 'string' ? err.code : undefined
+    };
+  }
 
   /**
    * 流式生成文本
@@ -69,10 +81,7 @@ export function useStream(options: UseStreamOptions = {}) {
       options.onComplete?.(text);
       return text;
     } catch (err: unknown) {
-      const normalizedError = {
-        message: err instanceof Error ? err.message : String(err),
-        code: (err as { code?: string }).code
-      };
+      const normalizedError = normalizeStreamError(err);
       error.value = normalizedError;
       options.onError?.(normalizedError);
       return null;
