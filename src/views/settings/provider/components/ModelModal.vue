@@ -26,18 +26,20 @@
 </template>
 
 <script setup lang="ts">
-import type { ModelSubmitResult } from '../types';
 import type { Rule } from 'ant-design-vue/es/form';
+import type { AIProviderModel } from 'types/ai';
 import { computed, reactive, ref, watch } from 'vue';
 import { message, Form } from 'ant-design-vue';
-import type { ProviderModel } from '@/shared/storage/providers/types';
 import { asyncTo } from '@/utils/asyncTo';
 import { useProviders } from '../hooks/useProviders';
 
 interface Props {
-  model?: ProviderModel | null;
+  // AI 模型
+  model?: AIProviderModel | null;
+  // 服务商 ID
   providerId?: string;
-  models?: ProviderModel[];
+  // 服务商模型列表
+  models?: AIProviderModel[];
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -46,7 +48,7 @@ const props = withDefaults(defineProps<Props>(), {
   models: () => []
 });
 
-const emit = defineEmits<{ success: [model: ProviderModel] }>();
+const emit = defineEmits<{ success: [model: AIProviderModel] }>();
 
 const visible = defineModel<boolean>('open', { default: false });
 
@@ -60,7 +62,7 @@ const modelTypeOptions = [
   { label: '多模态模型', value: 'multimodal' }
 ];
 
-const dataItem = reactive<ProviderModel>({ id: '', name: '', type: 'chat', isEnabled: true });
+const dataItem = reactive<AIProviderModel>({ id: '', name: '', type: 'chat', isEnabled: true });
 
 const isEditMode = computed(() => Boolean(props.model));
 
@@ -78,12 +80,12 @@ function handleCancel(): void {
   visible.value = false;
 }
 
-async function createModel(model: ProviderModel): Promise<ModelSubmitResult> {
+async function createModel(model: AIProviderModel): Promise<{ success: boolean; message?: string }> {
   if (!props.providerId) {
     return { success: false, message: '服务商不存在' };
   }
 
-  const exists = props.models.some((item: ProviderModel) => item.id === model.id);
+  const exists = props.models.some((item: AIProviderModel) => item.id === model.id);
 
   if (exists) {
     return { success: false, message: '模型 ID 已存在，请更换' };
@@ -99,12 +101,12 @@ async function createModel(model: ProviderModel): Promise<ModelSubmitResult> {
   return { success: true, message: '模型已创建' };
 }
 
-async function updateModel(model: ProviderModel): Promise<ModelSubmitResult> {
+async function updateModel(model: AIProviderModel): Promise<{ success: boolean; message?: string }> {
   if (!props.providerId) {
     return { success: false, message: '服务商不存在' };
   }
 
-  const nextModels = props.models.map((item: ProviderModel) => (item.id === model.id ? { ...item, ...model } : item));
+  const nextModels = props.models.map((item: AIProviderModel) => (item.id === model.id ? { ...item, ...model } : item));
   const savedProvider = await saveProviderModels(props.providerId, nextModels);
 
   if (!savedProvider) {
@@ -122,7 +124,7 @@ async function handleSubmit(): Promise<void> {
 
   saving.value = true;
 
-  const model: ProviderModel = { id, name: dataItem.name.trim(), type: dataItem.type, isEnabled: props.model?.isEnabled ?? true };
+  const model: AIProviderModel = { id, name: dataItem.name.trim(), type: dataItem.type, isEnabled: props.model?.isEnabled ?? true };
 
   const result = isEditMode.value ? await updateModel(model) : await createModel(model);
   saving.value = false;

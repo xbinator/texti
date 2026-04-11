@@ -39,12 +39,12 @@
 </template>
 
 <script setup lang="ts">
+import type { AIProviderModel } from 'types/ai';
 import { ref, computed } from 'vue';
 import { Icon } from '@iconify/vue';
 import { message } from 'ant-design-vue';
 import BButton from '@/components/BButton/index.vue';
 import BModelIcon from '@/components/BModelIcon/index.vue';
-import type { ProviderModel } from '@/shared/storage/providers/types';
 import { useProviders } from '../hooks/useProviders';
 import ModelModal from './ModelModal.vue';
 
@@ -54,8 +54,11 @@ interface Category {
 }
 
 interface Props {
+  // 服务商 ID
   providerId: string;
-  models: ProviderModel[];
+  // 服务商模型列表
+  models: AIProviderModel[];
+  // 模型分类
   categories?: Category[];
 }
 
@@ -70,14 +73,14 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   (e: 'refresh'): void;
-  (e: 'modelCreated', model: ProviderModel): void;
-  (e: 'modelUpdated', model: ProviderModel): void;
+  (e: 'modelCreated', model: AIProviderModel): void;
+  (e: 'modelUpdated', model: AIProviderModel): void;
 }>();
 
 const searchText = ref('');
 const activeCategory = ref('all');
 const modalVisible = ref(false);
-const currentModel = ref<ProviderModel | null>(null);
+const currentModel = ref<AIProviderModel | null>(null);
 const { saveProviderModels } = useProviders();
 
 const categoryOptions = computed(() => props.categories.map((category) => ({ label: category.label, value: category.key })));
@@ -102,7 +105,7 @@ function handleCreateModel(): void {
   modalVisible.value = true;
 }
 
-function handleEditModel(model: ProviderModel): void {
+function handleEditModel(model: AIProviderModel): void {
   currentModel.value = model;
 
   modalVisible.value = true;
@@ -113,7 +116,7 @@ function handleModelSuccess(): void {
 }
 
 async function handleToggleModel(modelId: string, enabled: boolean): Promise<void> {
-  const nextModels = props.models.map((item: ProviderModel) => (item.id === modelId ? { ...item, isEnabled: enabled } : item));
+  const nextModels = props.models.map((item) => (item.id === modelId ? { ...item, isEnabled: enabled } : item));
   const savedProvider = await saveProviderModels(props.providerId, nextModels);
 
   if (!savedProvider) {
@@ -127,7 +130,7 @@ async function handleToggleModel(modelId: string, enabled: boolean): Promise<voi
 }
 
 async function handleDeleteModel(modelId: string): Promise<void> {
-  const nextModels = props.models.filter((item: ProviderModel) => item.id !== modelId);
+  const nextModels = props.models.filter((item) => item.id !== modelId);
   const savedProvider = await saveProviderModels(props.providerId, nextModels);
 
   if (!savedProvider) {

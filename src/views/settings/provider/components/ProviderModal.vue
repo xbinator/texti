@@ -48,12 +48,11 @@
 </template>
 
 <script setup lang="ts">
-import type { Provider } from '../types';
 import type { Rule } from 'ant-design-vue/es/form';
+import type { AIProvider, AIProviderType } from 'types/ai';
 import { computed, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { message, Form } from 'ant-design-vue';
-import type { ProviderRequestFormat } from '@/shared/storage';
 import { asyncTo } from '@/utils/asyncTo';
 import { providerFormatOptions } from '../../constants';
 import { useProviders } from '../hooks/useProviders';
@@ -62,14 +61,14 @@ interface CustomProviderForm {
   id: string;
   name: string;
   logo: string;
-  type: ProviderRequestFormat;
+  type: AIProviderType;
   baseUrl: string;
   apiKey: string;
 }
 
-const props = withDefaults(defineProps<{ provider?: Provider | null }>(), { provider: null });
+const props = withDefaults(defineProps<{ provider?: AIProvider | null }>(), { provider: null });
 
-const emit = defineEmits<{ success: [provider: Provider] }>();
+const emit = defineEmits<{ success: [provider: AIProvider] }>();
 
 const visible = defineModel<boolean>('open', { default: false });
 
@@ -82,7 +81,7 @@ const dataItem = reactive<CustomProviderForm>({ id: '', name: '', logo: '', type
 
 const isEditMode = computed(() => Boolean(props.provider));
 
-const providerMap = computed<Record<string, Provider>>(() => {
+const providerMap = computed<Record<string, AIProvider>>(() => {
   return Object.fromEntries(providers.value.map((provider) => [provider.id, provider]));
 });
 

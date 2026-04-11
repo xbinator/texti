@@ -91,7 +91,7 @@
 </template>
 
 <script setup lang="tsx">
-import type { Provider } from '../types';
+import type { AIProvider } from 'types/ai';
 import { computed, ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { Icon } from '@iconify/vue';
@@ -121,17 +121,18 @@ interface ProviderOption {
 interface ProviderComputedData {
   customProviders: ProviderOption[];
   defaultProviders: ProviderOption[];
-  providerMap: Record<string, Provider>;
+  providerMap: Record<string, AIProvider>;
   categoryCountMap: Record<string, number>;
 }
 
 const providerComputedData = computed<ProviderComputedData>(() => {
   const custom: ProviderOption[] = [];
   const default_: ProviderOption[] = [];
-  const map: Record<string, Provider> = {};
+  const map: Record<string, AIProvider> = {};
+
   let enabledCount = 0;
 
-  providers.value.forEach((provider: Provider) => {
+  providers.value.forEach((provider: AIProvider) => {
     map[provider.id] = provider;
 
     if (provider.isCustom) {
@@ -166,7 +167,7 @@ const categories: Category[] = [
 ];
 
 const modalVisible = ref<boolean>(false);
-const editingProvider = ref<Provider | null>(null);
+const editingProvider = ref<AIProvider | null>(null);
 const customCollapsed = ref<boolean>(false);
 const defaultCollapsed = ref<boolean>(false);
 
@@ -205,9 +206,8 @@ function handleProviderClick(value: string): void {
 
 const providerLogos = computed<Record<string, string>>(() => {
   const logos: Record<string, string> = {};
-  providers.value.forEach((provider: Provider) => {
-    logos[provider.id] = provider.logo || '';
-  });
+
+  providers.value.forEach((provider) => (logos[provider.id] = provider.logo || ''));
   return logos;
 });
 
@@ -245,7 +245,7 @@ async function handleDeleteProvider(providerId: string): Promise<void> {
 
 const providerDropdownOptionsMap = computed<Map<string, DropdownOptionItem[]>>(() => {
   const optionsMap = new Map<string, DropdownOptionItem[]>();
-  providers.value.forEach((provider: Provider) => {
+  providers.value.forEach((provider) => {
     if (provider.isCustom) {
       optionsMap.set(provider.id, [
         {

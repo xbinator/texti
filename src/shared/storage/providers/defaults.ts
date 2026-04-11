@@ -1,6 +1,6 @@
-import type { Provider } from './types';
+import type { AIProvider } from 'types/ai';
 
-export const DEFAULT_PROVIDERS: Provider[] = [
+export const DEFAULT_PROVIDERS: AIProvider[] = [
   {
     id: 'openai',
     name: 'OpenAI',

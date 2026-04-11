@@ -166,7 +166,7 @@ texti/
 
 ### Electron 桥接
 
-项目不再通过全局 `electron.d.ts` 注入类型，而是通过 `src/shared/platform/electron-api.ts` 统一定义：
+项目通过 `types/electron-api.d.ts` 维护 Electron 桥接类型，并通过 `src/shared/platform/electron-api.ts` 统一暴露运行时访问 helper：
 
 - `ElectronAPI`
 - `getElectronAPI()`

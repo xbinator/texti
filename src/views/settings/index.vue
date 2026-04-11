@@ -1,10 +1,9 @@
 <template>
   <BLayout class="settings-layout" content-class="settings-container">
-    <template #header-left>
-      <div class="settings-header-back" @click="handleBack">
-        <Icon icon="uis:angle-left" width="24" height="24" />
-        <span>设置</span>
-      </div>
+    <template #header-right>
+      <BButton type="secondary" size="small" square @click="handleBack">
+        <Icon icon="lucide:layout-grid" width="16" height="16" />
+      </BButton>
     </template>
 
     <div class="settings-sidebar">
@@ -59,7 +58,6 @@ function handleBack(): void {
   gap: 8px;
   align-items: center;
   height: 40px;
-  padding: 0 14px;
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);

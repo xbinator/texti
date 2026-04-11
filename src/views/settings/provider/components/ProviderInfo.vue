@@ -16,13 +16,13 @@
 </template>
 
 <script setup lang="ts">
-import type { Provider } from '../types';
+import type { AIProvider } from 'types/ai';
 import { Icon } from '@iconify/vue';
 import BModelIcon from '@/components/BModelIcon/index.vue';
 
 interface Props {
   // 服务商信息
-  provider?: Partial<Provider>;
+  provider?: Partial<AIProvider>;
 }
 
 withDefaults(defineProps<Props>(), { provider: () => ({}) });

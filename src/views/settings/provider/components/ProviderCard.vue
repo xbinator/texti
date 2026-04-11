@@ -21,7 +21,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Provider } from '../types';
+import type { AIProvider } from 'types/ai';
 import { useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import BModelIcon from '@/components/BModelIcon/index.vue';
@@ -29,7 +29,7 @@ import BModelIcon from '@/components/BModelIcon/index.vue';
 const router = useRouter();
 
 interface Props {
-  provider: Provider;
+  provider: AIProvider;
 }
 
 const props = withDefaults(defineProps<Props>(), {});

@@ -18,20 +18,13 @@
     <div v-if="loading" class="b-button__loading">
       <div class="b-button__loading-spinner"></div>
     </div>
-    <Icon v-if="$slots.icon || icon" class="b-button__icon" :icon="icon" />
-    <slot v-if="$slots.icon" name="icon"></slot>
-    <span class="b-button__text">
-      <template v-if="isTwoCharacterText"> {{ textArray[0] }} {{ textArray[1] }} </template>
-      <template v-else>
-        <slot></slot>
-      </template>
-    </span>
+    <Icon v-if="icon" class="b-button__icon" :icon="icon" />
+    <slot></slot>
   </button>
 </template>
 
 <script setup lang="ts">
 import type { BButtonProps as Props } from './types';
-import { computed, useSlots } from 'vue';
 import { Icon } from '@iconify/vue';
 
 const props = withDefaults(defineProps<Props>(), {
@@ -48,37 +41,6 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits(['click']);
-const slots = useSlots();
-
-// 获取按钮文本
-const buttonText = computed(() => {
-  if (props.text) {
-    return props.text;
-  }
-  // 尝试从插槽中获取文本
-  const defaultSlot = slots.default?.();
-  if (defaultSlot && defaultSlot.length > 0) {
-    const slotContent = defaultSlot[0];
-    if (typeof slotContent === 'string') {
-      return slotContent;
-    }
-    if (slotContent.children && typeof slotContent.children === 'string') {
-      return slotContent.children;
-    }
-  }
-  return '';
-});
-
-// 检查是否是两个字符的文本
-const isTwoCharacterText = computed(() => {
-  const text = buttonText.value.trim();
-  return text.length === 2;
-});
-
-// 将文本拆分为数组
-const textArray = computed(() => {
-  return buttonText.value.trim().split('');
-});
 
 function handleClick(event: MouseEvent) {
   if (!props.disabled && !props.loading) {
@@ -91,7 +53,7 @@ function handleClick(event: MouseEvent) {
 .b-button {
   position: relative;
   display: inline-flex;
-  gap: 8px;
+  gap: 2px;
   align-items: center;
   justify-content: center;
   padding: 0 16px;
@@ -131,34 +93,6 @@ function handleClick(event: MouseEvent) {
 
   &--rounded {
     border-radius: 9999px;
-  }
-
-  &--square {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    border-radius: 6px;
-
-    &.b-button--small {
-      width: 28px;
-    }
-
-    &.b-button--middle {
-      width: 32px;
-    }
-
-    &.b-button--large {
-      width: 44px;
-    }
-
-    .b-button__text {
-      display: none;
-    }
-
-    .b-button__icon {
-      margin: 0;
-    }
   }
 
   // 尺寸
@@ -354,6 +288,30 @@ function handleClick(event: MouseEvent) {
   &--text .b-button__loading-spinner {
     border-color: rgb(0 0 0 / 10%);
     border-top-color: var(--color-primary);
+  }
+
+  &--square {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border-radius: 6px;
+
+    &.b-button--small {
+      width: 28px;
+    }
+
+    &.b-button--middle {
+      width: 32px;
+    }
+
+    &.b-button--large {
+      width: 44px;
+    }
+
+    .b-button__icon {
+      margin: 0;
+    }
   }
 }
 

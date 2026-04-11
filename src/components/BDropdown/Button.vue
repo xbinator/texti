@@ -1,11 +1,11 @@
 <template>
   <BDropdown v-model:open="visible">
-    <div class="b-dropdown-button" :class="[{ 'is-active': visible, 'is-small': props.size === 'small', 'is-bordered': props.bordered }]">
+    <button class="b-dropdown-button" :class="[{ 'is-active': visible, 'is-small': props.size === 'small', 'is-bordered': props.bordered }]">
       <slot>
         <div class="b-dropdown-button-content" :style="{ width }">{{ contentPrefix }}{{ label }}</div>
       </slot>
       <Icon v-if="showIcon" class="dropdown-icon" icon="lucide:chevron-down" :style="{ transform: visible ? 'rotate(180deg)' : 'rotate(0deg)' }" />
-    </div>
+    </button>
 
     <template #overlay>
       <BDropdownMenu v-model:value="active" :options="options" :row-class="rowClass" :width="overlayWidth" @change="handleActiveChange">
@@ -95,6 +95,7 @@ watch(
   font-size: 14px;
   cursor: pointer;
   user-select: none;
+  background-color: transparent;
   border-radius: 6px;
   transition: all 0.3s;
 }

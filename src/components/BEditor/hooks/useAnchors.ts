@@ -15,10 +15,19 @@ interface UseBEditorAnchorsResult {
   handleEditorScroll: () => void;
 }
 
+interface BScrollbarExposed {
+  getScrollElement: () => HTMLDivElement | null;
+  scrollTo: (options: ScrollToOptions) => void;
+}
+
 const HEADING_SELECTOR = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].map((tag) => `.b-editor-content ${tag}`).join(', ');
 
 export function useAnchors(layoutRef: Ref<HTMLElement | null>, scrollbarRef: Ref<InstanceType<typeof BScrollbar> | null>): UseBEditorAnchorsResult {
   const activeAnchorId = ref('');
+
+  function getScrollbar(): BScrollbarExposed | null {
+    return scrollbarRef.value as unknown as BScrollbarExposed | null;
+  }
 
   function getHeadingElements(): HTMLHeadingElement[] {
     return Array.from(layoutRef.value?.querySelectorAll(HEADING_SELECTOR) ?? []).filter(
@@ -30,7 +39,7 @@ export function useAnchors(layoutRef: Ref<HTMLElement | null>, scrollbarRef: Ref
     activeAnchorId.value = record.id;
 
     if (!record.id) {
-      scrollbarRef.value?.scrollTo({ top: 0 });
+      getScrollbar()?.scrollTo({ top: 0 });
       return;
     }
 
@@ -41,7 +50,7 @@ export function useAnchors(layoutRef: Ref<HTMLElement | null>, scrollbarRef: Ref
   }
 
   const updateActiveAnchor = useThrottleFn(() => {
-    const container = scrollbarRef.value?.getScrollElement();
+    const container = getScrollbar()?.getScrollElement();
     if (!container) return;
 
     if (container.scrollTop < 50) {

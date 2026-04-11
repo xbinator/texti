@@ -1,6 +1,6 @@
 <template>
   <Transition name="toc-fade">
-    <div v-if="items.length" class="toc-panel">
+    <div v-if="items.length" class="b-editor-sidebar">
       <AnchorContent :title="title" :items="items" :active-id="activeId" @click="handleAnchorClick" />
     </div>
   </Transition>
@@ -63,28 +63,13 @@ function handleAnchorClick(item: AnchorItem) {
   transform: translateX(-20px);
 }
 
-.toc-panel {
+.b-editor-sidebar {
   display: flex;
   flex-direction: column;
   width: 280px;
   height: 100%;
   background: var(--bg-primary);
-  border-right: 1px solid var(--border-primary);
+  border-radius: 8px;
   backdrop-filter: blur(10px);
-}
-
-.toc-panel__header {
-  display: flex;
-  align-items: center;
-  height: 52px;
-  padding: 0 14px;
-  border-bottom: 1px solid var(--border-primary);
-}
-
-.toc-panel__title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  letter-spacing: 0.08em;
 }
 </style>

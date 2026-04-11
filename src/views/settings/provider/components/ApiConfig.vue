@@ -22,11 +22,11 @@
 </template>
 
 <script setup lang="ts">
-import type { Provider } from '../types';
+import type { AIProvider } from 'types/ai';
 import { computed, ref, watch } from 'vue';
 import { message } from 'ant-design-vue';
 import BButton from '@/components/BButton/index.vue';
-import { aiService } from '@/services/ai';
+import { generateElectronAIText } from '@/shared/platform/ai';
 
 interface TestModelOption {
   id: string;
@@ -40,7 +40,7 @@ interface Props {
 
 const props = defineProps<Props>();
 
-const dataItem = defineModel<Partial<Provider>>('value', { default: () => ({}) });
+const dataItem = defineModel<Partial<AIProvider>>('value', { default: () => ({}) });
 
 const testModel = ref<string | undefined>(undefined);
 const testing = ref(false);
@@ -56,7 +56,13 @@ async function handleTestClick(): Promise<void> {
 
   testing.value = true;
 
-  const [error, result] = await aiService.generateText({ providerId: dataItem.value.id, modelId: testModel.value, prompt: 'Hello', ignoreEnabled: true });
+  const [error, result] = await generateElectronAIText({
+    providerId: dataItem.value.id,
+    modelId: testModel.value,
+    prompt: 'Hello',
+    ignoreEnabled: true,
+    providerOverride: dataItem.value
+  });
 
   testing.value = false;
 

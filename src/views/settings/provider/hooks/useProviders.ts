@@ -2,17 +2,16 @@
  * 服务商管理相关的 Hook
  * 提供服务商的加载、更新、切换状态等功能
  */
-import type { Provider, Model } from '../types';
+import type { AIProvider, AIProviderModel, AICustomProvider } from 'types/ai';
 import { computed, ref } from 'vue';
 import { cloneDeep } from 'lodash-es';
-import type { CustomProviderPayload } from '@/shared/storage';
 import { DEFAULT_PROVIDERS, providerStorage } from '@/shared/storage';
 
 /**
  * 模块级共享的服务商列表状态
  * 所有调用 useProviders 的组件共用同一份响应式数据
  */
-const providers = ref<Provider[]>(DEFAULT_PROVIDERS.map((provider: Provider) => cloneDeep(provider)));
+const providers = ref<AIProvider[]>(DEFAULT_PROVIDERS.map((provider) => cloneDeep(provider)));
 
 /**
  * 用于防止重复加载的 Promise 实例
@@ -46,7 +45,7 @@ function ensureProvidersLoaded(): Promise<void> {
  * @param patch 要更新的服务商信息
  * @returns 更新后的服务商信息，未找到则返回 null
  */
-async function updateProvider(id: string, patch: Partial<Provider>): Promise<Provider | null> {
+async function updateProvider(id: string, patch: Partial<AIProvider>) {
   const nextProvider = await providerStorage.updateProvider(id, {
     isEnabled: patch.isEnabled,
     apiKey: patch.apiKey,
@@ -65,7 +64,7 @@ async function updateProvider(id: string, patch: Partial<Provider>): Promise<Pro
  * @param enabled 是否启用
  * @returns 切换后的服务商信息，未找到则返回 null
  */
-async function toggleProvider(id: string, enabled: boolean): Promise<Provider | null> {
+async function toggleProvider(id: string, enabled: boolean) {
   const nextProvider = await providerStorage.toggleProvider(id, enabled);
 
   await loadProviders();
@@ -79,7 +78,7 @@ async function toggleProvider(id: string, enabled: boolean): Promise<Provider | 
  * @param config 配置信息，包含 apiKey 和 baseUrl
  * @returns 保存后的服务商信息，未找到则返回 null
  */
-async function saveProviderConfig(id: string, config: Pick<Provider, 'apiKey' | 'baseUrl'>): Promise<Provider | null> {
+async function saveProviderConfig(id: string, config: Pick<AIProvider, 'apiKey' | 'baseUrl'>) {
   const nextProvider = await providerStorage.saveProviderConfig(id, config);
   await loadProviders();
   return nextProvider;
@@ -91,7 +90,7 @@ async function saveProviderConfig(id: string, config: Pick<Provider, 'apiKey' | 
  * @param models 模型列表
  * @returns 保存后的服务商信息，未找到则返回 null
  */
-async function saveProviderModels(id: string, models: Model[]): Promise<Provider | null> {
+async function saveProviderModels(id: string, models: AIProviderModel[]) {
   const nextProvider = await providerStorage.saveProviderModels(id, models);
 
   await loadProviders();
@@ -104,7 +103,7 @@ async function saveProviderModels(id: string, models: Model[]): Promise<Provider
  * @param payload 自定义服务商信息
  * @returns 保存后的服务商信息，失败时返回 null
  */
-async function saveCustomProvider(payload: CustomProviderPayload): Promise<Provider | null> {
+async function saveCustomProvider(payload: AICustomProvider) {
   const nextProvider = await providerStorage.createOrUpdateCustomProvider(payload);
 
   await loadProviders();
@@ -117,10 +116,10 @@ async function saveCustomProvider(payload: CustomProviderPayload): Promise<Provi
  * @param id 服务商 ID
  * @returns 服务商信息，未找到则返回 null
  */
-async function getProviderById(id: string): Promise<Provider | null> {
+async function getProviderById(id: string) {
   await ensureProvidersLoaded();
 
-  return providers.value.find((provider: Provider) => provider.id === id) || null;
+  return providers.value.find((provider) => provider.id === id) || null;
 }
 
 /**
@@ -142,7 +141,7 @@ async function deleteCustomProvider(id: string): Promise<boolean> {
  * 用于下拉选择的服务商列表
  * 格式为 { label: 服务商名称, value: 服务商 ID }
  */
-const providerList = computed(() => providers.value.map((provider: Provider) => ({ label: provider.name, value: provider.id })));
+const providerList = computed(() => providers.value.map((provider) => ({ label: provider.name, value: provider.id })));
 
 const providerStore = {
   providers,

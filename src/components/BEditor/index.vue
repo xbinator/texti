@@ -10,7 +10,7 @@
       @change="handleChangeAnchor"
     />
 
-    <BScrollbar ref="scrollbarRef" @scroll="handleEditorScroll">
+    <BScrollbar ref="scrollbarRef" class="b-editor-scrollbar" @scroll="handleEditorScroll">
       <div ref="containerRef" class="b-editor-container">
         <RichEditorPane
           v-if="isRichMode"
@@ -197,6 +197,7 @@ useTextareaAutosize({ element: titleTextareaRef, input: editorTitle });
 <style lang="less">
 .b-editor-layout {
   display: flex;
+  gap: 4px;
   height: 100%;
 
   --selection-color: #fff;
@@ -209,8 +210,8 @@ useTextareaAutosize({ element: titleTextareaRef, input: editorTitle });
 }
 
 .b-editor-scrollbar {
-  flex: 1;
-  overflow: hidden;
+  background: var(--bg-primary);
+  border-radius: 8px;
 }
 
 .b-editor-container {

@@ -16,7 +16,8 @@
     "jsxImportSource": "vue",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "types/*": ["types/*"],
     },
 
     /* Linting */
@@ -26,6 +27,6 @@
     "noFallthroughCasesInSwitch": true,
 
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue", "types/**/*.d.ts"],
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue", "types/**/*.d.ts", "types/ai.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

@@ -1,4 +1,5 @@
-import type { CustomProviderPayload, Provider, ProviderModel, ProviderRequestFormat, StoredProviderSettings } from './types';
+import type { StoredProviderSettings } from './types';
+import type { AIProviderType, AIProviderModel, AIProvider, AICustomProvider } from 'types/ai';
 import { cloneDeep, omitBy, isUndefined, pick, isBoolean, isString, isArray } from 'lodash-es';
 import { getElectronAPI, hasElectronAPI } from '../../platform/electron-api';
 import { DEFAULT_PROVIDERS } from './defaults';
@@ -24,7 +25,7 @@ const UPSERT_CUSTOM_PROVIDER_SQL = `
 `;
 
 /** 所有合法的请求格式枚举值 */
-const REQUEST_FORMATS: ProviderRequestFormat[] = ['openai', 'anthropic', 'google'];
+const REQUEST_FORMATS: AIProviderType[] = ['openai', 'anthropic', 'google'];
 
 // ─────────────────────────────────────────────
 // 数据库行类型
@@ -73,12 +74,12 @@ async function dbExecute(sql: string, params?: unknown[]): Promise<{ changes: nu
 // ─────────────────────────────────────────────
 
 /** 深克隆模型列表，防止外部修改污染内部状态 */
-function cloneModels(models: ProviderModel[]): ProviderModel[] {
+function cloneModels(models: AIProviderModel[]): AIProviderModel[] {
   return cloneDeep(models);
 }
 
 /** 深克隆服务商对象 */
-function cloneProvider(provider: Provider): Provider {
+function cloneProvider(provider: AIProvider): AIProvider {
   return cloneDeep(provider);
 }
 
@@ -87,27 +88,27 @@ function cloneProvider(provider: Provider): Provider {
 // ─────────────────────────────────────────────
 
 /** 判断一个值是否为合法的请求格式标识符 */
-function isProviderRequestFormat(value: unknown): value is ProviderRequestFormat {
-  return typeof value === 'string' && REQUEST_FORMATS.includes(value as ProviderRequestFormat);
+function isProviderRequestFormat(value: unknown): value is AIProviderType {
+  return typeof value === 'string' && REQUEST_FORMATS.includes(value as AIProviderType);
 }
 
 // ─────────────────────────────────────────────
 // JSON 序列化 / 反序列化
 // ─────────────────────────────────────────────
 
-function parseModelsJson(json: string | null): ProviderModel[] | undefined {
+function parseModelsJson(json: string | null): AIProviderModel[] | undefined {
   if (!json) return undefined;
 
   try {
     const parsed: unknown = JSON.parse(json);
     if (!Array.isArray(parsed)) return undefined;
-    return cloneModels(parsed as ProviderModel[]);
+    return cloneModels(parsed as AIProviderModel[]);
   } catch {
     return undefined;
   }
 }
 
-function stringifyModels(models?: ProviderModel[]): string | null {
+function stringifyModels(models?: AIProviderModel[]): string | null {
   return models ? JSON.stringify(cloneModels(models)) : null;
 }
 
@@ -138,7 +139,7 @@ function mapRowToStoredSettings(row: ProviderSettingsRow): StoredProviderSetting
   });
 }
 
-function mapRowToCustomProvider(row: CustomProviderRow): Provider | null {
+function mapRowToCustomProvider(row: CustomProviderRow): AIProvider | null {
   if (!isProviderRequestFormat(row.type)) return null;
 
   return {
@@ -160,7 +161,7 @@ function mapRowToCustomProvider(row: CustomProviderRow): Provider | null {
 // 合并逻辑
 // ─────────────────────────────────────────────
 
-function mergeProvider(base: Provider, stored?: StoredProviderSettings): Provider {
+function mergeProvider(base: AIProvider, stored?: StoredProviderSettings): AIProvider {
   const overrides = stored ? sanitizeProviderSettings(stored) : {};
 
   return {
@@ -176,7 +177,7 @@ function mergeProvider(base: Provider, stored?: StoredProviderSettings): Provide
 
 const DEFAULT_PROVIDERS_MAP = new Map(DEFAULT_PROVIDERS.map((p) => [p.id, p]));
 
-function getDefaultProvider(id: string): Provider | undefined {
+function getDefaultProvider(id: string): AIProvider | undefined {
   return DEFAULT_PROVIDERS_MAP.get(id);
 }
 
@@ -217,17 +218,17 @@ async function persistSettings(id: string, settings: StoredProviderSettings): Pr
   ]);
 }
 
-async function loadAllCustomProviders(): Promise<Provider[]> {
+async function loadAllCustomProviders(): Promise<AIProvider[]> {
   if (!isAvailable()) return [];
 
   const rows = await dbSelect<CustomProviderRow>(SELECT_ALL_CUSTOM_PROVIDERS_SQL);
   return rows
     .map(mapRowToCustomProvider)
-    .filter((p): p is Provider => Boolean(p))
+    .filter((p): p is AIProvider => Boolean(p))
     .map(cloneProvider);
 }
 
-async function loadCustomProvider(id: string): Promise<Provider | null> {
+async function loadCustomProvider(id: string): Promise<AIProvider | null> {
   if (!isAvailable()) return null;
 
   const rows = await dbSelect<CustomProviderRow>(SELECT_ONE_CUSTOM_PROVIDER_SQL, [id]);
@@ -237,7 +238,7 @@ async function loadCustomProvider(id: string): Promise<Provider | null> {
   return provider ? cloneProvider(provider) : null;
 }
 
-async function persistCustomProvider(provider: Provider, createdAt?: number): Promise<void> {
+async function persistCustomProvider(provider: AIProvider, createdAt?: number): Promise<void> {
   const now = Date.now();
 
   await dbExecute(UPSERT_CUSTOM_PROVIDER_SQL, [
@@ -259,7 +260,7 @@ async function persistCustomProvider(provider: Provider, createdAt?: number): Pr
 // 自定义服务商 Payload 规范化
 // ─────────────────────────────────────────────
 
-function normalizeCustomProviderPayload(payload: CustomProviderPayload): CustomProviderPayload {
+function normalizeCustomProviderPayload(payload: AICustomProvider): AICustomProvider {
   return {
     ...pick(payload, ['id', 'name', 'description', 'type', 'logo', 'isEnabled', 'apiKey', 'baseUrl']),
     id: sanitizeProviderId(payload.id),
@@ -274,14 +275,14 @@ function normalizeCustomProviderPayload(payload: CustomProviderPayload): CustomP
 // ─────────────────────────────────────────────
 
 export const providerStorage = {
-  async listProviders(): Promise<Provider[]> {
+  async listProviders(): Promise<AIProvider[]> {
     const [stored, customProviders] = await Promise.all([loadAllStoredSettings(), loadAllCustomProviders()]);
 
     const defaults = DEFAULT_PROVIDERS.map((p) => mergeProvider(p, stored.get(p.id)));
     return [...defaults, ...customProviders];
   },
 
-  async getProvider(id: string): Promise<Provider | null> {
+  async getProvider(id: string): Promise<AIProvider | null> {
     const normalizedId = sanitizeProviderId(id);
     const base = getDefaultProvider(normalizedId);
 
@@ -293,7 +294,7 @@ export const providerStorage = {
     return loadCustomProvider(normalizedId);
   },
 
-  async createOrUpdateCustomProvider(payload: CustomProviderPayload): Promise<Provider | null> {
+  async createOrUpdateCustomProvider(payload: AICustomProvider): Promise<AIProvider | null> {
     if (!isAvailable()) return null;
 
     const normalized = normalizeCustomProviderPayload(payload);
@@ -305,7 +306,7 @@ export const providerStorage = {
 
     const current = await loadCustomProvider(id);
 
-    const nextProvider: Provider = {
+    const nextProvider: AIProvider = {
       id,
       name: normalized.name,
       description: normalized.description || current?.description || '自定义服务商',
@@ -323,7 +324,7 @@ export const providerStorage = {
     return cloneProvider(nextProvider);
   },
 
-  async updateProvider(id: string, patch: StoredProviderSettings): Promise<Provider | null> {
+  async updateProvider(id: string, patch: StoredProviderSettings): Promise<AIProvider | null> {
     const normalizedId = sanitizeProviderId(id);
     if (!isAvailable()) return null;
 
@@ -340,7 +341,7 @@ export const providerStorage = {
     const currentCustom = await loadCustomProvider(normalizedId);
     if (!currentCustom) return null;
 
-    const nextCustom: Provider = {
+    const nextCustom: AIProvider = {
       ...currentCustom,
       ...sanitizeProviderSettings({ ...currentCustom, ...patch }),
       id: currentCustom.id,
@@ -357,15 +358,15 @@ export const providerStorage = {
     return cloneProvider(nextCustom);
   },
 
-  async toggleProvider(id: string, enabled: boolean): Promise<Provider | null> {
+  async toggleProvider(id: string, enabled: boolean): Promise<AIProvider | null> {
     return this.updateProvider(id, { isEnabled: enabled });
   },
 
-  async saveProviderConfig(id: string, config: Pick<StoredProviderSettings, 'apiKey' | 'baseUrl'>): Promise<Provider | null> {
+  async saveProviderConfig(id: string, config: Pick<StoredProviderSettings, 'apiKey' | 'baseUrl'>): Promise<AIProvider | null> {
     return this.updateProvider(id, config);
   },
 
-  async saveProviderModels(id: string, models: ProviderModel[]): Promise<Provider | null> {
+  async saveProviderModels(id: string, models: AIProviderModel[]): Promise<AIProvider | null> {
     return this.updateProvider(id, { models: cloneModels(models) });
   },
 
