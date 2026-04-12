@@ -162,6 +162,14 @@ const electronAPI: ElectronAPI = {
     return () => {
       ipcRenderer.removeListener('ai:stream:error', handler);
     };
+  },
+
+  // ==================== 日志操作 ====================
+  logger: {
+    debug: (...args) => ipcRenderer.send('logger:debug', ...args),
+    info: (...args) => ipcRenderer.send('logger:info', ...args),
+    warn: (...args) => ipcRenderer.send('logger:warn', ...args),
+    error: (...args) => ipcRenderer.send('logger:error', ...args)
   }
 };
 

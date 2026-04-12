@@ -168,11 +168,7 @@ function queueSave(): void {
     clearTimeout(saveTimer);
   }
 
-  saveTimer = setTimeout(() => {
-    persistConfig().catch((error: unknown) => {
-      console.error('保存服务模型配置失败:', error);
-    });
-  }, 300);
+  saveTimer = setTimeout(persistConfig, 300);
 }
 
 watch([selectedModel, customPrompt], () => {

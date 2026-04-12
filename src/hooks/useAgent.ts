@@ -3,7 +3,6 @@ import type { AIServiceError, AIRequestOptions, AICreateOptions } from 'types/ai
 import { computed, toValue, type MaybeRefOrGetter } from 'vue';
 import { getElectronAPI } from '@/shared/platform/electron-api';
 import { providerStorage } from '@/shared/storage';
-import { asyncTo } from '@/utils/asyncTo';
 
 export interface UseStreamOptions {
   /** 服务商 ID */
@@ -54,7 +53,7 @@ export function useAgent(options: UseStreamOptions) {
 
     if (error) return [error];
 
-    return asyncTo(electronAPI.aiInvoke(provider, payload));
+    return electronAPI.aiInvoke(provider, payload);
   };
 
   const onStream = async (payload: AIRequestOptions): Promise<void> => {

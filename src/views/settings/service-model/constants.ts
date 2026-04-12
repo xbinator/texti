@@ -9,8 +9,8 @@ export interface ServiceConfigOption {
 }
 
 export const variableOptions: VariableOption[] = [
-  { value: 'SELECTED_TEXT', label: 'SELECTED_TEXT' },
-  { value: 'USER_INPUT', label: 'USER_INPUT' }
+  { value: 'SELECTED_TEXT', label: '选中文本' },
+  { value: 'USER_INPUT', label: '用户输入' }
 ];
 
 export const POLISH_SERVICE_CONFIG_OPTIONS: ServiceConfigOption[] = [
@@ -32,7 +32,7 @@ export const POLISH_DEFAULT_PROMPT = `# Role
 3. 不要新增解释性文字
 
 # Original Content
-SELECTED_TEXT
+{{SELECTED_TEXT}}
 
 # User Instruction
-USER_INPUT `;
+{{USER_INPUT}} `;

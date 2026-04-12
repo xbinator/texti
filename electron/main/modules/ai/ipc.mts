@@ -1,11 +1,11 @@
-import type { AICreateOptions, AIRequestOptions, AIInvokeResult } from 'types/ai';
+import type { AICreateOptions, AIRequestOptions } from 'types/ai';
 import { ipcMain } from 'electron';
 import { getWindowFromWebContents } from '../../window.mjs';
 import { aiService } from './service.mjs';
 
 export function registerAIHandlers(): void {
   ipcMain.handle('ai:invoke', async (_event, createOptions: AICreateOptions, request: AIRequestOptions) => {
-    return (await aiService.generateText(createOptions, request)) satisfies AIInvokeResult;
+    return aiService.generateText(createOptions, request);
   });
 
   ipcMain.handle('ai:stream', async (event, createOptions: AICreateOptions, request: AIRequestOptions) => {
@@ -16,7 +16,12 @@ export function registerAIHandlers(): void {
     }
 
     try {
-      const result = await aiService.streamText(createOptions, request);
+      const [error, result] = await aiService.streamText(createOptions, request);
+
+      if (error) {
+        win.webContents.send('ai:stream:error', error);
+        return;
+      }
 
       for await (const chunk of result.stream) {
         win.webContents.send('ai:stream:chunk', chunk);

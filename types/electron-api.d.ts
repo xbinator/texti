@@ -61,13 +61,21 @@ export interface ElectronAPI {
   openExternal: (url: string) => Promise<void>;
 
   // AI 服务操作
-  aiInvoke: (createOptions: AICreateOptions, request: AIRequestOptions) => Promise<AIInvokeResult>;
+  aiInvoke: (createOptions: AICreateOptions, request: AIRequestOptions) => Promise<AsyncResult<AIInvokeResult, AIServiceError>>;
   aiStream: (createOptions: AICreateOptions, request: AIRequestOptions) => Promise<void>;
 
   // AI 流式事件监听
   onAiStreamChunk: (callback: (chunk: string) => void) => () => void;
   onAiStreamComplete: (callback: () => void) => () => void;
   onAiStreamError: (callback: (error: AIServiceError) => void) => () => void;
+
+  // 日志操作
+  logger: {
+    debug: (...args: unknown[]) => void;
+    info: (...args: unknown[]) => void;
+    warn: (...args: unknown[]) => void;
+    error: (...args: unknown[]) => void;
+  };
 }
 
 declare global {

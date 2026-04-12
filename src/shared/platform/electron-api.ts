@@ -1,9 +1,7 @@
 import type { ElectronAPI } from 'types/electron-api';
 
 export type {
-  AIGenerateResult,
   DbExecuteResult,
-  ElectronAIRequestPayload,
   ElectronAPI,
   ElectronDialogFilter,
   ElectronFileResult,

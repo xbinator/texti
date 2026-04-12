@@ -57,6 +57,7 @@ async function handleTestClick(): Promise<void> {
 
   loading.value = false;
 
+  console.log('🚀 ~ handleTestClick ~ error:', error);
   if (error) {
     message.error(error.message);
   } else {

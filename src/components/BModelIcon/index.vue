@@ -8,6 +8,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useSettingStore } from '@/stores/setting';
+import logger from '@/utils/logger';
 
 type IconTheme = 'light' | 'dark';
 
@@ -118,7 +119,7 @@ const fallbackText = computed(() => {
 });
 
 function handleError(): void {
-  console.warn(`Failed to load icon: ${iconId.value}`);
+  logger.warn(`Failed to load icon: ${iconId.value}`);
 }
 </script>
 

@@ -1,5 +1,5 @@
 import { app, BrowserWindow } from 'electron';
-import { registerAllIpcHandlers, initDatabase, closeDatabase, initStore, migrateFromTauri } from './modules/index.mjs';
+import { registerAllIpcHandlers, initDatabase, closeDatabase, initStore, migrateFromTauri, initLogger } from './modules/index.mjs';
 import { createWindow } from './window.mjs';
 
 function handleActivate(): void {
@@ -16,6 +16,9 @@ function handleWindowAllClosed(): void {
 }
 
 async function bootstrap(): Promise<void> {
+  // 初始化日志 (仅控制台)
+  initLogger();
+
   // 初始化存储
   await initStore();
   migrateFromTauri();

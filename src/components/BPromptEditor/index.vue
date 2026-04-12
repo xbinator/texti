@@ -31,11 +31,8 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import VariableSelect from './components/VariableSelect.vue';
 
 interface Props {
-  // 占位符文本
   placeholder?: string;
-  // 变量分组选项
   options?: VariableOptionGroup[];
-  // 是否禁用
   disabled?: boolean;
 }
 
@@ -67,52 +64,90 @@ const variableQuery = ref<string>('');
 
 const variables = computed<Variable[]>(() => props.options.flatMap((group) => group.options));
 
+const filteredVariables = computed<Variable[]>(() => {
+  const query = variableQuery.value.trim().toLowerCase();
+  if (!query) return variables.value;
+  return variables.value.filter((variable) => {
+    const searchText = [variable.label, variable.value, variable.description || ''].join(' ').toLowerCase();
+    return searchText.includes(query);
+  });
+});
+
+// ─── DOM Helpers ───────────────────────────────────────────────────────────────
+
 function createVariableSpan(variableName: string): HTMLElement {
   const element = document.createElement('span');
-
+  element.className = 'prompt-variable-tag';
   element.setAttribute('data-value', 'variable');
   element.setAttribute('data-content', variableName);
   element.setAttribute('contenteditable', 'false');
-
-  element.style.backgroundColor = 'rgba(var(--color-primary-value, 64, 128, 255), 0.1)';
-  element.style.color = 'var(--color-primary, #4080ff)';
-  element.style.borderRadius = '4px';
-  element.style.fontSize = '12px';
-  element.style.padding = '0 6px';
-  element.style.height = '20px';
-  element.style.lineHeight = '20px';
-  element.style.display = 'inline-flex';
-  element.style.alignItems = 'center';
-  element.style.gap = '4px';
-  element.style.fontFamily = 'inherit';
-
   const variable = variables.value.find((v) => v.value === variableName);
   element.textContent = variable?.label || variableName;
-
   return element;
+}
+
+function isVariableElement(node: Node | null): node is HTMLElement {
+  return node instanceof HTMLElement && node.dataset.value === 'variable';
+}
+
+// ─── Encode / Decode ───────────────────────────────────────────────────────────
+
+function escapeHtml(text: string): string {
+  const map: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  };
+  return text.replace(/[&<>"']/g, (m) => map[m]);
 }
 
 function encodeVariables(content: string): string {
   if (!content) return '';
-
-  return content.replace(/\{\{([^{}]+)\}\}/g, (_, variableName) => {
-    const span = createVariableSpan(variableName.trim());
-    return span.outerHTML;
-  });
+  return escapeHtml(content).replace(/\{\{([^{}]+)\}\}/g, (_, name) => createVariableSpan(name.trim()).outerHTML);
 }
 
 function decodeVariables(content: string): string {
   if (!content) return '';
 
-  return content
+  const decoded = content
     .replace(/<span[^>]*data-content="([^"]+)"[^>]*>.*?<\/span>/g, '{{$1}}')
     .split(CARET_SPACER)
     .join('');
+
+  const temp = document.createElement('div');
+  temp.innerHTML = decoded;
+
+  temp.querySelectorAll('br').forEach((br) => br.replaceWith('\n'));
+  temp.querySelectorAll('div, p').forEach((block) => {
+    block.parentNode?.insertBefore(document.createTextNode('\n'), block);
+    while (block.firstChild) block.parentNode?.insertBefore(block.firstChild, block);
+    block.remove();
+  });
+
+  return temp.textContent || '';
+}
+
+// ─── Selection Helpers ────────────────────────────────────────────────────────
+
+function getActiveSelection(): Selection | null {
+  const sel = window.getSelection();
+  return sel && sel.rangeCount > 0 ? sel : null;
+}
+
+function getActiveRange(): Range | null {
+  return getActiveSelection()?.getRangeAt(0) ?? null;
+}
+
+function cacheCurrentRange(): void {
+  const range = getActiveRange();
+  if (range) cachedRange.value = range.cloneRange();
 }
 
 function getCursorPosition(): MenuPosition | null {
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0) return null;
+  const selection = getActiveSelection();
+  if (!selection) return null;
 
   const range = selection.getRangeAt(0).cloneRange();
   range.collapse(true);
@@ -123,221 +158,118 @@ function getCursorPosition(): MenuPosition | null {
     span.textContent = '\u200b';
     range.insertNode(span);
     rect = span.getBoundingClientRect();
-    const restoreRange = document.createRange();
-    restoreRange.setStartBefore(span);
-    restoreRange.collapse(true);
     span.remove();
+    const restored = document.createRange();
+    restored.setStartBefore(span);
+    restored.collapse(true);
     selection.removeAllRanges();
-    selection.addRange(restoreRange);
+    selection.addRange(restored);
   }
 
-  return {
-    top: rect.top,
-    left: rect.left,
-    bottom: rect.bottom
-  };
+  return { top: rect.top, left: rect.left, bottom: rect.bottom };
 }
 
 function getTextBeforeCursor(): string {
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0) return '';
-
-  const range = selection.getRangeAt(0);
-  const node = range.startContainer;
-  const offset = range.startOffset;
-
-  if (node.nodeType === Node.TEXT_NODE) {
-    return node.textContent?.slice(0, offset) || '';
-  }
-
-  return '';
-}
-
-function isVariableElement(node: Node | null): node is HTMLElement {
-  return node instanceof HTMLElement && node.dataset.value === 'variable';
-}
-
-function findVariableNodeBeforeCursor(range: Range): { variableNode: HTMLElement; spacerNode: Node | null } | null {
+  const range = getActiveRange();
+  if (!range) return '';
   const { startContainer, startOffset } = range;
+  return startContainer.nodeType === Node.TEXT_NODE ? startContainer.textContent?.slice(0, startOffset) ?? '' : '';
+}
+
+function isSelectionInsideEditor(): boolean {
+  const sel = getActiveSelection();
+  return !!(sel && editorRef.value?.contains(sel.anchorNode));
+}
+
+function getVariableQueryBeforeCursor(): string | null {
+  const match = getTextBeforeCursor().match(/\{\{([^{}]*)$/);
+  return match ? match[1] ?? '' : null;
+}
+
+// ─── Variable Node Detection ──────────────────────────────────────────────────
+
+interface VariableTarget {
+  variableNode: HTMLElement;
+  spacerNode: Node | null;
+}
+
+/**
+ * Generalized finder for a variable node adjacent to the cursor.
+ * direction: 'before' | 'after'
+ */
+function findAdjacentVariableNode(range: Range, direction: 'before' | 'after'): VariableTarget | null {
+  const { startContainer, startOffset } = range;
+  const isBefore = direction === 'before';
 
   if (startContainer.nodeType === Node.TEXT_NODE) {
-    const textNode = startContainer;
-    const beforeText = textNode.textContent?.slice(0, startOffset) || '';
+    const text = startContainer.textContent ?? '';
+    const relevantText = isBefore ? text.slice(0, startOffset) : text.slice(startOffset);
+    const sibling = isBefore ? startContainer.previousSibling : startContainer.nextSibling;
 
-    if (beforeText === CARET_SPACER && isVariableElement(textNode.previousSibling)) {
-      return {
-        variableNode: textNode.previousSibling,
-        spacerNode: textNode
-      };
+    if (relevantText === CARET_SPACER && isVariableElement(sibling)) {
+      return { variableNode: sibling, spacerNode: startContainer };
     }
-
-    if (startOffset === 0 && isVariableElement(textNode.previousSibling)) {
-      return {
-        variableNode: textNode.previousSibling,
-        spacerNode: null
-      };
+    const atEdge = isBefore ? startOffset === 0 : startOffset === text.length;
+    if (atEdge && isVariableElement(sibling)) {
+      return { variableNode: sibling, spacerNode: null };
     }
-
-    return null;
-  }
-
-  if (startContainer.nodeType === Node.ELEMENT_NODE && startOffset > 0) {
-    const previousNode = startContainer.childNodes[startOffset - 1];
-
-    if (previousNode?.nodeType === Node.TEXT_NODE && previousNode.textContent === CARET_SPACER && isVariableElement(previousNode.previousSibling)) {
-      return {
-        variableNode: previousNode.previousSibling,
-        spacerNode: previousNode
-      };
-    }
-
-    if (isVariableElement(previousNode)) {
-      return {
-        variableNode: previousNode,
-        spacerNode: null
-      };
-    }
-  }
-
-  return null;
-}
-
-function findVariableNodeAfterCursor(range: Range): { variableNode: HTMLElement; spacerNode: Node | null } | null {
-  const { startContainer, startOffset } = range;
-
-  if (startContainer.nodeType === Node.TEXT_NODE) {
-    const textNode = startContainer;
-    const afterText = textNode.textContent?.slice(startOffset) || '';
-
-    if (afterText === CARET_SPACER && isVariableElement(textNode.nextSibling)) {
-      return {
-        variableNode: textNode.nextSibling,
-        spacerNode: textNode
-      };
-    }
-
-    if (startOffset === textNode.textContent?.length && isVariableElement(textNode.nextSibling)) {
-      return {
-        variableNode: textNode.nextSibling,
-        spacerNode: null
-      };
-    }
-
     return null;
   }
 
   if (startContainer.nodeType === Node.ELEMENT_NODE) {
-    const nextNode = startContainer.childNodes[startOffset];
+    const adjacentIndex = isBefore ? startOffset - 1 : startOffset;
+    const node = startContainer.childNodes[adjacentIndex];
+    if (!node) return null;
 
-    if (nextNode?.nodeType === Node.TEXT_NODE && nextNode.textContent === CARET_SPACER && isVariableElement(nextNode.nextSibling)) {
-      return {
-        variableNode: nextNode.nextSibling,
-        spacerNode: nextNode
-      };
+    if (isBefore && node.nodeType === Node.TEXT_NODE && node.textContent === CARET_SPACER && isVariableElement(node.previousSibling)) {
+      return { variableNode: node.previousSibling, spacerNode: node };
     }
-
-    if (isVariableElement(nextNode)) {
-      return {
-        variableNode: nextNode,
-        spacerNode: null
-      };
+    if (!isBefore && node.nodeType === Node.TEXT_NODE && node.textContent === CARET_SPACER && isVariableElement(node.nextSibling)) {
+      return { variableNode: node.nextSibling, spacerNode: node };
+    }
+    if (isVariableElement(node)) {
+      return { variableNode: node, spacerNode: null };
     }
   }
 
   return null;
 }
 
-function isSelectionInsideEditor(): boolean {
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0) return false;
-
-  const { anchorNode } = selection;
-  if (!anchorNode || !editorRef.value) return false;
-
-  return editorRef.value.contains(anchorNode);
-}
-
-function getVariableQueryBeforeCursor(): string | null {
-  const beforeText = getTextBeforeCursor();
-  const match = beforeText.match(/\{\{([^{}]*)$/);
-
-  if (!match) return null;
-
-  return match[1] || '';
-}
-
-function hasTriggerBeforeCursor(): boolean {
-  return getVariableQueryBeforeCursor() !== null;
-}
-
-const filteredVariables = computed<Variable[]>(() => {
-  const query = variableQuery.value.trim().toLowerCase();
-
-  if (!query) return variables.value;
-
-  return variables.value.filter((variable) => {
-    const searchText = [variable.label, variable.value, variable.description || ''].join(' ').toLowerCase();
-
-    return searchText.includes(query);
-  });
-});
+// ─── Model Sync ───────────────────────────────────────────────────────────────
 
 function updateModelValue(): void {
   if (!editorRef.value) return;
-
-  const content = editorRef.value.innerHTML;
-  const decoded = decodeVariables(content);
-
+  const decoded = decodeVariables(editorRef.value.innerHTML);
   inputValue.value = decoded;
   emit('change', decoded);
 }
 
-watch(inputValue, (newValue) => {
-  if (editorRef.value && editorRef.value.innerHTML !== encodeVariables(newValue)) {
-    editorRef.value.innerHTML = encodeVariables(newValue);
-  }
-});
+// ─── Cursor Insertion ─────────────────────────────────────────────────────────
 
-watch(filteredVariables, (newVariables) => {
-  if (newVariables.length === 0) {
-    activeIndex.value = 0;
-    return;
-  }
+function insertTextAtCursor(text: string): boolean {
+  const selection = getActiveSelection();
+  if (!selection) return false;
 
-  if (activeIndex.value >= newVariables.length) {
-    activeIndex.value = 0;
-  }
-});
+  const range = selection.getRangeAt(0);
+  range.deleteContents();
+  const textNode = document.createTextNode(text);
+  range.insertNode(textNode);
+  range.setStartAfter(textNode);
+  range.setEndAfter(textNode);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return true;
+}
+
+// ─── Menu Lifecycle ───────────────────────────────────────────────────────────
 
 function showMenu(): void {
   if (!editorRef.value) return;
-
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0) return;
-
-  const range = selection.getRangeAt(0);
-  cachedRange.value = range.cloneRange();
-
+  cacheCurrentRange();
   const position = getCursorPosition();
-  if (position) {
-    menuPosition.value = position;
-  }
-
+  if (position) menuPosition.value = position;
   activeIndex.value = 0;
   showVariableMenu.value = true;
-}
-
-function updateMenuPosition(): void {
-  if (!showVariableMenu.value) return;
-
-  const position = getCursorPosition();
-  if (position) {
-    menuPosition.value = position;
-  }
-}
-
-function syncVariableQuery(): void {
-  variableQuery.value = getVariableQueryBeforeCursor() || '';
 }
 
 function hideMenu(): void {
@@ -346,40 +278,71 @@ function hideMenu(): void {
   variableQuery.value = '';
 }
 
+function updateMenuPosition(): void {
+  if (!showVariableMenu.value) return;
+  const position = getCursorPosition();
+  if (position) menuPosition.value = position;
+}
+
+function canShowMenu(): boolean {
+  const sel = getActiveSelection();
+  return !!(editorRef.value && sel?.isCollapsed && getVariableQueryBeforeCursor() !== null);
+}
+
+function updateDropdownVisibility(): void {
+  if (!canShowMenu()) {
+    if (showVariableMenu.value) hideMenu();
+    return;
+  }
+
+  variableQuery.value = getVariableQueryBeforeCursor() ?? '';
+
+  if (showVariableMenu.value) {
+    cacheCurrentRange();
+    updateMenuPosition();
+  } else {
+    showMenu();
+  }
+}
+
+// ─── Variable Selection ───────────────────────────────────────────────────────
+
+function deleteQueryTrigger(range: Range): void {
+  const queryText = getVariableQueryBeforeCursor();
+  if (queryText === null) return;
+
+  const textNode = range.startContainer;
+  if (textNode.nodeType !== Node.TEXT_NODE || !textNode.textContent) return;
+
+  const triggerStart = range.startOffset - queryText.length - 2; // 2 = '{{'
+  if (triggerStart < 0) return;
+
+  const triggerRange = document.createRange();
+  triggerRange.setStart(textNode, triggerStart);
+  triggerRange.setEnd(textNode, range.startOffset);
+  triggerRange.deleteContents();
+  range.setStart(textNode, triggerStart);
+}
+
 function selectVariable(variable: Variable): void {
   if (!editorRef.value) return;
-
   editorRef.value.focus();
 
-  const selection = window.getSelection();
+  const selection = getActiveSelection();
   if (!selection) return;
 
   let range: Range;
-
   if (cachedRange.value) {
     range = cachedRange.value.cloneRange();
     selection.removeAllRanges();
     selection.addRange(range);
-  } else if (selection.rangeCount > 0) {
-    range = selection.getRangeAt(0);
   } else {
-    return;
+    const current = getActiveRange();
+    if (!current) return;
+    range = current;
   }
 
-  const variableQueryText = getVariableQueryBeforeCursor();
-  if (variableQueryText !== null) {
-    const textNode = range.startContainer;
-    if (textNode.nodeType === Node.TEXT_NODE && textNode.textContent) {
-      const triggerStartOffset = range.startOffset - variableQueryText.length - 2;
-      if (triggerStartOffset >= 0) {
-        const triggerRange = document.createRange();
-        triggerRange.setStart(textNode, triggerStartOffset);
-        triggerRange.setEnd(textNode, range.startOffset);
-        triggerRange.deleteContents();
-        range.setStart(textNode, triggerStartOffset);
-      }
-    }
-  }
+  deleteQueryTrigger(range);
 
   const variableSpan = createVariableSpan(variable.value);
   range.deleteContents();
@@ -389,10 +352,8 @@ function selectVariable(variable: Variable): void {
   range.setStartAfter(variableSpan);
   range.setEndAfter(variableSpan);
   range.insertNode(caretSpacer);
-
   range.setStartAfter(caretSpacer);
   range.setEndAfter(caretSpacer);
-
   selection.removeAllRanges();
   selection.addRange(range);
 
@@ -400,107 +361,43 @@ function selectVariable(variable: Variable): void {
   hideMenu();
 }
 
-function deleteVariableBeforeCursor(): boolean {
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return false;
+// ─── Variable Deletion ────────────────────────────────────────────────────────
 
-  const range = selection.getRangeAt(0);
-  const target = findVariableNodeBeforeCursor(range);
+function deleteAdjacentVariable(direction: 'before' | 'after'): boolean {
+  const selection = getActiveSelection();
+  if (!selection?.isCollapsed) return false;
+
+  const range = getActiveRange();
+  if (!range) return false;
+
+  const target = findAdjacentVariableNode(range, direction);
   if (!target) return false;
 
   const { variableNode, spacerNode } = target;
-  const { parentNode } = variableNode;
-  if (!parentNode) return false;
+  const parent = variableNode.parentNode;
+  if (!parent) return false;
 
-  const nextNode = spacerNode?.nextSibling || variableNode.nextSibling;
+  const nextNode = direction === 'before' ? spacerNode?.nextSibling || variableNode.nextSibling : null;
 
-  if (spacerNode) {
-    spacerNode.parentNode?.removeChild(spacerNode);
-  }
-  parentNode.removeChild(variableNode);
+  spacerNode?.parentNode?.removeChild(spacerNode);
+  parent.removeChild(variableNode);
 
-  const nextSelection = document.createRange();
-
+  const newRange = document.createRange();
   if (nextNode) {
-    nextSelection.setStartBefore(nextNode);
+    newRange.setStartBefore(nextNode);
   } else {
-    nextSelection.selectNodeContents(parentNode);
-    nextSelection.collapse(false);
+    newRange.selectNodeContents(parent);
+    newRange.collapse(false);
   }
-
-  nextSelection.collapse(true);
+  newRange.collapse(true);
   selection.removeAllRanges();
-  selection.addRange(nextSelection);
+  selection.addRange(newRange);
 
   updateModelValue();
   return true;
 }
 
-function deleteVariableAfterCursor(): boolean {
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return false;
-
-  const range = selection.getRangeAt(0);
-  const target = findVariableNodeAfterCursor(range);
-  if (!target) return false;
-
-  const { variableNode, spacerNode } = target;
-  const { parentNode } = variableNode;
-  if (!parentNode) return false;
-
-  if (spacerNode) {
-    spacerNode.parentNode?.removeChild(spacerNode);
-  }
-  parentNode.removeChild(variableNode);
-
-  const nextSelection = document.createRange();
-  nextSelection.selectNodeContents(parentNode);
-  nextSelection.collapse(false);
-  selection.removeAllRanges();
-  selection.addRange(nextSelection);
-
-  updateModelValue();
-  return true;
-}
-
-function canShowMenu(): boolean {
-  if (!editorRef.value) return false;
-
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return false;
-
-  return hasTriggerBeforeCursor();
-}
-
-function updateDropdownVisibility(): void {
-  if (canShowMenu()) {
-    syncVariableQuery();
-
-    if (showVariableMenu.value) {
-      const selection = window.getSelection();
-      if (selection && selection.rangeCount > 0) {
-        cachedRange.value = selection.getRangeAt(0).cloneRange();
-      }
-      updateMenuPosition();
-    } else {
-      showMenu();
-    }
-  } else if (showVariableMenu.value) {
-    hideMenu();
-  }
-}
-
-function syncMenuWithSelection(): void {
-  if (props.disabled || !isSelectionInsideEditor()) {
-    if (showVariableMenu.value) {
-      hideMenu();
-    }
-    return;
-  }
-
-  updateDropdownVisibility();
-  updateMenuPosition();
-}
+// ─── Event Handlers ───────────────────────────────────────────────────────────
 
 function handleInput(): void {
   if (props.disabled) return;
@@ -511,108 +408,107 @@ function handleInput(): void {
 function handleKeyDown(event: KeyboardEvent): void {
   if (props.disabled) return;
 
-  if (event.key === 'Backspace' && deleteVariableBeforeCursor()) {
+  if (event.key === 'Backspace' && deleteAdjacentVariable('before')) {
     event.preventDefault();
     hideMenu();
     return;
   }
 
-  if (event.key === 'Delete' && deleteVariableAfterCursor()) {
+  if (event.key === 'Delete' && deleteAdjacentVariable('after')) {
     event.preventDefault();
     hideMenu();
     return;
   }
 
-  if (showVariableMenu.value) {
-    const variableCount = filteredVariables.value.length;
+  if (event.key === 'Enter' && !showVariableMenu.value) {
+    event.preventDefault();
+    insertTextAtCursor('\n');
+    updateModelValue();
+    return;
+  }
 
-    switch (event.key) {
-      case 'ArrowDown':
-        if (variableCount === 0) break;
-        event.preventDefault();
-        activeIndex.value = (activeIndex.value + 1) % variableCount;
-        break;
-      case 'ArrowUp':
-        if (variableCount === 0) break;
-        event.preventDefault();
-        activeIndex.value = activeIndex.value === 0 ? variableCount - 1 : activeIndex.value - 1;
-        break;
-      case 'Enter':
-        event.preventDefault();
-        if (filteredVariables.value[activeIndex.value]) {
-          selectVariable(filteredVariables.value[activeIndex.value]);
-        }
-        break;
-      case 'Escape':
-        event.preventDefault();
-        hideMenu();
-        break;
-      default:
-        break;
-    }
+  if (!showVariableMenu.value) return;
+
+  const count = filteredVariables.value.length;
+
+  switch (event.key) {
+    case 'ArrowDown':
+      if (!count) break;
+      event.preventDefault();
+      activeIndex.value = (activeIndex.value + 1) % count;
+      break;
+    case 'ArrowUp':
+      if (!count) break;
+      event.preventDefault();
+      activeIndex.value = activeIndex.value === 0 ? count - 1 : activeIndex.value - 1;
+      break;
+    case 'Enter':
+      event.preventDefault();
+      if (filteredVariables.value[activeIndex.value]) {
+        selectVariable(filteredVariables.value[activeIndex.value]);
+      }
+      break;
+    case 'Escape':
+      event.preventDefault();
+      hideMenu();
+      break;
+    default:
+      break;
   }
 }
 
 function handlePaste(event: ClipboardEvent): void {
   if (props.disabled) return;
-
   event.preventDefault();
-
   const text = event.clipboardData?.getData('text/plain');
-  if (!text) return;
-
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0) return;
-
-  const range = selection.getRangeAt(0);
-  range.deleteContents();
-
-  const textNode = document.createTextNode(text);
-  range.insertNode(textNode);
-
-  range.setStartAfter(textNode);
-  range.setEndAfter(textNode);
-
-  selection.removeAllRanges();
-  selection.addRange(range);
-
-  updateModelValue();
+  if (text) {
+    insertTextAtCursor(text);
+    updateModelValue();
+  }
 }
 
 function handleBlur(): void {
-  if (props.disabled) return;
-
-  setTimeout(() => {
-    hideMenu();
-  }, 200);
+  if (!props.disabled) setTimeout(hideMenu, 200);
 }
 
 function handleSelectionChange(): void {
-  syncMenuWithSelection();
-}
-
-function handleViewportChange(): void {
+  if (props.disabled || !isSelectionInsideEditor()) {
+    if (showVariableMenu.value) hideMenu();
+    return;
+  }
+  updateDropdownVisibility();
   updateMenuPosition();
 }
 
 function handleClickOutside(event: MouseEvent): void {
-  const target = event.target as HTMLElement;
-
-  const isClickInsideEditor = wrapperRef.value && wrapperRef.value.contains(target);
-
-  if (!isClickInsideEditor && showVariableMenu.value) {
+  if (showVariableMenu.value && !wrapperRef.value?.contains(event.target as HTMLElement)) {
     hideMenu();
   }
 }
 
-function initializeEditor(): void {
-  if (!editorRef.value) return;
-
-  editorRef.value.innerHTML = encodeVariables(inputValue.value);
+let rafId = 0;
+function handleViewportChange(): void {
+  cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(updateMenuPosition);
 }
 
+// ─── Watchers ─────────────────────────────────────────────────────────────────
+
+watch(inputValue, (newValue) => {
+  const encoded = encodeVariables(newValue);
+  if (editorRef.value && editorRef.value.innerHTML !== encoded) {
+    editorRef.value.innerHTML = encoded;
+  }
+});
+
+watch(filteredVariables, (vars) => {
+  if (activeIndex.value >= vars.length) activeIndex.value = 0;
+});
+
+// ─── Lifecycle ────────────────────────────────────────────────────────────────
+
 onMounted(() => {
-  initializeEditor();
+  if (editorRef.value) editorRef.value.innerHTML = encodeVariables(inputValue.value);
   document.addEventListener('click', handleClickOutside);
   document.addEventListener('selectionchange', handleSelectionChange);
   window.addEventListener('resize', handleViewportChange);
@@ -628,6 +524,20 @@ onUnmounted(() => {
 </script>
 
 <style scoped lang="less">
+:deep(.prompt-variable-tag) {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--color-primary, #4080ff);
+  background-color: rgb(var(--color-primary-value, 64, 128, 255), 0.1);
+  border-radius: 4px;
+}
+
 .variable-editor-wrapper {
   position: relative;
   width: 100%;

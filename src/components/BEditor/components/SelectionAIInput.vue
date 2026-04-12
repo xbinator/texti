@@ -158,6 +158,7 @@ async function handleSubmit(): Promise<void> {
   if (from === to) return;
 
   const selectedText = text || props.editor.state.doc.textBetween(from, to, '');
+
   const prompt = buildPrompt(selectedText, value);
 
   isLoading.value = true;

@@ -35,7 +35,7 @@ export const DEFAULT_PROVIDERS: AIProvider[] = [
     id: 'deepseek',
     name: 'DeepSeek',
     description: '提供高性能推理与代码生成模型，适用于编程辅助和复杂逻辑任务。',
-    baseUrl: 'https://api.deepseek.com',
+    baseUrl: 'https://api.deepseek.com/v1',
     type: 'openai',
     isEnabled: false,
     readonly: true,
