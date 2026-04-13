@@ -170,8 +170,8 @@ registerShortcut({
 <style scoped>
 .find-bar {
   position: absolute;
-  top: 20px;
-  right: 20px;
+  top: 60px;
+  right: 40px;
   display: flex;
   align-items: center;
   transform-origin: top center;

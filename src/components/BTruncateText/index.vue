@@ -1,7 +1,5 @@
 <template>
-  <span ref="textRef" class="b-truncate-text" :title="isTruncated ? text : ''">
-    {{ text }}
-  </span>
+  <span ref="textRef" class="b-truncate-text" :title="isTruncated ? text : ''"> {{ text }} </span>
 </template>
 
 <script setup lang="ts">

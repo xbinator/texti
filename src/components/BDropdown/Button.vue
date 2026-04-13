@@ -1,10 +1,15 @@
 <template>
-  <BDropdown v-model:open="visible">
+  <BDropdown v-model:open="visible" :disabled="!options.length">
     <button class="b-dropdown-button" :class="[{ 'is-active': visible, 'is-small': props.size === 'small', 'is-bordered': props.bordered }]">
       <slot>
         <div class="b-dropdown-button-content" :style="{ width }">{{ contentPrefix }}{{ label }}</div>
       </slot>
-      <Icon v-if="showIcon" class="dropdown-icon" icon="lucide:chevron-down" :style="{ transform: visible ? 'rotate(180deg)' : 'rotate(0deg)' }" />
+      <Icon
+        v-if="showIcon && options.length"
+        class="dropdown-icon"
+        icon="lucide:chevron-down"
+        :style="{ transform: visible ? 'rotate(180deg)' : 'rotate(0deg)' }"
+      />
     </button>
 
     <template #overlay>

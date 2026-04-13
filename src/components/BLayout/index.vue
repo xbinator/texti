@@ -101,6 +101,10 @@ useEventListener(window, 'resize', validateWindowState);
   width: 100%;
   height: 36px;
   -webkit-app-region: drag;
+
+  button {
+    -webkit-app-region: no-drag;
+  }
 }
 
 .b-layout__content {
@@ -112,7 +116,6 @@ useEventListener(window, 'resize', validateWindowState);
   flex-shrink: 0;
   width: 60px;
   height: 100%;
-  -webkit-app-region: drag;
 }
 
 .b-layout-header__content {
@@ -123,10 +126,6 @@ useEventListener(window, 'resize', validateWindowState);
 
   &.is-mac {
     padding: 0 12px;
-  }
-
-  button {
-    -webkit-app-region: no-drag;
   }
 }
 

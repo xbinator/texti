@@ -1,14 +1,14 @@
 <template>
   <div ref="layoutRef" class="b-editor-layout">
-    <BEditorSidebar
-      v-if="showSidebar"
-      :title="editorTitle"
-      :content="bodyContentForSidebar"
-      :anchor-id-prefix="editorInstanceId"
-      :active-id="activeAnchorId"
-      class="b-editor-sidebar"
-      @change="handleChangeAnchor"
-    />
+    <BPanelSplitter v-if="showSidebar" v-model:size="sidebarWidth" position="right" :min-width="180" :max-width="400">
+      <BEditorSidebar
+        :title="editorTitle"
+        :content="bodyContentForSidebar"
+        :anchor-id-prefix="editorInstanceId"
+        :active-id="activeAnchorId"
+        @change="handleChangeAnchor"
+      />
+    </BPanelSplitter>
 
     <BScrollbar ref="scrollbarRef" class="b-editor-scrollbar" @scroll="handleEditorScroll">
       <div ref="containerRef" class="b-editor-container">
@@ -33,6 +33,7 @@ import type { FrontMatterData } from './hooks/useFrontMatter';
 import type { BEditorViewMode } from './types';
 import { computed, ref, toRef } from 'vue';
 import { useTextareaAutosize } from '@vueuse/core';
+import BPanelSplitter from '@/components/BPanelSplitter/index.vue';
 import BScrollbar from '@/components/BScrollbar/index.vue';
 import RichEditorPane from './components/RichEditorPane.vue';
 import SourceEditorPane from './components/SourceEditorPane.vue';
@@ -47,6 +48,7 @@ const editorInstanceCounter = ref(0);
 const layoutRef = ref<HTMLElement | null>(null);
 const scrollbarRef = ref<InstanceType<typeof BScrollbar> | null>(null);
 const titleTextareaRef = ref<HTMLTextAreaElement | null>(null);
+const sidebarWidth = ref(260);
 
 interface Props {
   editable?: boolean;
@@ -197,7 +199,7 @@ useTextareaAutosize({ element: titleTextareaRef, input: editorTitle });
 <style lang="less">
 .b-editor-layout {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   height: 100%;
 
   --selection-color: #fff;
@@ -210,6 +212,8 @@ useTextareaAutosize({ element: titleTextareaRef, input: editorTitle });
 }
 
 .b-editor-scrollbar {
+  flex: 1;
+  width: 0;
   background: var(--bg-primary);
   border-radius: 8px;
 }

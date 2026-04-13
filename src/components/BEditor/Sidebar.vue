@@ -65,8 +65,9 @@ function handleAnchorClick(item: AnchorItem) {
 
 .b-editor-sidebar {
   display: flex;
+  flex-shrink: 0;
   flex-direction: column;
-  width: 280px;
+  width: 100%;
   height: 100%;
   background: var(--bg-primary);
   border-radius: 8px;
