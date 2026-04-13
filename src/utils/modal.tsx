@@ -28,9 +28,10 @@ interface RenderModalProps {
 }
 
 interface FooterButtonsProps {
-  onCancel: () => void;
+  onCancel?: () => void;
   onConfirm: () => void;
   confirmText?: string;
+  cancelText?: string;
   danger?: boolean;
 }
 
@@ -38,6 +39,7 @@ interface ConfirmModalOptions {
   title?: string;
   content: string;
   confirmText?: string;
+  cancelText?: string;
   danger?: boolean;
 }
 
@@ -113,12 +115,14 @@ function createModalInstance(renderModal: (props: { open: boolean; onClose: () =
 
 // ——— 内部组件 ———
 
-function FooterButtons({ onCancel, onConfirm, confirmText = '确定', danger = false }: FooterButtonsProps) {
+function FooterButtons({ onCancel, onConfirm, confirmText = '确定', cancelText = '取消', danger = false }: FooterButtonsProps) {
   return (
     <div style={{ textAlign: 'right' }}>
-      <BButtonComponent type="secondary" onClick={onCancel} style={{ marginRight: '8px' }}>
-        取消
-      </BButtonComponent>
+      {onCancel && (
+        <BButtonComponent type="secondary" onClick={onCancel} style={{ marginRight: '8px' }}>
+          {cancelText}
+        </BButtonComponent>
+      )}
       <BButtonComponent type="primary" onClick={onConfirm} danger={danger}>
         {confirmText}
       </BButtonComponent>
@@ -128,7 +132,27 @@ function FooterButtons({ onCancel, onConfirm, confirmText = '确定', danger = f
 
 // ——— Render 函数 ———
 
-function RenderConfirmModal({ content, title, confirmText, danger }: ConfirmModalOptions): Promise<[boolean, boolean]> {
+function RenderAlertModal({ content, title, confirmText }: Omit<ConfirmModalOptions, 'danger'>): Promise<void> {
+  return new Promise((resolve) => {
+    let instance: ModalInstance;
+
+    const onConfirm = (): void => {
+      resolve();
+      instance.close();
+    };
+
+    instance = createModalInstance((controlProps) =>
+      h(RenderModal, {
+        ...controlProps,
+        title,
+        content: () => <div style={{ marginBottom: '16px' }}>{content}</div>,
+        footer: () => <FooterButtons onConfirm={onConfirm} confirmText={confirmText || '知道了'} />
+      })
+    );
+  });
+}
+
+function RenderConfirmModal({ content, title, confirmText, cancelText, danger }: ConfirmModalOptions): Promise<[boolean, boolean]> {
   return new Promise((resolve) => {
     let instance: ModalInstance;
 
@@ -146,7 +170,7 @@ function RenderConfirmModal({ content, title, confirmText, danger }: ConfirmModa
         ...controlProps,
         title,
         content: () => <div style={{ marginBottom: '16px' }}>{content}</div>,
-        footer: () => <FooterButtons onCancel={onCancel} onConfirm={onConfirm} confirmText={confirmText} danger={danger} />
+        footer: () => <FooterButtons onCancel={onCancel} onConfirm={onConfirm} confirmText={confirmText} cancelText={cancelText} danger={danger} />
       })
     );
   });
@@ -190,8 +214,12 @@ function RenderInputModal(title: string, options: InputOptions = {}): Promise<[f
 // ——— 公共 API ———
 
 export class Modal {
-  static confirm(title: string, content: string): Promise<[boolean, boolean]> {
-    return RenderConfirmModal({ content, title });
+  static alert(title: string, content: string, confirmText?: string): Promise<void> {
+    return RenderAlertModal({ content, title, confirmText });
+  }
+
+  static confirm(title: string, content: string, options?: { confirmText?: string; cancelText?: string }): Promise<[boolean, boolean]> {
+    return RenderConfirmModal({ content, title, ...options });
   }
 
   static delete(content: string, options: DeleteOptions = {}): Promise<[boolean, boolean]> {
