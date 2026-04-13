@@ -1,5 +1,5 @@
 /* eslint-disable class-methods-use-this */
-import type { Native, OpenFileOptions, SaveFileOptions } from './types';
+import type { Native, OpenFileOptions, SaveFileOptions, FileChangeEvent } from './types';
 import { getElectronAPI } from '../electron-api';
 
 export class ElectronNative implements Native {
@@ -26,6 +26,18 @@ export class ElectronNative implements Native {
 
   async writeFile(filePath: string, content: string): Promise<void> {
     await getElectronAPI().writeFile(filePath, content);
+  }
+
+  async watchFile(filePath: string): Promise<void> {
+    await getElectronAPI().watchFile(filePath);
+  }
+
+  async unwatchFile(): Promise<void> {
+    await getElectronAPI().unwatchFile();
+  }
+
+  onFileChanged(callback: (data: FileChangeEvent) => void): () => void {
+    return getElectronAPI().onFileChanged(callback);
   }
 
   async setWindowTitle(title: string): Promise<void> {

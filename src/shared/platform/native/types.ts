@@ -13,12 +13,24 @@ export interface File {
   ext: string;
 }
 
+export interface FileChangeEvent {
+  type: 'change' | 'unlink';
+  filePath: string;
+  content?: string;
+}
+
 export interface Native {
   openFile(options?: OpenFileOptions): Promise<File>;
 
   saveFile(content: string, path?: string, options?: SaveFileOptions): Promise<string | null>;
 
   writeFile(path: string, content: string): Promise<void>;
+
+  watchFile(path: string): Promise<void>;
+
+  unwatchFile(): Promise<void>;
+
+  onFileChanged(callback: (data: FileChangeEvent) => void): () => void;
 
   setWindowTitle(title: string): Promise<void>;
 }

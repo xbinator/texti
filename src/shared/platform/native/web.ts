@@ -1,5 +1,5 @@
 /* eslint-disable class-methods-use-this */
-import type { Native, OpenFileOptions, SaveFileOptions, File } from './types';
+import type { Native, OpenFileOptions, SaveFileOptions, File, FileChangeEvent } from './types';
 
 export class WebNative implements Native {
   async openFile(options?: OpenFileOptions) {
@@ -40,6 +40,22 @@ export class WebNative implements Native {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async writeFile(_path: string, _content: string): Promise<void> {
     // this.syncCurrentFile(path, content);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async watchFile(_path: string): Promise<void> {
+    // web 端不支持文件监听
+  }
+
+  async unwatchFile(): Promise<void> {
+    // web 端不支持文件监听
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  onFileChanged(_callback: (data: FileChangeEvent) => void): () => void {
+    return () => {
+      // web 端不需要清理
+    };
   }
 
   async setWindowTitle(title: string): Promise<void> {
