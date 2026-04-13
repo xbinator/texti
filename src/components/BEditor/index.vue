@@ -1,14 +1,13 @@
 <template>
   <div ref="layoutRef" class="b-editor-layout">
-    <BPanelSplitter v-if="showSidebar" v-model:size="sidebarWidth" position="right" :min-width="180" :max-width="400">
-      <BEditorSidebar
-        :title="editorTitle"
-        :content="bodyContentForSidebar"
-        :anchor-id-prefix="editorInstanceId"
-        :active-id="activeAnchorId"
-        @change="handleChangeAnchor"
-      />
-    </BPanelSplitter>
+    <BEditorSidebar
+      v-if="showSidebar"
+      :title="editorTitle"
+      :content="bodyContentForSidebar"
+      :anchor-id-prefix="editorInstanceId"
+      :active-id="activeAnchorId"
+      @change="handleChangeAnchor"
+    />
 
     <BScrollbar ref="scrollbarRef" class="b-editor-scrollbar" @scroll="handleEditorScroll">
       <div ref="containerRef" class="b-editor-container">
@@ -33,7 +32,6 @@ import type { FrontMatterData } from './hooks/useFrontMatter';
 import type { BEditorViewMode } from './types';
 import { computed, ref, toRef } from 'vue';
 import { useTextareaAutosize } from '@vueuse/core';
-import BPanelSplitter from '@/components/BPanelSplitter/index.vue';
 import BScrollbar from '@/components/BScrollbar/index.vue';
 import RichEditorPane from './components/RichEditorPane.vue';
 import SourceEditorPane from './components/SourceEditorPane.vue';
@@ -48,13 +46,14 @@ const editorInstanceCounter = ref(0);
 const layoutRef = ref<HTMLElement | null>(null);
 const scrollbarRef = ref<InstanceType<typeof BScrollbar> | null>(null);
 const titleTextareaRef = ref<HTMLTextAreaElement | null>(null);
-const sidebarWidth = ref(260);
 
 interface Props {
   editable?: boolean;
   // 编辑器实例ID
   editorId?: string;
+  // 编辑器视图模式
   viewMode?: BEditorViewMode;
+  // 是否显示大纲
   showOutline?: boolean;
 }
 

@@ -1,13 +1,18 @@
 <template>
-  <Transition name="toc-fade">
-    <div v-if="items.length" class="b-editor-sidebar">
-      <AnchorContent :title="title" :items="items" :active-id="activeId" @click="handleAnchorClick" />
+  <BPanelSplitter v-model:size="sidebarWidth" position="right" :min-width="180" :max-width="400">
+    <div class="b-editor-sidebar">
+      <AnchorContent v-if="items.length > 0" :title="title" :items="items" :active-id="activeId" @click="handleAnchorClick" />
+      <div v-else class="empty-state">
+        <div class="empty-icon">📝</div>
+        <div class="empty-text">暂无目录大纲</div>
+        <div class="empty-subtext">在正文输入标题以生成目录</div>
+      </div>
     </div>
-  </Transition>
+  </BPanelSplitter>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { marked, Tokens } from 'marked';
 import AnchorContent, { AnchorItem } from './components/AnchorContent.vue';
 
@@ -27,6 +32,8 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits(['change']);
+
+const sidebarWidth = ref(260);
 
 const items = computed(() => {
   if (!props.content) return [];
@@ -52,17 +59,6 @@ function handleAnchorClick(item: AnchorItem) {
 </script>
 
 <style scoped>
-.toc-fade-enter-active,
-.toc-fade-leave-active {
-  transition: all 0.3s ease;
-}
-
-.toc-fade-enter-from,
-.toc-fade-leave-to {
-  opacity: 0;
-  transform: translateX(-20px);
-}
-
 .b-editor-sidebar {
   display: flex;
   flex-shrink: 0;
@@ -72,5 +68,34 @@ function handleAnchorClick(item: AnchorItem) {
   background: var(--bg-primary);
   border-radius: 8px;
   backdrop-filter: blur(10px);
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 24px;
+  color: var(--text-tertiary, #999);
+  text-align: center;
+}
+
+.empty-icon {
+  margin-bottom: 12px;
+  font-size: 32px;
+  opacity: 0.6;
+}
+
+.empty-text {
+  margin-bottom: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary, #666);
+}
+
+.empty-subtext {
+  font-size: 12px;
+  opacity: 0.8;
 }
 </style>
