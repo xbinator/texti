@@ -1,6 +1,6 @@
 import type { AICreateOptions, AIRequestOptions } from 'types/ai';
 import { ipcMain } from 'electron';
-import { getWindowFromWebContents, isDev } from '../../window.mjs';
+import { getWindowFromWebContents } from '../../window.mjs';
 import { aiService } from './service.mjs';
 
 export function registerAIHandlers(): void {
@@ -29,14 +29,11 @@ export function registerAIHandlers(): void {
       }
 
       for await (const chunk of result.stream) {
-        if (isDev()) {
-          process.stdout.write(chunk);
+        if (chunk.type === 'text-delta') {
+          win.webContents.send('ai:stream:chunk', chunk.text);
+        } else if (chunk.type === 'error') {
+          win.webContents.send('ai:stream:error', chunk.error);
         }
-        win.webContents.send('ai:stream:chunk', chunk);
-      }
-
-      if (isDev()) {
-        process.stdout.write('\n');
       }
 
       win.webContents.send('ai:stream:complete');

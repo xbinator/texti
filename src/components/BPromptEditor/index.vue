@@ -17,6 +17,7 @@
     ></div>
 
     <VariableSelect
+      v-if="options.length"
       :visible="trigger.visible.value"
       :variables="trigger.filteredVariables.value"
       :position="trigger.menuPosition.value"
@@ -39,10 +40,14 @@ const props = withDefaults(defineProps<Props>(), {
   options: () => [],
   disabled: false,
   maxHeight: undefined,
-  variant: 'outlined'
+  variant: 'outlined',
+  submitOnEnter: false
 });
 
-const emit = defineEmits<{ (e: 'change', value: string): void }>();
+const emit = defineEmits<{
+  (e: 'change', value: string): void;
+  (e: 'submit'): void;
+}>();
 
 const inputValue = defineModel<string>('value', { default: '' });
 
@@ -80,6 +85,8 @@ const { handleKeyDown } = useEditorKeyboard({
     selectionHook.insertTextAtCursor('\n');
     updateModelValue();
   },
+  onSubmit: () => emit('submit'),
+  submitOnEnter: computed(() => props.submitOnEnter),
   onMenuKeydown: trigger.handleMenuKeydown,
   isMenuVisible: trigger.visible,
   hideMenu: trigger.hide
