@@ -111,6 +111,8 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
 </script>
 
 <style lang="less">
+@import url('@/assets/styles/markdown.less');
+
 .rich-editor-pane {
   position: relative;
 }
@@ -121,7 +123,7 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
 
   .ProseMirror {
     min-height: 100%;
-    padding: 20px 40px 90px;
+    padding: 20px 50px 90px;
     margin: 0;
     line-height: 1.74;
     color: var(--editor-text);
@@ -290,71 +292,7 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
       line-height: 1.6;
       color: var(--code-text);
       background-color: transparent;
-
-      .hljs-keyword {
-        color: var(--code-keyword);
-      }
-
-      .hljs-string {
-        color: var(--code-string);
-      }
-
-      .hljs-number {
-        color: var(--code-number);
-      }
-
-      .hljs-comment {
-        font-style: italic;
-        color: var(--code-comment);
-      }
-
-      .hljs-function {
-        color: var(--code-function);
-      }
-
-      .hljs-title {
-        color: var(--code-function);
-      }
-
-      .hljs-params {
-        color: var(--code-text);
-      }
-
-      .hljs-variable {
-        color: var(--code-variable);
-      }
-
-      .hljs-operator {
-        color: var(--code-number);
-      }
-
-      .hljs-tag {
-        color: var(--code-tag);
-      }
-
-      .hljs-attr {
-        color: var(--code-attr-name);
-      }
-
-      .hljs-value {
-        color: var(--code-attr-value);
-      }
-
-      .hljs-property {
-        color: var(--code-variable);
-      }
-
-      .hljs-built_in {
-        color: var(--code-builtin);
-      }
-
-      .hljs-class {
-        color: var(--code-class);
-      }
-
-      .hljs-constant {
-        color: var(--code-constant);
-      }
+      .code-highlight();
     }
   }
 
