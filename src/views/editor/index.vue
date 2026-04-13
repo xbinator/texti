@@ -51,7 +51,7 @@
       </div>
 
       <!-- 辅助工具侧边栏 -->
-      <BPanelSplitter v-show="sidebarVisible" v-model:size="sidebarWidth" position="left" :min-width="200" :max-width="500">
+      <BPanelSplitter v-show="sidebarState.visible" v-model:size="sidebarState.width" position="left" :min-width="200" :max-width="500">
         <AuxiliarySidebar />
       </BPanelSplitter>
 
@@ -70,6 +70,7 @@ import type { EditorFile } from './types';
 import { computed, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
+import { useStorage } from '@vueuse/core';
 import type { DropdownOption } from '@/components/BDropdown/type';
 import BEditor from '@/components/BEditor/index.vue';
 import type { BEditorPublicInstance } from '@/components/BEditor/types';
@@ -92,11 +93,10 @@ const router = useRouter();
 const { isDirty, setOriginalContent } = useDirty(fileState);
 
 const visible = reactive({ find: false, recentSearch: false, shortcuts: false });
-const sidebarVisible = ref(false);
-const sidebarWidth = ref(300);
+const sidebarState = useStorage('editor-sidebar-state', { visible: false, width: 300 });
 
 function toggleSidebar(): void {
-  sidebarVisible.value = !sidebarVisible.value;
+  sidebarState.value.visible = !sidebarState.value.visible;
 }
 
 function handleOpenSettings(): void {

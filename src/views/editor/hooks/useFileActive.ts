@@ -1,7 +1,7 @@
 /* eslint-disable no-restricted-syntax */
 import type { EditorFile } from '../types';
 import type { Ref } from 'vue';
-import { computed, nextTick, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { customAlphabet } from 'nanoid';
 import type { ToolbarOptions } from '@/components/BToolbar/types';
 import { native } from '@/shared/platform';
@@ -22,79 +22,95 @@ const nanoid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz_', 6);
 
 export function getRecentFileLabel(file: Pick<EditorFile, 'name' | 'content'>): string {
   const content = file.content.replace(/^\s*---[\s\S]*?---\s*\n?/, '');
-  const match = /^#{1,6}\s+(.+)/m.exec(content);
-
-  const title = match?.[1]?.trim();
-
+  const title = /^#{1,6}\s+(.+)/m.exec(content)?.[1]?.trim();
   return `${file.name || '未命名文件'}${title ? `【${title}】` : ''}`;
 }
 
+/** 构造一个带 nanoid 的空白新文件 */
+function createEmptyFile(overrides: Partial<EditorFile> = {}): EditorFile {
+  return { path: '', name: '', ext: 'md', content: '', id: nanoid(6), ...overrides };
+}
+
+/** 从文件路径中解析文件名和扩展名 */
+function parseFileName(filePath: string): { name: string; ext: string } {
+  const fileName = filePath.split(/[/\\]/).pop() ?? '';
+  const [, name = '', ext = ''] = /^(.+?)(?:\.([^.]+))?$/.exec(fileName) ?? [];
+  return { name, ext };
+}
+
 export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActiveOptions) {
-  const canSave = computed(() => fileState.value.path !== undefined);
+  const settingStore = useSettingStore();
+
+  const canSave = computed(() => Boolean(fileState.value.path));
   const recentFiles = ref<EditorFile[]>([]);
-  const savedRecentFiles = computed<EditorFile[]>(() => recentFiles.value.filter((file) => Boolean(file.path)));
+  const savedRecentFiles = computed<EditorFile[]>(() => recentFiles.value.filter((f) => Boolean(f.path)));
+
+  // ------------------------------------------------------------------ //
+  // 基础 storage 操作
+  // ------------------------------------------------------------------ //
 
   async function loadRecentFiles(): Promise<void> {
-    const files = await recentFilesStorage.getAllRecentFiles();
-    recentFiles.value = files;
+    recentFiles.value = await recentFilesStorage.getAllRecentFiles();
   }
 
   async function removeUnsavedFiles(preserveIds: string[] = []): Promise<void> {
-    const ids = recentFiles.value.filter((file) => !file.path && !preserveIds.includes(file.id)).map((file) => file.id);
-    if (!ids.length) return;
-
-    await recentFilesStorage.removeRecentFile(...ids);
+    const ids = recentFiles.value.filter((f) => !f.path && !preserveIds.includes(f.id)).map((f) => f.id);
+    if (ids.length) await recentFilesStorage.removeRecentFile(...ids);
   }
 
-  async function confirmUnsavedChanges(): Promise<boolean> {
-    if (fileState.value.path) return true;
-    if (!fileState.value.content.trim()) return true;
+  // ------------------------------------------------------------------ //
+  // 文件状态切换
+  // ------------------------------------------------------------------ //
 
-    const [cancelled] = await Modal.confirm('提示', '当前文件未保存，是否放弃当前修改？');
-    return !cancelled;
-  }
-
-  const settingStore = useSettingStore();
-
+  /** 切换当前激活文件，同步 watcher / storage / 窗口标题 */
   function setFileState(file: EditorFile): void {
     options.pause();
-
+    file.path ? native.watchFile(file.path) : native.unwatchFile();
     fileState.value = file;
-    if (file.id) {
-      recentFilesStorage.setCurrentFile(file.id);
-    }
-
-    // 使用 setting store 设置窗口标题
+    if (file.id) recentFilesStorage.setCurrentFile(file.id);
     settingStore.setWindowTitle(`${file.name || '未命名'}.${file.ext || 'md'}`);
     nextTick(() => options.resume());
   }
 
-  async function restoreCurrentFile(): Promise<void> {
-    const currentId = await recentFilesStorage.getCurrentFileId();
-    if (currentId) {
-      const stored = await recentFilesStorage.getRecentFile(currentId);
-      if (stored) {
-        setFileState(stored);
-      }
-    }
-
-    if (!fileState.value.id) {
-      const nextFile: EditorFile = { path: '', name: '', ext: 'md', content: '', id: nanoid(6) };
-      await recentFilesStorage.addRecentFile(nextFile as StoredFile);
-      setFileState(nextFile);
-    }
-
-    await loadRecentFiles();
-  }
-
-  onMounted(() => {
-    restoreCurrentFile();
-  });
-
+  /** 更新 storage 并切换文件状态 */
   async function applyFileUpdate(id: string, updated: EditorFile): Promise<void> {
     await recentFilesStorage.updateRecentFile(id, updated as StoredFile);
     setFileState(updated);
   }
+
+  // ------------------------------------------------------------------ //
+  // 常用交互流程（confirm → switch）
+  // ------------------------------------------------------------------ //
+
+  /** 检查未保存变更，需用户确认才继续 */
+  async function confirmUnsavedChanges(): Promise<boolean> {
+    if (fileState.value.path || !fileState.value.content.trim()) return true;
+    const [cancelled] = await Modal.confirm('提示', '当前文件未保存，是否放弃当前修改？');
+    return !cancelled;
+  }
+
+  /**
+   * 切换至指定文件的完整流程：
+   * 确认未保存 → 清理临时文件 → 切换 → 刷新列表
+   */
+  async function switchToFile(file: EditorFile, { preserveIds = [] }: { preserveIds?: string[] } = {}): Promise<void> {
+    if (!(await confirmUnsavedChanges())) return;
+    await removeUnsavedFiles(preserveIds);
+    setFileState(file);
+    await loadRecentFiles();
+  }
+
+  /**
+   * 注册新文件到 storage 并切换，不弹确认框（用于内部新建流程）
+   */
+  async function registerAndSwitch(file: EditorFile, opts?: Parameters<typeof switchToFile>[1]): Promise<void> {
+    await recentFilesStorage.addRecentFile(file as StoredFile);
+    await switchToFile(file, opts);
+  }
+
+  // ------------------------------------------------------------------ //
+  // 保存相关
+  // ------------------------------------------------------------------ //
 
   async function electronSaveAs(): Promise<void> {
     const { id, name, ext, content } = fileState.value;
@@ -102,71 +118,186 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
     const savedPath = await native.saveFile(content, undefined, { defaultPath });
     if (!savedPath) return;
 
-    const fileName = savedPath.split(/[/\\]/).pop() ?? '';
-    const [, savedName, savedExt] = /^(.+?)(?:\.([^.]+))?$/.exec(fileName) || ['', '', ''];
+    const { name: savedName, ext: savedExt } = parseFileName(savedPath);
     await applyFileUpdate(id, { ...fileState.value, path: savedPath, name: savedName, ext: savedExt });
+  }
+
+  // ------------------------------------------------------------------ //
+  // 启动 & 恢复
+  // ------------------------------------------------------------------ //
+
+  async function restoreCurrentFile(): Promise<void> {
+    const currentId = await recentFilesStorage.getCurrentFileId();
+    if (currentId) {
+      const stored = await recentFilesStorage.getRecentFile(currentId);
+      if (stored) setFileState(stored);
+    }
+
+    if (!fileState.value.id) {
+      const nextFile = createEmptyFile();
+      await recentFilesStorage.addRecentFile(nextFile as StoredFile);
+      setFileState(nextFile);
+    }
+
+    await loadRecentFiles();
   }
 
   async function activateLatestOrNew(): Promise<void> {
     const files = await recentFilesStorage.getAllRecentFiles();
-    const first = files[0];
-    if (first) {
-      setFileState(first);
-      await loadRecentFiles();
-      return;
+    if (files[0]) {
+      setFileState(files[0]);
+    } else {
+      const nextFile = createEmptyFile();
+      await recentFilesStorage.addRecentFile(nextFile as StoredFile);
+      setFileState(nextFile);
     }
-
-    const nextFile: EditorFile = { path: '', name: '', ext: 'md', content: '', id: nanoid(6) };
-    await recentFilesStorage.addRecentFile(nextFile as StoredFile);
-    setFileState(nextFile);
     await loadRecentFiles();
   }
+
+  // ------------------------------------------------------------------ //
+  // 文件监听
+  // ------------------------------------------------------------------ //
+
+  let cleanupFileWatcher: (() => void) | null = null;
+
+  onMounted(() => {
+    restoreCurrentFile();
+
+    cleanupFileWatcher = native.onFileChanged(async ({ type, filePath, content }) => {
+      if (fileState.value.path !== filePath) return;
+
+      if (type === 'change' && content !== undefined && fileState.value.content !== content) {
+        const [cancelled] = await Modal.confirm('外部修改', '当前文件在外部已被修改，是否重新加载新内容？（未保存的更改将丢失）');
+        if (!cancelled) {
+          options.pause();
+          fileState.value.content = content;
+          options.setOriginalContent(content);
+          recentFilesStorage.updateRecentFile(fileState.value.id, fileState.value as StoredFile);
+          nextTick(() => options.resume());
+        }
+        return;
+      }
+
+      if (type === 'unlink') {
+        await Modal.alert('文件已删除', '当前打开的文件已在外部被删除。编辑器将保留当前内容并标记为未保存状态，您可以将其另存为新文件。');
+        options.pause();
+        native.unwatchFile();
+
+        const newId = nanoid(6);
+        fileState.value = { ...fileState.value, id: newId, path: '' };
+        options.setOriginalContent('');
+        await recentFilesStorage.addRecentFile(fileState.value as StoredFile);
+        recentFilesStorage.setCurrentFile(newId);
+        settingStore.setWindowTitle(`${fileState.value.name || '未命名'}.${fileState.value.ext || 'md'}`);
+        nextTick(() => options.resume());
+      }
+    });
+  });
+
+  onUnmounted(() => {
+    cleanupFileWatcher?.();
+    native.unwatchFile();
+  });
+
+  // ------------------------------------------------------------------ //
+  // 对外操作
+  // ------------------------------------------------------------------ //
 
   async function openRecentFile(id: string): Promise<void> {
     const stored = await recentFilesStorage.getRecentFile(id);
     if (!stored) return;
+    await switchToFile(stored, { preserveIds: [id] });
+  }
 
-    if (!(await confirmUnsavedChanges())) return;
-    await removeUnsavedFiles([id]);
+  // ------------------------------------------------------------------ //
+  // 工具栏菜单 handlers（独立声明，让 computed 保持简洁）
+  // ------------------------------------------------------------------ //
 
-    setFileState(stored);
+  async function handleNew(): Promise<void> {
+    await registerAndSwitch(createEmptyFile());
+  }
+
+  async function handleOpen(): Promise<void> {
+    const file = await native.openFile();
+    if (!file.path) return;
+    await registerAndSwitch({ ...file, id: nanoid(6) });
+  }
+
+  async function handleDuplicate(): Promise<void> {
+    const { path, name, ext, content } = fileState.value;
+    await registerAndSwitch(createEmptyFile({ path, name: name ? `${name}-副本` : '', ext: ext || 'md', content }));
+  }
+
+  async function handleSave(): Promise<void> {
+    const { id, path, name = '未命名', ext = 'md', content } = fileState.value;
+
+    if (isElectron()) {
+      if (path) await native.writeFile(path, content);
+      else await electronSaveAs();
+      options.setOriginalContent(content);
+    } else if (isWeb()) {
+      const resolvedPath = path || `${name}.${ext}`;
+      fileState.value = { ...fileState.value, name, ext, path: resolvedPath };
+      await applyFileUpdate(id, { ...fileState.value });
+      await loadRecentFiles();
+      options.setOriginalContent(content);
+    }
+  }
+
+  async function handleSaveAs(): Promise<void> {
+    const { name, ext, content } = fileState.value;
+    if (isElectron()) {
+      await electronSaveAs();
+    } else if (isWeb()) {
+      await native.saveFile(content, undefined, { defaultPath: `${name || '未命名'}.${ext || 'md'}` });
+    }
+  }
+
+  async function handleRename(): Promise<void> {
+    const { id, name = '' } = fileState.value;
+    const [cancel, newName] = await Modal.input('重命名', { defaultValue: name, placeholder: '请输入' });
+    if (cancel || newName === name) return;
+    await applyFileUpdate(id, { ...fileState.value, name: newName });
     await loadRecentFiles();
   }
 
+  async function handleClearContent(): Promise<void> {
+    const [, confirmed] = await Modal.delete('将清空当前文件内容，是否继续？', { title: '清空内容' });
+    if (!confirmed) return;
+    await applyFileUpdate(fileState.value.id, { ...fileState.value, content: '' });
+    await loadRecentFiles();
+  }
+
+  async function handleRemoveCurrent(): Promise<void> {
+    const [, confirmed] = await Modal.delete('此操作仅移除最近打开记录，不会删除磁盘上的文件，是否继续？');
+    if (!confirmed) return;
+
+    const { id } = fileState.value;
+    await recentFilesStorage.removeRecentFile(id);
+    const currentId = await recentFilesStorage.getCurrentFileId();
+    if (currentId === id) await recentFilesStorage.clearCurrentFile();
+    await activateLatestOrNew();
+  }
+
+  async function handleClearRecent(): Promise<void> {
+    const [, confirmed] = await Modal.delete('此操作将删除所有最近打开的文件记录，是否继续？', { title: '清除最近打开记录' });
+    if (!confirmed) return;
+    await recentFilesStorage.clearRecentFiles();
+    await loadRecentFiles();
+  }
+
+  // ------------------------------------------------------------------ //
+  // 工具栏配置（纯声明，不含业务逻辑）
+  // ------------------------------------------------------------------ //
+
   const toolbarFileOptions = computed<ToolbarOptions>(() => [
-    {
-      value: 'new',
-      label: '新建',
-      shortcut: EditorShortcuts.FILE_NEW,
-      onClick: async () => {
-        if (!(await confirmUnsavedChanges())) return;
-        await removeUnsavedFiles();
-
-        const nextFile: EditorFile = { path: '', name: '', ext: 'md', content: '', id: nanoid(6) };
-        await recentFilesStorage.addRecentFile(nextFile as StoredFile);
-
-        setFileState(nextFile);
-        await loadRecentFiles();
-      }
-    },
+    { value: 'new', label: '新建', shortcut: EditorShortcuts.FILE_NEW, onClick: handleNew },
     { type: 'divider' },
     {
       value: 'open',
       label: '打开',
       shortcut: EditorShortcuts.FILE_OPEN,
-      onClick: async () => {
-        const file = await native.openFile();
-        if (!file.path) return;
-
-        if (!(await confirmUnsavedChanges())) return;
-        await removeUnsavedFiles();
-
-        const nextFile: EditorFile = { ...file, id: nanoid(6) };
-        await recentFilesStorage.addRecentFile(nextFile as StoredFile);
-
-        setFileState(nextFile);
-        await loadRecentFiles();
-      }
+      onClick: handleOpen
     },
     {
       value: 'recent',
@@ -177,9 +308,7 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
           value: file.id,
           label: getRecentFileLabel(file),
           active: file.id === fileState.value.id,
-          onClick: async () => {
-            await openRecentFile(file.id);
-          }
+          onClick: () => openRecentFile(file.id)
         })),
         ...(savedRecentFiles.value.length > 10
           ? [
@@ -189,133 +318,25 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
                 label: '更多',
                 shortcut: EditorShortcuts.FILE_RECENT_MORE,
                 enableShortcut: false,
-                onClick: async () => {
+                onClick: () => {
                   options.visible.recentSearch = true;
                 }
               }
             ]
           : []),
         { type: 'divider' as const },
-        {
-          value: 'clear-recent',
-          label: '清除最近打开记录',
-          onClick: async () => {
-            const [, confirmed] = await Modal.delete('此操作将删除所有最近打开的文件记录，是否继续？', { title: '清除最近打开记录' });
-            if (!confirmed) return;
-
-            await recentFilesStorage.clearRecentFiles();
-            await loadRecentFiles();
-          }
-        }
+        { value: 'clear-recent', label: '清除最近打开记录', onClick: handleClearRecent }
       ]
     },
     { type: 'divider' },
-    {
-      value: 'duplicate',
-      label: '复制为新文件',
-      shortcut: EditorShortcuts.FILE_DUPLICATE,
-      onClick: async () => {
-        if (!(await confirmUnsavedChanges())) return;
-        await removeUnsavedFiles();
-
-        const source = fileState.value;
-        const nextFile: EditorFile = {
-          path: source.path,
-          name: source.name ? `${source.name}-副本` : '',
-          ext: source.ext || 'md',
-          content: source.content,
-          id: nanoid(6)
-        };
-
-        await recentFilesStorage.addRecentFile(nextFile as StoredFile);
-        setFileState(nextFile);
-        await loadRecentFiles();
-      }
-    },
-    {
-      value: 'save',
-      label: '保存',
-      shortcut: EditorShortcuts.FILE_SAVE,
-      onClick: async () => {
-        const { id, path, name = '未命名', ext = 'md', content } = fileState.value;
-
-        if (isElectron()) {
-          if (path) {
-            await native.writeFile(path, content);
-          } else {
-            await electronSaveAs();
-          }
-          options.setOriginalContent(content);
-        } else if (isWeb()) {
-          fileState.value = { ...fileState.value, name, ext, path: path || `${name}.${ext}` };
-          await applyFileUpdate(id, { ...fileState.value });
-          await loadRecentFiles();
-          options.setOriginalContent(content);
-        }
-      }
-    },
-    {
-      value: 'saveAs',
-      label: '另存为',
-      shortcut: EditorShortcuts.FILE_SAVE_AS,
-      disabled: !canSave.value,
-      onClick: async () => {
-        const { name, ext, content } = fileState.value;
-
-        if (isElectron()) {
-          await electronSaveAs();
-        } else if (isWeb()) {
-          const defaultPath = `${name || '未命名'}.${ext || 'md'}`;
-          await native.saveFile(content, undefined, { defaultPath });
-        }
-      }
-    },
+    { value: 'duplicate', label: '复制为新文件', shortcut: EditorShortcuts.FILE_DUPLICATE, onClick: handleDuplicate },
+    { value: 'save', label: '保存', shortcut: EditorShortcuts.FILE_SAVE, onClick: handleSave },
+    { value: 'saveAs', label: '另存为', shortcut: EditorShortcuts.FILE_SAVE_AS, disabled: !canSave.value, onClick: handleSaveAs },
     { type: 'divider' },
-    {
-      value: 'rename',
-      label: '重命名',
-      shortcut: EditorShortcuts.FILE_RENAME,
-      disabled: !fileState.value.path,
-      onClick: async () => {
-        const { id, name = '' } = fileState.value;
-        const [cancel, newName] = await Modal.input('重命名', { defaultValue: name, placeholder: '请输入' });
-        if (cancel || newName === name) return;
-
-        await applyFileUpdate(id, { ...fileState.value, name: newName });
-        await loadRecentFiles();
-      }
-    },
+    { value: 'rename', label: '重命名', shortcut: EditorShortcuts.FILE_RENAME, disabled: !fileState.value.path, onClick: handleRename },
     { type: 'divider' },
-    {
-      value: 'clear-content',
-      label: '清空内容',
-      onClick: async () => {
-        const [, confirmed] = await Modal.delete('将清空当前文件内容，是否继续？', { title: '清空内容' });
-        if (!confirmed) return;
-
-        const { id } = fileState.value;
-        await applyFileUpdate(id, { ...fileState.value, content: '' });
-        await loadRecentFiles();
-      }
-    },
-    {
-      value: 'remove-current',
-      label: '从最近记录移除当前',
-      onClick: async () => {
-        const [, confirmed] = await Modal.delete('此操作仅移除最近打开记录，不会删除磁盘上的文件，是否继续？');
-        if (!confirmed) return;
-
-        const { id } = fileState.value;
-        await recentFilesStorage.removeRecentFile(id);
-
-        const currentId = await recentFilesStorage.getCurrentFileId();
-        if (currentId === id) {
-          await recentFilesStorage.clearCurrentFile();
-        }
-
-        await activateLatestOrNew();
-      }
-    }
+    { value: 'clear-content', label: '清空内容', onClick: handleClearContent },
+    { value: 'remove-current', label: '从最近记录移除当前', onClick: handleRemoveCurrent }
   ]);
 
   return { toolbarFileOptions, loadRecentFiles, savedRecentFiles, openRecentFile };
