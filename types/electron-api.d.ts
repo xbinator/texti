@@ -32,6 +32,12 @@ export interface DbExecuteResult {
   lastInsertRowid: number;
 }
 
+export interface FileChangeEvent {
+  type: 'change' | 'unlink';
+  filePath: string;
+  content?: string;
+}
+
 export interface ElectronAPI {
   // 文件对话框操作
   openFile: (options?: ElectronOpenFileOptions) => Promise<ElectronFileResult>;
@@ -39,6 +45,10 @@ export interface ElectronAPI {
   saveFile: (content: string, filePath?: string, options?: ElectronSaveFileOptions) => Promise<string | null>;
 
   writeFile: (filePath: string, content: string) => Promise<void>;
+
+  watchFile: (filePath: string) => Promise<void>;
+  unwatchFile: () => Promise<void>;
+  onFileChanged: (callback: (data: FileChangeEvent) => void) => () => void;
 
   // 窗口控制操作
   setWindowTitle: (title: string) => Promise<void>;

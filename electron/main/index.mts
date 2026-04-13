@@ -2,6 +2,9 @@ import { app, BrowserWindow } from 'electron';
 import { registerAllIpcHandlers, initDatabase, closeDatabase, initStore, migrateFromTauri, initLogger } from './modules/index.mjs';
 import { createWindow } from './window.mjs';
 
+// 设置应用名称（开发模式下也生效）
+app.setName('Texti');
+
 function handleActivate(): void {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();

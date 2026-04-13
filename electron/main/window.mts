@@ -20,13 +20,21 @@ export function getDistPath(): string {
 }
 
 export function getIconPath(): string {
-  if (process.platform === 'darwin') {
-    return '';
-  }
-  const iconName = process.platform === 'win32' ? 'app.png' : 'app.png';
+  // 统一图标名
+  const iconName = process.platform === 'darwin' ? 'app.icns' : 'app.png';
+
   if (isDev()) {
+    // 开发环境：直接读取资源文件夹
     return path.join(__dirname, '../../resources/icons', iconName);
   }
+
+  // 生产环境（打包后）
+  if (process.platform === 'darwin') {
+    // macOS 打包后图标在 app 包内的 Contents/Resources
+    return path.join(process.resourcesPath, 'app.icns');
+  }
+
+  // Windows / Linux
   return path.join(process.resourcesPath, 'icons', iconName);
 }
 

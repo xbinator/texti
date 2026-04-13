@@ -37,6 +37,20 @@ const electronAPI: ElectronAPI = {
    */
   writeFile: (filePath: string, content: string) => ipcRenderer.invoke('fs:writeFile', filePath, content),
 
+  watchFile: (filePath: string) => ipcRenderer.invoke('fs:watchFile', filePath),
+
+  unwatchFile: () => ipcRenderer.invoke('fs:unwatchFile'),
+
+  onFileChanged: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => {
+      callback(data);
+    };
+    ipcRenderer.on('file:changed', handler);
+    return () => {
+      ipcRenderer.removeListener('file:changed', handler);
+    };
+  },
+
   // ==================== 窗口控制操作 ====================
 
   /**
