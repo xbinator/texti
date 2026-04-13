@@ -48,21 +48,21 @@ function handleClick() {
   opacity: 0;
   transform: translateX(-50%);
   transition: opacity 0.2s ease;
+}
 
-  &--visible {
-    pointer-events: auto;
-    opacity: 1;
-  }
+.b-chat-to-bottom--visible {
+  pointer-events: auto;
+  opacity: 1;
+}
 
-  &__loading {
-    position: absolute;
-    width: 44px;
-    height: 44px;
-    border: 2px solid var(--border-secondary);
-    border-top-color: var(--color-primary);
-    border-radius: 50%;
-    animation: b-chat-loading 1s linear infinite;
-  }
+.b-chat-to-bottom__loading {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  border: 2px solid var(--border-secondary);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: b-chat-loading 1s linear infinite;
 }
 
 @keyframes b-chat-loading {

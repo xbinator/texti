@@ -1,5 +1,6 @@
 import { onMounted, onUnmounted, watch } from 'vue';
 import type { Ref } from 'vue';
+import { flattenDeep } from 'lodash-es';
 import type { DropdownOption, DropdownOptionDivider, DropdownOptionItem } from '@/components/BDropdown/type';
 import type { ToolbarOption, ToolbarOptions } from '@/components/BToolbar/types';
 import { isMac } from '@/shared/platform/env';
@@ -14,105 +15,112 @@ interface UseNativeMenuOptions {
 
 type MenuOptionItem = ToolbarOption | DropdownOptionItem;
 type MenuOptions = Array<MenuOptionItem | DropdownOptionDivider>;
+type ClickHandler = () => void | Promise<void>;
 
-function isDivider(option: MenuOptionItem | DropdownOptionDivider): option is DropdownOptionDivider {
-  return option.type === 'divider';
+// ========== 辅助方法 ==========
+
+const isItem = (opt: DropdownOption): opt is DropdownOptionItem => opt.type !== 'divider';
+
+/**
+ * 将多层嵌套的菜单项展开为一维数组
+ */
+function flattenMenuOptions(options: MenuOptions): DropdownOptionItem[] {
+  return flattenDeep(
+    options.map((opt) => {
+      if (!isItem(opt)) return [];
+      return [opt, opt.children ? flattenMenuOptions(opt.children) : []];
+    })
+  ) as DropdownOptionItem[];
 }
 
-function isDropdownItem(option: DropdownOption): option is DropdownOptionItem {
-  return option.type !== 'divider';
+/**
+ * 扁平化提取带前缀的点击事件
+ * 例如把 value: 'new' 提取为 { 'file:new': handler }
+ */
+function extractHandlers(prefix: string, options: MenuOptions = []): Record<string, ClickHandler> {
+  const result: Record<string, ClickHandler> = {};
+
+  flattenMenuOptions(options).forEach((opt) => {
+    if (opt.onClick) {
+      result[`${prefix}${opt.value}`] = opt.onClick;
+    }
+  });
+
+  return result;
 }
 
-function isToolbarItem(option: ToolbarOption | DropdownOptionDivider): option is ToolbarOption {
-  return option.type !== 'divider';
+/**
+ * 提取所有的菜单点击事件
+ */
+function buildAllHandlers(options: UseNativeMenuOptions): Record<string, ClickHandler> {
+  const themeItem = options.toolbarViewOptions.value.find((v): v is ToolbarOption => isItem(v) && v.value === 'theme');
+
+  return {
+    ...extractHandlers('file:', options.toolbarFileOptions.value),
+    ...extractHandlers('edit:', options.toolbarEditOptions.value),
+    ...extractHandlers('view:', options.toolbarViewOptions.value),
+    ...extractHandlers('theme:', themeItem?.children),
+    ...extractHandlers('help:', options.toolbarHelpOptions.value),
+
+    // 特殊拦截事件
+    'file:recent': () => {
+      options.visible.recentSearch = true;
+    }
+  };
 }
 
-function getSelected(option: DropdownOptionItem): boolean | undefined {
-  return (option as unknown as { selected?: boolean }).selected;
+/**
+ * 同步视图和主题的选中状态到原生菜单
+ */
+function syncMenuCheckState(viewOptions: ToolbarOptions) {
+  const { electronAPI } = window;
+  if (!electronAPI?.updateMenuItem) return;
+
+  // 使用 flatten 处理嵌套结构
+  const allItems = flattenMenuOptions(viewOptions);
+
+  allItems.forEach((opt) => {
+    // 兼容可能存在的不同选中属性字段 (如 selected)
+    const { selected } = opt as any;
+    if (typeof selected === 'boolean') {
+      // 区分 theme 的前缀
+      const isThemeItem = typeof opt.value === 'string' && ['light', 'dark', 'system'].includes(opt.value);
+      const prefix = isThemeItem ? 'theme:' : 'view:';
+
+      electronAPI.updateMenuItem(`${prefix}${opt.value}`, { checked: selected });
+    }
+  });
 }
+
+// ========== 主 Hook ==========
 
 export function useNativeMenu(options: UseNativeMenuOptions) {
-  const { toolbarFileOptions, toolbarEditOptions, toolbarViewOptions, toolbarHelpOptions, visible } = options;
+  if (!isMac()) return;
 
   let cleanupMenuListener: (() => void) | undefined;
 
   onMounted(() => {
     const { electronAPI } = window;
-    if (isMac() && electronAPI?.onMenuAction) {
+    if (!electronAPI) return;
+
+    // 1. 注册菜单点击监听
+    if (electronAPI.onMenuAction) {
       cleanupMenuListener = electronAPI.onMenuAction((action: string) => {
-        const extractOptions = (prefix: string, opts: MenuOptions): Record<string, () => void | Promise<void>> => {
-          const result: Record<string, () => void | Promise<void>> = {};
-
-          opts.forEach((opt) => {
-            if (isDivider(opt)) return;
-
-            if (typeof opt.onClick === 'function') {
-              result[`${prefix}${opt.value}`] = opt.onClick;
-            }
-
-            if (opt.children) {
-              opt.children.forEach((child) => {
-                if (!isDropdownItem(child)) return;
-                if (typeof child.onClick === 'function') {
-                  result[`${prefix}${child.value}`] = child.onClick;
-                }
-              });
-            }
-          });
-
-          return result;
-        };
-
-        const themeOption = toolbarViewOptions.value.find((v): v is ToolbarOption => isToolbarItem(v) && v.value === 'theme');
-
-        const handlers = {
-          ...extractOptions('file:', toolbarFileOptions.value),
-          ...extractOptions('edit:', toolbarEditOptions.value),
-          ...extractOptions('view:', toolbarViewOptions.value),
-          ...extractOptions('theme:', themeOption?.children ?? []),
-          ...extractOptions('help:', toolbarHelpOptions.value)
-        };
-
-        if (action === 'file:recent') {
-          visible.recentSearch = true;
-        } else if (handlers[action]) {
-          handlers[action]();
-        }
+        const handlers = buildAllHandlers(options);
+        const handler = handlers[action];
+        if (handler) handler();
       });
-
-      watch(
-        () => toolbarViewOptions.value,
-        (viewOptions) => {
-          if (!electronAPI?.updateMenuItem) return;
-
-          viewOptions.forEach((opt) => {
-            if (isDivider(opt)) return;
-
-            if (typeof opt.selected === 'boolean') {
-              electronAPI.updateMenuItem(`view:${opt.value}`, { checked: opt.selected });
-            }
-
-            if (!opt.children) return;
-
-            opt.children.forEach((child) => {
-              if (!isDropdownItem(child)) return;
-
-              const selected = getSelected(child);
-              if (typeof selected !== 'boolean') return;
-
-              const prefix = opt.value === 'theme' ? 'theme:' : 'view:';
-              electronAPI.updateMenuItem(`${prefix}${child.value}`, { checked: selected });
-            });
-          });
-        },
-        { immediate: true, deep: true }
-      );
     }
+
+    // 2. 监听状态变化并同步 checkbox 选中状态
+    watch(
+      () => options.toolbarViewOptions.value,
+      (viewOptions) => syncMenuCheckState(viewOptions),
+      { immediate: true, deep: true }
+    );
   });
 
   onUnmounted(() => {
-    if (cleanupMenuListener) {
-      cleanupMenuListener();
-    }
+    cleanupMenuListener?.();
   });
 }

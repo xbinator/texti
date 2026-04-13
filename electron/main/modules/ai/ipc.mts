@@ -14,10 +14,7 @@ export function registerAIHandlers(): void {
 
   ipcMain.handle('ai:stream', async (event, createOptions: AICreateOptions, request: AIRequestOptions) => {
     const win = getWindowFromWebContents(event.sender);
-
-    if (!win) {
-      throw new Error('Window not found');
-    }
+    if (!win) return;
 
     const { requestId } = request;
 
@@ -33,6 +30,10 @@ export function registerAIHandlers(): void {
           win.webContents.send('ai:stream:chunk', chunk.text);
         } else if (chunk.type === 'error') {
           win.webContents.send('ai:stream:error', chunk.error);
+        } else if (chunk.type === 'finish') {
+          const { inputTokens, outputTokens, totalTokens } = chunk.totalUsage;
+
+          win.webContents.send('ai:stream:finish', { usage: { inputTokens, outputTokens, totalTokens } });
         }
       }
 

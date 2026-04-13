@@ -68,8 +68,8 @@ const providerId = computed(() => modelConfig.value?.providerId ?? '');
 
 const { agent } = useAgent({
   providerId,
-  onChunk(chunk) {
-    previewText.value += chunk;
+  onChunk(content) {
+    previewText.value += content;
   },
   onComplete() {
     loading.value = false;

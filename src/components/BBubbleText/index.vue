@@ -104,61 +104,59 @@ watch(
 </script>
 
 <style scoped lang="less">
-.b-bubble-text {
-  &__think {
-    margin: 10px 0 0;
-    line-height: 1.6;
-  }
+.b-bubble-text__think {
+  margin: 10px 0 0;
+  line-height: 1.6;
+}
 
-  &__think-toggle {
-    display: flex;
-    align-items: center;
-    width: fit-content;
-    padding: 4px 10px;
-    font-size: 13px;
-    cursor: pointer;
-    background-color: var(--bg-secondary);
-    border-radius: 6px;
-    transition: background-color 0.2s;
+.b-bubble-text__think-toggle {
+  display: flex;
+  align-items: center;
+  width: fit-content;
+  padding: 4px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  background-color: var(--bg-secondary);
+  border-radius: 6px;
+  transition: background-color 0.2s;
+}
 
-    &:hover {
-      background-color: var(--bg-tertiary);
-    }
-  }
+.b-bubble-text__think-toggle:hover {
+  background-color: var(--bg-tertiary);
+}
 
-  &__think-title {
-    margin-right: 6px;
-    font-weight: 500;
-    color: var(--text-secondary);
-  }
+.b-bubble-text__think-title {
+  margin-right: 6px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
 
-  &__think-icon {
-    font-size: 14px;
-    color: var(--text-tertiary);
-    transition: transform 0.2s;
-  }
+.b-bubble-text__think-icon {
+  font-size: 14px;
+  color: var(--text-tertiary);
+  transition: transform 0.2s;
+}
 
-  &__think-content {
-    position: relative;
-    padding: 12px 0 0 14px;
-    margin-top: 10px;
-    font-size: 14px;
-    color: var(--text-secondary);
+.b-bubble-text__think-content {
+  position: relative;
+  padding: 12px 0 0 14px;
+  margin-top: 10px;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
 
-    &::before {
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      left: 0;
-      width: 2px;
-      content: '';
-      background: var(--border-primary);
-      border-radius: 1px;
-    }
-  }
+.b-bubble-text__think-content::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  content: '';
+  background: var(--border-primary);
+  border-radius: 1px;
+}
 
-  &__content {
-    min-height: 1em;
-  }
+.b-bubble-text__content {
+  min-height: 1em;
 }
 </style>

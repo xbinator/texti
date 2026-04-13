@@ -1,8 +1,7 @@
 <template>
   <div class="detail-container">
     <div class="detail-header">
-      <div class="flex flex-wrap gap-3 items-center cursor-pointer" @click="handleBack">
-        <Icon icon="lucide:arrow-left" class="back-icon" />
+      <div class="flex flex-wrap gap-6 items-center cursor-pointer">
         <h2 class="page-title">{{ headerTitle }}</h2>
         <span v-if="provider" class="provider-type-tag">{{ providerTypeLabel }}</span>
       </div>
@@ -38,7 +37,7 @@
 import type { AIProvider, AIProviderModel } from 'types/ai';
 import type { ComputedRef, Ref } from 'vue';
 import { ref, computed, watch } from 'vue';
-import { useRouter, useRoute } from 'vue-router';
+import { useRoute } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { message } from 'ant-design-vue';
 import { debounce } from 'lodash-es';
@@ -49,7 +48,6 @@ import ProviderInfo from './components/ProviderInfo.vue';
 import ProviderModal from './components/ProviderModal.vue';
 import { useProviders } from './hooks/useProviders';
 
-const router = useRouter();
 const route = useRoute();
 
 const providerId: ComputedRef<string> = computed(() => route.params.provider as string);
@@ -109,10 +107,6 @@ watch(
     persistProviderConfig();
   }
 );
-
-function handleBack(): void {
-  router.push('/settings/provider');
-}
 
 function handleEdit(): void {
   modalVisible.value = true;

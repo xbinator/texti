@@ -184,6 +184,15 @@ const electronAPI: ElectronAPI = {
     };
   },
 
+  onAiStreamFinish: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: any) => callback(payload);
+
+    ipcRenderer.on('ai:stream:finish', handler);
+    return () => {
+      ipcRenderer.removeListener('ai:stream:finish', handler);
+    };
+  },
+
   // ==================== 日志操作 ====================
   logger: {
     debug: (...args) => ipcRenderer.send('logger:debug', ...args),
@@ -200,7 +209,7 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.removeListener('menu:action', handler);
     };
   },
-  
+
   updateMenuItem: (id: string, properties: { checked?: boolean }) => {
     ipcRenderer.send('menu:update-item', id, properties);
   }

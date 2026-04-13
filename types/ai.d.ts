@@ -24,6 +24,8 @@ export interface AICreateOptions {
 export interface AIRequestOptions {
   // 请求唯一标识，用于中止等操作
   requestId?: string;
+  // 提供商 ID
+  providerId?: string;
   // 模型 ID
   modelId: string;
   // 提示词
@@ -111,18 +113,24 @@ export interface AICustomProvider {
   baseUrl?: string;
 }
 
+export interface AIUsage {
+  /** 输入令牌数 */
+  inputTokens: number;
+  /** 输出令牌数 */
+  outputTokens: number;
+  /** 总令牌数 */
+  totalTokens: number;
+}
+
 export interface AIInvokeResult {
   text: string;
-  usage?: {
-    // 输入令牌数
-    inputTokens: number;
-    // 输出令牌数
-    outputTokens: number;
-    // 总令牌数
-    totalTokens: number;
-  };
+  usage?: AIUsage;
 }
 
 export interface AIStreamResult {
   stream: StreamTextResult['textStream'];
+}
+
+export interface AIStreamFinishChunk {
+  usage: AIUsage;
 }
