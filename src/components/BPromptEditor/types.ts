@@ -13,3 +13,16 @@ export interface VariableOptionGroup {
   // 当前类型下的变量选项
   options: Variable[];
 }
+
+export interface BPromptEditorProps {
+  // 占位符
+  placeholder?: string;
+  // 变量选项
+  options?: VariableOptionGroup[];
+  // 是否禁用
+  disabled?: boolean;
+  // 最大高度
+  maxHeight?: number | string;
+  // 形态变体
+  variant?: 'outlined' | 'borderless' | 'filled' | 'underlined';
+}
