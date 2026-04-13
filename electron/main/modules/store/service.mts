@@ -15,8 +15,8 @@ type StoreType = ElectronStore<StoreSchema> & {
 
 let storeInstance: StoreType | null = null;
 
-const KEY_FILE_NAME = 'texti-key.bin';
-const STORE_NAME = 'texti-secure-store';
+const KEY_FILE_NAME = 'tibis-key.bin';
+const STORE_NAME = 'tibis-secure-store';
 
 function getEncryptionKeyPath(): string {
   return path.join(app.getPath('userData'), KEY_FILE_NAME);
@@ -40,7 +40,7 @@ function loadOrCreateEncryptionKey(): string {
     }
   }
 
-  const newKey = `texti-encryption-key-${Date.now().toString(36)}`;
+  const newKey = `tibis-encryption-key-${Date.now().toString(36)}`;
 
   if (safeStorage.isEncryptionAvailable()) {
     const encryptedKey = safeStorage.encryptString(newKey);

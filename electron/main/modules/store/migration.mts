@@ -230,12 +230,12 @@ function migrateRecentFilesFromTauri(): void {
 }
 
 export function migrateFromTauri(): void {
-  const tauriDataDir = path.join(app.getPath('appData'), 'com.Texti.desktop');
+  const tauriDataDir = path.join(app.getPath('appData'), 'com.Tibis.desktop');
   const electronDataDir = app.getPath('userData');
 
-  copyFileIfMissing(path.join(tauriDataDir, 'texti.db'), path.join(electronDataDir, 'texti.db'));
-  copyFileIfMissing(path.join(tauriDataDir, 'texti.db-wal'), path.join(electronDataDir, 'texti.db-wal'));
-  copyFileIfMissing(path.join(tauriDataDir, 'texti.db-shm'), path.join(electronDataDir, 'texti.db-shm'));
+  copyFileIfMissing(path.join(tauriDataDir, 'tibis.db'), path.join(electronDataDir, 'tibis.db'));
+  copyFileIfMissing(path.join(tauriDataDir, 'tibis.db-wal'), path.join(electronDataDir, 'tibis.db-wal'));
+  copyFileIfMissing(path.join(tauriDataDir, 'tibis.db-shm'), path.join(electronDataDir, 'tibis.db-shm'));
 
   migrateRecentFilesFromTauri();
 }

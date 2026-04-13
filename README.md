@@ -132,7 +132,7 @@ pnpm lint:style
 ## 项目结构
 
 ```text
-texti/
+tibis/
 ├── electron/                # Electron 主进程与 preload 源码
 │   ├── main/
 │   ├── preload/

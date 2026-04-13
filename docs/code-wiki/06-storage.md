@@ -23,7 +23,7 @@ Texti 的本地数据分两类：
 ## SQLite（主进程）
 
 - 初始化与 schema：`electron/main/modules/database/service.mts`
-- DB 文件位置：`app.getPath('userData')/texti.db`
+- DB 文件位置：`app.getPath('userData')/tibis.db`
 - 表结构：
   - `provider_settings`：内置 provider 的启用状态与配置覆盖（api_key/base_url/models_json）
   - `custom_providers`：自定义 provider（包含 name/type/logo/models_json 等）
@@ -68,8 +68,8 @@ Texti 的本地数据分两类：
 主进程用 `electron-store` + `safeStorage` 做“加密 key 的持久化与数据加密”：
 
 - `electron/main/modules/store/service.mts`
-  - 生成/加载加密 key：`texti-key.bin`（在 `userData` 下）
-  - store 文件：`texti-secure-store.json`
+  - 生成/加载加密 key：`tibis-key.bin`（在 `userData` 下）
+  - store 文件：`tibis-secure-store.json`
   - 通过 IPC 暴露 get/set/delete 给渲染进程
 
 ## 最近文件与文件存储

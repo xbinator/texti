@@ -1,5 +1,5 @@
-appId: com.texti.desktop
-productName: Texti
+appId: com.tibis.desktop
+productName: Tibis
 directories:
   buildResources: build
   output: release

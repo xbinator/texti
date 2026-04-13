@@ -9,7 +9,7 @@ let db: DatabaseInstance | null = null;
 
 export function getDbPath(): string {
   const userDataPath = app.getPath('userData');
-  return path.join(userDataPath, 'texti.db');
+  return path.join(userDataPath, 'tibis.db');
 }
 
 export async function initDatabase(): Promise<void> {
