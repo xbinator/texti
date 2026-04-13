@@ -9,6 +9,19 @@
         <BToolbar :title="'视图'" show-selected-check :options="toolbarViewOptions" />
 
         <BToolbar :title="'帮助'" :options="toolbarHelpOptions" />
+
+        <div class="header-divider"></div>
+
+        <BDropdownButton :options="recentFileOptions" :value="fileState.id" :overlay-width="220">
+          <div>{{ fileState.name || '未命名文件' }}{{ isDirty ? ' *' : '' }}</div>
+
+          <template #menu="{ record }">
+            <div class="flex items-center justify-between w-full gap-2">
+              <BTruncateText :text="record.label" />
+              <Icon v-if="record.selected" icon="lucide:check" class="flex-shrink-0" />
+            </div>
+          </template>
+        </BDropdownButton>
       </div>
     </template>
     <template #header-right>
@@ -48,15 +61,16 @@
     <!-- 查找栏 -->
     <FindBar v-model:visible="visible.find" :content="fileState.content" :editor-instance="editorInstance" />
 
-    <SearchRecent v-model:visible="visible.recentSearch" :files="recentFiles" :active-id="fileState.id" @select="handleSelectRecentFile" />
+    <SearchRecent v-model:visible="visible.recentSearch" :files="savedRecentFiles" :active-id="fileState.id" @select="handleSelectRecentFile" />
   </BLayout>
 </template>
 
 <script setup lang="ts">
 import type { EditorFile } from './types';
-import { reactive, ref } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
+import type { DropdownOption } from '@/components/BDropdown/type';
 import BEditor from '@/components/BEditor/index.vue';
 import type { BEditorPublicInstance } from '@/components/BEditor/types';
 import BPanelSplitter from '@/components/BPanelSplitter/index.vue';
@@ -65,14 +79,17 @@ import FindBar from './components/FindBar.vue';
 import SearchRecent from './components/SearchRecent.vue';
 import ShortcutsHelp from './components/ShortcutsHelp.vue';
 import { useAutoSave } from './hooks/useAutoSave';
+import { useDirty } from './hooks/useDirty';
 import { useEditActive } from './hooks/useEditActive';
-import { useFileActive } from './hooks/useFileActive';
+import { useFileActive, getRecentFileLabel } from './hooks/useFileActive';
 import { useHelp } from './hooks/useHelp';
 import { useViewActive } from './hooks/useViewActive';
 
 const fileState = ref<EditorFile>({ id: '', path: '', content: '', name: '', ext: 'md' });
 const editorInstance = ref<BEditorPublicInstance | null>(null);
 const router = useRouter();
+
+const { isDirty, setOriginalContent } = useDirty(fileState);
 
 const visible = reactive({ find: false, recentSearch: false, shortcuts: false });
 const sidebarVisible = ref(false);
@@ -88,7 +105,24 @@ function handleOpenSettings(): void {
 
 const { pause, resume } = useAutoSave(fileState);
 
-const { toolbarFileOptions, recentFiles, openRecentFile } = useFileActive(fileState, { pause, resume, visible });
+const { toolbarFileOptions, savedRecentFiles, openRecentFile } = useFileActive(fileState, {
+  pause,
+  resume,
+  setOriginalContent,
+  visible
+});
+
+const recentFileOptions = computed<DropdownOption[]>(() =>
+  savedRecentFiles.value.map((file) => ({
+    value: file.id,
+    label: getRecentFileLabel(file),
+    class: 'b-dropdown-menu-item-selected',
+    selected: file.id === fileState.value.id,
+    onClick: async () => {
+      await openRecentFile(file.id);
+    }
+  }))
+);
 
 async function handleSelectRecentFile(id: string): Promise<void> {
   await openRecentFile(id);
@@ -117,6 +151,18 @@ const { toolbarHelpOptions } = useHelp({
   padding: 0 20px;
 }
 
+.header-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 2px;
+  background-color: var(--border-primary);
+}
+
+:deep(.b-dropdown-menu-item.is-active) {
+  color: var(--color-primary);
+  background-color: var(--color-primary-bg);
+}
+
 .header-right {
   display: flex;
   gap: 12px;
@@ -133,6 +179,7 @@ const { toolbarHelpOptions } = useHelp({
   position: relative;
   display: flex;
   flex: 1;
+  gap: 6px;
   height: 100%;
   margin: 0 6px 6px;
   overflow: hidden;
@@ -143,7 +190,6 @@ const { toolbarHelpOptions } = useHelp({
   display: flex;
   flex: 1;
   flex-direction: column;
-  margin: 0 6px;
   overflow: hidden;
   border-radius: 8px;
 }

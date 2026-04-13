@@ -14,16 +14,19 @@ import { EditorShortcuts } from '../constants/shortcuts';
 interface UseFileActiveOptions {
   pause: () => void;
   resume: () => void;
+  setOriginalContent: (content: string) => void;
   visible: { recentSearch: boolean };
 }
 
 const nanoid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz_', 6);
 
-function getRecentFileLabel(file: Pick<EditorFile, 'name' | 'content'>): string {
+export function getRecentFileLabel(file: Pick<EditorFile, 'name' | 'content'>): string {
   const content = file.content.replace(/^\s*---[\s\S]*?---\s*\n?/, '');
   const match = /^#{1,6}\s+(.+)/m.exec(content);
 
-  return match?.[1]?.trim() || file.name || '未命名';
+  const title = match?.[1]?.trim();
+
+  return `${file.name || '未命名文件'}${title ? `【${title}】` : ''}`;
 }
 
 export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActiveOptions) {
@@ -242,10 +245,12 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
           } else {
             await electronSaveAs();
           }
+          options.setOriginalContent(content);
         } else if (isWeb()) {
           fileState.value = { ...fileState.value, name, ext, path: path || `${name}.${ext}` };
           await applyFileUpdate(id, { ...fileState.value });
           await loadRecentFiles();
+          options.setOriginalContent(content);
         }
       }
     },
@@ -313,5 +318,5 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
     }
   ]);
 
-  return { toolbarFileOptions, loadRecentFiles, recentFiles, openRecentFile };
+  return { toolbarFileOptions, loadRecentFiles, savedRecentFiles, openRecentFile };
 }

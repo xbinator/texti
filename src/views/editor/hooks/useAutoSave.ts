@@ -27,15 +27,17 @@ export function useAutoSave(fileState: Ref<EditorFile>, options: AutoSaveOptions
 
   const stopWatch = watch(
     () => fileState.value.content,
-    () => !isPaused.value && debouncedSave()
+    () => {
+      if (!isPaused.value) {
+        debouncedSave();
+      }
+    }
   );
 
-  // 暂停自动保存
   function pause(): void {
     isPaused.value = true;
   }
 
-  // 恢复自动保存
   function resume(): void {
     isPaused.value = false;
   }
