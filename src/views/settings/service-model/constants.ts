@@ -36,3 +36,5 @@ export const POLISH_DEFAULT_PROMPT = `# Role
 
 # User Instruction
 {{USER_INPUT}} `;
+
+export const CHAT_SERVICE_CONFIG_OPTIONS: ServiceConfigOption[] = [];

@@ -5,7 +5,13 @@
     </div>
     <div class="manager-content">
       <BScrollbar>
-        <div class="flex flex-col items-center">
+        <div class="flex flex-col items-center gap-20">
+          <ServiceConfig
+            service-type="chat"
+            title="智能对话助手"
+            description="与 AI 进行智能对话，帮助你进行文本创作、编辑和优化。"
+            :options="CHAT_SERVICE_CONFIG_OPTIONS"
+          />
           <ServiceConfig
             service-type="polish"
             title="内容编辑助手"
@@ -22,7 +28,7 @@
 <script setup lang="ts">
 import BScrollbar from '@/components/BScrollbar/index.vue';
 import ServiceConfig from './components/ServiceConfig.vue';
-import { POLISH_DEFAULT_PROMPT, POLISH_SERVICE_CONFIG_OPTIONS } from './constants';
+import { CHAT_SERVICE_CONFIG_OPTIONS, POLISH_DEFAULT_PROMPT, POLISH_SERVICE_CONFIG_OPTIONS } from './constants';
 </script>
 
 <style scoped lang="less">

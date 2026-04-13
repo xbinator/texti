@@ -9,7 +9,7 @@
       <div class="header-right">
         <BSelect v-model:value="selectedModel" :options="modelOptions" placeholder="请选择模型">
           <template #option="{ modelId, modelName, providerName }">
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-6">
               <BModelIcon :model="modelId" :size="18" />
               <div class="flex-1 w-0 truncate">{{ modelName }}</div>
               <div class="fs-12">{{ providerName }}</div>
@@ -27,7 +27,7 @@
             <span>Prompt</span>
           </div>
           <div class="header-actions">
-            <button v-if="showResetButton" class="reset-btn" type="button" @click.stop="resetToDefault">
+            <button v-if="showResetButton && defaultPrompt" class="reset-btn" type="button" @click.stop="resetToDefault">
               <Icon icon="lucide:rotate-ccw" class="reset-icon" />
               <span>恢复默认</span>
             </button>
@@ -77,7 +77,7 @@ interface ModelOption {
 
 const props = withDefaults(defineProps<Props>(), {
   placeholder: '请输入自定义 Prompt 指令...',
-  defaultPrompt: '可以使用{{变量名}}格式的变量，例如{{SELECTED_TEXT}}、{{USER_INPUT}}等',
+  defaultPrompt: '',
   options: () => []
 });
 
@@ -195,7 +195,6 @@ onUnmounted(() => {
   background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-tertiary) 100%);
   border: 1px solid var(--border-secondary);
   border-radius: 12px;
-  box-shadow: 0 10px 30px -24px rgb(0 0 0 / 20%);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 
   &:hover {
@@ -210,23 +209,6 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 20px;
-}
-
-.service-icon-wrapper {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  color: var(--color-primary);
-  background: var(--color-primary-bg);
-  border-radius: 10px;
-}
-
-.service-icon {
-  width: 22px;
-  height: 22px;
 }
 
 .service-title {
@@ -258,34 +240,20 @@ onUnmounted(() => {
 .config-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px;
+  padding: 0 14px;
   background: var(--bg-primary);
   border: 1px solid var(--border-secondary);
   border-radius: 12px;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 24%);
 }
 
 .section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  height: 60px;
   padding: 2px;
   cursor: pointer;
   user-select: none;
-}
-
-.save-status {
-  font-size: 12px;
-  color: var(--text-tertiary);
-
-  &.saving {
-    color: var(--color-primary);
-  }
-
-  &.error {
-    color: var(--color-danger, #ff4d4f);
-  }
 }
 
 .section-label {
@@ -301,13 +269,6 @@ onUnmounted(() => {
     height: 14px;
     color: var(--text-tertiary);
   }
-}
-
-.collapse-icon {
-  width: 16px;
-  height: 16px;
-  color: var(--text-tertiary);
-  transition: transform 0.2s;
 }
 
 .header-actions {
@@ -345,17 +306,7 @@ onUnmounted(() => {
   background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-tertiary) 100%);
 }
 
-.prompt-textarea {
-  padding: 12px;
-  font-family: inherit;
-  font-size: 14px;
-  line-height: 1.6;
-  background: var(--bg-secondary);
-  border-radius: 8px;
-  transition: all 0.2s;
-
-  &:focus {
-    background: var(--bg-primary);
-  }
+.section-control {
+  padding-bottom: 14px;
 }
 </style>
