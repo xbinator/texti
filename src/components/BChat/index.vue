@@ -192,13 +192,15 @@ async function handleRegenerate(msg: Message) {
   gap: 8px;
   align-items: flex-end;
   padding: 8px 12px;
-  background: var(--input-bg);
+  background: var(--bg-secondary);
   border: 1px solid var(--input-border);
   border-radius: 8px;
+  box-shadow: var(--shadow-sm);
   transition: all 0.2s;
 
   .b-prompt-variable__textarea {
     padding: 0;
+    background: transparent;
   }
 }
 
