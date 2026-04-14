@@ -3,10 +3,10 @@ import { registerDatabaseHandlers } from './database/ipc.mjs';
 import { registerDialogHandlers } from './dialog/ipc.mjs';
 import { registerFileHandlers } from './file/ipc.mjs';
 import { registerLoggerHandlers } from './logger/ipc.mjs';
+import { registerMenuHandlers } from './menu/ipc.mjs';
 import { registerShellHandlers } from './shell/ipc.mjs';
 import { registerStoreHandlers } from './store/ipc.mjs';
 import { registerWindowHandlers } from './window/ipc.mjs';
-import { registerMenuHandlers } from './menu/ipc.mjs';
 
 export function registerAllIpcHandlers() {
   registerDialogHandlers();

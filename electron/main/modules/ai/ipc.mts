@@ -27,6 +27,8 @@ export function registerAIHandlers(): void {
 
       for await (const chunk of result.stream) {
         if (chunk.type === 'text-delta') {
+          process.stdout.write(chunk.text);
+
           win.webContents.send('ai:stream:chunk', chunk.text);
         } else if (chunk.type === 'error') {
           win.webContents.send('ai:stream:error', chunk.error);
