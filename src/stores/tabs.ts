@@ -59,18 +59,12 @@ export const useTabsStore = defineStore('tabs', {
       const existingIndex = this.tabs.findIndex((t) => t.id === tab.id);
 
       if (existingIndex === -1) this.tabs.push(tab);
-      else this.tabs[existingIndex] = { ...this.tabs[existingIndex], ...tab };
 
       this.activeId = tab.id;
 
       persistData(this.$state);
     },
 
-    markDirty(id: string, isDirty = true): void {
-      if (isDirty) this.dirtyById[id] = true;
-      else delete this.dirtyById[id];
-      persistData(this.$state);
-    },
     // 删除标签页
     removeTab(id: string): void {
       const index = this.tabs.findIndex((t) => t.id === id);

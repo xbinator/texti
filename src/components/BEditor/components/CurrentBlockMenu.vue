@@ -305,7 +305,7 @@ function updatePlacement(): void {
   }
 
   const triggerRect = triggerElement.getBoundingClientRect();
-  const viewportWidth = window.innerWidth;
+
   const viewportHeight = window.innerHeight;
   const estimatedPanelWidth = 180;
   const estimatedPanelHeight = 400;

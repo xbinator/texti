@@ -2,6 +2,7 @@ import type { App } from 'vue';
 import type { RouteRecordRaw } from 'vue-router';
 import { createRouter, createWebHistory } from 'vue-router';
 import { useSettingStore } from '@/stores/setting';
+import { useTabsStore } from '@/stores/tabs';
 import { basicRoutes } from './routes';
 
 const router = createRouter({
@@ -20,6 +21,22 @@ router.afterEach((to) => {
   if (title) {
     const settingStore = useSettingStore();
     settingStore.setWindowTitle(title);
+  }
+
+  // 路由拦截添加 Tab
+  if (!to.meta?.hideTab) {
+    const tabsStore = useTabsStore();
+    const { fullPath } = to;
+
+    if (fullPath.startsWith('/settings')) {
+      tabsStore.addTab({ id: '/settings', path: '/settings', title: '设置' });
+
+      tabsStore.setActiveTab('/settings');
+    } else if (fullPath && fullPath !== '/') {
+      tabsStore.addTab({ id: fullPath, path: to.fullPath, title: title || (to.name as string) || to.path });
+
+      tabsStore.setActiveTab(fullPath);
+    }
   }
 });
 

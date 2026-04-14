@@ -2,7 +2,7 @@ import type { AppRouteRecordRaw } from '../../type';
 
 const routes: AppRouteRecordRaw[] = [
   {
-    path: '/settings',
+    path: 'settings',
     name: 'Settings',
     component: () => import('@/views/settings/index.vue'),
     redirect: '/settings/provider',
@@ -38,9 +38,7 @@ const routes: AppRouteRecordRaw[] = [
         path: 'service-model',
         name: 'service-model',
         component: () => import('@/views/settings/service-model/index.vue'),
-        meta: {
-          title: '服务模型'
-        }
+        meta: { title: '服务模型' }
       }
     ]
   }

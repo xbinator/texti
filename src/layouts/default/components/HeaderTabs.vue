@@ -74,7 +74,7 @@ function handleWheel(e: WheelEvent) {
   flex-shrink: 0;
   align-items: center;
   height: 28px;
-  padding: 0 10px;
+  padding: 0 4px 0 10px;
   margin-right: 4px;
   cursor: pointer;
   background-color: transparent;

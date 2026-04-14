@@ -1,11 +1,5 @@
 <template>
-  <BLayout class="settings-layout" content-class="settings-container">
-    <template #header-right>
-      <BButton type="secondary" size="small" square @click="handleBack">
-        <Icon icon="lucide:layout-grid" width="16" height="16" />
-      </BButton>
-    </template>
-
+  <div class="settings-container">
     <div class="settings-sidebar">
       <RouterLink v-for="item in menuItems" :key="item.key" :to="item.path" class="sidebar-item" :class="{ active: isActive(item.key) }">
         <Icon :icon="item.icon" />
@@ -16,15 +10,14 @@
     <div class="settings-content">
       <RouterView />
     </div>
-  </BLayout>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { useRouter, useRoute } from 'vue-router';
+import { useRoute } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { menuItems, type SettingsMenuKey } from './constants';
 
-const router = useRouter();
 const route = useRoute();
 
 function isActive(key: SettingsMenuKey): boolean {
@@ -32,15 +25,12 @@ function isActive(key: SettingsMenuKey): boolean {
 
   return route.path === prefix || route.path.startsWith(`${prefix}/`);
 }
-
-function handleBack(): void {
-  router.push('/');
-}
 </script>
 
 <style scoped lang="less">
-.settings-layout {
-  background: var(--bg-secondary);
+.settings-container {
+  display: flex;
+  height: 100%;
 }
 
 .settings-sidebar {
@@ -93,11 +83,6 @@ function handleBack(): void {
     color: var(--text-primary);
     background: var(--color-primary-bg);
   }
-}
-
-:deep(.settings-container) {
-  display: flex;
-  height: 100%;
 }
 
 .settings-content {

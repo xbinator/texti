@@ -2,7 +2,7 @@
 import type { EditorFile } from '../types';
 import type { Ref } from 'vue';
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { customAlphabet } from 'nanoid';
 import type { ToolbarOptions } from '@/components/BToolbar/types';
 import { native } from '@/shared/platform';
@@ -43,6 +43,7 @@ function parseFileName(filePath: string): { name: string; ext: string } {
 export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActiveOptions) {
   const settingStore = useSettingStore();
   const route = useRoute();
+  const router = useRouter();
   const tabsStore = useTabsStore();
 
   const canSave = computed(() => Boolean(fileState.value.path));
@@ -73,9 +74,14 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
     fileState.value = file;
 
     if (file.id) {
+      const editorPath = `/editor/${file.id}`;
       recentFilesStorage.setCurrentFile(file.id);
       // 用户打开/切换文件时，同步注册到多标签页
-      tabsStore.addTab({ id: file.id, path: route.fullPath, title: file.name || '未命名文件', meta: { fileId: file.id } });
+      tabsStore.addTab({ id: file.id, path: editorPath, title: file.name || '未命名文件', meta: { fileId: file.id } });
+      // 路由参数与当前文件不一致时才跳转，防止循环
+      if (route.params.id !== file.id) {
+        router.push(editorPath);
+      }
     }
 
     settingStore.setWindowTitle(`${file.name || '未命名'}.${file.ext || 'md'}`);
@@ -171,8 +177,6 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
   let cleanupFileWatcher: (() => void) | null = null;
 
   onMounted(() => {
-    restoreCurrentFile();
-
     cleanupFileWatcher = native.onFileChanged(async ({ type, filePath, content }) => {
       if (fileState.value.path !== filePath) return;
 
@@ -349,5 +353,29 @@ export function useFileActive(fileState: Ref<EditorFile>, options: UseFileActive
     { value: 'remove-current', label: '从最近记录移除当前', onClick: handleRemoveCurrent }
   ]);
 
-  return { toolbarFileOptions, loadRecentFiles, savedRecentFiles, openRecentFile };
+  /** 通过文件 ID 加载文件，供路由 watch 调用 */
+  async function loadFileById(id: string | undefined): Promise<void> {
+    if (route.name !== 'Editor' && !route.path.startsWith('/editor')) {
+      return;
+    }
+
+    if (!id) {
+      // 无 id（/editor 无参数）：恢复最近文件或新建
+      await restoreCurrentFile();
+      return;
+    }
+    if (id === fileState.value.id) return;
+    const stored = await recentFilesStorage.getRecentFile(id);
+    if (stored) {
+      await switchToFile(stored, { preserveIds: [id] });
+    } else {
+      // 找不到记录时新建
+      const nextFile = createEmptyFile();
+      await recentFilesStorage.addRecentFile(nextFile as StoredFile);
+      setFileState(nextFile);
+      await loadRecentFiles();
+    }
+  }
+
+  return { toolbarFileOptions, loadRecentFiles, savedRecentFiles, openRecentFile, loadFileById };
 }
