@@ -219,7 +219,8 @@ useTextareaAutosize({ element: titleTextareaRef, input: editorTitle });
 
 .b-editor-container {
   position: relative;
-  max-width: 800px;
+  max-width: 900px;
+  padding: 20px 50px 90px;
   margin: 0 auto;
   font-size: 16px;
 }

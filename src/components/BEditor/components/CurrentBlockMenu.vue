@@ -83,9 +83,8 @@ const isFocused = ref(false);
 const isHoveringMenu = ref(false);
 const currentBlock = ref<BlockPosition | null>(null);
 const hoveredBlockPos = ref<number | null>(null);
-const triggerOffsetLeft = 0;
 const triggerSize = 28;
-const position = ref({ left: 8, top: 0 });
+const position = ref({ top: 0 });
 const placement = ref<'top' | 'bottom'>('bottom');
 
 const hiddenBlockTypes = new Set(['codeBlock', 'table', 'tableRow', 'tableCell', 'tableHeader']);
@@ -126,8 +125,9 @@ const isVisible = computed(() =>
   Boolean(props.editor && currentBlock.value && !shouldHideForCurrentBlock.value && (hoveredBlockPos.value !== null || open.value || isHoveringMenu.value))
 );
 const buttonStyle = computed(() => ({
-  left: `${position.value.left}px`,
-  top: `${position.value.top}px`
+  left: '-20px',
+  top: `${position.value.top}px`,
+  transform: 'translateX(-50%)'
 }));
 const panelClass = computed(() => ({
   'is-placement-top': placement.value === 'top',
@@ -294,10 +294,7 @@ function updatePosition(): void {
     effectiveLineHeight = parsedFontSize * 1.2;
   }
   const triggerTopOffset = Math.max(0, (effectiveLineHeight - triggerSize) / 2);
-  position.value = {
-    left: triggerOffsetLeft,
-    top: Math.max(0, nodeRect.top - rootRect.top + triggerTopOffset)
-  };
+  position.value = { top: Math.max(0, nodeRect.top - rootRect.top + triggerTopOffset) };
 }
 
 function updatePlacement(): void {

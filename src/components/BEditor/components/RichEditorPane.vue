@@ -123,7 +123,6 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
 
   .ProseMirror {
     min-height: 100%;
-    padding: 20px 50px 90px;
     margin: 0;
     line-height: 1.74;
     color: var(--editor-text);

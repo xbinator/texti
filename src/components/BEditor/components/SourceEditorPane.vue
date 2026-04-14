@@ -34,7 +34,6 @@ useTextareaAutosize({ element: sourceTextareaRef, input: editorContent });
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 20px 50px 90px;
 }
 
 .source-editor-textarea {
