@@ -74,10 +74,6 @@ const modelIcons: Record<string, string> = {
 };
 
 const iconId = computed(() => {
-  if (props.provider) {
-    return providerIcons[props.provider] || props.provider;
-  }
-
   if (props.model) {
     const model = (props.model?.match(/^[a-zA-Z]+/i) || [])[0]?.toLocaleLowerCase();
 
@@ -88,6 +84,10 @@ const iconId = computed(() => {
 
       return modelIcons[value] || value;
     }
+  }
+
+  if (props.provider) {
+    return providerIcons[props.provider] || props.provider;
   }
   return 'model';
 });

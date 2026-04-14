@@ -69,7 +69,6 @@ const renderedMarkdown = computed<string>(() => {
   overflow-y: auto;
   font-size: 14px;
   line-height: 1.7;
-  color: var(--text-primary);
   overflow-wrap: break-word;
   .scrollbar-base();
 }

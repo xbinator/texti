@@ -28,7 +28,6 @@ withDefaults(defineProps<Props>(), { type: 'dot' });
     align-items: center;
     height: 100%;
     min-height: 46px;
-    padding: 10px 20px;
 
     &-item {
       width: 4px;

@@ -66,7 +66,7 @@ const { collapse, toggleCollapse } = useCollapse(contentRef, () => ({ isCollapse
 const shouldShowCollapseButton = computed(() => props.placement === 'left' && collapse.visible && props.isCollapse);
 </script>
 
-<style scoped lang="less">
+<style lang="less">
 .b-bubble {
   display: flex;
   flex-direction: column;
@@ -97,8 +97,8 @@ const shouldShowCollapseButton = computed(() => props.placement === 'left' && co
     align-items: flex-end;
 
     .b-bubble__container {
-      color: #fff;
-      background: var(--color-primary);
+      color: var(--text-primary);
+      background: var(--color-primary-bg);
       border-radius: 12px 2px 12px 12px;
     }
 
