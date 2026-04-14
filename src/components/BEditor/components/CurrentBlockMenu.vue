@@ -85,7 +85,7 @@ const currentBlock = ref<BlockPosition | null>(null);
 const hoveredBlockPos = ref<number | null>(null);
 const triggerSize = 28;
 const position = ref({ top: 0 });
-const placement = ref<'top' | 'bottom'>('bottom');
+const placement = ref<'left-top' | 'left-bottom' | 'bottom'>('left-bottom');
 
 const hiddenBlockTypes = new Set(['codeBlock', 'table', 'tableRow', 'tableCell', 'tableHeader']);
 
@@ -130,7 +130,8 @@ const buttonStyle = computed(() => ({
   transform: 'translateX(-50%)'
 }));
 const panelClass = computed(() => ({
-  'is-placement-top': placement.value === 'top',
+  'is-placement-left-top': placement.value === 'left-top',
+  'is-placement-left-bottom': placement.value === 'left-bottom',
   'is-placement-bottom': placement.value === 'bottom'
 }));
 const triggerIcon = computed(() => {
@@ -304,16 +305,21 @@ function updatePlacement(): void {
   }
 
   const triggerRect = triggerElement.getBoundingClientRect();
+  const viewportWidth = window.innerWidth;
   const viewportHeight = window.innerHeight;
+  const estimatedPanelWidth = 180;
   const estimatedPanelHeight = 400;
 
+  const spaceLeft = triggerRect.left;
   const spaceBelow = viewportHeight - triggerRect.bottom;
   const spaceAbove = triggerRect.top;
 
-  if (spaceBelow < estimatedPanelHeight && spaceAbove > spaceBelow) {
-    placement.value = 'top';
-  } else {
+  if (spaceLeft < estimatedPanelWidth) {
     placement.value = 'bottom';
+  } else if (spaceBelow < estimatedPanelHeight && spaceAbove > spaceBelow) {
+    placement.value = 'left-top';
+  } else {
+    placement.value = 'left-bottom';
   }
 }
 
@@ -708,12 +714,18 @@ onBeforeUnmount(() => {
   box-shadow: var(--shadow-lg);
 }
 
-.current-block-menu__panel.is-placement-bottom {
+.current-block-menu__panel.is-placement-left-bottom {
   top: 0;
 }
 
-.current-block-menu__panel.is-placement-top {
+.current-block-menu__panel.is-placement-left-top {
   bottom: 0;
+}
+
+.current-block-menu__panel.is-placement-bottom {
+  top: calc(100% + 8px);
+  right: auto;
+  left: 0;
 }
 
 .current-block-menu__scrollbar {
