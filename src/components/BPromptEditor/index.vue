@@ -1,13 +1,13 @@
 <template>
-  <div ref="wrapperRef" class="variable-editor-wrapper">
+  <div ref="wrapperRef" class="b-prompt-variable">
     <div
       ref="editorRef"
       :contenteditable="!disabled"
       spellcheck="true"
       aria-multiline="true"
       :aria-disabled="disabled"
-      class="variable-editor"
-      :class="`variable-editor--${variant}`"
+      class="b-prompt-variable__textarea"
+      :class="`b-prompt-variable--${variant}`"
       :style="editorStyle"
       :data-placeholder="placeholder"
       @paste="handlePaste"
@@ -154,8 +154,8 @@ onUnmounted(() => {
 });
 </script>
 
-<style scoped lang="less">
-:deep(.prompt-variable-tag) {
+<style lang="less">
+.b-prompt-variable-tag {
   display: inline-flex;
   gap: 4px;
   align-items: center;
@@ -169,12 +169,12 @@ onUnmounted(() => {
   border-radius: 4px;
 }
 
-.variable-editor-wrapper {
+.b-prompt-variable {
   position: relative;
   width: 100%;
 }
 
-.variable-editor {
+.b-prompt-variable__textarea {
   min-height: 80px;
   padding: 12px;
   overflow-y: auto;
@@ -207,7 +207,7 @@ onUnmounted(() => {
   }
 }
 
-.variable-editor--outlined {
+.b-prompt-variable--outlined {
   background: var(--input-bg);
   border: 1px solid var(--input-border);
 
@@ -221,7 +221,7 @@ onUnmounted(() => {
   }
 }
 
-.variable-editor--borderless {
+.b-prompt-variable--borderless {
   background: transparent;
   border: none;
 
@@ -232,7 +232,7 @@ onUnmounted(() => {
   }
 }
 
-.variable-editor--filled {
+.b-prompt-variable--filled {
   background: var(--bg-secondary);
   border: none;
 
@@ -246,7 +246,7 @@ onUnmounted(() => {
   }
 }
 
-.variable-editor--underlined {
+.b-prompt-variable--underlined {
   padding-right: 0;
   padding-left: 0;
   background: transparent;
