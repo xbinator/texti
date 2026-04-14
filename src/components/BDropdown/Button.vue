@@ -128,8 +128,8 @@ watch(
 }
 
 .dropdown-icon {
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
   transition: transform 0.3s;
 }
 </style>
