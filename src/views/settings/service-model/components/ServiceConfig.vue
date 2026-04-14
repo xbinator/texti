@@ -147,7 +147,7 @@ function buildConfigPayload(): { providerId?: string; modelId?: string; customPr
     };
   }
 
-  const [providerId, modelId] = selectedModel.value.split(':');
+  const [, providerId, modelId] = selectedModel.value.match(/^([^:]+):(.+)$/) ?? [];
 
   return {
     providerId: providerId || undefined,

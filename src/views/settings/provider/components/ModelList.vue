@@ -45,6 +45,7 @@ import { Icon } from '@iconify/vue';
 import { message } from 'ant-design-vue';
 import BButton from '@/components/BButton/index.vue';
 import BModelIcon from '@/components/BModelIcon/index.vue';
+import { Modal } from '@/utils/modal';
 import { useProviders } from '../hooks/useProviders';
 import ModelModal from './ModelModal.vue';
 
@@ -130,6 +131,9 @@ async function handleToggleModel(modelId: string, enabled: boolean): Promise<voi
 }
 
 async function handleDeleteModel(modelId: string): Promise<void> {
+  const [cancelled] = await Modal.delete(`确定要删除模型 "${modelId}" 吗？`);
+  if (cancelled) return;
+
   const nextModels = props.models.filter((item) => item.id !== modelId);
   const savedProvider = await saveProviderModels(props.providerId, nextModels);
 

@@ -2,7 +2,7 @@
   <div class="config-section">
     <h3 class="section-title">API 配置</h3>
     <AForm layout="vertical">
-      <AFormItem label="API Key" required>
+      <AFormItem label="API Key">
         <AInputPassword v-model:value="dataItem.apiKey" placeholder="请输入 API Key" />
       </AFormItem>
       <AFormItem label="API 代理地址">
