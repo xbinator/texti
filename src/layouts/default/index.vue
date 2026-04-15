@@ -25,7 +25,7 @@
         </div>
         <div class="b-layout-header__right">
           <!-- 辅助工具侧边栏切换按钮 -->
-          <BButton type="secondary" size="small" square>
+          <BButton type="secondary" size="small" square @click="handleToggleSidebar">
             <Icon icon="lucide:panel-right" width="16" height="16" />
           </BButton>
 
@@ -53,7 +53,13 @@
     </div>
 
     <div class="b-layout__content">
-      <RouterView />
+      <div class="b-layout__content__main">
+        <RouterView />
+      </div>
+
+      <BPanelSplitter v-show="sidebarState.visible" v-model:size="sidebarState.width" position="left" :min-width="200" :max-width="500">
+        <AuxiliarySidebar />
+      </BPanelSplitter>
     </div>
 
     <SearchRecent v-model:visible="visible.searchRecent" />
@@ -70,6 +76,7 @@ import { useEventListener } from '@vueuse/core';
 import BButton from '@/components/BButton/index.vue';
 import { getElectronAPI } from '@/shared/platform/electron-api';
 import { isMac } from '@/shared/platform/env';
+import AuxiliarySidebar from './components/AuxiliarySidebar.vue';
 import HeaderTabs from './components/HeaderTabs.vue';
 import SearchRecent from './components/SearchRecent.vue';
 import ShortcutsHelp from './components/ShortcutsHelp.vue';
@@ -82,6 +89,9 @@ const router = useRouter();
 
 const visible = reactive({ searchRecent: false, shortcutsHelp: false });
 
+// 侧边栏状态
+const sidebarState = ref({ visible: false, width: 300 });
+
 const { toolbarFileOptions } = useFileActive(visible);
 const { toolbarEditOptions } = useEditActive();
 const { toolbarViewOptions } = useViewActive();
@@ -89,6 +99,11 @@ const { toolbarHelpOptions } = useHelpActive(visible);
 
 function handleOpenSettings(): void {
   router.push('/settings');
+}
+
+// 切换侧边栏显示状态
+function handleToggleSidebar(): void {
+  sidebarState.value.visible = !sidebarState.value.visible;
 }
 
 // --- Window Controls ---
@@ -146,8 +161,16 @@ useEventListener(window, 'resize', validateWindowState);
 }
 
 .b-layout__content {
+  display: flex;
   flex: 1;
   height: 0;
+  padding-bottom: 6px;
+
+  .b-layout__content__main {
+    flex: 1;
+    width: 0;
+    margin: 0 6px;
+  }
 }
 
 .b-layout-header__mac-spacer {
