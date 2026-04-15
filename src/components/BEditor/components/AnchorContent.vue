@@ -1,5 +1,5 @@
 <template>
-  <BScrollbar class="anchor-panel__content" inset>
+  <BScrollbar class="anchor-panel__content" inset="vertical">
     <TransitionGroup name="anchor-fade" tag="div">
       <div v-if="title" class="anchor-panel__header" :class="{ active: !activeId }" @click="handleTitleClick">
         <span class="anchor-panel__title">{{ title }}</span>
