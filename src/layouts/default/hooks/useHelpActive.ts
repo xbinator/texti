@@ -2,18 +2,19 @@ import { computed } from 'vue';
 import type { ToolbarOptions } from '@/components/BToolbar/types';
 
 interface UseHelpOptions {
-  onShowShortcuts: () => void;
+  searchRecent: boolean;
+  shortcutsHelp: boolean;
 }
 
-export function useHelp(options: UseHelpOptions) {
-  const { onShowShortcuts } = options;
-
+export function useHelpActive(options: UseHelpOptions) {
   const toolbarHelpOptions = computed<ToolbarOptions>(() => [
     {
       value: 'shortcuts',
       label: '快捷键',
       shortcut: 'Ctrl+/',
-      onClick: onShowShortcuts
+      onClick: () => {
+        options.shortcutsHelp = true;
+      }
     }
   ]);
 

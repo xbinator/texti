@@ -1,85 +1,58 @@
-import type { EditorFile } from '../types';
-import type { Ref } from 'vue';
 import { computed } from 'vue';
-import { marked } from 'marked';
 import type { ToolbarOptions } from '@/components/BToolbar/types';
-import { useClipboard } from '@/hooks/useClipboard';
-import { useEditorStore } from '@/stores/editor';
-import { EditorShortcuts } from '../constants/shortcuts';
+import { EditorShortcuts } from '@/constants/shortcuts';
+import { emitter } from '@/utils/emitter';
 
-export function useEditActive(fileState: Ref<EditorFile>) {
-  const editorStore = useEditorStore();
-  const { clipboard } = useClipboard();
-
-  async function toHtml(markdown: string): Promise<string> {
-    const rendered = marked.parse(markdown);
-
-    if (typeof rendered === 'string') {
-      return rendered;
-    }
-
-    return rendered;
-  }
-
-  async function toPlainText(markdown: string): Promise<string> {
-    const parser = new DOMParser();
-    const html = await toHtml(markdown);
-    const documentNode = parser.parseFromString(html, 'text/html');
-
-    return documentNode.body.textContent?.trim() ?? '';
-  }
-
+export function useEditActive() {
   const toolbarEditOptions = computed<ToolbarOptions>(() => {
-    const { content } = fileState.value;
-    const canCopy = Boolean(content.trim());
-    const instance = editorStore.editorInstance;
     return [
       {
         value: 'undo',
         label: '撤销',
         shortcut: EditorShortcuts.EDIT_UNDO,
         enableShortcut: false,
-        disabled: !instance?.canUndo(),
-        onClick: () => instance?.undo()
+        disabled: false,
+        onClick: () => {
+          emitter.emit('edit:undo');
+        }
       },
       {
         value: 'redo',
         label: '重做',
         shortcut: EditorShortcuts.EDIT_REDO,
         enableShortcut: false,
-        disabled: !instance?.canRedo(),
-        onClick: () => instance?.redo()
+        disabled: false,
+        onClick: () => {
+          emitter.emit('edit:redo');
+        }
       },
       { type: 'divider' },
       {
         value: 'copyPlainText',
         label: '复制为纯文本',
-        disabled: !canCopy,
+        disabled: false,
         onClick: async () => {
-          const plainText = await toPlainText(content);
-          await clipboard(plainText, { successMessage: '已复制纯文本' });
+          emitter.emit('edit:copyPlainText');
         }
       },
       {
         value: 'copyMarkdown',
         label: '复制为 Markdown',
-        disabled: !canCopy,
+        disabled: false,
         onClick: async () => {
-          await clipboard(content, { successMessage: '已复制 Markdown' });
+          emitter.emit('edit:copyMarkdown');
         }
       },
       {
         value: 'copyHtml',
         label: '复制为 HTML 代码',
-        disabled: !canCopy,
+        disabled: false,
         onClick: async () => {
-          const html = await toHtml(content);
-          await clipboard(html, { successMessage: '已复制 HTML 代码' });
+          emitter.emit('edit:copyHtml');
         }
       }
     ];
   });
-  return {
-    toolbarEditOptions
-  };
+
+  return { toolbarEditOptions };
 }

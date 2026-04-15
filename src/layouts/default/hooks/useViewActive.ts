@@ -1,43 +1,28 @@
 import { computed } from 'vue';
-import { storeToRefs } from 'pinia';
 import type { ToolbarOptions } from '@/components/BToolbar/types';
-import { local } from '@/shared/storage/base';
-import { useEditorStore } from '@/stores/editor';
 import { useSettingStore } from '@/stores/setting';
-import { EditorShortcuts } from '../constants/shortcuts';
-
-const STORAGE_KEY = 'editor_viewState';
-
-function saveViewState(state: { mode: string; showOutline: boolean }): void {
-  local.setItem(STORAGE_KEY, state);
-}
+import { EditorShortcuts } from '../../../constants/shortcuts';
 
 export function useViewActive() {
-  const editorStore = useEditorStore();
-  const { viewState } = storeToRefs(editorStore);
   const settingStore = useSettingStore();
-
-  const canShowOutline = computed<boolean>(() => viewState.value.mode === 'rich');
 
   const toolbarViewOptions = computed<ToolbarOptions>(() => [
     {
       value: 'source',
       label: '源代码模式',
       shortcut: EditorShortcuts.VIEW_SOURCE,
-      selected: viewState.value.mode === 'source',
+      selected: settingStore.sourceMode,
       onClick: () => {
-        viewState.value.mode = viewState.value.mode === 'source' ? 'rich' : 'source';
-        saveViewState(viewState.value);
+        settingStore.toggleSourceMode();
       }
     },
     {
       value: 'outline',
       label: '大纲',
-      selected: canShowOutline.value && viewState.value.showOutline,
-      disabled: !canShowOutline.value,
+      selected: settingStore.showOutline,
+      disabled: false,
       onClick: () => {
-        viewState.value.showOutline = !viewState.value.showOutline;
-        saveViewState(viewState.value);
+        settingStore.toggleOutline();
       }
     },
     { type: 'divider' },
@@ -74,5 +59,5 @@ export function useViewActive() {
     }
   ]);
 
-  return { viewState, toolbarViewOptions };
+  return { toolbarViewOptions };
 }
