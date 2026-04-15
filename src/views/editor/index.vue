@@ -3,69 +3,44 @@
     <div class="editor-main-container">
       <div class="editor-content-wrapper">
         <BEditor
+          ref="editorRef"
           :key="fileState.id"
           v-model:value="fileState.content"
           v-model:title="fileState.name"
-          :editor-id="fileState?.id"
-          :show-outline="viewState.showOutline"
+          :editor-id="fileState.id"
+          :view-mode="settingStore.sourceMode ? 'source' : 'rich'"
+          :show-outline="settingStore.showOutline"
         />
-
-        <!-- :view-mode="viewState.mode" -->
       </div>
 
-      <!-- 辅助工具侧边栏 -->
       <BPanelSplitter v-show="sidebarState.visible" v-model:size="sidebarState.width" position="left" :min-width="200" :max-width="500">
         <AuxiliarySidebar />
       </BPanelSplitter>
-
-      <ShortcutsHelp v-model:visible="visible.shortcuts" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import type { EditorFile } from './types';
-import { computed, reactive, ref, watch, nextTick } from 'vue';
+import { computed, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import BEditor from '@/components/BEditor/index.vue';
+import type { BEditorPublicInstance } from '@/components/BEditor/types';
 import BPanelSplitter from '@/components/BPanelSplitter/index.vue';
-import { native } from '@/shared/platform';
-import { recentFilesStorage } from '@/shared/storage';
-import { useTabsStore } from '@/stores/tabs';
+import { useSettingStore } from '@/stores/setting';
 import AuxiliarySidebar from './components/AuxiliarySidebar.vue';
-import ShortcutsHelp from './components/ShortcutsHelp.vue';
-import { useAutoSave } from './hooks/useAutoSave';
+import { useBindings } from './hooks/useBindings';
+import { useSession } from './hooks/useSession';
 
 const route = useRoute();
 
-const tabsStore = useTabsStore();
+const fileId = computed(() => String(route.params.id || ''));
 
-const fileId = computed(() => (route.params.id || '') as string);
-// 编辑器文件状态
-const fileState = ref<EditorFile>({ id: '', name: '', content: '', ext: '', path: null });
-// 编辑器视图状态
-const viewState = reactive({ mode: 'rich', showOutline: true });
+const { fileState, sidebarState, actions } = useSession(fileId);
+const settingStore = useSettingStore();
 
-const sidebarState = ref({ visible: false, width: 300 });
+const editorRef = ref<BEditorPublicInstance | null>(null);
 
-const visible = reactive({ shortcuts: false });
-
-const { pause, resume } = useAutoSave(fileState);
-
-async function loadFileState() {
-  pause();
-
-  const stored = await recentFilesStorage.getRecentFile(fileId.value);
-  fileState.value = stored || { id: fileId.value, name: '', content: '', ext: '', path: null };
-
-  fileState.value.path ? native.watchFile(fileState.value.path) : native.unwatchFile();
-
-  tabsStore.addTab({ id: fileId.value, path: route.fullPath, title: fileState.value.name || '未命名文件' });
-
-  nextTick(resume);
-}
-
-watch(fileId, () => loadFileState(), { immediate: true });
+useBindings(fileId, { fileState, actions, editorInstance: editorRef });
 </script>
 
 <style lang="less" scoped>

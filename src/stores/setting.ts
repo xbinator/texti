@@ -7,10 +7,14 @@ export type ThemeMode = 'dark' | 'light' | 'system';
 type ResolvedTheme = 'dark' | 'light';
 
 const THEME_STORAGE_KEY = 'app_theme';
+const OUTLINE_STORAGE_KEY = 'editor_showOutline';
+const SOURCE_MODE_STORAGE_KEY = 'editor_sourceMode';
 
 interface SettingState {
   theme: ThemeMode;
   title: string;
+  showOutline: boolean;
+  sourceMode: boolean;
 }
 
 function loadTheme(): ThemeMode {
@@ -19,6 +23,16 @@ function loadTheme(): ThemeMode {
     return saved;
   }
   return 'system';
+}
+
+function loadShowOutline(): boolean {
+  const saved = local.getItem<boolean>(OUTLINE_STORAGE_KEY);
+  return typeof saved === 'boolean' ? saved : true;
+}
+
+function loadSourceMode(): boolean {
+  const saved = local.getItem<boolean>(SOURCE_MODE_STORAGE_KEY);
+  return typeof saved === 'boolean' ? saved : false;
 }
 
 function getSystemTheme(): ResolvedTheme {
@@ -44,7 +58,9 @@ function applyTheme(theme: ThemeMode): void {
 export const useSettingStore = defineStore('setting', {
   state: (): SettingState => ({
     theme: loadTheme(),
-    title: 'Tibis'
+    title: 'Tibis',
+    showOutline: loadShowOutline(),
+    sourceMode: loadSourceMode()
   }),
 
   getters: {
@@ -80,6 +96,42 @@ export const useSettingStore = defineStore('setting', {
       const currentIndex = themes.indexOf(this.theme);
       const newTheme = themes[(currentIndex + 1) % themes.length];
       this.setTheme(newTheme);
+    },
+
+    // ==================== 大纲设置 ====================
+
+    /**
+     * 设置大纲显示状态
+     * @param show 是否显示大纲
+     */
+    setShowOutline(show: boolean): void {
+      this.showOutline = show;
+      local.setItem(OUTLINE_STORAGE_KEY, show);
+    },
+
+    /**
+     * 切换大纲显示状态
+     */
+    toggleOutline(): void {
+      this.setShowOutline(!this.showOutline);
+    },
+
+    // ==================== 源代码模式设置 ====================
+
+    /**
+     * 设置源代码模式
+     * @param enabled 是否启用源代码模式
+     */
+    setSourceMode(enabled: boolean): void {
+      this.sourceMode = enabled;
+      local.setItem(SOURCE_MODE_STORAGE_KEY, enabled);
+    },
+
+    /**
+     * 切换源代码模式
+     */
+    toggleSourceMode(): void {
+      this.setSourceMode(!this.sourceMode);
     },
 
     /**

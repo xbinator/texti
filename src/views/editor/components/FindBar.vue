@@ -30,8 +30,8 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import { Icon } from '@iconify/vue';
 import type { BEditorPublicInstance, EditorSearchState as SearchState } from '@/components/BEditor/types';
+import { EditorShortcuts } from '@/constants/shortcuts';
 import { useShortcuts } from '@/hooks/useShortcuts';
-import { EditorShortcuts } from '../constants/shortcuts';
 
 interface Props {
   content: string;

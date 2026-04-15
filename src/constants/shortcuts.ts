@@ -11,6 +11,7 @@ export const EditorShortcuts = {
   // 编辑操作
   EDIT_UNDO: 'Ctrl+Z',
   EDIT_REDO: 'Ctrl+Shift+Z',
+  EDIT_FIND: 'Ctrl+F',
 
   // 视图操作
   VIEW_SOURCE: 'Ctrl+E'

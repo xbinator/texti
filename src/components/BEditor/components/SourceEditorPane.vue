@@ -44,6 +44,7 @@ useTextareaAutosize({ element: sourceTextareaRef, input: editorContent });
   color: var(--editor-text);
   resize: none;
   outline: none;
+  background-color: transparent;
   border: 0;
 
   &::placeholder {

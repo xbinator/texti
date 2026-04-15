@@ -13,9 +13,9 @@
         <template v-if="!isMac()">
           <div class="b-layout-header__left">
             <BToolbar :title="'文件'" :options="toolbarFileOptions" />
-            <!--<BToolbar :title="'编辑'" :options="toolbarEditOptions" />
-              <BToolbar :title="'视图'" show-selected-check :options="toolbarViewOptions" />
-              <BToolbar :title="'帮助'" :options="toolbarHelpOptions" /> -->
+            <BToolbar :title="'编辑'" :options="toolbarEditOptions" />
+            <BToolbar :title="'视图'" show-selected-check :options="toolbarViewOptions" />
+            <BToolbar :title="'帮助'" :options="toolbarHelpOptions" />
           </div>
           <!-- 分割线 -->
           <div class="b-layout-header__divider"></div>
@@ -57,6 +57,8 @@
     </div>
 
     <SearchRecent v-model:visible="visible.searchRecent" />
+
+    <ShortcutsHelp v-model:visible="visible.shortcutsHelp" />
   </div>
 </template>
 
@@ -66,18 +68,24 @@ import { useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { useEventListener } from '@vueuse/core';
 import BButton from '@/components/BButton/index.vue';
-// import BToolbar from '@/components/BToolbar/index.vue';
 import { getElectronAPI } from '@/shared/platform/electron-api';
 import { isMac } from '@/shared/platform/env';
 import HeaderTabs from './components/HeaderTabs.vue';
 import SearchRecent from './components/SearchRecent.vue';
+import ShortcutsHelp from './components/ShortcutsHelp.vue';
+import { useEditActive } from './hooks/useEditActive';
 import { useFileActive } from './hooks/useFileActive';
+import { useHelpActive } from './hooks/useHelpActive';
+import { useViewActive } from './hooks/useViewActive';
 
 const router = useRouter();
 
-const visible = reactive({ searchRecent: false });
+const visible = reactive({ searchRecent: false, shortcutsHelp: false });
 
 const { toolbarFileOptions } = useFileActive(visible);
+const { toolbarEditOptions } = useEditActive();
+const { toolbarViewOptions } = useViewActive();
+const { toolbarHelpOptions } = useHelpActive(visible);
 
 function handleOpenSettings(): void {
   router.push('/settings');
@@ -156,6 +164,10 @@ useEventListener(window, 'resize', validateWindowState);
 
   &.is-mac {
     padding: 0 12px;
+
+    .b-layout-header__center {
+      margin-left: 12px;
+    }
   }
 }
 

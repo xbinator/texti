@@ -29,7 +29,7 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue';
 import BScrollbar from '@/components/BScrollbar/index.vue';
-import { EditorShortcuts } from '@/layouts/default/constants/shortcuts';
+import { EditorShortcuts } from '@/constants/shortcuts';
 import { getShortcutParts } from '@/utils/shortcut';
 
 interface ShortcutItem {
