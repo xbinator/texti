@@ -30,12 +30,8 @@ router.afterEach((to) => {
 
     if (fullPath.startsWith('/settings')) {
       tabsStore.addTab({ id: '/settings', path: '/settings', title: '设置' });
-
-      tabsStore.setActiveTab('/settings');
     } else if (fullPath && fullPath !== '/') {
       tabsStore.addTab({ id: fullPath, path: to.fullPath, title: title || (to.name as string) || to.path });
-
-      tabsStore.setActiveTab(fullPath);
     }
   }
 });
