@@ -46,8 +46,7 @@
         </div>
       </div>
 
-      <ShortcutsHelp v-model:visible="visibleShortcutsHelp" />
-      <SearchRecent v-model:visible="visibleSearchRecent" />
+      <SearchRecent v-model:visible="visibleSearchRecent" @delete="loadRecentFiles" />
     </div>
   </div>
 </template>
@@ -58,7 +57,6 @@ import { useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { customAlphabet } from 'nanoid';
 import SearchRecent from '@/layouts/default/components/SearchRecent.vue';
-import ShortcutsHelp from '@/layouts/default/components/ShortcutsHelp.vue';
 import { native } from '@/shared/platform';
 import { recentFilesStorage, type StoredFile } from '@/shared/storage';
 
@@ -67,12 +65,13 @@ const nanoid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz_', 8);
 
 const recentFiles = ref<StoredFile[]>([]);
 const isDragging = ref(false);
-const visibleShortcutsHelp = ref(false);
 const visibleSearchRecent = ref(false);
 
-onMounted(async () => {
+async function loadRecentFiles() {
   recentFiles.value = await recentFilesStorage.getAllRecentFiles();
-});
+}
+
+onMounted(loadRecentFiles);
 
 function handleNewFile(): void {
   router.push({ name: 'editor', params: { id: nanoid() } });
