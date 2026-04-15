@@ -48,10 +48,13 @@ export const useTabsStore = defineStore('tabs', {
     // 添加标签页
     addTab(tab: Tab): void {
       const index = this.tabs.findIndex((t) => t.id === tab.id);
-      if (index === -1) {
+      if (tab.path.startsWith('/settings')) {
+        const _index = this.tabs.findIndex((t) => t.path.includes('/settings'));
+
+        const _tab = { ...tab, title: '设置' };
+        _index === -1 ? this.tabs.push(_tab) : (this.tabs[_index] = _tab);
+      } else if (index === -1) {
         this.tabs.push(tab);
-      } else {
-        this.tabs[index] = { ...this.tabs[index], ...tab };
       }
 
       persistData(this.$state);

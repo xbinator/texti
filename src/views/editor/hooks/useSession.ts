@@ -34,8 +34,6 @@ export function useSession(fileId: Ref<string>) {
   const fileState = ref<EditorFile>(createEmptyFile(''));
   const viewState = reactive<{ mode: ViewMode; showOutline: boolean }>({ mode: 'rich', showOutline: true });
 
-  const sidebarState = ref({ visible: false, width: 300 });
-
   const { pause, resume } = useAutoSave(fileState);
 
   const currentTitle = computed(() => fileState.value.name || '未命名文件');
@@ -173,7 +171,6 @@ export function useSession(fileId: Ref<string>) {
   return {
     fileState,
     viewState,
-    sidebarState,
     currentTitle,
     actions,
     loadFileState,

@@ -12,10 +12,6 @@
           :show-outline="settingStore.showOutline"
         />
       </div>
-
-      <BPanelSplitter v-show="sidebarState.visible" v-model:size="sidebarState.width" position="left" :min-width="200" :max-width="500">
-        <AuxiliarySidebar />
-      </BPanelSplitter>
     </div>
   </div>
 </template>
@@ -25,9 +21,7 @@ import { computed, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import BEditor from '@/components/BEditor/index.vue';
 import type { BEditorPublicInstance } from '@/components/BEditor/types';
-import BPanelSplitter from '@/components/BPanelSplitter/index.vue';
 import { useSettingStore } from '@/stores/setting';
-import AuxiliarySidebar from './components/AuxiliarySidebar.vue';
 import { useBindings } from './hooks/useBindings';
 import { useSession } from './hooks/useSession';
 
@@ -35,7 +29,7 @@ const route = useRoute();
 
 const fileId = computed(() => String(route.params.id || ''));
 
-const { fileState, sidebarState, actions } = useSession(fileId);
+const { fileState, actions } = useSession(fileId);
 const settingStore = useSettingStore();
 
 const editorRef = ref<BEditorPublicInstance | null>(null);
@@ -56,7 +50,6 @@ useBindings(fileId, { fileState, actions, editorInstance: editorRef });
   flex: 1;
   gap: 6px;
   height: 100%;
-  margin: 0 6px 6px;
   overflow: hidden;
 }
 
