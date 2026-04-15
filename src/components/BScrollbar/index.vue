@@ -1,5 +1,5 @@
 <template>
-  <div :class="['scrollbar', { 'scrollbar--visible': barVisible, 'scrollbar--inset': inset }]" @mouseenter="onMouseEnter" @mouseleave="onMouseLeave">
+  <div :class="['scrollbar', { 'scrollbar--visible': barVisible, 'scrollbar--inset': !!inset }]" @mouseenter="onMouseEnter" @mouseleave="onMouseLeave">
     <!-- container：统一包裹 -->
     <div class="scrollbar__container">
       <!-- wrap -->
@@ -37,8 +37,8 @@ interface Props {
   height?: string | number;
   // 滚动条最大高度
   maxHeight?: string | number;
-  // 是否占据空间
-  inset?: boolean;
+  // 是否占据空间，可选值：true(同时水平垂直) | 'horizontal' | 'vertical'
+  inset?: boolean | 'horizontal' | 'vertical';
   // 是否隐藏滚动条
   hide?: boolean;
 }
@@ -119,9 +119,13 @@ const wrapStyle = computed<CSSProperties>(() => {
   if (props.maxHeight) style.maxHeight = addCssUnit(props.maxHeight);
 
   if (props.inset) {
-    showVertical.value && (style.paddingRight = `${BAR_TOTAL}px`);
+    if (props.inset === true || props.inset === 'vertical') {
+      style.paddingRight = `${BAR_TOTAL}px`;
+    }
 
-    showHorizontal.value && (style.paddingBottom = `${BAR_TOTAL}px`);
+    if (props.inset === true || props.inset === 'horizontal') {
+      style.paddingBottom = `${BAR_TOTAL}px`;
+    }
   }
 
   return style;
