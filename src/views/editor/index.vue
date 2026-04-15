@@ -25,32 +25,44 @@
 
 <script setup lang="ts">
 import type { EditorFile } from './types';
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, reactive, ref, watch, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import BEditor from '@/components/BEditor/index.vue';
 import BPanelSplitter from '@/components/BPanelSplitter/index.vue';
+import { native } from '@/shared/platform';
 import { recentFilesStorage } from '@/shared/storage';
+import { useTabsStore } from '@/stores/tabs';
 import AuxiliarySidebar from './components/AuxiliarySidebar.vue';
 import ShortcutsHelp from './components/ShortcutsHelp.vue';
+import { useAutoSave } from './hooks/useAutoSave';
 
 const route = useRoute();
 
+const tabsStore = useTabsStore();
+
 const fileId = computed(() => (route.params.id || '') as string);
-
+// 编辑器文件状态
 const fileState = ref<EditorFile>({ id: '', name: '', content: '', ext: '', path: null });
-
+// 编辑器视图状态
 const viewState = reactive({ mode: 'rich', showOutline: true });
 
 const sidebarState = ref({ visible: false, width: 300 });
 
 const visible = reactive({ shortcuts: false });
 
+const { pause, resume } = useAutoSave(fileState);
+
 async function loadFileState() {
-  if (!fileId.value) return;
+  pause();
 
   const stored = await recentFilesStorage.getRecentFile(fileId.value);
+  fileState.value = stored || { id: fileId.value, name: '', content: '', ext: '', path: null };
 
-  stored && (fileState.value = stored);
+  fileState.value.path ? native.watchFile(fileState.value.path) : native.unwatchFile();
+
+  tabsStore.addTab({ id: fileId.value, path: route.fullPath, title: fileState.value.name || '未命名文件' });
+
+  nextTick(resume);
 }
 
 watch(fileId, () => loadFileState(), { immediate: true });
