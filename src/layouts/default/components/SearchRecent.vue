@@ -1,8 +1,8 @@
 <template>
-  <BModal v-model:open="visible" :width="560" :main-style="{ padding: '16px' }">
+  <BModal v-model:open="visible" :mask-closable="true" :width="560" :main-style="{ padding: '16px' }">
     <div class="search-recent">
       <div ref="inputRef" class="search-recent-toolbar">
-        <AInput ref="" v-model:value="keyword" placeholder="搜索最近文件" @keydown.esc.prevent="handleClose" />
+        <AInput v-model:value="keyword" placeholder="搜索最近文件" @keydown.esc.prevent="handleClose" />
       </div>
 
       <BScrollbar :max-height="420" inset>
@@ -22,9 +22,9 @@
               <span v-else class="search-recent-item-path is-unsaved">未保存文件</span>
             </div>
 
-            <button class="search-recent-item-delete" @click.stop="handleRemove(file.id)">
+            <div class="search-recent-item-delete" @click.stop="handleRemove(file.id)">
               <Icon icon="ic:round-close" width="16" height="16" />
-            </button>
+            </div>
           </button>
         </div>
 
@@ -52,7 +52,7 @@ const inputRef = ref<HTMLElement | null>(null);
 
 const activeId = computed<string>(() => (route.name === 'editor' ? (route.params.id as string) || '' : ''));
 
-const recqentFiles = ref<StoredFile[]>([]);
+const recentFiles = ref<StoredFile[]>([]);
 
 function getFileLabel(file: Pick<EditorFile, 'name' | 'content'>): string {
   const content = file.content.replace(/^\s*---[\s\S]*?---\s*\n?/, '');
@@ -61,19 +61,29 @@ function getFileLabel(file: Pick<EditorFile, 'name' | 'content'>): string {
   return match?.[1]?.trim() || file.name || '未命名';
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function createSearchRegExp(input: string): RegExp {
+  return new RegExp(escapeRegExp(input), 'i');
+}
+
 const filteredFiles = computed<StoredFile[]>(() => {
-  const term = keyword.value.trim().toLowerCase();
+  const term = keyword.value.trim();
 
-  if (!term) return recqentFiles.value;
+  if (!term) return recentFiles.value;
 
-  return recqentFiles.value.filter((file) => {
-    const label = getFileLabel(file).toLowerCase();
+  const searchRegExp = createSearchRegExp(term);
 
-    const name = (file.name || '').toLowerCase();
-    const path = (file.path || '').toLowerCase();
-    const content = (file.content || '').toLowerCase();
+  return recentFiles.value.filter((file) => {
+    const label = getFileLabel(file);
 
-    return label.includes(term) || name.includes(term) || path.includes(term) || content.includes(term);
+    const name = file.name || '';
+    const path = file.path || '';
+    const content = file.content || '';
+
+    return searchRegExp.test(label) || searchRegExp.test(name) || searchRegExp.test(path) || searchRegExp.test(content);
   });
 });
 
@@ -107,7 +117,7 @@ async function handleSelect(file: StoredFile): Promise<void> {
 
 async function handleRemove(id: string): Promise<void> {
   await recentFilesStorage.removeRecentFile(id);
-  recqentFiles.value = recqentFiles.value.filter((file) => file.id !== id);
+  recentFiles.value = recentFiles.value.filter((file) => file.id !== id);
 }
 
 watch(visible, (value) => {
@@ -118,7 +128,7 @@ watch(visible, (value) => {
 
   focusInput();
 
-  recentFilesStorage.getAllRecentFiles().then((files) => (recqentFiles.value = files));
+  recentFilesStorage.getAllRecentFiles().then((files) => (recentFiles.value = files));
 });
 </script>
 
