@@ -6,6 +6,7 @@ export const EditorShortcuts = {
   FILE_SAVE_AS: 'Ctrl+Shift+S',
   FILE_DUPLICATE: 'Ctrl+Alt+D',
   FILE_RENAME: 'F2',
+  FILE_RECENT: 'Ctrl+R',
 
   // 编辑操作
   EDIT_UNDO: 'Ctrl+Z',
