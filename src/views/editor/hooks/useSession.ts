@@ -41,6 +41,7 @@ export function useSession(fileId: Ref<string>) {
   let loadVersion = 0;
 
   function updateTab() {
+    console.log('🚀 ~ updateTab ~ fileId.value:', fileId.value);
     if (!fileId.value) return;
 
     tabsStore.addTab({ id: fileId.value, path: route.fullPath, title: currentTitle.value });
@@ -131,32 +132,63 @@ export function useSession(fileId: Ref<string>) {
     await router.push({ name: 'editor', params: { id: nextId } });
   }
 
+  /**
+   * 加载文件状态
+   *
+   * 该函数负责从存储中加载指定文件的状态，并处理并发加载问题。
+   * 使用版本号机制确保只有最新的加载请求会生效，避免旧的加载请求覆盖新的数据。
+   *
+   * 执行流程：
+   * 1. 增加版本号，标记当前加载请求
+   * 2. 暂停自动保存，避免在加载过程中触发保存
+   * 3. 从存储中获取文件数据
+   * 4. 检查版本号，如果版本不匹配则终止（说明有更新的加载请求）
+   * 5. 更新文件状态
+   * 6. 切换文件监听器到新文件
+   * 7. 等待 Vue 更新周期完成
+   * 8. 恢复自动保存
+   */
   async function loadFileState(): Promise<void> {
+    // 增加版本号，标记当前加载请求
     const currentVersion = ++loadVersion;
+
+    // 暂停自动保存，避免在加载过程中触发保存
     pause();
+
+    // 记录当前文件ID，避免在异步操作过程中文件ID发生变化
     const currentFileId = fileId.value;
+
+    // 从存储中获取文件数据
     const stored = await recentFilesStorage.getRecentFile(currentFileId);
 
+    // 检查版本号，如果版本不匹配则终止（说明有更新的加载请求）
     if (currentVersion !== loadVersion) return;
 
+    // 更新文件状态，如果存储中有数据则使用存储的数据，否则创建空文件
     fileState.value = stored ? { ...stored } : createEmptyFile(currentFileId);
 
+    // 再次检查版本号
     if (currentVersion !== loadVersion) return;
 
+    // 切换文件监听器到新文件
     await switchWatchedFile(fileState.value.path);
 
+    // 检查版本号
     if (currentVersion !== loadVersion) return;
 
+    // 等待 Vue 更新周期完成
     await nextTick();
 
+    // 最后一次检查版本号
     if (currentVersion !== loadVersion) return;
 
+    // 恢复自动保存
     resume();
   }
 
   watch(fileId, () => loadFileState(), { immediate: true });
 
-  watch([fileId, () => route.fullPath, () => fileState.value.name], updateTab, { immediate: true });
+  watch([fileId, () => route.fullPath, () => fileState.value.name], updateTab);
 
   async function dispose(): Promise<void> {
     await clearWatchedFile();
