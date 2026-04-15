@@ -1,8 +1,13 @@
 /* eslint-disable class-methods-use-this */
-import type { Native, OpenFileOptions, SaveFileOptions, FileChangeEvent } from './types';
+import type { Native, OpenFileOptions, SaveFileOptions, FileChangeEvent, ReadFileResult } from './types';
 import { getElectronAPI } from '../electron-api';
 
 export class ElectronNative implements Native {
+  async readFile(filePath: string): Promise<ReadFileResult> {
+    const result = await getElectronAPI().readFile(filePath);
+    return { content: result.content, name: result.fileName, ext: result.ext };
+  }
+
   async openFile(options?: OpenFileOptions) {
     const filters = options?.filters || [{ name: 'Markdown', extensions: ['md', 'markdown'] }];
     const result = await getElectronAPI().openFile({ filters });

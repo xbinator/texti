@@ -1,7 +1,11 @@
 /* eslint-disable class-methods-use-this */
-import type { Native, OpenFileOptions, SaveFileOptions, File, FileChangeEvent } from './types';
+import type { Native, OpenFileOptions, SaveFileOptions, File, FileChangeEvent, ReadFileResult } from './types';
 
 export class WebNative implements Native {
+  async readFile(): Promise<ReadFileResult> {
+    throw new Error('Web platform does not support reading files by path');
+  }
+
   async openFile(options?: OpenFileOptions) {
     return new Promise<File>((resolve) => {
       const input = document.createElement('input');

@@ -7,13 +7,15 @@ export type OpenFileOptions = ElectronOpenFileOptions;
 export type SaveFileOptions = ElectronSaveFileOptions;
 
 export interface File {
-  // 文件路径
   path: string | null;
-  // 文件内容
   content: string;
-  // 文件名
   name: string;
-  // 文件扩展名
+  ext: string;
+}
+
+export interface ReadFileResult {
+  content: string;
+  name: string;
   ext: string;
 }
 
@@ -24,6 +26,8 @@ export interface FileChangeEvent {
 }
 
 export interface Native {
+  readFile(path: string): Promise<ReadFileResult>;
+
   openFile(options?: OpenFileOptions): Promise<File>;
 
   saveFile(content: string, path?: string, options?: SaveFileOptions): Promise<string | null>;
