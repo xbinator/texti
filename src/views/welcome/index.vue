@@ -168,6 +168,7 @@ async function handleDrop(e: DragEvent): Promise<void> {
   width: 100%;
   height: 100%;
   background-color: var(--bg-primary);
+  border-radius: 8px;
 }
 
 .drag-overlay {
