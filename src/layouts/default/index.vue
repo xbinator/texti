@@ -10,30 +10,28 @@
       <div v-if="platform === 'mac' && !isFullScreen" class="b-layout-header__mac-spacer"></div>
 
       <div class="b-layout-header__content" :class="{ 'is-mac': platform === 'mac' }">
-        <div class="b-layout-header__teleport">
-          <div class="header-left">
-            <template v-if="!isMac()">
-              <!-- <BToolbar :title="'文件'" :options="toolbarFileOptions" />
-              <BToolbar :title="'编辑'" :options="toolbarEditOptions" />
+        <template v-if="!isMac()">
+          <div class="b-layout-header__left">
+            <BToolbar :title="'文件'" :options="toolbarFileOptions" />
+            <!--<BToolbar :title="'编辑'" :options="toolbarEditOptions" />
               <BToolbar :title="'视图'" show-selected-check :options="toolbarViewOptions" />
               <BToolbar :title="'帮助'" :options="toolbarHelpOptions" /> -->
-            </template>
           </div>
-        </div>
+          <!-- 分割线 -->
+          <div class="b-layout-header__divider"></div>
+        </template>
         <div class="b-layout-header__center">
           <HeaderTabs />
         </div>
-        <div class="b-layout-header__teleport">
-          <div class="header-right">
-            <!-- 辅助工具侧边栏切换按钮 -->
-            <BButton type="secondary" size="small" square>
-              <Icon icon="lucide:panel-right" width="16" height="16" />
-            </BButton>
+        <div class="b-layout-header__right">
+          <!-- 辅助工具侧边栏切换按钮 -->
+          <BButton type="secondary" size="small" square>
+            <Icon icon="lucide:panel-right" width="16" height="16" />
+          </BButton>
 
-            <BButton type="secondary" size="small" square @click="handleOpenSettings">
-              <Icon icon="lucide:settings" width="16" height="16" />
-            </BButton>
-          </div>
+          <BButton type="secondary" size="small" square @click="handleOpenSettings">
+            <Icon icon="lucide:settings" width="16" height="16" />
+          </BButton>
         </div>
       </div>
 
@@ -57,11 +55,13 @@
     <div class="b-layout__content">
       <RouterView />
     </div>
+
+    <SearchRecent v-model:visible="visible.searchRecent" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { useEventListener } from '@vueuse/core';
@@ -70,8 +70,14 @@ import BButton from '@/components/BButton/index.vue';
 import { getElectronAPI } from '@/shared/platform/electron-api';
 import { isMac } from '@/shared/platform/env';
 import HeaderTabs from './components/HeaderTabs.vue';
+import SearchRecent from './components/SearchRecent.vue';
+import { useFileActive } from './hooks/useFileActive';
 
 const router = useRouter();
+
+const visible = reactive({ searchRecent: false });
+
+const { toolbarFileOptions } = useFileActive(visible);
 
 function handleOpenSettings(): void {
   router.push('/settings');
@@ -189,32 +195,24 @@ useEventListener(window, 'resize', validateWindowState);
   background-color: var(--bg-hover);
 }
 
-.b-layout-header__teleport {
+.b-layout-header__left,
+.b-layout-header__right {
   display: flex;
+  gap: 4px;
   align-items: center;
   height: 100%;
-}
-
-.header-left {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 0 20px;
 
   &:empty {
     display: none;
   }
 }
 
+.b-layout-header__left {
+  padding-left: 20px;
+}
+
 :deep(.b-dropdown-menu-item.is-active) {
   color: var(--color-primary);
   background-color: var(--color-primary-bg);
-}
-
-.header-right {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  padding-right: 12px;
 }
 </style>

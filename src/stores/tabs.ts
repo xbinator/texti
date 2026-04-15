@@ -56,9 +56,8 @@ export const useTabsStore = defineStore('tabs', {
   actions: {
     // 添加标签页
     addTab(tab: Tab): void {
-      const existingIndex = this.tabs.findIndex((t) => t.id === tab.id);
-
-      if (existingIndex === -1) this.tabs.push(tab);
+      const index = this.tabs.findIndex((t) => t.id === tab.id);
+      index === -1 && this.tabs.push(tab);
 
       this.activeId = tab.id;
 

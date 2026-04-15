@@ -10,7 +10,7 @@
     >
       <div class="header-tab__title">{{ tab.title }}</div>
 
-      <button class="header-tab__close" @click.stop="tabsStore.removeTab(tab.id)">
+      <button class="header-tab__close" @click.stop="handleCloseTab(tab.id)">
         <Icon icon="ic:round-close" width="12" height="12" />
       </button>
     </div>
@@ -36,6 +36,17 @@ async function handleClickTab(id: string, path: string): Promise<void> {
   }
 }
 
+async function handleCloseTab(id: string): Promise<void> {
+  const isActive = tabsStore.activeId === id;
+  const firstTab = tabsStore.tabs[0];
+
+  tabsStore.removeTab(id);
+
+  if (isActive && firstTab && firstTab.id !== id) {
+    await router.push(firstTab.path);
+  }
+}
+
 function handleWheel(e: WheelEvent) {
   if (scrollContainer.value) {
     if (e.deltaY !== 0) {
@@ -53,7 +64,6 @@ function handleWheel(e: WheelEvent) {
   align-items: center;
   width: 100%;
   height: 100%;
-  padding: 0 8px;
   overflow: auto hidden;
 
   /* Hide scrollbar for Chrome, Safari and Opera */
