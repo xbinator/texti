@@ -14,8 +14,8 @@ type ViewMode = 'rich' | 'source';
 
 const nanoid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz_', 8);
 
-function createEmptyFile(id: string): EditorFile {
-  return { id, name: '', content: '', ext: 'md', path: null };
+function createEmptyFile(id: string, name = ''): EditorFile {
+  return { id, name, content: '', ext: 'md', path: null };
 }
 
 function parseFileName(filePath: string): { name: string; ext: string } {
@@ -36,12 +36,11 @@ export function useSession(fileId: Ref<string>) {
 
   const { pause, resume } = useAutoSave(fileState);
 
-  const currentTitle = computed(() => fileState.value.name || '未命名文件');
+  const currentTitle = computed(() => fileState.value.name || '未命名');
 
   let loadVersion = 0;
 
   function updateTab() {
-    console.log('🚀 ~ updateTab ~ fileId.value:', fileId.value);
     if (!fileId.value) return;
 
     tabsStore.addTab({ id: fileId.value, path: route.fullPath, title: currentTitle.value });
@@ -133,6 +132,24 @@ export function useSession(fileId: Ref<string>) {
   }
 
   /**
+   * 初始化文件状态
+   *
+   * 如果存储中有文件数据，则使用存储的数据；否则创建空文件并添加到存储中
+   *
+   * @param stored - 存储中的文件数据
+   * @param currentFileId - 当前文件ID
+   */
+  function initializeFileState(stored: EditorFile | null, currentFileId: string): void {
+    if (stored) {
+      fileState.value = { ...stored };
+    } else {
+      fileState.value = createEmptyFile(currentFileId, '未命名');
+
+      recentFilesStorage.addRecentFile({ ...fileState.value });
+    }
+  }
+
+  /**
    * 加载文件状态
    *
    * 该函数负责从存储中加载指定文件的状态，并处理并发加载问题。
@@ -143,7 +160,7 @@ export function useSession(fileId: Ref<string>) {
    * 2. 暂停自动保存，避免在加载过程中触发保存
    * 3. 从存储中获取文件数据
    * 4. 检查版本号，如果版本不匹配则终止（说明有更新的加载请求）
-   * 5. 更新文件状态
+   * 5. 初始化文件状态
    * 6. 切换文件监听器到新文件
    * 7. 等待 Vue 更新周期完成
    * 8. 恢复自动保存
@@ -151,7 +168,6 @@ export function useSession(fileId: Ref<string>) {
   async function loadFileState(): Promise<void> {
     // 增加版本号，标记当前加载请求
     const currentVersion = ++loadVersion;
-
     // 暂停自动保存，避免在加载过程中触发保存
     pause();
 
@@ -160,28 +176,24 @@ export function useSession(fileId: Ref<string>) {
 
     // 从存储中获取文件数据
     const stored = await recentFilesStorage.getRecentFile(currentFileId);
-
     // 检查版本号，如果版本不匹配则终止（说明有更新的加载请求）
     if (currentVersion !== loadVersion) return;
 
-    // 更新文件状态，如果存储中有数据则使用存储的数据，否则创建空文件
-    fileState.value = stored ? { ...stored } : createEmptyFile(currentFileId);
+    // 初始化文件状态
+    initializeFileState(stored, currentFileId);
 
     // 再次检查版本号
     if (currentVersion !== loadVersion) return;
-
     // 切换文件监听器到新文件
     await switchWatchedFile(fileState.value.path);
 
     // 检查版本号
     if (currentVersion !== loadVersion) return;
-
     // 等待 Vue 更新周期完成
     await nextTick();
 
     // 最后一次检查版本号
     if (currentVersion !== loadVersion) return;
-
     // 恢复自动保存
     resume();
   }

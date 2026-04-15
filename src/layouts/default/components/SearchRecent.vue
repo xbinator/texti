@@ -44,8 +44,11 @@ import BScrollbar from '@/components/BScrollbar/index.vue';
 import { native } from '@/shared/platform';
 import { recentFilesStorage, type StoredFile } from '@/shared/storage';
 
+const emit = defineEmits(['delete']);
+
 const route = useRoute();
 const router = useRouter();
+
 const visible = defineModel<boolean>('visible', { default: false });
 const keyword = ref('');
 const inputRef = ref<HTMLElement | null>(null);
@@ -117,7 +120,10 @@ async function handleSelect(file: StoredFile): Promise<void> {
 
 async function handleRemove(id: string): Promise<void> {
   await recentFilesStorage.removeRecentFile(id);
+
   recentFiles.value = recentFiles.value.filter((file) => file.id !== id);
+
+  emit('delete', id);
 }
 
 watch(visible, (value) => {
