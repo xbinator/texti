@@ -6,8 +6,6 @@ localforage.config({ name: 'Tibis', storeName: 'files', description: 'Tibis ç¬”è
 
 const RECENT_FILES_KEY = 'recent_files';
 
-const CURRENT_FILE_ID_KEY = 'current_file_id';
-
 const MAX_RECENT_FILES = 100;
 
 let electronLocalMigrationPromise: Promise<void> | null = null;
@@ -21,10 +19,6 @@ async function setElectronStoreValue(key: string, value: unknown): Promise<void>
   await getElectronAPI().storeSet(key, value);
 }
 
-async function deleteElectronStoreValue(key: string): Promise<void> {
-  await getElectronAPI().storeDelete(key);
-}
-
 async function ensureElectronLocalMigration(): Promise<void> {
   if (!hasElectronAPI()) return;
 
@@ -35,12 +29,6 @@ async function ensureElectronLocalMigration(): Promise<void> {
     ]);
     if ((!storeFiles || storeFiles.length === 0) && localFiles?.length) {
       await setElectronStoreValue(RECENT_FILES_KEY, localFiles.slice(0, MAX_RECENT_FILES));
-    }
-
-    const storeCurrentId = await getElectronStoreValue<string>(CURRENT_FILE_ID_KEY);
-    const localCurrentId = await localforage.getItem<string>(CURRENT_FILE_ID_KEY);
-    if (!storeCurrentId && localCurrentId) {
-      await setElectronStoreValue(CURRENT_FILE_ID_KEY, localCurrentId);
     }
   })();
 
@@ -114,36 +102,9 @@ export const recentFilesStorage = {
     await localforage.setItem(RECENT_FILES_KEY, []);
   },
 
-  async setCurrentFile(id: string): Promise<void> {
-    if (hasElectronAPI()) {
-      await setElectronStoreValue(CURRENT_FILE_ID_KEY, id);
-      return;
-    }
-
-    await localforage.setItem(CURRENT_FILE_ID_KEY, id);
-  },
-
-  async getCurrentFileId(): Promise<string | null> {
-    if (hasElectronAPI()) {
-      await ensureElectronLocalMigration();
-      return getElectronStoreValue<string>(CURRENT_FILE_ID_KEY);
-    }
-
-    return localforage.getItem<string>(CURRENT_FILE_ID_KEY);
-  },
-
-  async clearCurrentFile(): Promise<void> {
-    if (hasElectronAPI()) {
-      await deleteElectronStoreValue(CURRENT_FILE_ID_KEY);
-      return;
-    }
-
-    await localforage.removeItem(CURRENT_FILE_ID_KEY);
-  },
-
   async clear(): Promise<void> {
     if (hasElectronAPI()) {
-      await Promise.all([setElectronStoreValue(RECENT_FILES_KEY, []), deleteElectronStoreValue(CURRENT_FILE_ID_KEY)]);
+      await setElectronStoreValue(RECENT_FILES_KEY, []);
       return;
     }
 
