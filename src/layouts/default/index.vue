@@ -58,7 +58,7 @@
       </div>
 
       <BPanelSplitter v-show="sidebarState.visible" v-model:size="sidebarState.width" position="left" :min-width="200" :max-width="500">
-        <AuxiliarySidebar />
+        <BChatSidebar />
       </BPanelSplitter>
     </div>
 
@@ -74,10 +74,10 @@ import { useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { useEventListener } from '@vueuse/core';
 import BButton from '@/components/BButton/index.vue';
+import BChatSidebar from '@/components/BChatSidebar/index.vue';
 import BSearchRecent from '@/components/BSearchRecent/index.vue';
 import { getElectronAPI } from '@/shared/platform/electron-api';
 import { isMac } from '@/shared/platform/env';
-import AuxiliarySidebar from './components/AuxiliarySidebar.vue';
 import HeaderTabs from './components/HeaderTabs.vue';
 import ShortcutsHelp from './components/ShortcutsHelp.vue';
 import { useEditActive } from './hooks/useEditActive';
