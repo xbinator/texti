@@ -22,9 +22,7 @@
 
 <script setup lang="ts">
 import type { ToolbarOption, ToolbarOptions } from './types';
-import { watch } from 'vue';
 import { Icon } from '@iconify/vue';
-import { useShortcuts } from '@/hooks/useShortcuts';
 import { getShortcutParts } from '@/utils/shortcut';
 
 export interface Props {
@@ -38,41 +36,6 @@ const props = withDefaults(defineProps<Props>(), {
   showSelectedCheck: false,
   options: () => []
 });
-
-const { registerShortcuts } = useShortcuts();
-
-function setupShortcuts() {
-  const shortcuts = [];
-
-  for (let i = 0; i < props.options.length; i++) {
-    const option = props.options[i];
-
-    if (option.type === 'divider') {
-      continue;
-    }
-
-    const toolbarOption = option as ToolbarOption;
-    const shouldBindShortcut = toolbarOption.enableShortcut !== false;
-    const isEnabled = toolbarOption.disabled !== true;
-
-    if (shouldBindShortcut && !!toolbarOption.shortcut && !!toolbarOption.onClick && isEnabled) {
-      shortcuts.push({ key: toolbarOption.shortcut!, handler: () => toolbarOption.onClick!(), enabled: true, preventDefault: true });
-    }
-  }
-
-  return registerShortcuts(shortcuts);
-}
-
-let cleanup: (() => void) | undefined;
-
-watch(
-  () => props.options,
-  () => {
-    cleanup?.();
-    cleanup = setupShortcuts();
-  },
-  { immediate: true, deep: true }
-);
 </script>
 
 <style lang="less" scoped>
