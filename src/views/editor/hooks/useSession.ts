@@ -4,22 +4,17 @@ import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { customAlphabet } from 'nanoid';
 import { native } from '@/shared/platform';
-import type { FileChangeEvent } from '@/shared/platform/native/types';
 import { useFilesStore } from '@/stores/files';
 import { useTabsStore } from '@/stores/tabs';
 import { Modal } from '@/utils/modal';
+import { getDefaultSavePath, replaceFileName } from '../utils/filePath';
 import { useAutoSave } from './useAutoSave';
+import { useFileState } from './useFileState';
 import { useFileWatcher } from './useFileWatcher';
 
 type ViewMode = 'rich' | 'source';
 
 const nanoid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz_', 8);
-
-function parseFileName(filePath: string): { name: string; ext: string } {
-  const fileName = filePath.split(/[/\\]/).pop() ?? '';
-  const [, name = '', ext = ''] = /^(.+?)(?:\.([^.]+))?$/.exec(fileName) ?? [];
-  return { name, ext };
-}
 
 export function useSession(fileId: Ref<string>) {
   const route = useRoute();
@@ -32,23 +27,19 @@ export function useSession(fileId: Ref<string>) {
   const fileState = ref<EditorFile>({ id: '', name: '', content: '', ext: 'md', path: null });
   const viewState = reactive<{ mode: ViewMode; showOutline: boolean }>({ mode: 'rich', showOutline: true });
 
-  const { pause, resume } = useAutoSave(fileState);
+  const autoSave = useAutoSave(fileState);
 
   const currentTitle = computed(() => fileState.value.name || '未命名');
-
-  const savedContent = ref<string>('');
+  // 文件状态相关的存储同步、保存收尾和外部文件回填都收口到这里，useSession 只做流程编排。
+  const fileStateActions = useFileState({
+    fileId,
+    fileState,
+    switchWatchedFile,
+    autoSave,
+    finishReload
+  });
+  // 用版本号丢弃过期的异步加载结果，避免快速切换标签时旧请求覆盖新文件状态。
   let loadVersion = 0;
-
-  watch(
-    () => fileState.value.content,
-    (content) => {
-      if (content !== savedContent.value) {
-        tabsStore.setDirty(fileId.value);
-      } else {
-        tabsStore.clearDirty(fileId.value);
-      }
-    }
-  );
 
   setIsDirty(() => tabsStore.isDirty(fileId.value));
 
@@ -58,87 +49,36 @@ export function useSession(fileId: Ref<string>) {
     tabsStore.addTab({ id: fileId.value, path: route.fullPath, title: currentTitle.value });
   }
 
-  function getDefaultSavePath(): string {
-    const name = fileState.value.name || '未命名';
-    const ext = fileState.value.ext || 'md';
-    return `${name}.${ext}`;
-  }
-
-  async function ensureStoredFile(): Promise<void> {
-    const stored = await filesStore.getFileById(fileState.value.id);
-    if (stored) return;
-
-    await filesStore.addFile({ ...fileState.value });
-  }
-
-  async function persistCurrentFile(): Promise<void> {
-    const current = { ...fileState.value };
-    const stored = await filesStore.getFileById(current.id);
-
-    if (stored) {
-      await filesStore.updateFile(current.id, current);
-    } else {
-      await filesStore.addFile(current);
-    }
-  }
-
-  function handleExternalFileChange(event: FileChangeEvent): void {
-    if (event.type !== 'change' || event.content === undefined) return;
-
-    pause();
-    fileState.value.content = event.content;
-    savedContent.value = event.content;
-    tabsStore.clearDirty(fileId.value);
-    persistCurrentFile();
-    finishReload();
-    resume();
-  }
-
-  setOnFileChanged(handleExternalFileChange);
-
-  async function finalizeSave(savedPath: string): Promise<void> {
-    const { name, ext } = parseFileName(savedPath);
-
-    fileState.value.path = savedPath;
-    fileState.value.name = name || fileState.value.name;
-    fileState.value.ext = ext || fileState.value.ext || 'md';
-    savedContent.value = fileState.value.content;
-    tabsStore.clearDirty(fileId.value);
-
-    await persistCurrentFile();
-    await switchWatchedFile(savedPath);
-  }
+  setOnFileChanged(fileStateActions.handleExternalFileChange);
 
   async function onSave(): Promise<void> {
-    await ensureStoredFile();
+    await fileStateActions.ensureStoredFile();
 
     if (fileState.value.path) {
       await native.writeFile(fileState.value.path, fileState.value.content);
-      savedContent.value = fileState.value.content;
-      tabsStore.clearDirty(fileId.value);
-      await persistCurrentFile();
+      await fileStateActions.markCurrentContentSaved();
       return;
     }
 
-    const savedPath = await native.saveFile(fileState.value.content, undefined, { defaultPath: getDefaultSavePath() });
+    const savedPath = await native.saveFile(fileState.value.content, undefined, { defaultPath: getDefaultSavePath(fileState.value) });
 
     if (!savedPath) return;
 
-    await finalizeSave(savedPath);
+    await fileStateActions.finalizeSave(savedPath);
   }
 
   async function onSaveAs(): Promise<void> {
-    await ensureStoredFile();
+    await fileStateActions.ensureStoredFile();
 
-    const savedPath = await native.saveFile(fileState.value.content, undefined, { defaultPath: getDefaultSavePath() });
+    const savedPath = await native.saveFile(fileState.value.content, undefined, { defaultPath: getDefaultSavePath(fileState.value) });
 
     if (!savedPath) return;
 
-    await finalizeSave(savedPath);
+    await fileStateActions.finalizeSave(savedPath);
   }
 
   async function onRename(): Promise<void> {
-    await ensureStoredFile();
+    await fileStateActions.ensureStoredFile();
 
     const [cancelled, newName] = await Modal.input('重命名', { defaultValue: fileState.value.name, placeholder: '请输入文件名' });
 
@@ -148,8 +88,16 @@ export function useSession(fileId: Ref<string>) {
       return;
     }
 
+    if (fileState.value.path) {
+      const nextPath = replaceFileName(fileState.value.path, normalizedName, fileState.value.ext);
+
+      await native.renameFile(fileState.value.path, nextPath);
+      fileState.value.path = nextPath;
+      await switchWatchedFile(nextPath);
+    }
+
     fileState.value.name = normalizedName;
-    await persistCurrentFile();
+    await fileStateActions.persistCurrentFile();
   }
 
   async function onDuplicate(): Promise<void> {
@@ -161,72 +109,41 @@ export function useSession(fileId: Ref<string>) {
     await router.push({ name: 'editor', params: { id: nextId } });
   }
 
-  /**
-   * 初始化文件状态
-   *
-   * 如果存储中有文件数据，则使用存储的数据；否则创建空文件并添加到存储中
-   *
-   * @param stored - 存储中的文件数据
-   * @param currentFileId - 当前文件ID
-   */
-  function initializeFileState(stored: EditorFile | undefined, currentFileId: string): void {
-    if (stored) {
-      fileState.value = { ...stored };
-    } else {
-      fileState.value = { id: currentFileId, name: '未命名', content: '', ext: 'md', path: null };
-
-      filesStore.addFile({ ...fileState.value });
-    }
-    savedContent.value = fileState.value.content;
-    tabsStore.clearDirty(currentFileId);
-  }
-
-  /**
-   * 加载文件状态
-   *
-   * 该函数负责从存储中加载指定文件的状态，并处理并发加载问题。
-   * 使用版本号机制确保只有最新的加载请求会生效，避免旧的加载请求覆盖新的数据。
-   *
-   * 执行流程：
-   * 1. 增加版本号，标记当前加载请求
-   * 2. 暂停自动保存，避免在加载过程中触发保存
-   * 3. 从存储中获取文件数据
-   * 4. 检查版本号，如果版本不匹配则终止（说明有更新的加载请求）
-   * 5. 初始化文件状态
-   * 6. 切换文件监听器到新文件
-   * 7. 等待 Vue 更新周期完成
-   * 8. 恢复自动保存
-   */
   async function loadFileState(): Promise<void> {
     // 增加版本号，标记当前加载请求
     const currentVersion = ++loadVersion;
     // 暂停自动保存，避免在加载过程中触发保存
-    pause();
+    autoSave.pause();
+    // 页面切换后的初始化回填不应该被视为用户修改。
+    fileStateActions.pauseDirtyTracking();
 
-    // 记录当前文件ID，避免在异步操作过程中文件ID发生变化
-    const currentFileId = fileId.value;
+    try {
+      // 记录当前文件ID，避免在异步操作过程中文件ID发生变化
+      const currentFileId = fileId.value;
 
-    const stored = await filesStore.getFileById(currentFileId);
-    // 检查版本号，如果版本不匹配则终止（说明有更新的加载请求）
-    if (currentVersion !== loadVersion) return;
+      const stored = await filesStore.getFileById(currentFileId);
+      // 检查版本号，如果版本不匹配则终止（说明有更新的加载请求）
+      if (currentVersion !== loadVersion) return;
 
-    // 初始化文件状态
-    initializeFileState(stored, currentFileId);
+      // 初始化文件状态
+      await fileStateActions.initializeFileState(stored, currentFileId);
 
-    // 再次检查版本号
-    if (currentVersion !== loadVersion) return;
-    // 切换文件监听器到新文件
-    await switchWatchedFile(fileState.value.path);
+      // 再次检查版本号
+      if (currentVersion !== loadVersion) return;
+      // 切换文件监听器到新文件
+      await switchWatchedFile(fileState.value.path);
 
-    // 检查版本号
-    if (currentVersion !== loadVersion) return;
-    // 等待 Vue 更新周期完成
-    await nextTick();
-
-    // 最后一次检查版本号
-    if (currentVersion !== loadVersion) return;
-    // 恢复自动保存
-    resume();
+      // 检查版本号
+      if (currentVersion !== loadVersion) return;
+      // 等待 Vue 更新周期完成
+      await nextTick();
+    } finally {
+      // 只有当前请求仍然有效时才恢复跟踪，避免旧请求提前解除新请求的保护。
+      if (currentVersion === loadVersion) {
+        fileStateActions.resumeDirtyTracking();
+        autoSave.resume();
+      }
+    }
   }
 
   watch(fileId, () => loadFileState(), { immediate: true });

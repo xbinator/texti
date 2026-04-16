@@ -94,7 +94,14 @@ export function useFileActive(visible: UseFileActiveOptions['visible']) {
   ]);
 
   const cleanup = registerShortcuts(toolbarFileOptions.value);
-  onUnmounted(cleanup);
+  const unregisterRecent = emitter.on('file:recent', () => {
+    visible.searchRecent = true;
+  });
+
+  onUnmounted(() => {
+    cleanup();
+    unregisterRecent();
+  });
 
   return { toolbarFileOptions };
 }

@@ -21,8 +21,13 @@ const scrollContainer = ref<HTMLElement | null>(null);
 const route = useRoute();
 const router = useRouter();
 
+interface HeaderTabItem {
+  id: string;
+  path: string;
+}
+
 // 判断标签页是否为当前激活状态
-function isActiveTab(tab: { path: string }) {
+function isActiveTab(tab: { path: string }): boolean {
   // 从路由路径中提取文件 ID，与标签页 ID 比较
   return tab.path === route.path;
 }
@@ -33,14 +38,15 @@ async function handleClickTab(_id: string, path: string): Promise<void> {
   }
 }
 
-async function handleCloseTab(tab: { path: string; id: string }): Promise<void> {
+async function handleCloseTab(tab: HeaderTabItem): Promise<void> {
   const isActive = isActiveTab(tab);
-  const firstTab = tabsStore.tabs[0];
+  const closingIndex = tabsStore.tabs.findIndex((item) => item.id === tab.id);
+  const nextTab = closingIndex === -1 ? null : tabsStore.tabs[closingIndex + 1] ?? tabsStore.tabs[closingIndex - 1] ?? null;
 
   tabsStore.removeTab(tab.id);
 
-  if (isActive && firstTab && firstTab.path !== tab.path) {
-    await router.push(firstTab.path);
+  if (isActive && nextTab) {
+    await router.push(nextTab.path);
   } else if (tabsStore.tabs.length === 0) {
     // 最后一个标签页被关闭时，跳转到欢迎页
     await router.push('/welcome');

@@ -15,6 +15,10 @@ export function registerFileHandlers(): void {
     await fs.promises.writeFile(filePath, content, 'utf-8');
   });
 
+  ipcMain.handle('fs:renameFile', async (_event, oldPath: string, newPath: string) => {
+    await fs.promises.rename(oldPath, newPath);
+  });
+
   ipcMain.handle('fs:watchFile', async (_event, filePath: string) => {
     await fileWatchService.watch(filePath);
   });
