@@ -34,7 +34,7 @@ import { useRouter } from 'vue-router';
 import { message } from 'ant-design-vue';
 import { nanoid } from 'nanoid';
 import BButton from '@/components/BButton/index.vue';
-import { useAgent } from '@/hooks/useAgent';
+import { useChat } from '@/hooks/useChat';
 import { useServiceModelStore } from '@/stores/service-model';
 import { Modal } from '@/utils/modal';
 import Container from './components/Container.vue';
@@ -56,7 +56,7 @@ const loading = ref(false);
 const serviceModelStore = useServiceModelStore();
 
 // 初始化Agent，处理AI对话流的各种回调
-const { agent } = useAgent({
+const { agent } = useChat({
   // 接收到流式数据块时的处理
   onChunk: (content: string) => {
     const lastMessage = messages.value[messages.value.length - 1];
