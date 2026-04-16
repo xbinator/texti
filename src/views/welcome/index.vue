@@ -144,7 +144,7 @@ async function handleDrop(e: DragEvent): Promise<void> {
     const id = nanoid();
     const name = file.name.split('.').slice(0, -1).join('.') || file.name;
 
-    await filesStore.addFile({ id, path: filePath || null, name, ext, content });
+    await filesStore.addFile({ id, path: filePath || null, name, ext, content, savedContent: content });
     router.push({ name: 'editor', params: { id } });
   } catch (error) {
     console.error('Failed to drop file:', error);

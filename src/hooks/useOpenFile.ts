@@ -10,11 +10,8 @@ export function useOpenFile() {
   const nanoid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz_', 8);
 
   async function openFile(file: StoredFile): Promise<void> {
-    if (file.path) {
-      const result = await native.readFile(file.path);
-      await filesStore.updateFile(file.id, { ...file, content: result.content });
-    }
-    router.push({ name: 'editor', params: { id: file.id } });
+    // 已存在于本地存储的文件应优先恢复草稿，避免重新打开时被磁盘旧内容覆盖。
+    await router.push({ name: 'editor', params: { id: file.id } });
   }
 
   async function openFileById(id: string): Promise<void> {
@@ -33,7 +30,7 @@ export function useOpenFile() {
     if (existingFile) {
       id = existingFile.id;
     } else {
-      await filesStore.addFile({ ...file, id });
+      await filesStore.addFile({ ...file, id, savedContent: file.content });
     }
 
     await router.push({ name: 'editor', params: { id } });
