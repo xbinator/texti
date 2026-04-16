@@ -4,7 +4,8 @@ import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { customAlphabet } from 'nanoid';
 import { native } from '@/shared/platform';
-import { recentFilesStorage } from '@/shared/storage';
+import type { FileChangeEvent } from '@/shared/platform/native/types';
+import { useFilesStore } from '@/stores/files';
 import { useTabsStore } from '@/stores/tabs';
 import { Modal } from '@/utils/modal';
 import { useAutoSave } from './useAutoSave';
@@ -13,10 +14,6 @@ import { useFileWatcher } from './useFileWatcher';
 type ViewMode = 'rich' | 'source';
 
 const nanoid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz_', 8);
-
-function createEmptyFile(id: string, name = ''): EditorFile {
-  return { id, name, content: '', ext: 'md', path: null };
-}
 
 function parseFileName(filePath: string): { name: string; ext: string } {
   const fileName = filePath.split(/[/\\]/).pop() ?? '';
@@ -29,16 +26,31 @@ export function useSession(fileId: Ref<string>) {
   const router = useRouter();
 
   const tabsStore = useTabsStore();
-  const { switchWatchedFile, clearWatchedFile } = useFileWatcher();
+  const filesStore = useFilesStore();
+  const { switchWatchedFile, clearWatchedFile, setOnFileChanged, setIsDirty, finishReload } = useFileWatcher();
 
-  const fileState = ref<EditorFile>(createEmptyFile(''));
+  const fileState = ref<EditorFile>({ id: '', name: '', content: '', ext: 'md', path: null });
   const viewState = reactive<{ mode: ViewMode; showOutline: boolean }>({ mode: 'rich', showOutline: true });
 
   const { pause, resume } = useAutoSave(fileState);
 
   const currentTitle = computed(() => fileState.value.name || '未命名');
 
+  const savedContent = ref<string>('');
   let loadVersion = 0;
+
+  watch(
+    () => fileState.value.content,
+    (content) => {
+      if (content !== savedContent.value) {
+        tabsStore.setDirty(fileId.value);
+      } else {
+        tabsStore.clearDirty(fileId.value);
+      }
+    }
+  );
+
+  setIsDirty(() => tabsStore.isDirty(fileId.value));
 
   function updateTab() {
     if (!fileId.value) return;
@@ -53,22 +65,36 @@ export function useSession(fileId: Ref<string>) {
   }
 
   async function ensureStoredFile(): Promise<void> {
-    const stored = await recentFilesStorage.getRecentFile(fileState.value.id);
+    const stored = await filesStore.getFileById(fileState.value.id);
     if (stored) return;
 
-    await recentFilesStorage.addRecentFile({ ...fileState.value });
+    await filesStore.addFile({ ...fileState.value });
   }
 
   async function persistCurrentFile(): Promise<void> {
     const current = { ...fileState.value };
-    const stored = await recentFilesStorage.getRecentFile(current.id);
+    const stored = await filesStore.getFileById(current.id);
 
     if (stored) {
-      await recentFilesStorage.updateRecentFile(current.id, current);
+      await filesStore.updateFile(current.id, current);
     } else {
-      await recentFilesStorage.addRecentFile(current);
+      await filesStore.addFile(current);
     }
   }
+
+  function handleExternalFileChange(event: FileChangeEvent): void {
+    if (event.type !== 'change' || event.content === undefined) return;
+
+    pause();
+    fileState.value.content = event.content;
+    savedContent.value = event.content;
+    tabsStore.clearDirty(fileId.value);
+    persistCurrentFile();
+    finishReload();
+    resume();
+  }
+
+  setOnFileChanged(handleExternalFileChange);
 
   async function finalizeSave(savedPath: string): Promise<void> {
     const { name, ext } = parseFileName(savedPath);
@@ -76,6 +102,8 @@ export function useSession(fileId: Ref<string>) {
     fileState.value.path = savedPath;
     fileState.value.name = name || fileState.value.name;
     fileState.value.ext = ext || fileState.value.ext || 'md';
+    savedContent.value = fileState.value.content;
+    tabsStore.clearDirty(fileId.value);
 
     await persistCurrentFile();
     await switchWatchedFile(savedPath);
@@ -86,6 +114,8 @@ export function useSession(fileId: Ref<string>) {
 
     if (fileState.value.path) {
       await native.writeFile(fileState.value.path, fileState.value.content);
+      savedContent.value = fileState.value.content;
+      tabsStore.clearDirty(fileId.value);
       await persistCurrentFile();
       return;
     }
@@ -126,7 +156,7 @@ export function useSession(fileId: Ref<string>) {
     const nextId = nanoid();
     const nextName = fileState.value.name ? `${fileState.value.name}-副本` : '';
 
-    await recentFilesStorage.addRecentFile({ ...fileState.value, id: nextId, name: nextName, path: null });
+    await filesStore.addFile({ ...fileState.value, id: nextId, name: nextName, path: null });
 
     await router.push({ name: 'editor', params: { id: nextId } });
   }
@@ -139,14 +169,16 @@ export function useSession(fileId: Ref<string>) {
    * @param stored - 存储中的文件数据
    * @param currentFileId - 当前文件ID
    */
-  function initializeFileState(stored: EditorFile | null, currentFileId: string): void {
+  function initializeFileState(stored: EditorFile | undefined, currentFileId: string): void {
     if (stored) {
       fileState.value = { ...stored };
     } else {
-      fileState.value = createEmptyFile(currentFileId, '未命名');
+      fileState.value = { id: currentFileId, name: '未命名', content: '', ext: 'md', path: null };
 
-      recentFilesStorage.addRecentFile({ ...fileState.value });
+      filesStore.addFile({ ...fileState.value });
     }
+    savedContent.value = fileState.value.content;
+    tabsStore.clearDirty(currentFileId);
   }
 
   /**
@@ -174,8 +206,7 @@ export function useSession(fileId: Ref<string>) {
     // 记录当前文件ID，避免在异步操作过程中文件ID发生变化
     const currentFileId = fileId.value;
 
-    // 从存储中获取文件数据
-    const stored = await recentFilesStorage.getRecentFile(currentFileId);
+    const stored = await filesStore.getFileById(currentFileId);
     // 检查版本号，如果版本不匹配则终止（说明有更新的加载请求）
     if (currentVersion !== loadVersion) return;
 
