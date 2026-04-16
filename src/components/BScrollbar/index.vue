@@ -37,8 +37,8 @@ interface Props {
   height?: string | number;
   // 滚动条最大高度
   maxHeight?: string | number;
-  // 是否占据空间，可选值：true(同时水平垂直) | 'horizontal' | 'vertical'
-  inset?: boolean | 'horizontal' | 'vertical';
+  // 是否内嵌滚动条
+  inset?: boolean | 'horizontal' | 'vertical' | 'auto' | 'auto-horizontal' | 'auto-vertical';
   // 是否隐藏滚动条
   hide?: boolean;
 }
@@ -119,11 +119,16 @@ const wrapStyle = computed<CSSProperties>(() => {
   if (props.maxHeight) style.maxHeight = addCssUnit(props.maxHeight);
 
   if (props.inset) {
-    if (props.inset === true || props.inset === 'vertical') {
+    const insetVertical = props.inset === true || props.inset === 'vertical';
+    const insetHorizontal = props.inset === true || props.inset === 'horizontal';
+    const autoVertical = props.inset === 'auto' || props.inset === 'auto-vertical';
+    const autoHorizontal = props.inset === 'auto' || props.inset === 'auto-horizontal';
+
+    if (insetVertical || (autoVertical && showVertical.value)) {
       style.paddingRight = `${BAR_TOTAL}px`;
     }
 
-    if (props.inset === true || props.inset === 'horizontal') {
+    if (insetHorizontal || (autoHorizontal && showHorizontal.value)) {
       style.paddingBottom = `${BAR_TOTAL}px`;
     }
   }
