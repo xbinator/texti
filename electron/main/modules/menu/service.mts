@@ -38,15 +38,13 @@ export function setupAppMenu(): void {
         { label: '新建', accelerator: 'CmdOrCtrl+Alt+N', click: () => sendAction('file:new') },
         { type: 'separator' as const },
         { label: '打开...', accelerator: 'CmdOrCtrl+Shift+O', click: () => sendAction('file:open') },
+        { label: '打开最近的文件', accelerator: 'CmdOrCtrl+R', click: () => sendAction('file:recent') },
         { type: 'separator' as const },
         { label: '复制为新文件', accelerator: 'CmdOrCtrl+Alt+D', click: () => sendAction('file:duplicate') },
         { label: '保存', accelerator: 'CmdOrCtrl+S', click: () => sendAction('file:save') },
         { label: '另存为...', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendAction('file:saveAs') },
         { type: 'separator' as const },
         { label: '重命名', accelerator: 'F2', click: () => sendAction('file:rename') },
-        { type: 'separator' as const },
-        { label: '清空内容', click: () => sendAction('file:clear-content') },
-        { label: '从最近记录移除当前', click: () => sendAction('file:remove-current') },
         { type: 'separator' as const },
         { role: 'close' as const, label: '关闭' }
       ]
@@ -58,24 +56,9 @@ export function setupAppMenu(): void {
         { role: 'undo' as const, label: '撤销', accelerator: 'CmdOrCtrl+Z' },
         { role: 'redo' as const, label: '重做', accelerator: 'CmdOrCtrl+Shift+Z' },
         { type: 'separator' as const },
-        { role: 'cut' as const, label: '剪切', accelerator: 'CmdOrCtrl+X' },
-        { role: 'copy' as const, label: '复制', accelerator: 'CmdOrCtrl+C' },
-        { role: 'paste' as const, label: '粘贴', accelerator: 'CmdOrCtrl+V' },
-        { role: 'pasteAndMatchStyle' as const, label: '粘贴并匹配样式', accelerator: 'CmdOrCtrl+Shift+V' },
-        { role: 'delete' as const, label: '删除' },
-        { role: 'selectAll' as const, label: '全选', accelerator: 'CmdOrCtrl+A' },
-        { type: 'separator' as const },
         { label: '复制为纯文本', click: () => sendAction('edit:copy-plain-text') },
         { label: '复制为 Markdown', click: () => sendAction('edit:copy-markdown') },
-        { label: '复制为 HTML 代码', click: () => sendAction('edit:copy-html') },
-        { type: 'separator' as const },
-        {
-          label: '语音',
-          submenu: [
-            { role: 'startSpeaking' as const, label: '开始朗读' },
-            { role: 'stopSpeaking' as const, label: '停止朗读' }
-          ]
-        }
+        { label: '复制为 HTML 代码', click: () => sendAction('edit:copy-html') }
       ]
     },
     // { role: 'viewMenu' }
@@ -113,18 +96,6 @@ export function setupAppMenu(): void {
         { role: 'toggleDevTools' as const, label: '切换开发者工具' },
         { type: 'separator' as const },
         { role: 'togglefullscreen' as const, label: '切换全屏' }
-      ]
-    },
-    // { role: 'windowMenu' }
-    {
-      label: '窗口',
-      submenu: [
-        { role: 'minimize' as const, label: '最小化' },
-        { role: 'zoom' as const, label: '缩放' },
-        { type: 'separator' as const },
-        { role: 'front' as const, label: '前置全部窗口' },
-        { type: 'separator' as const },
-        { role: 'window' as const, label: '窗口' }
       ]
     },
     {
