@@ -69,6 +69,23 @@ export const useTabsStore = defineStore('tabs', {
       delete this.dirtyById[id];
 
       persistData(this.$state);
+    },
+
+    // 设置标签页为已修改状态
+    setDirty(id: string): void {
+      this.dirtyById[id] = true;
+      persistData(this.$state);
+    },
+
+    // 清除标签页的修改状态
+    clearDirty(id: string): void {
+      this.dirtyById[id] = false;
+      persistData(this.$state);
+    },
+
+    // 检查标签页是否已修改
+    isDirty(id: string): boolean {
+      return this.dirtyById[id] === true;
     }
   }
 });

@@ -1,7 +1,7 @@
 <template>
   <div ref="scrollContainer" class="header-tabs" @wheel.prevent="handleWheel">
     <div v-for="tab in tabsStore.tabs" :key="tab.id" class="header-tab" :class="{ 'is-active': isActiveTab(tab) }" @click="handleClickTab(tab.id, tab.path)">
-      <div class="header-tab__title">{{ tab.title }}</div>
+      <div class="header-tab__title"><span v-if="tabsStore.isDirty(tab.id)" class="header-tab__dirty-mark">*</span>{{ tab.title }}</div>
 
       <button class="header-tab__close" @click.stop="handleCloseTab(tab)">
         <Icon icon="ic:round-close" width="12" height="12" />
@@ -112,6 +112,11 @@ function handleWheel(e: WheelEvent) {
   color: var(--text-primary);
   white-space: nowrap;
   user-select: none;
+}
+
+.header-tab__dirty-mark {
+  margin-right: 2px;
+  font-weight: 700;
 }
 
 .header-tab__dirty {
