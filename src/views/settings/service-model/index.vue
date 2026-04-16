@@ -5,7 +5,7 @@
     </div>
     <div class="manager-content">
       <BScrollbar>
-        <div class="flex flex-col items-center gap-20">
+        <div class="flex flex-col items-center gap-20 mr-20">
           <ServiceConfig
             service-type="chat"
             title="智能对话助手"
@@ -59,6 +59,6 @@ import { CHAT_SERVICE_CONFIG_OPTIONS, POLISH_DEFAULT_PROMPT, POLISH_SERVICE_CONF
   flex: 1;
   width: 100%;
   height: 0;
-  padding: 20px;
+  padding: 20px 0 20px 20px;
 }
 </style>

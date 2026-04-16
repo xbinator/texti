@@ -20,7 +20,8 @@
           variant="borderless"
           @submit="handleSubmit"
         />
-        <BButton size="small" square icon="lucide:send-horizontal" :disabled="!inputValue" @click="handleSubmit" />
+        <BButton v-if="!loading" size="small" square icon="lucide:send-horizontal" :disabled="!inputValue" @click="handleSubmit" />
+        <BButton v-else size="small" square icon="lucide:square" @click="handleAbort" />
       </div>
     </div>
   </div>
@@ -134,6 +135,19 @@ async function handleSubmit(): Promise<void> {
   inputValue.value = '';
 
   await _streamMessage(config);
+}
+
+/**
+ * 中止当前流式请求
+ */
+function handleAbort(): void {
+  agent.abort();
+  loading.value = false;
+  const lastMessage = messages.value[messages.value.length - 1];
+  if (lastMessage?.role === 'assistant' && lastMessage.loading) {
+    lastMessage.loading = false;
+    lastMessage.finished = true;
+  }
 }
 
 /**
