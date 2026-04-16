@@ -59,6 +59,6 @@ import { CHAT_SERVICE_CONFIG_OPTIONS, POLISH_DEFAULT_PROMPT, POLISH_SERVICE_CONF
   flex: 1;
   width: 100%;
   height: 0;
-  padding: 20px 0 20px 20px;
+  padding: 20px;
 }
 </style>

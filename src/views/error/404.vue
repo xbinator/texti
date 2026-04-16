@@ -40,23 +40,23 @@ function handleBack() {
 }
 
 .error-code {
+  margin-bottom: 24px;
   font-size: 120px;
   font-weight: 700;
   line-height: 1;
   color: var(--color-primary);
-  margin-bottom: 24px;
 }
 
 .error-title {
+  margin-bottom: 16px;
   font-size: 24px;
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 16px;
 }
 
 .error-desc {
+  margin-bottom: 32px;
   font-size: 14px;
   color: var(--text-secondary);
-  margin-bottom: 32px;
 }
 </style>

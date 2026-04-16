@@ -27,10 +27,10 @@
         </div>
       </div>
 
-      <div v-if="recentFiles.length" class="recent-files-section">
+      <div v-if="topRecentFiles.length" class="recent-files-section">
         <div class="recent-files-title">最近文件</div>
         <div class="recent-files-list">
-          <div v-for="file in recentFiles.slice(0, 3)" :key="file.id" class="recent-file-item" @click="handleOpenRecentFile(file.id)">
+          <div v-for="file in topRecentFiles" :key="file.id" class="recent-file-item" @click="handleOpenRecentFile(file.id)">
             <div class="recent-file-icon">
               <Icon icon="lucide:file-text" width="14" height="14" />
             </div>
@@ -46,32 +46,32 @@
         </div>
       </div>
 
-      <SearchRecent v-model:visible="visibleSearchRecent" @delete="loadRecentFiles" />
+      <BSearchRecent v-model:visible="visibleSearchRecent" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { customAlphabet } from 'nanoid';
-import SearchRecent from '@/layouts/default/components/SearchRecent.vue';
+import BSearchRecent from '@/components/BSearchRecent/index.vue';
+import { useOpenFile } from '@/hooks/useOpenFile';
 import { native } from '@/shared/platform';
-import { recentFilesStorage, type StoredFile } from '@/shared/storage';
+import { useFilesStore } from '@/stores/files';
 
 const router = useRouter();
 const nanoid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz_', 8);
 
-const recentFiles = ref<StoredFile[]>([]);
+const filesStore = useFilesStore();
+const { openFileById } = useOpenFile();
 const isDragging = ref(false);
 const visibleSearchRecent = ref(false);
 
-async function loadRecentFiles() {
-  recentFiles.value = await recentFilesStorage.getAllRecentFiles();
-}
+const topRecentFiles = computed(() => filesStore.recentFiles?.slice(0, 3) ?? []);
 
-onMounted(loadRecentFiles);
+onMounted(() => filesStore.initialize());
 
 function handleNewFile(): void {
   router.push({ name: 'editor', params: { id: nanoid() } });
@@ -82,19 +82,19 @@ async function handleOpenFile(): Promise<void> {
   if (!file.path) return;
 
   let id = nanoid();
-  const index = recentFiles.value.findIndex((f) => f.path === file.path);
+  const existingFile = await filesStore.getFileByPath(file.path);
 
-  if (index === -1) {
-    await recentFilesStorage.addRecentFile({ ...file, id });
+  if (existingFile) {
+    id = existingFile.id;
   } else {
-    id = recentFiles.value[index].id;
+    await filesStore.addFile({ ...file, id });
   }
 
   router.push({ name: 'editor', params: { id } });
 }
 
-function handleOpenRecentFile(id: string): void {
-  router.push({ name: 'editor', params: { id } });
+async function handleOpenRecentFile(id: string): Promise<void> {
+  await openFileById(id);
 }
 
 function handleShowShortcuts(): void {
@@ -150,7 +150,7 @@ async function handleDrop(e: DragEvent): Promise<void> {
     const id = nanoid();
     const name = file.name.split('.').slice(0, -1).join('.') || file.name;
 
-    await recentFilesStorage.addRecentFile({ id, path: filePath || null, name, ext, content });
+    await filesStore.addFile({ id, path: filePath || null, name, ext, content });
     router.push({ name: 'editor', params: { id } });
   } catch (error) {
     console.error('Failed to drop file:', error);

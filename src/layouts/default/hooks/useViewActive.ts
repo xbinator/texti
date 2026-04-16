@@ -1,10 +1,12 @@
-import { computed } from 'vue';
+import { computed, onUnmounted } from 'vue';
+import { useToolbarShortcuts } from '@/components/BToolbar/hooks/useToolbarShortcuts';
 import type { ToolbarOptions } from '@/components/BToolbar/types';
 import { useSettingStore } from '@/stores/setting';
 import { EditorShortcuts } from '../../../constants/shortcuts';
 
 export function useViewActive() {
   const settingStore = useSettingStore();
+  const { register: registerShortcuts } = useToolbarShortcuts();
 
   const toolbarViewOptions = computed<ToolbarOptions>(() => [
     {
@@ -58,6 +60,9 @@ export function useViewActive() {
       ]
     }
   ]);
+
+  const cleanup = registerShortcuts(toolbarViewOptions.value);
+  onUnmounted(cleanup);
 
   return { toolbarViewOptions };
 }

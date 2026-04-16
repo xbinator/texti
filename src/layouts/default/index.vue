@@ -62,7 +62,7 @@
       </BPanelSplitter>
     </div>
 
-    <SearchRecent v-model:visible="visible.searchRecent" />
+    <BSearchRecent v-model:visible="visible.searchRecent" />
 
     <ShortcutsHelp v-model:visible="visible.shortcutsHelp" />
   </div>
@@ -74,11 +74,11 @@ import { useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { useEventListener } from '@vueuse/core';
 import BButton from '@/components/BButton/index.vue';
+import BSearchRecent from '@/components/BSearchRecent/index.vue';
 import { getElectronAPI } from '@/shared/platform/electron-api';
 import { isMac } from '@/shared/platform/env';
 import AuxiliarySidebar from './components/AuxiliarySidebar.vue';
 import HeaderTabs from './components/HeaderTabs.vue';
-import SearchRecent from './components/SearchRecent.vue';
 import ShortcutsHelp from './components/ShortcutsHelp.vue';
 import { useEditActive } from './hooks/useEditActive';
 import { useFileActive } from './hooks/useFileActive';

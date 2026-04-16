@@ -1,17 +1,18 @@
-import { computed } from 'vue';
+import { computed, onUnmounted } from 'vue';
+import { useToolbarShortcuts } from '@/components/BToolbar/hooks/useToolbarShortcuts';
 import type { ToolbarOptions } from '@/components/BToolbar/types';
 import { EditorShortcuts } from '@/constants/shortcuts';
 import { emitter } from '@/utils/emitter';
 
 export function useEditActive() {
+  const { register: registerShortcuts } = useToolbarShortcuts();
+
   const toolbarEditOptions = computed<ToolbarOptions>(() => {
     return [
       {
         value: 'undo',
         label: '撤销',
         shortcut: EditorShortcuts.EDIT_UNDO,
-        enableShortcut: false,
-        disabled: false,
         onClick: () => {
           emitter.emit('edit:undo');
         }
@@ -20,8 +21,6 @@ export function useEditActive() {
         value: 'redo',
         label: '重做',
         shortcut: EditorShortcuts.EDIT_REDO,
-        enableShortcut: false,
-        disabled: false,
         onClick: () => {
           emitter.emit('edit:redo');
         }
@@ -53,6 +52,9 @@ export function useEditActive() {
       }
     ];
   });
+
+  const cleanup = registerShortcuts(toolbarEditOptions.value);
+  onUnmounted(cleanup);
 
   return { toolbarEditOptions };
 }

@@ -1,9 +1,10 @@
-import { computed, ref } from 'vue';
+import { computed, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { customAlphabet } from 'nanoid';
+import { useToolbarShortcuts } from '@/components/BToolbar/hooks/useToolbarShortcuts';
 import type { ToolbarOptions } from '@/components/BToolbar/types';
 import { native } from '@/shared/platform';
-import { recentFilesStorage, type StoredFile } from '@/shared/storage';
+import { useFilesStore } from '@/stores/files';
 import { emitter } from '@/utils/emitter';
 import { EditorShortcuts } from '../../../constants/shortcuts';
 
@@ -15,13 +16,8 @@ interface UseFileActiveOptions {
 
 export function useFileActive(visible: UseFileActiveOptions['visible']) {
   const router = useRouter();
-  const storedFiles = ref<StoredFile[]>([]);
-
-  async function loadStoredFiles(): Promise<void> {
-    storedFiles.value = await recentFilesStorage.getAllRecentFiles();
-  }
-
-  loadStoredFiles();
+  const filesStore = useFilesStore();
+  const { register: registerShortcuts } = useToolbarShortcuts();
 
   const toolbarFileOptions = computed<ToolbarOptions>(() => [
     {
@@ -42,13 +38,15 @@ export function useFileActive(visible: UseFileActiveOptions['visible']) {
         if (!file.path) return;
 
         let id = nanoid();
+        const existingFile = await filesStore.getFileByPath(file.path);
 
-        const index = storedFiles.value.findIndex((f) => f.path === file.path);
-        index === -1 ? await recentFilesStorage.addRecentFile({ ...file, id }) : (id = storedFiles.value[index].id);
+        if (existingFile) {
+          id = existingFile.id;
+        } else {
+          await filesStore.addFile({ ...file, id });
+        }
 
         router.push({ name: 'editor', params: { id } });
-
-        loadStoredFiles();
       }
     },
     {
@@ -94,6 +92,9 @@ export function useFileActive(visible: UseFileActiveOptions['visible']) {
       }
     }
   ]);
+
+  const cleanup = registerShortcuts(toolbarFileOptions.value);
+  onUnmounted(cleanup);
 
   return { toolbarFileOptions };
 }

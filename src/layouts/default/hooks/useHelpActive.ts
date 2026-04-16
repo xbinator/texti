@@ -1,4 +1,5 @@
-import { computed } from 'vue';
+import { computed, onUnmounted } from 'vue';
+import { useToolbarShortcuts } from '@/components/BToolbar/hooks/useToolbarShortcuts';
 import type { ToolbarOptions } from '@/components/BToolbar/types';
 
 interface UseHelpOptions {
@@ -7,6 +8,8 @@ interface UseHelpOptions {
 }
 
 export function useHelpActive(options: UseHelpOptions) {
+  const { register: registerShortcuts } = useToolbarShortcuts();
+
   const toolbarHelpOptions = computed<ToolbarOptions>(() => [
     {
       value: 'shortcuts',
@@ -17,6 +20,9 @@ export function useHelpActive(options: UseHelpOptions) {
       }
     }
   ]);
+
+  const cleanup = registerShortcuts(toolbarHelpOptions.value);
+  onUnmounted(cleanup);
 
   return {
     toolbarHelpOptions
