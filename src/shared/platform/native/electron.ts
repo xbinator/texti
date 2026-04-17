@@ -37,6 +37,14 @@ export class ElectronNative implements Native {
     await getElectronAPI().renameFile(oldPath, newPath);
   }
 
+  async trashFile(filePath: string): Promise<void> {
+    await getElectronAPI().trashFile(filePath);
+  }
+
+  async showItemInFolder(filePath: string): Promise<void> {
+    await getElectronAPI().showItemInFolder(filePath);
+  }
+
   async watchFile(filePath: string): Promise<void> {
     await getElectronAPI().watchFile(filePath);
   }
