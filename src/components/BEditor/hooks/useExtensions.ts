@@ -1,6 +1,14 @@
-import type { AnyExtension, JSONContent, MarkdownParseHelpers, MarkdownParseResult, MarkdownToken, Editor } from '@tiptap/core';
 import type { NodeViewProps } from '@tiptap/vue-3';
 import type { Component, Ref } from 'vue';
+import {
+  Extension,
+  type AnyExtension,
+  type JSONContent,
+  type MarkdownParseHelpers,
+  type MarkdownParseResult,
+  type MarkdownToken,
+  type Editor
+} from '@tiptap/core';
 import _Code from '@tiptap/extension-code';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { Color } from '@tiptap/extension-color';
@@ -71,6 +79,56 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
   }
 
   const Code = _Code.extend({ excludes: '' });
+
+  const HtmlComment = Extension.create({
+    name: 'htmlComment',
+    markdownTokenName: 'html',
+    parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult | null => {
+      let raw = '';
+
+      if (typeof token.raw === 'string') {
+        raw = token.raw;
+      } else if (typeof token.text === 'string') {
+        raw = token.text;
+      }
+
+      const normalized = raw.replace(/\r?\n$/, '');
+
+      if (!/^<!--[\s\S]*?-->$/.test(normalized.trim())) {
+        return null;
+      }
+
+      return helpers.createNode('paragraph', undefined, [helpers.createTextNode(normalized)]);
+    }
+  });
+
+  const ReferenceLinkAsText = Extension.create({
+    name: 'referenceLinkAsText',
+    markdownTokenName: 'link',
+    parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult | null => {
+      const raw = typeof token.raw === 'string' ? token.raw.trim() : '';
+
+      if (!/^\[[^\]]+\]\[[^\]]+\]$/.test(raw)) {
+        return null;
+      }
+
+      return helpers.createTextNode(raw);
+    }
+  });
+
+  const LinkDefinitionAsText = Extension.create({
+    name: 'linkDefinitionAsText',
+    markdownTokenName: 'def',
+    parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult | null => {
+      const raw = typeof token.raw === 'string' ? token.raw.trim() : '';
+
+      if (!/^\[[^\]]+\]:\s+\S+/.test(raw)) {
+        return null;
+      }
+
+      return helpers.createNode('paragraph', undefined, [helpers.createTextNode(raw)]);
+    }
+  });
 
   const CodeBlock = CodeBlockLowlight.extend({
     addNodeView: () => VueNodeViewRenderer(CodeBlockView as unknown as Component<NodeViewProps>)
@@ -246,6 +304,9 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
     }),
     Placeholder.configure({ emptyEditorClass: 'is-editor-empty', placeholder: '请输入内容' }),
     Markdown,
+    HtmlComment,
+    ReferenceLinkAsText,
+    LinkDefinitionAsText,
     AISelectionHighlight,
     Heading,
     Paragraph,

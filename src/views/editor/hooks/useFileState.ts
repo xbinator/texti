@@ -54,6 +54,9 @@ export function useFileState(options: SessionPersistenceOptions): SessionPersist
     }
 
     if (fileState.value.content !== savedContent.value) {
+      console.log('🚀 ~ syncDirtyState ~ fileState.value.content !== savedContent.value:', fileState.value.content);
+
+      console.log(savedContent.value);
       tabsStore.setDirty(fileId.value);
     } else {
       tabsStore.clearDirty(fileId.value);

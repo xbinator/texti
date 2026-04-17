@@ -24,7 +24,7 @@ export function useRichEditor({ bodyContent, editable, editorInstanceId, onConte
   const { editorExtensions, resetHeadingIndex, assignHeadingIds } = useExtensions(editorInstanceId, { onSearchMatchFocus });
   const editorInstanceRef = ref<Editor>();
 
-  const { setEditorContent, onPaste, onEditorUpdate } = useContent({
+  const { setEditorContent, onPaste, onEditorUpdate, isEquivalentToImportedContent, rememberImportedContent } = useContent({
     assignHeadingIds,
     editable,
     editorContent: bodyContent,
@@ -99,6 +99,9 @@ export function useRichEditor({ bodyContent, editable, editorInstanceId, onConte
     editorInstance,
     (instance) => {
       editorInstanceRef.value = instance;
+      if (instance) {
+        rememberImportedContent(bodyContent.value ?? '');
+      }
     },
     { immediate: true }
   );
@@ -108,6 +111,7 @@ export function useRichEditor({ bodyContent, editable, editorInstanceId, onConte
     if (!instance) return;
 
     const currentContent = instance.getMarkdown();
+    if (isEquivalentToImportedContent(content, currentContent)) return;
     if (currentContent === content) return;
 
     setEditorContent(content ?? '', false);

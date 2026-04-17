@@ -13,6 +13,8 @@ interface UseBEditorContentParams {
 }
 
 interface UseBEditorContentResult {
+  isEquivalentToImportedContent: (externalContent: string | undefined, currentMarkdown: string) => boolean;
+  rememberImportedContent: (text: string) => void;
   onEditorUpdate: ({ editor }: { editor: Editor }) => void;
   onPaste: (_view: unknown, event: ClipboardEvent) => boolean;
   setEditorContent: (text: string, emitUpdate?: boolean) => void;
@@ -26,6 +28,15 @@ export function useContent({
   resetHeadingIndex,
   onContentChange
 }: UseBEditorContentParams): UseBEditorContentResult {
+  let lastImportedRawContent = '';
+  let lastImportedCanonicalContent = '';
+
+  function rememberImportedContent(text: string): void {
+    const instance = getEditorInstance();
+    lastImportedRawContent = text;
+    lastImportedCanonicalContent = instance ? instance.getMarkdown() : text;
+  }
+
   function setEditorContent(text: string, emitUpdate = true): void {
     const instance = getEditorInstance();
     if (!instance) {
@@ -37,6 +48,8 @@ export function useContent({
       emitUpdate,
       contentType: text ? 'markdown' : undefined
     });
+
+    rememberImportedContent(text);
   }
 
   function onPaste(_view: unknown, event: ClipboardEvent): boolean {
@@ -63,8 +76,14 @@ export function useContent({
 
   function onEditorUpdate({ editor }: { editor: Editor }): void {
     assignHeadingIds(editor);
-    editorContent.value = editor.getMarkdown();
+    const markdown = editor.getMarkdown();
+
+    editorContent.value = markdown === lastImportedCanonicalContent ? lastImportedRawContent : markdown;
     onContentChange?.();
+  }
+
+  function isEquivalentToImportedContent(externalContent: string | undefined, currentMarkdown: string): boolean {
+    return currentMarkdown === lastImportedCanonicalContent && (externalContent ?? '') === lastImportedRawContent;
   }
 
   watch(
@@ -75,6 +94,8 @@ export function useContent({
   );
 
   return {
+    isEquivalentToImportedContent,
+    rememberImportedContent,
     onEditorUpdate,
     onPaste,
     setEditorContent
