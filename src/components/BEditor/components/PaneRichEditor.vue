@@ -55,6 +55,15 @@ const frontMatterData = defineModel<FrontMatterData>('frontMatterData', { defaul
 const aiInputVisible = ref(false);
 const selectionRange = ref<SelectionRange>({ from: 0, to: 0, text: '' });
 
+// ---- Editor Commands ----
+
+const undo = () => props.editor?.commands.undo();
+const redo = () => props.editor?.commands.redo();
+const canUndo = () => Boolean(props.editor?.can().undo());
+const canRedo = () => Boolean(props.editor?.can().redo());
+const focusEditor = () => props.editor?.commands.focus();
+const focusEditorAtStart = () => props.editor?.commands.focus('start');
+
 // ---- AI Input ----
 
 function handleAIInputToggle(value: boolean, nextSelectionRange?: SelectionRange): void {
@@ -114,15 +123,6 @@ async function handleLinkClick(event: MouseEvent): Promise<void> {
   await native.openExternal(anchor.href);
 }
 
-// ---- Editor Commands ----
-
-const undo = () => props.editor?.commands.undo();
-const redo = () => props.editor?.commands.redo();
-const canUndo = () => Boolean(props.editor?.can().undo());
-const canRedo = () => Boolean(props.editor?.can().redo());
-const focusEditor = () => props.editor?.commands.focus();
-const focusEditorAtStart = () => props.editor?.commands.focus('start');
-
 defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
 </script>
 
@@ -155,6 +155,7 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
     }
 
     .search-match-current {
+      color: #000;
       background: var(--editor-search-active);
       box-shadow: var(--editor-search-active-border);
     }
