@@ -71,6 +71,10 @@ export class WebNative implements Native {
     document.title = title;
   }
 
+  async openExternal(url: string): Promise<void> {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onMenuAction(_callback: (action: string) => void): () => void {
     return () => {

@@ -44,6 +44,8 @@ export interface Native {
 
   setWindowTitle(title: string): Promise<void>;
 
+  openExternal(url: string): Promise<void>;
+
   onMenuAction?(callback: (action: string) => void): () => void;
 
   updateMenuItem?(id: string, properties: { checked?: boolean }): void;

@@ -1,5 +1,5 @@
 <template>
-  <div class="rich-editor-pane">
+  <div class="rich-editor-pane" @click="handleLinkClick">
     <!-- Front Matter 卡片 -->
     <FrontMatterCard
       v-if="shouldShowFrontMatterCard"
@@ -28,6 +28,7 @@ import type { SelectionRange } from '../types';
 import type { Editor } from '@tiptap/vue-3';
 import { ref, watch } from 'vue';
 import { EditorContent } from '@tiptap/vue-3';
+import { native } from '@/shared/platform';
 import { clearAISelectionHighlight, setAISelectionHighlight } from '../extensions/AISelectionHighlight';
 import CurrentBlockMenu from './CurrentBlockMenu.vue';
 import FrontMatterCard from './FrontMatterCard.vue';
@@ -96,6 +97,21 @@ function handleFrontMatterFieldRemove(key: string): void {
 function handleFrontMatterFieldAdd(key: string, value: unknown): void {
   if (key in frontMatterData.value) return;
   frontMatterData.value = { ...frontMatterData.value, [key]: value };
+}
+
+async function handleLinkClick(event: MouseEvent): Promise<void> {
+  const { target } = event;
+  if (!(target instanceof Element) || (!event.ctrlKey && !event.metaKey)) {
+    return;
+  }
+
+  const anchor = target.closest('a[href]');
+  if (!(anchor instanceof HTMLAnchorElement) || !anchor.href) {
+    return;
+  }
+
+  event.preventDefault();
+  await native.openExternal(anchor.href);
 }
 
 // ---- Editor Commands ----

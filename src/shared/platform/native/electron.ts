@@ -53,6 +53,10 @@ export class ElectronNative implements Native {
     await getElectronAPI().setWindowTitle(title);
   }
 
+  async openExternal(url: string): Promise<void> {
+    await getElectronAPI().openExternal(url);
+  }
+
   updateMenuItem(id: string, properties: { checked?: boolean }): void {
     getElectronAPI().updateMenuItem(id, properties);
   }

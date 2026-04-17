@@ -57,8 +57,33 @@ function createParagraphNode(content: JSONContent[] = []): JSONContent {
   };
 }
 
+function getReferenceStyleLinkRaw(token: MarkdownToken): string | null {
+  if (token.type !== 'link' || typeof token.raw !== 'string') {
+    return null;
+  }
+
+  const raw = token.raw.trim();
+  return /^\[[^\]]+\]\[[^\]]+\]$/.test(raw) ? raw : null;
+}
+
+function parseInlinePreservingReferenceLinks(tokens: MarkdownToken[] | undefined, helpers: MarkdownParseHelpers): JSONContent[] {
+  if (!tokens?.length) {
+    return [];
+  }
+
+  return tokens.flatMap((token) => {
+    const raw = getReferenceStyleLinkRaw(token);
+
+    if (raw) {
+      return [helpers.createTextNode(raw)];
+    }
+
+    return helpers.parseInline([token]);
+  });
+}
+
 function parseInlineOrText(tokens: MarkdownToken[] | undefined, text: string | undefined, helpers: MarkdownParseHelpers): JSONContent[] {
-  const content = helpers.parseInline(tokens || []);
+  const content = parseInlinePreservingReferenceLinks(tokens, helpers);
 
   if (content.length) {
     return content;
@@ -83,7 +108,7 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
   const HtmlComment = Extension.create({
     name: 'htmlComment',
     markdownTokenName: 'html',
-    parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult | null => {
+    parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
       let raw = '';
 
       if (typeof token.raw === 'string') {
@@ -95,35 +120,21 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
       const normalized = raw.replace(/\r?\n$/, '');
 
       if (!/^<!--[\s\S]*?-->$/.test(normalized.trim())) {
-        return null;
+        return [];
       }
 
       return helpers.createNode('paragraph', undefined, [helpers.createTextNode(normalized)]);
     }
   });
 
-  const ReferenceLinkAsText = Extension.create({
-    name: 'referenceLinkAsText',
-    markdownTokenName: 'link',
-    parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult | null => {
-      const raw = typeof token.raw === 'string' ? token.raw.trim() : '';
-
-      if (!/^\[[^\]]+\]\[[^\]]+\]$/.test(raw)) {
-        return null;
-      }
-
-      return helpers.createTextNode(raw);
-    }
-  });
-
   const LinkDefinitionAsText = Extension.create({
     name: 'linkDefinitionAsText',
     markdownTokenName: 'def',
-    parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult | null => {
+    parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
       const raw = typeof token.raw === 'string' ? token.raw.trim() : '';
 
       if (!/^\[[^\]]+\]:\s+\S+/.test(raw)) {
-        return null;
+        return [];
       }
 
       return helpers.createNode('paragraph', undefined, [helpers.createTextNode(raw)]);
@@ -146,7 +157,7 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
       };
     },
     parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
-      const content = helpers.parseInline(token.tokens || []);
+      const content = parseInlinePreservingReferenceLinks(token.tokens, helpers);
       const id = getHeadingId(headingIndex++);
 
       if (content.length) {
@@ -170,7 +181,7 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
 
   const Paragraph = BaseParagraph.extend({
     parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
-      const content = helpers.parseInline(token.tokens || []);
+      const content = parseInlinePreservingReferenceLinks(token.tokens, helpers);
 
       if (content.length) {
         return helpers.createNode('paragraph', undefined, content);
@@ -202,7 +213,7 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
           }
 
           if (itemToken.type === 'text' && itemToken.tokens && itemToken.tokens.length > 0) {
-            inlineBuffer.push(...helpers.parseInline(itemToken.tokens));
+            inlineBuffer.push(...parseInlinePreservingReferenceLinks(itemToken.tokens, helpers));
             return;
           }
 
@@ -305,7 +316,6 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
     Placeholder.configure({ emptyEditorClass: 'is-editor-empty', placeholder: '请输入内容' }),
     Markdown,
     HtmlComment,
-    ReferenceLinkAsText,
     LinkDefinitionAsText,
     AISelectionHighlight,
     Heading,
