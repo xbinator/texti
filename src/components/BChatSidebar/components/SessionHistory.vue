@@ -104,6 +104,8 @@ const groupedSessions = computed<SessionGroup[]>(() => {
 });
 
 function handleSwitchSession(sessionId: string): void {
+  if (sessionId === props.activeSessionId) return;
+
   open.value = false;
 
   emit('switch-session', sessionId);
