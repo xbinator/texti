@@ -96,12 +96,35 @@ export function useFileActive(visible: UseFileActiveOptions['visible']) {
   ]);
 
   const cleanup = registerShortcuts(toolbarFileOptions.value);
+
+  const unregisterNew = emitter.on('file:new', () => {
+    router.push({ name: 'editor', params: { id: nanoid() } });
+  });
+
+  const unregisterOpen = emitter.on('file:open', async () => {
+    const file = await native.openFile();
+    if (!file.path) return;
+
+    let id = nanoid();
+    const existingFile = await filesStore.getFileByPath(file.path);
+
+    if (existingFile) {
+      id = existingFile.id;
+    } else {
+      await filesStore.addFile({ ...file, id });
+    }
+
+    router.push({ name: 'editor', params: { id } });
+  });
+
   const unregisterRecent = emitter.on('file:recent', () => {
     visible.searchRecent = true;
   });
 
   onUnmounted(() => {
     cleanup();
+    unregisterNew();
+    unregisterOpen();
     unregisterRecent();
   });
 
