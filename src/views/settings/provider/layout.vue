@@ -296,6 +296,7 @@ const providerDropdownOptionsMap = computed<Map<string, DropdownOptionItem[]>>((
   display: flex;
   flex-direction: column;
   gap: 4px;
+  user-select: none;
 
   & + .sidebar-section {
     margin-top: 20px;

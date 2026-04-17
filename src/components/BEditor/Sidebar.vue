@@ -1,14 +1,14 @@
 <template>
   <BPanelSplitter v-model:size="sidebarWidth" position="right" :min-width="180" :max-width="400">
     <div class="b-editor-sidebar">
-      <div v-if="title" class="anchor-panel__header">
-        <div class="anchor-panel__main" @click="handleTitleClick">
-          <Icon icon="lucide:file-text" width="14" height="14" class="anchor-panel__file-icon" />
-          <span class="anchor-panel__title">{{ title }}</span>
+      <div v-if="title" class="sidebar__header">
+        <div class="sidebar__main" @click="handleTitleClick">
+          <Icon icon="lucide:file-text" width="14" height="14" class="sidebar__file-icon" />
+          <span class="sidebar__title">{{ title }}</span>
         </div>
 
         <BDropdown>
-          <BButton square size="small" type="text" class="anchor-panel__more" @click.stop>
+          <BButton square size="small" type="text" class="sidebar__more" @click.stop>
             <Icon icon="lucide:ellipsis" width="14" height="14" />
           </BButton>
 
@@ -17,7 +17,9 @@
           </template>
         </BDropdown>
       </div>
-      <AnchorContent v-if="items.length > 0" :items="items" :active-id="activeId" @click="handleAnchorClick" />
+      <div v-if="items.length" class="sidebar__content">
+        <AnchorContent :items="items" :active-id="activeId" @click="handleAnchorClick" />
+      </div>
       <div v-else class="empty-state">
         <div class="empty-icon">📝</div>
         <div class="empty-text">暂无目录大纲</div>
@@ -113,7 +115,6 @@ function handleTitleClick() {
 <style scoped>
 .b-editor-sidebar {
   display: flex;
-  flex-shrink: 0;
   flex-direction: column;
   width: 100%;
   height: 100%;
@@ -122,7 +123,7 @@ function handleTitleClick() {
   backdrop-filter: blur(10px);
 }
 
-.anchor-panel__header {
+.sidebar__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -138,7 +139,7 @@ function handleTitleClick() {
   }
 }
 
-.anchor-panel__main {
+.sidebar__main {
   display: flex;
   flex: 1;
   gap: 8px;
@@ -147,12 +148,17 @@ function handleTitleClick() {
   cursor: pointer;
 }
 
-.anchor-panel__file-icon {
+.sidebar__content {
+  flex: 1;
+  height: 0;
+}
+
+.sidebar__file-icon {
   flex-shrink: 0;
   color: var(--text-secondary);
 }
 
-.anchor-panel__title {
+.sidebar__title {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -161,7 +167,7 @@ function handleTitleClick() {
   white-space: nowrap;
 }
 
-.anchor-panel__more {
+.sidebar__more {
   flex-shrink: 0;
   color: var(--text-secondary);
 }

@@ -77,6 +77,7 @@ function isActive(key: SettingsMenuKey): boolean {
   color: var(--text-secondary);
   text-decoration: none;
   cursor: pointer;
+  user-select: none;
   border-radius: 6px;
   transition: all 0.15s;
 
