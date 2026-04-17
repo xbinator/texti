@@ -20,7 +20,7 @@ export function useVariableEncoder(options: VariableEncoderOptions) {
 
   function createVariableSpan(variableName: string): HTMLElement {
     const element = document.createElement('span');
-    element.className = 'prompt-variable-tag';
+    element.className = 'b-prompt-variable-tag';
     element.setAttribute('data-value', 'variable');
     element.setAttribute('data-content', variableName);
     element.setAttribute('contenteditable', 'false');
