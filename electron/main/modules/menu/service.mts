@@ -4,16 +4,10 @@ import { getWindow } from '../../window.mjs';
 export function setupAppMenu(): void {
   const isMac = process.platform === 'darwin';
 
-  const getTargetWebContents = () => {
-    const win = BrowserWindow.getFocusedWindow() ?? getWindow() ?? BrowserWindow.getAllWindows()[0];
-    return win?.webContents;
-  };
-
   const sendAction = (action: string) => {
-    const webContents = getTargetWebContents();
-    if (webContents) {
-      webContents.send('menu:action', action);
-    }
+    const win = BrowserWindow.getFocusedWindow() ?? getWindow() ?? BrowserWindow.getAllWindows()[0];
+
+    win && win.webContents.send('menu:action', action);
   };
 
   const template: MenuItemConstructorOptions[] = [];
@@ -62,10 +56,10 @@ export function setupAppMenu(): void {
       { role: 'undo' as const, label: '撤销', accelerator: 'CmdOrCtrl+Z' },
       { role: 'redo' as const, label: '重做', accelerator: 'CmdOrCtrl+Shift+Z' },
       { type: 'separator' as const },
-      { label: '剪切', accelerator: 'CmdOrCtrl+X', click: () => getTargetWebContents()?.cut() },
-      { label: '复制', accelerator: 'CmdOrCtrl+C', click: () => getTargetWebContents()?.copy() },
-      { label: '粘贴', accelerator: 'CmdOrCtrl+V', click: () => getTargetWebContents()?.paste() },
-      { label: '全选', accelerator: 'CmdOrCtrl+A', click: () => getTargetWebContents()?.selectAll() },
+      { role: 'cut' as const, label: '剪切', accelerator: 'CmdOrCtrl+X' },
+      { role: 'copy' as const, label: '复制', accelerator: 'CmdOrCtrl+C' },
+      { role: 'paste' as const, label: '粘贴', accelerator: 'CmdOrCtrl+V' },
+      { role: 'selectAll' as const, label: '全选', accelerator: 'CmdOrCtrl+A' },
       { type: 'separator' as const },
       { label: '复制为纯文本', click: () => sendAction('edit:copy-plain-text') },
       { label: '复制为 Markdown', click: () => sendAction('edit:copy-markdown') },
