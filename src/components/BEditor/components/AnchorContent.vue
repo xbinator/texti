@@ -131,7 +131,6 @@ watch(
 
 <style lang="less" scoped>
 .anchor-panel__content {
-  flex: 1;
   padding: 2px 0 8px 8px;
 }
 
