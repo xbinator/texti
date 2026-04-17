@@ -1,192 +1,105 @@
-<template>
+﻿<template>
   <div class="editor-sidebar">
     <div class="sidebar-header">
-      <BButton square size="small" type="text" :disabled="loading" @click="handleNewSession">
+      <BButton square size="small" type="text" @click="handleNewSession">
         <Icon icon="lucide:message-circle-plus" width="16" height="16" />
       </BButton>
-      <SessionHistory :sessions="chatStore.sortedSessions" :active-session-id="activeSessionId" :loading="loading" @switch-session="handleSwitchSession" />
+      <SessionHistory :sessions="sessions" :active-session-id="activeSessionId" @delete-session="handleDeleteSession" @switch-session="handleSwitchSession" />
     </div>
-
-    <BChat
-      ref="chatRef"
-      v-model:messages="messages"
-      v-model:input-value="inputValue"
-      :loading="loading"
-      :disabled="false"
-      :session-id="activeSessionId"
-      placeholder="输入消息..."
-      @submit="handleSubmit"
-      @abort="handleAbort"
-      @edit="handleEdit"
-      @regenerate="handleRegenerate"
-      @loading-change="handleLoadingChange"
-      @message-update="handleMessageUpdate"
-    />
+    <div class="chat-sidebar-container">
+      <BChat
+        v-model:messages="messages"
+        v-model:input-value="inputValue"
+        placeholder="输入消息..."
+        :on-before-send="handleBeforeSend"
+        :on-before-regenerate="handleBeforeRegenerate"
+        @complete="handleComplete"
+      >
+        <template #empty>
+          <div class="chat-sidebar-empty">
+            <div class="chat-sidebar-empty__art" aria-hidden="true">
+              <div class="chat-sidebar-empty__card chat-sidebar-empty__card--back"></div>
+              <div class="chat-sidebar-empty__card chat-sidebar-empty__card--front">
+                <Icon icon="lucide:messages-square" width="26" height="26" />
+              </div>
+            </div>
+            <div class="chat-sidebar-empty__title">开始一段新对话</div>
+            <div class="chat-sidebar-empty__text">输入你的问题，开始与助手的对话</div>
+          </div>
+        </template>
+      </BChat>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import type { ChatSession } from 'types/chat';
+import { onMounted, ref } from 'vue';
 import { Icon } from '@iconify/vue';
-import { message as antdMessage } from 'ant-design-vue';
-import { nanoid } from 'nanoid';
 import type { Message } from '@/components/BChat/types';
 import { useChatStore } from '@/stores/chat';
-import { useServiceModelStore } from '@/stores/service-model';
-import { Modal } from '@/utils/modal';
 import SessionHistory from './components/SessionHistory.vue';
 
-// ─── Stores & Router ────────────────────────────────────────────────────────
+const CHAT_SESSION_TYPE = 'assistant';
 
-const router = useRouter();
-const serviceModelStore = useServiceModelStore();
 const chatStore = useChatStore();
 
-chatStore.initialize('chat');
-
-// ─── State ──────────────────────────────────────────────────────────────────
-
 const inputValue = ref('');
-const loading = ref(false);
 const activeSessionId = ref<string | null>(null);
 const messages = ref<Message[]>([]);
-const chatRef = ref<any>(null);
+const sessions = ref<ChatSession[]>([]);
+const loading = ref(false);
 
-watch(
-  () => chatStore.sortedSessions,
-  async (sessions) => {
-    if (activeSessionId.value && sessions.some((item) => item.id === activeSessionId.value)) {
-      return;
-    }
+async function handleBeforeSend(message: Message): Promise<void> {
+  if (!activeSessionId.value) {
+    const session = await chatStore.createSession(CHAT_SESSION_TYPE, { title: message.content });
 
-    activeSessionId.value = sessions[0]?.id ?? null;
-    messages.value = activeSessionId.value ? [...(await chatStore.loadSessionMessages(activeSessionId.value))] : [];
-  },
-  { immediate: true }
-);
-
-watch(messages, (value) => {
-  chatStore.setSessionMessages(activeSessionId.value, value, false);
-});
-
-function syncMessagesFromStore(sessionId: string | null): void {
-  messages.value = sessionId ? [...chatStore.getMessagesBySessionId(sessionId)] : [];
-}
-
-// ─── Event Handlers ───────────────────────────────────────────────────────────
-
-function handleLoadingChange(isLoading: boolean) {
-  loading.value = isLoading;
-}
-
-function handleMessageUpdate(sessionId: string) {
-  if (sessionId === activeSessionId.value) {
-    syncMessagesFromStore(sessionId);
+    activeSessionId.value = session.id;
+    sessions.value.unshift(session);
   }
+
+  await chatStore.addSessionMessage(activeSessionId.value, message);
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/** 获取可用的服务配置，未配置时引导用户前往设置页 */
-async function getServiceConfig(): Promise<{ providerId: string; modelId: string } | null> {
-  const config = await serviceModelStore.getAvailableServiceConfig('chat');
-  if (config?.providerId && config?.modelId) return config;
-
-  const [, confirmed] = await Modal.confirm('提示', '当前未配置可用的大模型服务', {
-    confirmText: '去填写',
-    cancelText: '取消'
-  });
-
-  if (confirmed) router.push('/settings/service-model');
-  return null;
+async function handleBeforeRegenerate(nextMessages: Message[]): Promise<void> {
+  await chatStore.setSessionMessages(activeSessionId.value, nextMessages);
 }
 
-/** 启动流式请求的公共逻辑 */
-async function startStream(sessionId: string, excludeId: string, config: { providerId: string; modelId: string }) {
-  if (chatRef.value) {
-    await chatRef.value.startStream(sessionId, excludeId, config);
-  }
-}
-
-// ─── Event Handlers ───────────────────────────────────────────────────────────
-
-async function handleSubmit(prompt: string): Promise<void> {
-  if (loading.value) return;
-
-  const config = await getServiceConfig();
-  if (!config) return;
-
-  try {
-    const sessionId = activeSessionId.value ?? (await chatStore.createSession('chat'));
-    activeSessionId.value = sessionId;
-
-    const userMessage = chatStore.createMessage({
-      id: nanoid(),
-      role: 'user',
-      content: prompt,
-      createdAt: Date.now(),
-      finished: true
-    });
-    await chatStore.appendMessage(sessionId, userMessage, true);
-    syncMessagesFromStore(sessionId);
-    inputValue.value = '';
-
-    await startStream(sessionId, userMessage.id, config);
-  } catch (error) {
-    console.error('发送消息失败:', error);
-    antdMessage.error('发送消息失败，请重试');
-    loading.value = false;
-  }
-}
-
-async function handleRegenerate(msg: Message): Promise<void> {
-  if (loading.value) return;
-
-  const config = await getServiceConfig();
-  if (!config) return;
-
-  const sessionId = activeSessionId.value;
-  if (!sessionId) return;
-
-  try {
-    await chatStore.truncateMessages(sessionId, msg.id, true);
-    syncMessagesFromStore(sessionId);
-    await startStream(sessionId, msg.id, config);
-  } catch (error) {
-    console.error('重新生成消息失败:', error);
-    antdMessage.error('重新生成消息失败，请重试');
-    loading.value = false;
-  }
-}
-
-async function handleAbort(): Promise<void> {
-  // 中止操作由 BChat 组件处理
-}
-
-function handleEdit(msg: Message): void {
-  inputValue.value = msg.content;
+async function handleComplete(message: Message): Promise<void> {
+  await chatStore.addSessionMessage(activeSessionId.value, message);
 }
 
 async function handleNewSession(): Promise<void> {
-  if (loading.value) return;
-  inputValue.value = '';
   activeSessionId.value = null;
   messages.value = [];
+}
+
+async function loadSessions(): Promise<void> {
+  sessions.value = await chatStore.getSessions(CHAT_SESSION_TYPE);
 }
 
 async function handleSwitchSession(sessionId: string): Promise<void> {
   if (loading.value) return;
 
-  try {
-    activeSessionId.value = sessionId;
-    await chatStore.loadSessionMessages(sessionId);
-    syncMessagesFromStore(sessionId);
-  } catch (error) {
-    console.error('切换会话失败:', error);
-    antdMessage.error('切换会话失败，请重试');
+  loading.value = true;
+  activeSessionId.value = sessionId;
+
+  messages.value = await chatStore.getSessionMessages(sessionId);
+  loading.value = false;
+}
+
+async function handleDeleteSession(sessionId: string): Promise<void> {
+  const index = sessions.value.findIndex((session) => session.id === sessionId);
+  if (index === -1) return;
+
+  sessions.value.splice(index, 1);
+
+  if (activeSessionId.value === sessionId) {
+    await handleNewSession();
   }
 }
+
+onMounted(loadSessions);
 </script>
 
 <style scoped lang="less">
@@ -211,5 +124,69 @@ async function handleSwitchSession(sessionId: string): Promise<void> {
   justify-content: flex-end;
   padding: 8px;
   border-bottom: 1px solid var(--border-color);
+}
+
+.chat-sidebar-container {
+  flex: 1;
+  height: 0;
+}
+
+.chat-sidebar-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+}
+
+.chat-sidebar-empty__art {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 136px;
+  height: 136px;
+}
+
+.chat-sidebar-empty__card {
+  position: absolute;
+  border: 1px solid var(--border-primary);
+  border-radius: 24px;
+  box-shadow: 0 18px 38px rgb(53 43 33 / 8%);
+  backdrop-filter: blur(12px);
+}
+
+.chat-sidebar-empty__card--back {
+  width: 66px;
+  height: 82px;
+  background: linear-gradient(180deg, var(--bg-elevated), var(--bg-secondary));
+  transform: translate(-24px, 8px) rotate(-10deg);
+}
+
+.chat-sidebar-empty__card--front {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 82px;
+  height: 98px;
+  color: var(--color-primary);
+  background: linear-gradient(180deg, var(--bg-elevated), var(--bg-tertiary));
+  transform: translate(18px, -6px) rotate(8deg);
+}
+
+.chat-sidebar-empty__title {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+
+.chat-sidebar-empty__text {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
 }
 </style>

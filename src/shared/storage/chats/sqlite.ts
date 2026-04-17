@@ -12,23 +12,16 @@ const SELECT_SESSIONS_BY_TYPE_SQL = `
   WHERE type = ?
   ORDER BY last_message_at DESC, updated_at DESC, created_at DESC
 `;
-const SELECT_ONE_SESSION_SQL = `
-  SELECT id, type, title, created_at, updated_at, last_message_at
-  FROM chat_sessions
-  WHERE id = ?
-  LIMIT 1
-`;
 const UPSERT_SESSION_SQL = `
   INSERT OR REPLACE INTO chat_sessions
     (id, type, title, created_at, updated_at, last_message_at)
   VALUES (?, ?, ?, ?, ?, ?)
 `;
-const UPDATE_SESSION_SQL = `
+const UPDATE_SESSION_LAST_MESSAGE_AT_SQL = `
   UPDATE chat_sessions
-  SET title = ?, updated_at = ?, last_message_at = ?
+  SET last_message_at = ?
   WHERE id = ?
 `;
-const DELETE_SESSION_SQL = 'DELETE FROM chat_sessions WHERE id = ?';
 
 const SELECT_MESSAGES_BY_SESSION_SQL = `
   SELECT id, session_id, role, content, files_json, usage_json, created_at
@@ -41,16 +34,16 @@ const UPSERT_MESSAGE_SQL = `
     (id, session_id, role, content, files_json, usage_json, created_at)
   VALUES (?, ?, ?, ?, ?, ?, ?)
 `;
-const DELETE_MESSAGE_SQL = 'DELETE FROM chat_messages WHERE id = ?';
+const DELETE_SESSION_SQL = 'DELETE FROM chat_sessions WHERE id = ?';
 const DELETE_MESSAGES_BY_SESSION_SQL = 'DELETE FROM chat_messages WHERE session_id = ?';
 
 interface ChatSessionRow {
   id: string;
   type: string;
   title: string;
-  created_at: number;
-  updated_at: number;
-  last_message_at: number;
+  created_at: string;
+  updated_at: string;
+  last_message_at: string;
 }
 
 interface ChatMessageRow {
@@ -60,17 +53,11 @@ interface ChatMessageRow {
   content: string;
   files_json: string | null;
   usage_json: string | null;
-  created_at: number;
+  created_at: string;
 }
 
 interface FallbackMessagesMap {
   [sessionId: string]: ChatMessageRecord[] | undefined;
-}
-
-interface UpdateChatSessionPayload {
-  title: string;
-  updatedAt: number;
-  lastMessageAt: number;
 }
 
 function isChatSessionType(value: string): value is ChatSessionType {
@@ -149,14 +136,30 @@ function saveFallbackMessages(messages: FallbackMessagesMap): void {
 
 function sortSessions(sessions: ChatSession[]): ChatSession[] {
   return [...sessions].sort((left, right) => {
-    if (right.lastMessageAt !== left.lastMessageAt) return right.lastMessageAt - left.lastMessageAt;
-    if (right.updatedAt !== left.updatedAt) return right.updatedAt - left.updatedAt;
-    return right.createdAt - left.createdAt;
+    if (right.lastMessageAt !== left.lastMessageAt) return right.lastMessageAt.localeCompare(left.lastMessageAt);
+    if (right.updatedAt !== left.updatedAt) return right.updatedAt.localeCompare(left.updatedAt);
+    return right.createdAt.localeCompare(left.createdAt);
   });
 }
 
 function sortMessages(messages: ChatMessageRecord[]): ChatMessageRecord[] {
-  return [...messages].sort((left, right) => left.createdAt - right.createdAt);
+  return [...messages].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
+async function upsertSessionMessages(messages: ChatMessageRecord[]): Promise<void> {
+  await Promise.all(
+    messages.map((message) =>
+      dbExecute(UPSERT_MESSAGE_SQL, [
+        message.id,
+        message.sessionId,
+        message.role,
+        message.content,
+        serializeJsonValue(message.files),
+        serializeJsonValue(message.usage),
+        message.createdAt
+      ])
+    )
+  );
 }
 
 export const chatStorage = {
@@ -167,15 +170,6 @@ export const chatStorage = {
 
     const rows = await dbSelect<ChatSessionRow>(SELECT_SESSIONS_BY_TYPE_SQL, [type]);
     return rows.map(mapSessionRow).filter((item): item is ChatSession => item !== null);
-  },
-
-  async getSession(id: string): Promise<ChatSession | null> {
-    if (!dbAvailable()) {
-      return loadFallbackSessions().find((item) => item.id === id) ?? null;
-    }
-
-    const rows = await dbSelect<ChatSessionRow>(SELECT_ONE_SESSION_SQL, [id]);
-    return rows[0] ? mapSessionRow(rows[0]) : null;
   },
 
   async createSession(session: ChatSession): Promise<void> {
@@ -189,32 +183,18 @@ export const chatStorage = {
     await dbExecute(UPSERT_SESSION_SQL, [session.id, session.type, session.title, session.createdAt, session.updatedAt, session.lastMessageAt]);
   },
 
-  async updateSession(id: string, payload: UpdateChatSessionPayload): Promise<void> {
+  async updateSessionLastMessageAt(sessionId: string, lastMessageAt: string): Promise<void> {
     if (!dbAvailable()) {
       const sessions = loadFallbackSessions();
-      const index = sessions.findIndex((item) => item.id === id);
+      const index = sessions.findIndex((item) => item.id === sessionId);
       if (index === -1) return;
 
-      sessions[index] = { ...sessions[index], title: payload.title, updatedAt: payload.updatedAt, lastMessageAt: payload.lastMessageAt };
+      sessions[index] = { ...sessions[index], lastMessageAt };
       saveFallbackSessions(sortSessions(sessions));
       return;
     }
 
-    await dbExecute(UPDATE_SESSION_SQL, [payload.title, payload.updatedAt, payload.lastMessageAt, id]);
-  },
-
-  async deleteSession(id: string): Promise<void> {
-    if (!dbAvailable()) {
-      const sessions = loadFallbackSessions().filter((item) => item.id !== id);
-      const messages = loadFallbackMessages();
-      delete messages[id];
-      saveFallbackSessions(sessions);
-      saveFallbackMessages(messages);
-      return;
-    }
-
-    await dbExecute(DELETE_MESSAGES_BY_SESSION_SQL, [id]);
-    await dbExecute(DELETE_SESSION_SQL, [id]);
+    await dbExecute(UPDATE_SESSION_LAST_MESSAGE_AT_SQL, [lastMessageAt, sessionId]);
   },
 
   async getMessages(sessionId: string): Promise<ChatMessageRecord[]> {
@@ -227,13 +207,12 @@ export const chatStorage = {
     return rows.map(mapMessageRow);
   },
 
-  async saveMessage(message: ChatMessageRecord): Promise<void> {
+  async addMessage(message: ChatMessageRecord): Promise<void> {
     if (!dbAvailable()) {
       const messages = loadFallbackMessages();
       const sessionMessages = messages[message.sessionId] ?? [];
-      const nextMessages = sessionMessages.filter((item) => item.id !== message.id);
-      nextMessages.push(message);
-      messages[message.sessionId] = sortMessages(nextMessages);
+      sessionMessages.push(message);
+      messages[message.sessionId] = sortMessages(sessionMessages);
       saveFallbackMessages(messages);
       return;
     }
@@ -249,50 +228,38 @@ export const chatStorage = {
     ]);
   },
 
-  async replaceMessages(sessionId: string, messages: ChatMessageRecord[]): Promise<void> {
+  async setSessionMessages(sessionId: string, messages: ChatMessageRecord[]): Promise<void> {
     if (!dbAvailable()) {
       const allMessages = loadFallbackMessages();
       allMessages[sessionId] = sortMessages(messages);
       saveFallbackMessages(allMessages);
+
+      if (messages.length > 0) {
+        await this.updateSessionLastMessageAt(sessionId, messages[messages.length - 1].createdAt);
+      }
+
       return;
     }
 
     await dbExecute(DELETE_MESSAGES_BY_SESSION_SQL, [sessionId]);
+    await upsertSessionMessages(messages);
 
-    for (const message of messages) {
-      await dbExecute(UPSERT_MESSAGE_SQL, [
-        message.id,
-        message.sessionId,
-        message.role,
-        message.content,
-        serializeJsonValue(message.files),
-        serializeJsonValue(message.usage),
-        message.createdAt
-      ]);
+    if (messages.length > 0) {
+      await this.updateSessionLastMessageAt(sessionId, messages[messages.length - 1].createdAt);
     }
   },
 
-  async deleteMessage(id: string, sessionId: string): Promise<void> {
+  async deleteSession(sessionId: string): Promise<void> {
     if (!dbAvailable()) {
+      const sessions = loadFallbackSessions().filter((item) => item.id !== sessionId);
       const messages = loadFallbackMessages();
-      messages[sessionId] = (messages[sessionId] ?? []).filter((item) => item.id !== id);
+      delete messages[sessionId];
+      saveFallbackSessions(sessions);
       saveFallbackMessages(messages);
       return;
     }
 
-    await dbExecute(DELETE_MESSAGE_SQL, [id]);
-  },
-
-  async getSessionUsage(sessionId: string): Promise<AIUsage> {
-    const messages = await this.getMessages(sessionId);
-
-    return messages.reduce<AIUsage>(
-      (usage, message) => ({
-        inputTokens: usage.inputTokens + (message.usage?.inputTokens ?? 0),
-        outputTokens: usage.outputTokens + (message.usage?.outputTokens ?? 0),
-        totalTokens: usage.totalTokens + (message.usage?.totalTokens ?? 0)
-      }),
-      { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
-    );
+    await dbExecute(DELETE_MESSAGES_BY_SESSION_SQL, [sessionId]);
+    await dbExecute(DELETE_SESSION_SQL, [sessionId]);
   }
 };

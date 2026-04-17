@@ -1,6 +1,6 @@
 import type { AIUsage } from './ai';
 
-export type ChatSessionType = 'chat' | 'document' | 'assistant' | 'workflow';
+export type ChatSessionType = 'assistant';
 
 export type ChatMessageRole = 'user' | 'assistant';
 
@@ -37,11 +37,11 @@ export interface ChatSession {
   /** 会话标题 */
   title: string;
   /** 创建时间 */
-  createdAt: number;
+  createdAt: string;
   /** 更新时间 */
-  updatedAt: number;
+  updatedAt: string;
   /** 最后一条消息时间 */
-  lastMessageAt: number;
+  lastMessageAt: string;
 }
 
 export interface ChatMessageRecord {
@@ -58,5 +58,5 @@ export interface ChatMessageRecord {
   /** Token 使用统计 */
   usage?: AIUsage;
   /** 创建时间 */
-  createdAt: number;
+  createdAt: string;
 }

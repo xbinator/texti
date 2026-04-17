@@ -21,7 +21,7 @@
                   <span class="session-history__item-title">{{ session.title }}</span>
                 </span>
                 <span class="session-history__actions">
-                  <BButton type="text" square danger :disabled="props.loading" @click.stop="handleDeleteSession(session.id)">
+                  <BButton type="text" square danger size="small" @click.stop="handleDeleteSession(session.id)">
                     <Icon icon="lucide:trash-2" width="14" height="14" />
                   </BButton>
                 </span>
@@ -40,19 +40,19 @@
 import type { ChatSession } from 'types/chat';
 import { computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
-import { message as antdMessage } from 'ant-design-vue';
+import { message } from 'ant-design-vue';
 import dayjs from 'dayjs';
+import { groupBy, map } from 'lodash-es';
 import BButton from '@/components/BButton/index.vue';
 import BDropdown from '@/components/BDropdown/index.vue';
 import { useChatStore } from '@/stores/chat';
+import { asyncTo } from '@/utils/asyncTo';
 
 interface Props {
   // 会话列表
-  sessions: ChatSession[];
+  sessions?: ChatSession[];
   // 当前选中的会话ID
   activeSessionId?: string | null;
-  // 是否正在加载
-  loading?: boolean;
 }
 
 interface SessionGroup {
@@ -62,6 +62,7 @@ interface SessionGroup {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  sessions: () => [],
   activeSessionId: null,
   loading: false
 });
@@ -71,16 +72,20 @@ const chatStore = useChatStore();
 
 const emit = defineEmits<{
   (e: 'switch-session', sessionId: string): void;
+  (e: 'delete-session', sessionId: string): void;
 }>();
 
 const sessions = computed(() => props.sessions);
-const isDisabled = computed(() => props.loading || !sessions.value.length);
 
-function toDateKey(timestamp: number): string {
+const loading = ref(false);
+
+const isDisabled = computed(() => !sessions.value.length);
+
+function toDateKey(timestamp: string): string {
   return dayjs(timestamp).format('YYYY-MM-DD');
 }
 
-function formatSessionDay(timestamp: number): string {
+function formatSessionDay(timestamp: string): string {
   const date = dayjs(timestamp);
   const now = dayjs();
 
@@ -93,39 +98,27 @@ function formatSessionDay(timestamp: number): string {
 }
 
 const groupedSessions = computed<SessionGroup[]>(() => {
-  const groups = new Map<string, SessionGroup>();
+  const groups = groupBy(sessions.value, (session) => toDateKey(session.lastMessageAt));
 
-  for (const session of sessions.value) {
-    const key = toDateKey(session.lastMessageAt);
-
-    if (!groups.has(key)) {
-      groups.set(key, {
-        key,
-        label: formatSessionDay(session.lastMessageAt),
-        sessions: []
-      });
-    }
-
-    groups.get(key)!.sessions.push(session);
-  }
-
-  return Array.from(groups.values());
+  return map(groups, (_sessions, key) => ({ key, label: formatSessionDay(_sessions[0].lastMessageAt), sessions: _sessions }));
 });
 
 function handleSwitchSession(sessionId: string): void {
-  if (props.loading) return;
   open.value = false;
+
   emit('switch-session', sessionId);
 }
 
-async function handleDeleteSession(sessionId: string): Promise<void> {
-  if (props.loading) return;
-  try {
-    await chatStore.deleteSession(sessionId);
-  } catch (error) {
-    console.error('删除会话失败:', error);
-    antdMessage.error('删除会话失败，请重试');
-  }
+async function handleDeleteSession(sessionId: string) {
+  open.value = false;
+
+  if (loading.value) return;
+
+  loading.value = true;
+  const [error] = await asyncTo(chatStore.deleteSession(sessionId));
+  loading.value = false;
+
+  error ? message.error(error.message || '删除会话失败，请重试') : emit('delete-session', sessionId);
 }
 </script>
 

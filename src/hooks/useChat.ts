@@ -1,6 +1,8 @@
 /* eslint-disable no-use-before-define */
 import type { AIServiceError, AIRequestOptions, AICreateOptions, AIStreamFinishChunk } from 'types/ai';
 import { computed, toValue, ref, type MaybeRefOrGetter } from 'vue';
+import { message } from 'ant-design-vue';
+import { cloneDeep } from 'lodash-es';
 import { getElectronAPI } from '@/shared/platform/electron-api';
 import { providerStorage } from '@/shared/storage';
 
@@ -56,11 +58,16 @@ export function useChat(options: UseStreamOptions) {
     return electronAPI.aiInvoke(provider, payload);
   };
 
+  const _onError = (error: AIServiceError) => {
+    message.error(error.message);
+    options.onError?.(error);
+  };
+
   const onStream = async (payload: AIRequestOptions): Promise<void> => {
     const [error, provider] = await resolveProvider(payload);
 
     if (error) {
-      options.onError?.(error as AIServiceError);
+      _onError(error as AIServiceError);
       return;
     }
 
@@ -77,15 +84,11 @@ export function useChat(options: UseStreamOptions) {
 
     const cleanupComplete = electronAPI.onAiStreamComplete(() => {
       options.onComplete?.();
-
       cleanupAll();
     });
 
     const cleanupError = electronAPI.onAiStreamError((err) => {
-      options.onError?.(err);
-      options.onComplete?.();
-
-      cleanupAll();
+      _onError(err as AIServiceError);
     });
 
     function cleanupAll() {
@@ -98,12 +101,13 @@ export function useChat(options: UseStreamOptions) {
     }
 
     try {
-      await electronAPI.aiStream(provider, { ...payload, requestId });
+      await electronAPI.aiStream(provider, cloneDeep({ ...payload, requestId }));
     } catch (err) {
-      options.onError?.({ message: String((err as Error | AIServiceError)?.message || '未知错误') } as AIServiceError);
-      options.onComplete?.();
+      console.log('🚀 ~ onStream ~ err:', err);
+      _onError({ message: String((err as Error | AIServiceError)?.message || '未知错误') } as AIServiceError);
 
       cleanupAll();
+      options.onComplete?.();
     }
   };
 

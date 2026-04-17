@@ -59,9 +59,9 @@ export async function initDatabase(): Promise<void> {
       id TEXT PRIMARY KEY,
       type TEXT NOT NULL,
       title TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      last_message_at INTEGER NOT NULL
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_message_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS chat_messages (
@@ -71,7 +71,7 @@ export async function initDatabase(): Promise<void> {
       content TEXT NOT NULL,
       files_json TEXT,
       usage_json TEXT,
-      created_at INTEGER NOT NULL
+      created_at TEXT NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_chat_sessions_type_last_message_at
