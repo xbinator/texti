@@ -1,7 +1,7 @@
 import type { AIUsage } from 'types/ai';
 import type { ChatMessageFile, ChatMessageRecord, ChatSession, ChatSessionType } from 'types/chat';
 import { local } from '@/shared/storage/base';
-import { getElectronAPI, hasElectronAPI } from '../../platform/electron-api';
+import { dbSelect, dbExecute, isDatabaseAvailable, parseJson, stringifyJson } from '../utils';
 
 const CHAT_SESSIONS_STORAGE_KEY = 'chat_sessions_fallback';
 const CHAT_MESSAGES_STORAGE_KEY = 'chat_messages_fallback';
@@ -64,35 +64,6 @@ function isChatSessionType(value: string): value is ChatSessionType {
   return ['chat', 'document', 'assistant', 'workflow'].includes(value);
 }
 
-function dbAvailable(): boolean {
-  return hasElectronAPI();
-}
-
-async function dbSelect<T>(sql: string, params?: unknown[]): Promise<T[]> {
-  if (!dbAvailable()) return [];
-  return getElectronAPI().dbSelect<T>(sql, params);
-}
-
-async function dbExecute(sql: string, params?: unknown[]): Promise<void> {
-  if (!dbAvailable()) return;
-  await getElectronAPI().dbExecute(sql, params);
-}
-
-function parseJsonValue<T>(json: string | null): T | undefined {
-  if (!json) return undefined;
-
-  try {
-    return JSON.parse(json) as T;
-  } catch {
-    return undefined;
-  }
-}
-
-function serializeJsonValue(value: unknown): string | null {
-  if (value === undefined || value === null) return null;
-  return JSON.stringify(value);
-}
-
 function mapSessionRow(row: ChatSessionRow): ChatSession | null {
   if (!isChatSessionType(row.type)) return null;
 
@@ -112,8 +83,8 @@ function mapMessageRow(row: ChatMessageRow): ChatMessageRecord {
     sessionId: row.session_id,
     role: row.role === 'assistant' ? 'assistant' : 'user',
     content: row.content,
-    files: parseJsonValue<ChatMessageFile[]>(row.files_json),
-    usage: parseJsonValue<AIUsage>(row.usage_json),
+    files: parseJson<ChatMessageFile[]>(row.files_json),
+    usage: parseJson<AIUsage>(row.usage_json),
     createdAt: row.created_at
   };
 }
@@ -154,8 +125,8 @@ async function upsertSessionMessages(messages: ChatMessageRecord[]): Promise<voi
         message.sessionId,
         message.role,
         message.content,
-        serializeJsonValue(message.files),
-        serializeJsonValue(message.usage),
+        stringifyJson(message.files),
+        stringifyJson(message.usage),
         message.createdAt
       ])
     )
@@ -164,7 +135,7 @@ async function upsertSessionMessages(messages: ChatMessageRecord[]): Promise<voi
 
 export const chatStorage = {
   async getSessionsByType(type: ChatSessionType): Promise<ChatSession[]> {
-    if (!dbAvailable()) {
+    if (!isDatabaseAvailable()) {
       return sortSessions(loadFallbackSessions().filter((item) => item.type === type));
     }
 
@@ -173,7 +144,7 @@ export const chatStorage = {
   },
 
   async createSession(session: ChatSession): Promise<void> {
-    if (!dbAvailable()) {
+    if (!isDatabaseAvailable()) {
       const sessions = loadFallbackSessions().filter((item) => item.id !== session.id);
       sessions.unshift(session);
       saveFallbackSessions(sortSessions(sessions));
@@ -184,7 +155,7 @@ export const chatStorage = {
   },
 
   async updateSessionLastMessageAt(sessionId: string, lastMessageAt: string): Promise<void> {
-    if (!dbAvailable()) {
+    if (!isDatabaseAvailable()) {
       const sessions = loadFallbackSessions();
       const index = sessions.findIndex((item) => item.id === sessionId);
       if (index === -1) return;
@@ -198,7 +169,7 @@ export const chatStorage = {
   },
 
   async getMessages(sessionId: string): Promise<ChatMessageRecord[]> {
-    if (!dbAvailable()) {
+    if (!isDatabaseAvailable()) {
       const messages = loadFallbackMessages()[sessionId] ?? [];
       return sortMessages(messages);
     }
@@ -208,7 +179,7 @@ export const chatStorage = {
   },
 
   async addMessage(message: ChatMessageRecord): Promise<void> {
-    if (!dbAvailable()) {
+    if (!isDatabaseAvailable()) {
       const messages = loadFallbackMessages();
       const sessionMessages = messages[message.sessionId] ?? [];
       sessionMessages.push(message);
@@ -222,14 +193,14 @@ export const chatStorage = {
       message.sessionId,
       message.role,
       message.content,
-      serializeJsonValue(message.files),
-      serializeJsonValue(message.usage),
+      stringifyJson(message.files),
+      stringifyJson(message.usage),
       message.createdAt
     ]);
   },
 
   async setSessionMessages(sessionId: string, messages: ChatMessageRecord[]): Promise<void> {
-    if (!dbAvailable()) {
+    if (!isDatabaseAvailable()) {
       const allMessages = loadFallbackMessages();
       allMessages[sessionId] = sortMessages(messages);
       saveFallbackMessages(allMessages);
@@ -250,7 +221,7 @@ export const chatStorage = {
   },
 
   async deleteSession(sessionId: string): Promise<void> {
-    if (!dbAvailable()) {
+    if (!isDatabaseAvailable()) {
       const sessions = loadFallbackSessions().filter((item) => item.id !== sessionId);
       const messages = loadFallbackMessages();
       delete messages[sessionId];

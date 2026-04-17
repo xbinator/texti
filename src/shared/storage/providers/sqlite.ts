@@ -1,7 +1,7 @@
 import type { StoredProviderSettings } from './types';
 import type { AIProviderType, AIProviderModel, AIProvider, AICustomProvider } from 'types/ai';
 import { cloneDeep, omitBy, isUndefined, pick, isBoolean, isString, isArray } from 'lodash-es';
-import { getElectronAPI, hasElectronAPI } from '../../platform/electron-api';
+import { dbSelect, dbExecute, isDatabaseAvailable, parseJson, stringifyJson } from '../utils';
 import { DEFAULT_PROVIDERS } from './defaults';
 
 // ─────────────────────────────────────────────
@@ -52,24 +52,6 @@ interface CustomProviderRow {
 }
 
 // ─────────────────────────────────────────────
-// 数据库 IPC 访问层
-// ─────────────────────────────────────────────
-
-function isAvailable(): boolean {
-  return hasElectronAPI();
-}
-
-async function dbSelect<T>(sql: string, params?: unknown[]): Promise<T[]> {
-  if (!isAvailable()) return [];
-  return getElectronAPI().dbSelect<T>(sql, params);
-}
-
-async function dbExecute(sql: string, params?: unknown[]): Promise<{ changes: number; lastInsertRowid: number }> {
-  if (!isAvailable()) return { changes: 0, lastInsertRowid: 0 };
-  return getElectronAPI().dbExecute(sql, params);
-}
-
-// ─────────────────────────────────────────────
 // 克隆工具（使用 lodash-es cloneDeep 保证深拷贝）
 // ─────────────────────────────────────────────
 
@@ -92,24 +74,14 @@ function isProviderRequestFormat(value: unknown): value is AIProviderType {
   return typeof value === 'string' && REQUEST_FORMATS.includes(value as AIProviderType);
 }
 
-// ─────────────────────────────────────────────
-// JSON 序列化 / 反序列化
-// ─────────────────────────────────────────────
-
 function parseModelsJson(json: string | null): AIProviderModel[] | undefined {
-  if (!json) return undefined;
-
-  try {
-    const parsed: unknown = JSON.parse(json);
-    if (!Array.isArray(parsed)) return undefined;
-    return cloneModels(parsed as AIProviderModel[]);
-  } catch {
-    return undefined;
-  }
+  const parsed = parseJson<unknown>(json);
+  if (!Array.isArray(parsed)) return undefined;
+  return cloneModels(parsed as AIProviderModel[]);
 }
 
 function stringifyModels(models?: AIProviderModel[]): string | null {
-  return models ? JSON.stringify(cloneModels(models)) : null;
+  return stringifyJson(models ? cloneModels(models) : undefined);
 }
 
 // ─────────────────────────────────────────────
@@ -194,14 +166,14 @@ function sanitizeProviderId(id: string): string {
 // ─────────────────────────────────────────────
 
 async function loadAllStoredSettings(): Promise<Map<string, StoredProviderSettings>> {
-  if (!isAvailable()) return new Map();
+  if (!isDatabaseAvailable()) return new Map();
 
   const rows = await dbSelect<ProviderSettingsRow>(SELECT_ALL_SETTINGS_SQL);
   return new Map(rows.map((row) => [row.id, mapRowToStoredSettings(row)]));
 }
 
 async function loadStoredSetting(id: string): Promise<StoredProviderSettings | undefined> {
-  if (!isAvailable()) return undefined;
+  if (!isDatabaseAvailable()) return undefined;
 
   const rows = await dbSelect<ProviderSettingsRow>(SELECT_ONE_SETTING_SQL, [id]);
   return rows[0] ? mapRowToStoredSettings(rows[0]) : undefined;
@@ -219,7 +191,7 @@ async function persistSettings(id: string, settings: StoredProviderSettings): Pr
 }
 
 async function loadAllCustomProviders(): Promise<AIProvider[]> {
-  if (!isAvailable()) return [];
+  if (!isDatabaseAvailable()) return [];
 
   const rows = await dbSelect<CustomProviderRow>(SELECT_ALL_CUSTOM_PROVIDERS_SQL);
   return rows
@@ -229,7 +201,7 @@ async function loadAllCustomProviders(): Promise<AIProvider[]> {
 }
 
 async function loadCustomProvider(id: string): Promise<AIProvider | null> {
-  if (!isAvailable()) return null;
+  if (!isDatabaseAvailable()) return null;
 
   const rows = await dbSelect<CustomProviderRow>(SELECT_ONE_CUSTOM_PROVIDER_SQL, [id]);
   if (!rows[0]) return null;
@@ -295,7 +267,7 @@ export const providerStorage = {
   },
 
   async createOrUpdateCustomProvider(payload: AICustomProvider): Promise<AIProvider | null> {
-    if (!isAvailable()) return null;
+    if (!isDatabaseAvailable()) return null;
 
     const normalized = normalizeCustomProviderPayload(payload);
     const { id } = normalized;
@@ -326,7 +298,7 @@ export const providerStorage = {
 
   async updateProvider(id: string, patch: StoredProviderSettings): Promise<AIProvider | null> {
     const normalizedId = sanitizeProviderId(id);
-    if (!isAvailable()) return null;
+    if (!isDatabaseAvailable()) return null;
 
     const base = getDefaultProvider(normalizedId);
 
@@ -372,7 +344,7 @@ export const providerStorage = {
 
   async deleteCustomProvider(id: string): Promise<boolean> {
     const normalizedId = sanitizeProviderId(id);
-    if (!isAvailable()) return false;
+    if (!isDatabaseAvailable()) return false;
 
     const provider = await loadCustomProvider(normalizedId);
     if (!provider || !provider.isCustom) return false;
