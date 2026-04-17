@@ -321,6 +321,7 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
     font-weight: 500;
     color: var(--editor-link);
     text-decoration: none;
+    cursor: pointer;
 
     &:hover {
       text-decoration: underline;
