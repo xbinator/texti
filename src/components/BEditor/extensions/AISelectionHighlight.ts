@@ -1,12 +1,11 @@
-import type { CommandProps, Editor } from '@tiptap/core';
+import type { Editor } from '@tiptap/core';
+import type { Node as PMNode } from '@tiptap/pm/model';
 import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
-import { Decoration, DecorationSet } from '@tiptap/pm/view';
+import { DecorationSet } from '@tiptap/pm/view';
+import { createSingleDecorationSet, type DecorationRange } from './decoration-utils';
 
-interface AISelectionRange {
-  from: number;
-  to: number;
-}
+type AISelectionRange = DecorationRange;
 
 interface AISelectionHighlightState {
   decorations: DecorationSet;
@@ -19,21 +18,9 @@ interface AISelectionHighlightMeta {
 
 const aiSelectionHighlightPluginKey = new PluginKey<AISelectionHighlightState>('b-editor-ai-selection-highlight');
 
-function createDecorations(doc: CommandProps['state']['doc'], range: AISelectionRange | null): DecorationSet {
-  if (!range || range.from === range.to) {
-    return DecorationSet.create(doc, []);
-  }
-
-  return DecorationSet.create(doc, [
-    Decoration.inline(range.from, range.to, {
-      class: 'ai-selection-highlight'
-    })
-  ]);
-}
-
-function createHighlightState(doc: CommandProps['state']['doc'], range: AISelectionRange | null = null): AISelectionHighlightState {
+function createHighlightState(doc: PMNode, range: AISelectionRange | null = null): AISelectionHighlightState {
   return {
-    decorations: createDecorations(doc, range),
+    decorations: createSingleDecorationSet(doc, range, 'ai-selection-highlight'),
     range
   };
 }

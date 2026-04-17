@@ -1,12 +1,11 @@
 import type { CommandProps, Editor } from '@tiptap/core';
+import type { Node as PMNode } from '@tiptap/pm/model';
 import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
-import { Decoration, DecorationSet } from '@tiptap/pm/view';
+import { DecorationSet } from '@tiptap/pm/view';
+import { createInlineDecorationSet, type DecorationRange } from './decoration-utils';
 
-export interface SearchMatch {
-  from: number;
-  to: number;
-}
+export type SearchMatch = DecorationRange;
 
 export interface SearchSnapshot {
   currentIndex: number;
@@ -48,7 +47,7 @@ function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function findMatches(doc: CommandProps['state']['doc'], term: string): SearchMatch[] {
+function findMatches(doc: PMNode, term: string): SearchMatch[] {
   if (!term) {
     return [];
   }
@@ -84,27 +83,13 @@ function findMatches(doc: CommandProps['state']['doc'], term: string): SearchMat
   return matches;
 }
 
-function createDecorations(doc: CommandProps['state']['doc'], matches: SearchMatch[], currentIndex: number): DecorationSet {
-  if (matches.length === 0) {
-    return DecorationSet.create(doc, []);
-  }
-
-  const decorations = matches.map((match, index) =>
-    Decoration.inline(match.from, match.to, {
-      class: index === currentIndex ? 'search-match search-match-current' : 'search-match'
-    })
-  );
-
-  return DecorationSet.create(doc, decorations);
-}
-
-function createSearchState(doc: CommandProps['state']['doc'], term = '', currentIndex = 0): SearchState {
+function createSearchState(doc: PMNode, term = '', currentIndex = 0): SearchState {
   const matches = findMatches(doc, term);
   const nextIndex = matches.length === 0 ? 0 : Math.min(currentIndex, matches.length - 1);
 
   return {
     currentIndex: nextIndex,
-    decorations: createDecorations(doc, matches, nextIndex),
+    decorations: createInlineDecorationSet(doc, matches, (_, index) => (index === nextIndex ? 'search-match search-match-current' : 'search-match')),
     matches,
     term
   };
@@ -134,7 +119,7 @@ export function getSearchSnapshot(editor: Editor | null | undefined): SearchSnap
 
 function getMatchElement(editor: Editor, match: SearchMatch): HTMLElement | null {
   const domAtPos = editor.view.domAtPos(match.from);
-  const targetNode = domAtPos.node.nodeType === Node.TEXT_NODE ? domAtPos.node.parentElement : domAtPos.node;
+  const targetNode = domAtPos.node.nodeType === globalThis.Node.TEXT_NODE ? domAtPos.node.parentElement : domAtPos.node;
 
   return targetNode instanceof HTMLElement ? targetNode : null;
 }
