@@ -1,12 +1,16 @@
 <template>
   <div ref="layoutRef" class="b-editor-layout">
     <BEditorSidebar
-      v-if="showSidebar"
+      v-if="showOutline"
       :title="editorTitle"
+      :file-path="props.filePath"
       :content="bodyContentForSidebar"
       :anchor-id-prefix="editorInstanceId"
       :active-id="activeAnchorId"
       @change="handleChangeAnchor"
+      @rename-file="emit('rename-file')"
+      @delete-file="emit('delete-file')"
+      @show-in-folder="emit('show-in-folder')"
     />
 
     <BScrollbar ref="scrollbarRef" class="b-editor-scrollbar" @scroll="handleEditorScroll">
@@ -51,6 +55,8 @@ interface Props {
   editable?: boolean;
   // 编辑器实例ID
   editorId?: string;
+  // 文件路径
+  filePath?: string | null;
   // 编辑器视图模式
   viewMode?: BEditorViewMode;
   // 是否显示大纲
@@ -61,13 +67,15 @@ const props = withDefaults(defineProps<Props>(), {
   editable: true,
   // 编辑器实例ID
   editorId: '',
+  filePath: null,
   viewMode: 'rich',
   showOutline: true
 });
 
+const emit = defineEmits(['rename-file', 'delete-file', 'show-in-folder']);
+
 const editorInstanceId = computed(() => `${props.editorId || ''}`);
 const isRichMode = computed(() => props.viewMode === 'rich');
-const showSidebar = computed(() => isRichMode.value && props.showOutline);
 
 const editorContent = defineModel<string>('value', { default: '' });
 

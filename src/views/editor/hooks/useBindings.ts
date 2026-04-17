@@ -15,6 +15,10 @@ interface UseBindingsOptions {
     onSaveAs: () => Promise<void>;
     // 重命名文件
     onRename: () => Promise<void>;
+    // 删除文件
+    onDelete: () => Promise<void>;
+    // 打开文件所在位置
+    onShowInFolder: () => Promise<void>;
     // 复制文件
     onDuplicate: () => Promise<void>;
   };
@@ -50,6 +54,7 @@ export function useBindings(fileId: Ref<string>, options: UseBindingsOptions) {
       await actions.onSaveAs();
     }),
     emitter.on('file:rename', actions.onRename),
+    emitter.on('file:delete', actions.onDelete),
     emitter.on('file:duplicate', actions.onDuplicate),
     emitter.on('edit:undo', () => {
       editorInstance?.value?.undo();

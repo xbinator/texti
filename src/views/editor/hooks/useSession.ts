@@ -53,7 +53,7 @@ export function useSession(fileId: Ref<string>) {
 
   setOnFileChanged(fileStateActions.handleExternalFileChange);
 
-  async function onSave(): Promise<void> {
+  async function onSave() {
     await fileStateActions.ensureStoredFile();
 
     if (fileState.value.path) {
@@ -69,7 +69,7 @@ export function useSession(fileId: Ref<string>) {
     await fileStateActions.finalizeSave(savedPath);
   }
 
-  async function onSaveAs(): Promise<void> {
+  async function onSaveAs() {
     await fileStateActions.ensureStoredFile();
 
     const savedPath = await native.saveFile(fileState.value.content, undefined, { defaultPath: getDefaultSavePath(fileState.value) });
@@ -79,7 +79,7 @@ export function useSession(fileId: Ref<string>) {
     await fileStateActions.finalizeSave(savedPath);
   }
 
-  async function onRename(): Promise<void> {
+  async function onRename() {
     await fileStateActions.ensureStoredFile();
 
     const [cancelled, newName] = await Modal.input('重命名', { defaultValue: fileState.value.name, placeholder: '请输入文件名' });
@@ -102,13 +102,43 @@ export function useSession(fileId: Ref<string>) {
     await fileStateActions.persistCurrentFile();
   }
 
-  async function onDuplicate(): Promise<void> {
+  async function onDuplicate() {
     const nextId = nanoid();
     const nextName = fileState.value.name ? `${fileState.value.name}-副本` : '';
 
     await filesStore.addFile({ ...fileState.value, id: nextId, name: nextName, path: null, savedContent: fileState.value.content });
 
     await router.push({ name: 'editor', params: { id: nextId } });
+  }
+
+  async function onShowInFolder() {
+    if (!fileState.value.path) {
+      return;
+    }
+
+    await native.showItemInFolder(fileState.value.path);
+  }
+
+  async function onDelete() {
+    autoSave.pause();
+
+    const path = fileState.value.path || '';
+
+    const [cancelled] = await Modal.delete(path ? `确定要删除文件 "${currentTitle.value}" 吗？` : `确定要删除未保存文档 "${currentTitle.value}" 吗？`);
+
+    if (cancelled) return;
+
+    if (path) {
+      await clearWatchedFile();
+      // 删除文件
+      await native.trashFile(path);
+    }
+    // 删除关联的文件
+    await filesStore.removeFile(fileId.value);
+    // 删除关联的标签页
+    tabsStore.removeTab(fileId.value);
+
+    await router.push('/welcome');
   }
 
   async function applyDiskState(diskFile: ReadFileResult): Promise<void> {
@@ -122,7 +152,7 @@ export function useSession(fileId: Ref<string>) {
     await fileStateActions.persistCurrentFile();
   }
 
-  async function reconcileStoredFileWithDisk(): Promise<void> {
+  async function reconcileStoredFileWithDisk() {
     if (!fileState.value.path) return;
 
     let diskFile: ReadFileResult;
@@ -180,7 +210,7 @@ export function useSession(fileId: Ref<string>) {
     }
   }
 
-  async function loadFileState(): Promise<void> {
+  async function loadFileState() {
     // 增加版本号，标记当前加载请求
     const currentVersion = ++loadVersion;
     // 暂停自动保存，避免在加载过程中触发保存
@@ -233,7 +263,7 @@ export function useSession(fileId: Ref<string>) {
     dispose();
   });
 
-  const actions = { onSave, onSaveAs, onRename, onDuplicate };
+  const actions = { onSave, onSaveAs, onRename, onDelete, onShowInFolder, onDuplicate };
 
   return {
     fileState,

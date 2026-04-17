@@ -1,9 +1,6 @@
 <template>
   <BScrollbar class="anchor-panel__content" inset="vertical">
     <TransitionGroup name="anchor-fade" tag="div">
-      <div v-if="title" class="anchor-panel__header" :class="{ active: !activeId }" @click="handleTitleClick">
-        <span class="anchor-panel__title">{{ title }}</span>
-      </div>
       <div
         v-for="item in treeItems"
         :key="item.id"
@@ -50,7 +47,6 @@ interface VisibleAnchorItem extends AnchorTreeItem {
 }
 
 interface Props {
-  title?: string;
   // 目录项
   items: AnchorItem[];
   // 当前选中的目录项id
@@ -58,7 +54,6 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  title: '',
   activeId: ''
 });
 
@@ -66,7 +61,7 @@ const emit = defineEmits(['click']);
 
 const itemRefs = ref<Record<string, HTMLElement>>({});
 
-function setItemRef(el: HTMLElement, id: string): void {
+function setItemRef(el: HTMLElement, id: string) {
   if (el) {
     itemRefs.value[id] = el;
   }
@@ -74,19 +69,11 @@ function setItemRef(el: HTMLElement, id: string): void {
 
 const collapsedIds = ref<Record<string, boolean>>({});
 
-/**
- * 点击文档标题
- * 传递空 id，由父组件处理滚动到顶部逻辑
- */
-function handleTitleClick(): void {
-  emit('click', { id: '', text: '', level: 0 });
-}
-
 function handleClick(item: VisibleAnchorItem) {
   emit('click', item);
 }
 
-function toggleCollapsed(id: string): void {
+function toggleCollapsed(id: string) {
   collapsedIds.value[id] = !collapsedIds.value[id];
 }
 
@@ -145,34 +132,7 @@ watch(
 <style lang="less" scoped>
 .anchor-panel__content {
   flex: 1;
-  padding: 16px 2px 12px 8px;
-}
-
-.anchor-panel__header {
-  display: flex;
-  align-items: center;
-  min-height: 32px;
-  padding: 0 12px;
-  color: var(--text-primary);
-  cursor: pointer;
-  border-radius: 6px;
-  transition: background-color 0.15s ease, color 0.15s ease;
-
-  &:hover {
-    background: var(--bg-hover);
-  }
-
-  &.active {
-    background: var(--color-primary-bg);
-  }
-}
-
-.anchor-panel__title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 13px;
-  letter-spacing: 0.08em;
-  white-space: nowrap;
+  padding: 2px 0 8px 8px;
 }
 
 .anchor-item {
@@ -181,6 +141,7 @@ watch(
   align-items: center;
   min-height: 32px;
   padding-right: 12px;
+  margin-bottom: 2px;
   color: var(--text-primary);
   cursor: pointer;
   border-radius: 6px;
@@ -213,10 +174,6 @@ watch(
   &:hover {
     background: var(--bg-hover);
   }
-}
-
-.toc-item__toggle--empty {
-  cursor: default;
 }
 
 .anchor-item__text {
