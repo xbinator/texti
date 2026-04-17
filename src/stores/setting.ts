@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia';
+import { defaultsDeep } from 'lodash-es';
 import { native } from '@/shared/platform';
 import { local } from '@/shared/storage/base';
 
@@ -30,7 +31,7 @@ const DEFAULT_SETTINGS: PersistedSettingState = {
   showOutline: true,
   sourceMode: false,
   sidebarVisible: false,
-  sidebarWidth: 300
+  sidebarWidth: 340
 };
 
 function getSystemTheme(): ResolvedTheme {
@@ -63,14 +64,17 @@ function normalizeSettings(value: unknown): PersistedSettingState {
   }
 
   const settings = value as Partial<PersistedSettingState>;
+  const normalized = defaultsDeep({}, settings, DEFAULT_SETTINGS) as PersistedSettingState;
 
-  return {
-    theme: isThemeMode(settings.theme) ? settings.theme : DEFAULT_SETTINGS.theme,
-    showOutline: typeof settings.showOutline === 'boolean' ? settings.showOutline : DEFAULT_SETTINGS.showOutline,
-    sourceMode: typeof settings.sourceMode === 'boolean' ? settings.sourceMode : DEFAULT_SETTINGS.sourceMode,
-    sidebarVisible: typeof settings.sidebarVisible === 'boolean' ? settings.sidebarVisible : DEFAULT_SETTINGS.sidebarVisible,
-    sidebarWidth: normalizeSidebarWidth(settings.sidebarWidth)
-  };
+  // 确保主题模式有效
+  if (!isThemeMode(normalized.theme)) {
+    normalized.theme = DEFAULT_SETTINGS.theme;
+  }
+
+  // 确保侧边栏宽度有效
+  normalized.sidebarWidth = normalizeSidebarWidth(normalized.sidebarWidth);
+
+  return normalized;
 }
 
 function removeLegacySettings(): void {
@@ -129,6 +133,14 @@ export const useSettingStore = defineStore('setting', {
   },
 
   actions: {
+    syncNativeMenuState(): void {
+      native.updateMenuItem?.('view:source', { checked: this.sourceMode });
+      native.updateMenuItem?.('view:outline', { checked: this.showOutline });
+      native.updateMenuItem?.('theme:light', { checked: this.theme === 'light' });
+      native.updateMenuItem?.('theme:dark', { checked: this.theme === 'dark' });
+      native.updateMenuItem?.('theme:system', { checked: this.theme === 'system' });
+    },
+
     persistSettings(): void {
       const settings: PersistedSettingState = {
         theme: this.theme,
@@ -150,6 +162,7 @@ export const useSettingStore = defineStore('setting', {
       this.theme = newTheme;
       this.persistSettings();
       applyTheme(newTheme);
+      this.syncNativeMenuState();
     },
 
     /**
@@ -171,6 +184,7 @@ export const useSettingStore = defineStore('setting', {
     setShowOutline(show: boolean): void {
       this.showOutline = show;
       this.persistSettings();
+      this.syncNativeMenuState();
     },
 
     /**
@@ -189,6 +203,7 @@ export const useSettingStore = defineStore('setting', {
     setSourceMode(enabled: boolean): void {
       this.sourceMode = enabled;
       this.persistSettings();
+      this.syncNativeMenuState();
     },
 
     /**
@@ -259,6 +274,7 @@ export const useSettingStore = defineStore('setting', {
       this.initTheme();
       // 标题不保存到本地，每次启动使用默认值
       native.setWindowTitle(this.title);
+      this.syncNativeMenuState();
     }
   }
 });
