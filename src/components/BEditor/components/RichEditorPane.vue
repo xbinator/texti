@@ -101,7 +101,7 @@ function handleFrontMatterFieldAdd(key: string, value: unknown): void {
 
 async function handleLinkClick(event: MouseEvent): Promise<void> {
   const { target } = event;
-  if (!(target instanceof Element) || (!event.ctrlKey && !event.metaKey)) {
+  if (!(target instanceof Element)) {
     return;
   }
 
