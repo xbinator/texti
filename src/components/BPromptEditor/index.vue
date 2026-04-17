@@ -41,7 +41,7 @@ const props = withDefaults(defineProps<Props>(), {
   disabled: false,
   maxHeight: undefined,
   variant: 'outlined',
-  submitOnEnter: false
+  submitOnEnter: true
 });
 
 const emit = defineEmits<{

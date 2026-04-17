@@ -44,6 +44,7 @@ import BScrollbar from '@/components/BScrollbar/index.vue';
 import { useOpenFile } from '@/hooks/useOpenFile';
 import type { StoredFile } from '@/shared/storage';
 import { useFilesStore } from '@/stores/files';
+import { useTabsStore } from '@/stores/tabs';
 import { getRecentFileLabel } from '@/utils/recentFile';
 
 withDefaults(defineProps<BSearchRecentProps>(), {
@@ -57,6 +58,7 @@ const emit = defineEmits<{
 
 const route = useRoute();
 const filesStore = useFilesStore();
+const tabsStore = useTabsStore();
 const { openFile } = useOpenFile();
 const visible = defineModel<boolean>('visible', { default: false });
 const keyword = ref('');
@@ -115,6 +117,7 @@ async function handleSelect(file: StoredFile): Promise<void> {
 
 async function handleRemove(id: string): Promise<void> {
   await filesStore.removeFile(id);
+  tabsStore.removeTab(id);
   emit('remove', id);
 }
 

@@ -31,7 +31,7 @@ export function useEditorKeyboard(options: KeyboardOptions) {
 
     if (event.key === 'Enter' && !isMenuVisible.value) {
       event.preventDefault();
-      if (submitOnEnter.value && !event.shiftKey) {
+      if (submitOnEnter.value && !(event.ctrlKey || event.metaKey)) {
         onSubmit?.();
       } else {
         onEnter();
