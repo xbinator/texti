@@ -23,8 +23,8 @@
                 <Icon icon="lucide:messages-square" width="26" height="26" />
               </div>
             </div>
-            <div class="chat-sidebar-empty__title">开始一段新对话</div>
-            <div class="chat-sidebar-empty__text">输入你的问题，开始与助手的对话</div>
+            <div class="chat-sidebar-empty__title">开始对话</div>
+            <div class="chat-sidebar-empty__text">输入你的问题，跟助手聊聊吧</div>
           </div>
         </template>
       </BChat>

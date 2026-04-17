@@ -110,8 +110,6 @@ function handleSwitchSession(sessionId: string): void {
 }
 
 async function handleDeleteSession(sessionId: string) {
-  open.value = false;
-
   if (loading.value) return;
 
   loading.value = true;
