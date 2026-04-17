@@ -128,7 +128,7 @@ watch(visible, (value) => {
   }
 
   focusInput();
-  filesStore.initialize();
+  filesStore.ensureLoaded();
 });
 </script>
 

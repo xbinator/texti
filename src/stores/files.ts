@@ -4,44 +4,33 @@ import { recentFilesStorage } from '@/shared/storage';
 
 export interface FilesState {
   recentFiles: StoredFile[] | null;
-  isLoading: boolean;
 }
 
 export const useFilesStore = defineStore('files', {
   state: (): FilesState => ({
-    recentFiles: null,
-    isLoading: false
+    recentFiles: null
   }),
 
   actions: {
-    async ensureLoaded(): Promise<void> {
+    async ensureLoaded() {
       if (this.recentFiles !== null) return;
 
-      await this.initialize();
+      this.recentFiles = await recentFilesStorage.getAllRecentFiles();
     },
 
-    async getFileById(id: string): Promise<StoredFile | undefined> {
+    async getFileById(id: string) {
       await this.ensureLoaded();
 
       return this.recentFiles?.find((file) => file.id === id);
     },
 
-    async getFileByPath(path: string): Promise<StoredFile | undefined> {
+    async getFileByPath(path: string) {
       await this.ensureLoaded();
 
       return this.recentFiles?.find((file) => file.path === path);
     },
 
-    async initialize(): Promise<void> {
-      this.isLoading = true;
-      try {
-        this.recentFiles = await recentFilesStorage.getAllRecentFiles();
-      } finally {
-        this.isLoading = false;
-      }
-    },
-
-    async addFile(file: StoredFile): Promise<void> {
+    async addFile(file: StoredFile) {
       await recentFilesStorage.addRecentFile(file);
       if (this.recentFiles === null) {
         this.recentFiles = [file];
@@ -56,7 +45,7 @@ export const useFilesStore = defineStore('files', {
       }
     },
 
-    async updateFile(id: string, file: StoredFile): Promise<void> {
+    async updateFile(id: string, file: StoredFile) {
       await recentFilesStorage.updateRecentFile(id, file);
       if (this.recentFiles === null) return;
       const index = this.recentFiles.findIndex((f) => f.id === id);
@@ -65,13 +54,13 @@ export const useFilesStore = defineStore('files', {
       }
     },
 
-    async removeFile(...ids: string[]): Promise<void> {
+    async removeFile(...ids: string[]) {
       await recentFilesStorage.removeRecentFile(...ids);
       if (this.recentFiles === null) return;
       this.recentFiles = this.recentFiles.filter((file) => !ids.includes(file.id));
     },
 
-    async clearFiles(): Promise<void> {
+    async clearFiles() {
       await recentFilesStorage.clearRecentFiles();
       this.recentFiles = [];
     }

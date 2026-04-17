@@ -73,7 +73,7 @@ const visibleSearchRecent = ref(false);
 
 const topRecentFiles = computed(() => filesStore.recentFiles?.slice(0, 3) ?? []);
 
-onMounted(() => filesStore.initialize());
+onMounted(() => filesStore.ensureLoaded());
 
 function handleNewFile(): void {
   router.push({ name: 'editor', params: { id: nanoid() } });
