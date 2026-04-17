@@ -112,7 +112,7 @@ function isActive(key: SettingsMenuKey): boolean {
   border-radius: 8px;
 }
 
-@container (min-width: 800px) {
+@container (min-width: 900px) {
   .settings-sidebar {
     width: var(--sidebar-width-large);
   }
