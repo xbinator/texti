@@ -41,6 +41,10 @@ const electronAPI: ElectronAPI = {
 
   renameFile: (oldPath: string, newPath: string) => ipcRenderer.invoke('fs:renameFile', oldPath, newPath),
 
+  trashFile: (filePath: string) => ipcRenderer.invoke('shell:trashFile', filePath),
+
+  showItemInFolder: (filePath: string) => ipcRenderer.invoke('shell:showItemInFolder', filePath),
+
   watchFile: (filePath: string) => ipcRenderer.invoke('fs:watchFile', filePath),
 
   unwatchFile: () => ipcRenderer.invoke('fs:unwatchFile'),

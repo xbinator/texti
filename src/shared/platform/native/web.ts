@@ -52,6 +52,16 @@ export class WebNative implements Native {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async trashFile(_path: string): Promise<void> {
+    throw new Error('Web platform does not support deleting files by path');
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async showItemInFolder(_path: string): Promise<void> {
+    throw new Error('Web platform does not support revealing files by path');
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async watchFile(_path: string): Promise<void> {
     // web 端不支持文件监听
   }

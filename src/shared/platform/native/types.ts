@@ -36,6 +36,10 @@ export interface Native {
 
   renameFile(oldPath: string, newPath: string): Promise<void>;
 
+  trashFile(path: string): Promise<void>;
+
+  showItemInFolder(path: string): Promise<void>;
+
   watchFile(path: string): Promise<void>;
 
   unwatchFile(): Promise<void>;

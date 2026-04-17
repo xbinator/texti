@@ -54,6 +54,8 @@ export interface ElectronAPI {
 
   writeFile: (filePath: string, content: string) => Promise<void>;
   renameFile: (oldPath: string, newPath: string) => Promise<void>;
+  trashFile: (filePath: string) => Promise<void>;
+  showItemInFolder: (filePath: string) => Promise<void>;
 
   watchFile: (filePath: string) => Promise<void>;
   unwatchFile: () => Promise<void>;
