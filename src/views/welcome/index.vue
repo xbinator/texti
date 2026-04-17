@@ -42,7 +42,6 @@
         </div>
         <div class="recent-files-more" @click="handleShowShortcuts">
           <span>更多</span>
-          <Icon icon="lucide:chevron-right" width="14" height="14" />
         </div>
       </div>
 
@@ -302,8 +301,8 @@ async function handleDrop(e: DragEvent): Promise<void> {
 
 .recent-files-more {
   display: flex;
-  gap: 4px;
   align-items: center;
+  justify-content: center;
   padding: 8px 12px;
   color: var(--text-secondary);
   cursor: pointer;

@@ -4,6 +4,7 @@ import { customAlphabet } from 'nanoid';
 import { useToolbarShortcuts } from '@/components/BToolbar/hooks/useToolbarShortcuts';
 import type { ToolbarOptions } from '@/components/BToolbar/types';
 import { native } from '@/shared/platform';
+import { isElectron } from '@/shared/platform/env';
 import { useFilesStore } from '@/stores/files';
 import { emitter } from '@/utils/emitter';
 import { EditorShortcuts } from '../../../constants/shortcuts';
@@ -70,6 +71,7 @@ export function useFileActive(visible: UseFileActiveOptions['visible']) {
       value: 'save',
       label: '保存',
       shortcut: EditorShortcuts.FILE_SAVE,
+      enableShortcut: !isElectron(),
       onClick: () => {
         emitter.emit('file:save');
       }
