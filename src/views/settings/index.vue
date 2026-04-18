@@ -1,10 +1,14 @@
 <template>
   <div class="settings-container">
-    <div class="settings-sidebar">
+    <div class="settings-sidebar" :class="{ 'settings-sidebar--collapsed': sidebarCollapsed }">
       <RouterLink v-for="item in menuItems" :key="item.key" :to="item.path" class="sidebar-item" :class="{ active: isActive(item.key) }">
         <Icon :icon="item.icon" class="sidebar-item__icon" />
         <span class="sidebar-item__label">{{ item.label }}</span>
       </RouterLink>
+
+      <button type="button" class="sidebar-collapse-btn" @click="sidebarCollapsed = !sidebarCollapsed">
+        <Icon :icon="sidebarCollapsed ? 'lucide:panel-right-open' : 'lucide:panel-right-close'" width="14" height="14" />
+      </button>
     </div>
 
     <div class="settings-content">
@@ -14,11 +18,13 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { menuItems, type SettingsMenuKey } from './constants';
 
 const route = useRoute();
+const sidebarCollapsed = ref(false);
 
 function isActive(key: SettingsMenuKey): boolean {
   const prefix = `/settings/${key}`;
@@ -31,22 +37,35 @@ function isActive(key: SettingsMenuKey): boolean {
 .settings-container {
   --sidebar-width-large: 280px;
   --sidebar-width-small: 60px;
-  --container-width-threshold: 800px;
 
   display: flex;
   height: 100%;
-  container-type: inline-size;
 }
 
 .settings-sidebar {
   display: flex;
   flex-shrink: 0;
   flex-direction: column;
-  width: var(--sidebar-width-small);
+  width: var(--sidebar-width-large);
   height: 100%;
   padding: 16px 14px 12px 8px;
   overflow-y: auto;
   transition: width 0.3s ease;
+
+  &--collapsed {
+    width: var(--sidebar-width-small);
+
+    .sidebar-item {
+      gap: 0;
+      justify-content: center;
+      padding: 0;
+    }
+
+    .sidebar-item__label {
+      width: 0;
+      opacity: 0;
+    }
+  }
 }
 
 .settings-header-back {
@@ -67,11 +86,11 @@ function isActive(key: SettingsMenuKey): boolean {
 
 .sidebar-item {
   display: flex;
-  gap: 0;
+  gap: 12px;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   height: 38px;
-  padding: 0;
+  padding: 0 14px;
   margin-bottom: 8px;
   font-size: 14px;
   color: var(--text-secondary);
@@ -100,33 +119,34 @@ function isActive(key: SettingsMenuKey): boolean {
 }
 
 .sidebar-item__label {
-  width: 0;
   overflow: hidden;
   white-space: nowrap;
-  opacity: 0;
   transition: opacity 0.3s ease, width 0.3s ease;
+}
+
+.sidebar-collapse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 38px;
+  margin-top: auto;
+  color: var(--text-secondary);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  transition: all 0.15s;
+
+  &:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+  }
 }
 
 .settings-content {
   flex: 1;
   background: var(--bg-primary);
   border-radius: 8px;
-}
-
-@container (min-width: 900px) {
-  .settings-sidebar {
-    width: var(--sidebar-width-large);
-  }
-
-  .sidebar-item {
-    gap: 12px;
-    justify-content: flex-start;
-    padding: 0 14px;
-  }
-
-  .sidebar-item__label {
-    width: auto;
-    opacity: 1;
-  }
 }
 </style>
