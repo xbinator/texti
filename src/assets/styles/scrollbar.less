@@ -1,0 +1,19 @@
+.scrollbar-style() {
+  &::-webkit-scrollbar {
+    display: block;
+    width: 6px;
+    height: 6px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    display: block;
+    cursor: pointer;
+    background: var(--scrollbar-bg, rgb(0 0 0 / 10%));
+    border-radius: 6px;
+
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-hover, rgb(0 0 0 / 20%));
+  }
+}

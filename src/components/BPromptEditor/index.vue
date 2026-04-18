@@ -155,6 +155,8 @@ onUnmounted(() => {
 </script>
 
 <style lang="less">
+@import url('@/assets/styles/scrollbar.less');
+
 .b-prompt-variable-tag {
   display: inline-flex;
   gap: 4px;
@@ -205,6 +207,8 @@ onUnmounted(() => {
     pointer-events: none;
     content: attr(data-placeholder);
   }
+
+  .scrollbar-style();
 }
 
 .b-prompt-variable--outlined {

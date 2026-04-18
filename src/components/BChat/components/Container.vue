@@ -69,6 +69,8 @@ defineExpose({ scrollToBottom });
 </script>
 
 <style lang="less">
+@import url('@/assets/styles/scrollbar.less');
+
 .b-chat-container {
   position: relative;
   height: 100%;
@@ -81,22 +83,8 @@ defineExpose({ scrollToBottom });
   padding: var(--b-chat-padding, 16px);
   overflow-y: auto;
   scrollbar-gutter: stable;
-}
 
-.b-chat-container__main::-webkit-scrollbar {
-  display: block;
-  width: 6px;
-  height: 6px;
-}
-
-.b-chat-container__main::-webkit-scrollbar-thumb {
-  display: block;
-  background: var(--scrollbar-bg, rgb(0 0 0 / 10%));
-  border-radius: 6px;
-}
-
-.b-chat-container__main::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-hover, rgb(0 0 0 / 20%));
+  .scrollbar-style();
 }
 
 .b-chat-container__content {
