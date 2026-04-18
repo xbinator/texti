@@ -1,5 +1,5 @@
 <template>
-  <div ref="layoutRef" class="provider-layout" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
+  <div class="provider-layout" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
     <div class="provider-sidebar">
       <SidebarSearch v-model="searchKeyword" :collapsed="sidebarCollapsed" @toggle="toggleSidebarCollapsed" />
 
@@ -121,7 +121,6 @@ import { Icon } from '@iconify/vue';
 import BDropdown from '@/components/BDropdown/index.vue';
 import BDropdownMenu from '@/components/BDropdown/Menu.vue';
 import type { DropdownOptionItem } from '@/components/BDropdown/type';
-import { useAutoCollapse } from '@/hooks/useAutoCollapse';
 import { useSettingStore } from '@/stores/setting';
 import { Modal } from '@/utils/modal';
 import ProviderModal from './components/ProviderModal.vue';
@@ -134,15 +133,13 @@ const router = useRouter();
 const route = useRoute();
 const { providers, deleteCustomProvider } = useProviders();
 const settingStore = useSettingStore();
-const { providerSidebarCollapsed } = storeToRefs(settingStore);
+const { providerSidebarCollapsed: sidebarCollapsed } = storeToRefs(settingStore);
 
-const layoutRef = ref<HTMLElement | null>(null);
 const searchKeyword = ref<string>('');
-const { collapsed: sidebarCollapsed, toggleCollapsed: toggleSidebarCollapsed } = useAutoCollapse(layoutRef, {
-  collapsed: providerSidebarCollapsed,
-  onCollapsedChange: (collapsed: boolean) => settingStore.setProviderSidebarCollapsed(collapsed),
-  threshold: 600
-});
+
+function toggleSidebarCollapsed(): void {
+  settingStore.setProviderSidebarCollapsed(!sidebarCollapsed.value);
+}
 
 const providerComputedData = computed<ProviderComputedData>(() => {
   const custom: ProviderOption[] = [];
