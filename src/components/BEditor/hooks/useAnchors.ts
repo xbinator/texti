@@ -33,9 +33,7 @@ export function useAnchors(layoutRef: Ref<HTMLElement | null>, scrollbarRef: Ref
   }
 
   function getHeadingElements(): HTMLElement[] {
-    return Array.from(layoutRef.value?.querySelectorAll(HEADING_SELECTOR) ?? []).filter(
-      (heading): heading is HTMLElement => heading instanceof HTMLElement
-    );
+    return Array.from(layoutRef.value?.querySelectorAll(HEADING_SELECTOR) ?? []).filter((heading): heading is HTMLElement => heading instanceof HTMLElement);
   }
 
   function scrollElementToTop(element: HTMLElement): void {

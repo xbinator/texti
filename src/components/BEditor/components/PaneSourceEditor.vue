@@ -24,9 +24,9 @@ import { Compartment, EditorSelection, EditorState } from '@codemirror/state';
 import { EditorView, keymap, placeholder } from '@codemirror/view';
 import { noop } from 'lodash-es';
 import { getRenderedSourceAnchorOffsetTop } from '../adapters/sourceEditorAnchorScroll';
+import { createSourceCodeBlockHighlightExtension } from '../adapters/sourceEditorCodeBlockHighlight';
 import { createSourceHeadingAnchorExtension, getSourceActiveHeadingId, getSourceHeadingLines } from '../adapters/sourceEditorHeadingAnchors';
 import { createSourceEditorLayoutTheme } from '../adapters/sourceEditorLayoutTheme';
-import { createSourceEditorMarkdownTheme } from '../adapters/sourceEditorMarkdownTheme';
 import { useFrontMatter } from '../hooks/useFrontMatter';
 
 interface Props {
@@ -63,7 +63,7 @@ function createEditorExtensions(): Extension[] {
   return [
     history(),
     markdown(),
-    createSourceEditorMarkdownTheme(),
+    createSourceCodeBlockHighlightExtension(),
     keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
     createSourceEditorLayoutTheme(),
     headingAnchorCompartment.of(createSourceHeadingAnchorExtension(props.editorId)),
@@ -343,6 +343,65 @@ defineExpose(controller);
 
   .cm-placeholder {
     color: var(--editor-placeholder);
+  }
+
+  .hljs-keyword {
+    color: var(--code-keyword);
+  }
+
+  .hljs-string {
+    color: var(--code-string);
+  }
+
+  .hljs-number {
+    color: var(--code-number);
+  }
+
+  .hljs-comment {
+    font-style: italic;
+    color: var(--code-comment);
+  }
+
+  .hljs-function,
+  .hljs-title {
+    color: var(--code-function);
+  }
+
+  .hljs-params {
+    color: var(--code-text);
+  }
+
+  .hljs-variable,
+  .hljs-property {
+    color: var(--code-variable);
+  }
+
+  .hljs-operator {
+    color: var(--code-number);
+  }
+
+  .hljs-tag {
+    color: var(--code-tag);
+  }
+
+  .hljs-attr {
+    color: var(--code-attr-name);
+  }
+
+  .hljs-value {
+    color: var(--code-attr-value);
+  }
+
+  .hljs-built_in {
+    color: var(--code-builtin);
+  }
+
+  .hljs-class {
+    color: var(--code-class);
+  }
+
+  .hljs-constant {
+    color: var(--code-constant);
   }
 }
 </style>
