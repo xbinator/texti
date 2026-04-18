@@ -3,10 +3,15 @@
     <div class="card-header">
       <div class="flex flex-col">
         <div class="service-title">{{ title }}</div>
-        <div class="service-desc">{{ description }}</div>
       </div>
+    </div>
 
-      <div class="header-right">
+    <div class="card-content">
+      <div class="config-row">
+        <div class="config-info">
+          <div class="config-label">模型</div>
+          <div class="config-desc">{{ description }}</div>
+        </div>
         <BSelect v-model:value="selectedModel" :options="modelOptions" placeholder="请选择模型">
           <template #option="{ modelId, modelName, providerName }">
             <div class="flex items-center gap-6">
@@ -17,42 +22,42 @@
           </template>
         </BSelect>
       </div>
-    </div>
 
-    <div v-if="showPrompt" class="card-content">
-      <div class="config-section">
-        <div class="section-header" @click="togglePromptCollapsed">
-          <div class="section-label">
-            <Icon :icon="promptCollapsed ? 'lucide:chevron-right' : 'lucide:chevron-down'" class="label-icon" />
-            <span>Prompt</span>
-          </div>
-          <div class="header-actions">
-            <button v-if="showResetButton && defaultPrompt" class="reset-btn" type="button" @click.stop="resetToDefault">
-              <Icon icon="lucide:rotate-ccw" class="reset-icon" />
-              <span>恢复默认</span>
-            </button>
-          </div>
+      <div v-if="showPrompt" class="config-row prompt-row">
+        <div class="config-info">
+          <div class="config-label">提示词</div>
         </div>
-
-        <div v-show="!promptCollapsed" class="section-control">
-          <BPromptEditor v-model:value="customPrompt" :placeholder="placeholder" :options="options" />
-        </div>
+        <BButton type="secondary" size="small" icon="lucide:edit-2" @click="openPromptModal">编辑</BButton>
       </div>
     </div>
+
+    <BModal v-model:open="promptModalVisible" title="提示词" :width="600" :main-style="{ padding: '16px 24px 10px' }">
+      <div class="prompt-modal">
+        <div class="prompt-modal-desc" v-text="'输入内容，支持按此格式书写变量： {{ USER_NAME }}'"></div>
+        <BPromptEditor v-model:value="draftPrompt" :placeholder="placeholder" :options="options" :max-height="420" />
+      </div>
+
+      <template #footer>
+        <BButton v-if="showResetButton && defaultPrompt" type="secondary" icon="lucide:rotate-ccw" @click="resetToDefault">恢复默认</BButton>
+        <div class="flex-1"></div>
+        <BButton type="secondary" @click="cancelPromptEdit">取消</BButton>
+        <BButton @click="confirmPromptEdit">确定</BButton>
+      </template>
+    </BModal>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { AIProvider } from 'types/ai';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Icon } from '@iconify/vue';
+import BButton from '@/components/BButton/index.vue';
+import BModal from '@/components/BModal/index.vue';
 import BPromptEditor from '@/components/BPromptEditor/index.vue';
 import type { VariableOptionGroup } from '@/components/BPromptEditor/types';
 import BSelect from '@/components/BSelect/index.vue';
 import { providerStorage, serviceModelsStorage } from '@/shared/storage';
 import type { ServiceModelType } from '@/shared/storage/service-models';
 import { dispatchServiceModelUpdated } from '@/shared/storage/service-models/events';
-import { useServiceModelStore } from '@/stores/service-model';
 
 interface Props {
   serviceType: ServiceModelType;
@@ -79,19 +84,14 @@ const props = withDefaults(defineProps<Props>(), {
   showPrompt: true
 });
 
-const serviceModelStore = useServiceModelStore();
-
 const loading = ref(false);
 const providers = ref<AIProvider[]>([]);
 const selectedModel = ref<string>();
 const customPrompt = ref<string>();
+const draftPrompt = ref<string>();
 const initialized = ref(false);
+const promptModalVisible = ref(false);
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
-
-const promptCollapsed = computed<boolean>({
-  get: () => serviceModelStore.isSectionCollapsed(props.serviceType, 'prompt'),
-  set: () => serviceModelStore.toggleSectionCollapsed(props.serviceType, 'prompt')
-});
 
 const modelOptions = computed<ModelOption[]>(() => {
   return providers.value.flatMap((provider) => {
@@ -112,16 +112,27 @@ const modelOptions = computed<ModelOption[]>(() => {
 });
 
 const showResetButton = computed<boolean>(() => {
-  return Boolean(props.defaultPrompt && customPrompt.value !== props.defaultPrompt);
+  return Boolean(props.defaultPrompt && draftPrompt.value !== props.defaultPrompt);
 });
 
-function togglePromptCollapsed(): void {
-  serviceModelStore.toggleSectionCollapsed(props.serviceType, 'prompt');
+function openPromptModal(): void {
+  draftPrompt.value = customPrompt.value ?? props.defaultPrompt ?? '';
+  promptModalVisible.value = true;
+}
+
+function cancelPromptEdit(): void {
+  draftPrompt.value = customPrompt.value ?? props.defaultPrompt ?? '';
+  promptModalVisible.value = false;
+}
+
+function confirmPromptEdit(): void {
+  customPrompt.value = draftPrompt.value;
+  promptModalVisible.value = false;
 }
 
 function resetToDefault(): void {
   if (props.defaultPrompt) {
-    customPrompt.value = props.defaultPrompt;
+    draftPrompt.value = props.defaultPrompt;
   }
 }
 
@@ -136,6 +147,7 @@ async function loadSavedConfig(): Promise<void> {
 
   selectedModel.value = config?.providerId && config?.modelId ? `${config.providerId}:${config.modelId}` : undefined;
   customPrompt.value = config?.customPrompt ?? props.defaultPrompt ?? '';
+  draftPrompt.value = customPrompt.value;
 }
 
 function buildConfigPayload(): { providerId?: string; modelId?: string; customPrompt?: string } {
@@ -192,13 +204,8 @@ onUnmounted(() => {
   overflow: hidden;
   background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-tertiary) 100%);
   border: 1px solid var(--border-secondary);
-  border-radius: 12px;
+  border-radius: 8px;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-
-  &:hover {
-    border-color: var(--color-primary-light, var(--border-primary));
-    box-shadow: 0 16px 36px -26px rgb(0 0 0 / 24%);
-  }
 }
 
 .card-header {
@@ -216,91 +223,70 @@ onUnmounted(() => {
   color: var(--text-primary);
 }
 
-.service-desc {
-  margin: 0;
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
-.header-right {
-  width: 300px;
-}
-
 .card-content {
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  padding: 20px;
   background: var(--bg-secondary);
   border-top: 1px solid var(--border-secondary);
 }
 
-.config-section {
+.config-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 24px;
+  align-items: center;
+  min-height: 68px;
+  padding: 16px 20px;
+
+  & + & {
+    border-top: 1px solid var(--border-secondary);
+  }
+}
+
+.prompt-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.config-info {
+  min-width: 0;
+}
+
+.config-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.config-desc,
+.prompt-preview,
+.prompt-modal-desc {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.prompt-preview {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.prompt-modal {
   display: flex;
   flex-direction: column;
-  padding: 0 14px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-secondary);
-  border-radius: 12px;
+  gap: 12px;
 }
 
-.section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 60px;
-  padding: 2px;
-  cursor: pointer;
-  user-select: none;
+.prompt-modal-desc {
+  margin-top: 0;
 }
 
-.section-label {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-primary);
-
-  .label-icon {
-    width: 14px;
-    height: 14px;
-    color: var(--text-tertiary);
+@media (width <= 720px) {
+  .config-row,
+  .prompt-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
   }
-}
-
-.header-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding-left: 12px;
-}
-
-.reset-btn {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  padding: 4px 8px;
-  font-size: 12px;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  transition: all 0.2s;
-
-  &:hover {
-    color: var(--color-primary);
-    background: var(--color-primary-bg);
-  }
-}
-
-.reset-icon {
-  width: 12px;
-  height: 12px;
-}
-
-.section-control {
-  padding-bottom: 14px;
 }
 </style>

@@ -9,7 +9,7 @@
           <ServiceConfig
             service-type="chat"
             title="智能对话助手"
-            description="与 AI 进行智能对话，帮助你进行文本创作、编辑和优化。"
+            description="指定用于智能对话的模型"
             :options="CHAT_SERVICE_CONFIG_OPTIONS"
             :show-prompt="false"
           />
@@ -17,7 +17,7 @@
           <ServiceConfig
             service-type="polish"
             title="内容编辑助手"
-            description="根据用户输入的文本内容，自动编辑并返回编辑后的文本。"
+            description="指定用于内容编辑的模型"
             :options="POLISH_SERVICE_CONFIG_OPTIONS"
             :default-prompt="POLISH_DEFAULT_PROMPT"
           />
