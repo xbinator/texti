@@ -5,7 +5,7 @@
     </div>
     <div class="manager-content">
       <BScrollbar>
-        <div class="flex flex-col items-center gap-20 mr-20">
+        <div class="flex flex-col items-center gap-20 mr-20 min-w-500">
           <ServiceConfig
             service-type="chat"
             title="智能对话助手"
