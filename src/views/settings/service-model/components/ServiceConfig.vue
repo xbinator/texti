@@ -19,7 +19,7 @@
       </div>
     </div>
 
-    <div class="card-content">
+    <div v-if="showPrompt" class="card-content">
       <div class="config-section">
         <div class="section-header" @click="togglePromptCollapsed">
           <div class="section-label">
@@ -37,10 +37,6 @@
         <div v-show="!promptCollapsed" class="section-control">
           <BPromptEditor v-model:value="customPrompt" :placeholder="placeholder" :options="options" />
         </div>
-      </div>
-
-      <div v-if="$slots.extra" class="config-section extra-section">
-        <slot name="extra"></slot>
       </div>
     </div>
   </div>
@@ -65,6 +61,7 @@ interface Props {
   placeholder?: string;
   options?: VariableOptionGroup[];
   defaultPrompt?: string;
+  showPrompt?: boolean;
 }
 
 interface ModelOption {
@@ -78,7 +75,8 @@ interface ModelOption {
 const props = withDefaults(defineProps<Props>(), {
   placeholder: '请输入自定义 Prompt 指令...',
   defaultPrompt: '',
-  options: () => []
+  options: () => [],
+  showPrompt: true
 });
 
 const serviceModelStore = useServiceModelStore();
@@ -300,10 +298,6 @@ onUnmounted(() => {
 .reset-icon {
   width: 12px;
   height: 12px;
-}
-
-.extra-section {
-  background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-tertiary) 100%);
 }
 
 .section-control {

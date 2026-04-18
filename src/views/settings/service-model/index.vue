@@ -11,7 +11,9 @@
             title="智能对话助手"
             description="与 AI 进行智能对话，帮助你进行文本创作、编辑和优化。"
             :options="CHAT_SERVICE_CONFIG_OPTIONS"
+            :show-prompt="false"
           />
+
           <ServiceConfig
             service-type="polish"
             title="内容编辑助手"
