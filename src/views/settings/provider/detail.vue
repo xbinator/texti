@@ -1,6 +1,7 @@
 <template>
   <div class="detail-container">
     <div class="detail-header">
+      <!--  -->
       <div class="flex flex-wrap gap-6 items-center cursor-pointer">
         <h2 class="page-title">{{ headerTitle }}</h2>
         <span v-if="provider" class="provider-type-tag">{{ providerTypeLabel }}</span>
