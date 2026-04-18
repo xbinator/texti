@@ -4,27 +4,36 @@
       v-if="showOutline"
       :title="editorTitle"
       :file-path="props.filePath"
-      :content="bodyContentForSidebar"
-      :anchor-id-prefix="editorInstanceId"
+      :content="outlineContent"
+      :anchor-id-prefix="props.editorId"
       :active-id="activeAnchorId"
-      @change="handleChangeAnchor"
+      @change="handleEditorAnchorChange"
       @rename-file="emit('rename-file')"
       @delete-file="emit('delete-file')"
       @show-in-folder="emit('show-in-folder')"
     />
 
-    <BScrollbar ref="scrollbarRef" class="b-editor-scrollbar" @scroll="handleEditorScroll">
-      <div ref="containerRef" class="b-editor-container">
-        <PaneRichEditor
+    <BScrollbar ref="scrollbarRef" class="b-editor-scrollbar" @scroll="handleEditorScrollEvent">
+      <div class="b-editor-container">
+        <RichEditorHost
           v-if="isRichMode"
           ref="richEditorPaneRef"
-          v-model:front-matter-data="frontMatterModel"
-          :editor="editorInstance"
+          v-model:value="editorContent"
+          v-model:outline-content="outlineContent"
           :editor-id="props.editorId"
-          :should-show-front-matter-card="shouldShowFrontMatterCard"
+          :editable="props.editable"
+          :on-search-match-element-focus="scrollSearchMatchElementIntoView"
         />
 
-        <PaneSourceEditor v-else ref="sourceEditorPaneRef" v-model:value="editorContent" />
+        <PaneSourceEditor
+          v-else
+          ref="sourceEditorPaneRef"
+          v-model:value="editorContent"
+          v-model:outline-content="outlineContent"
+          :editor-id="props.editorId"
+          :on-anchor-scroll="scrollSourceAnchorIntoView"
+          :editable="props.editable"
+        />
       </div>
 
       <FindBar v-model:visible="findBarVisible" :editor-instance="editorPublicInstance" />
@@ -33,26 +42,20 @@
 </template>
 
 <script setup lang="ts">
-import type { EditorController } from './hooks/useEditorController';
-import type { FrontMatterData } from './hooks/useFrontMatter';
-import type { BEditorPublicInstance, BEditorViewMode } from './types';
-import { computed, ref, toRef } from 'vue';
-import { useTextareaAutosize } from '@vueuse/core';
+import type { BEditorPublicInstance, EditorController, EditorSearchState } from './adapters/types';
+import type { AnchorRecord } from './hooks/useAnchors';
+import type { BEditorViewMode } from './types';
+import { computed, ref } from 'vue';
 import BScrollbar from '@/components/BScrollbar/index.vue';
+import { handleEditorAnchorNavigation } from './adapters/editorAnchorNavigation';
 import FindBar from './components/FindBar.vue';
-import PaneRichEditor from './components/PaneRichEditor.vue';
 import PaneSourceEditor from './components/PaneSourceEditor.vue';
-import { getSearchSnapshot, type SearchScrollContext, type SearchSnapshot } from './extensions/Search';
+import RichEditorHost from './components/RichEditorHost.vue';
 import { useAnchors } from './hooks/useAnchors';
 import { useEditorController } from './hooks/useEditorController';
-import { useFrontMatter } from './hooks/useFrontMatter';
-import { useRichEditor } from './hooks/useRichEditor';
-
-const editorInstanceCounter = ref(0);
 
 const layoutRef = ref<HTMLElement | null>(null);
 const scrollbarRef = ref<InstanceType<typeof BScrollbar> | null>(null);
-const titleTextareaRef = ref<HTMLTextAreaElement | null>(null);
 
 interface Props {
   editable?: boolean;
@@ -77,43 +80,20 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits(['rename-file', 'delete-file', 'show-in-folder']);
 
-const editorInstanceId = computed(() => `${props.editorId || ''}`);
-const isRichMode = computed(() => props.viewMode === 'rich');
+const isRichMode = computed<boolean>(() => props.viewMode === 'rich');
 
 const editorContent = defineModel<string>('value', { default: '' });
 
 const editorTitle = defineModel<string>('title', { default: '' });
+const outlineContent = defineModel<string>('outlineContent', { default: '' });
 
 const richEditorPaneRef = ref<EditorController | null>(null);
-const sourceEditorPaneRef = ref<Pick<EditorController, 'focusEditor' | 'focusEditorAtStart'> | null>(null);
+const sourceEditorPaneRef = ref<EditorController | null>(null);
 const findBarVisible = ref(false);
 
-const { activeAnchorId, handleChangeAnchor, handleEditorScroll } = useAnchors(layoutRef, scrollbarRef);
+const { activeAnchorId, handleChangeAnchor, handleEditorScroll, setActiveAnchorId } = useAnchors(layoutRef, scrollbarRef);
 
-const { bodyContent, frontMatterData, hasFrontMatter, updateFrontMatter, reconstructContent } = useFrontMatter(editorContent);
-
-const bodyContentForSidebar = computed(() => bodyContent.value);
-const shouldShowFrontMatterCard = computed(() => Boolean(hasFrontMatter.value));
-
-function syncToExternal(): void {
-  editorContent.value = reconstructContent();
-}
-
-const frontMatterModel = computed<FrontMatterData>({
-  get(): FrontMatterData {
-    return frontMatterData.value;
-  },
-  set(data: FrontMatterData): void {
-    updateFrontMatter(data);
-    syncToExternal();
-  }
-});
-
-function scrollSearchMatchIntoView({ targetElement }: SearchScrollContext): void {
-  if (!(targetElement instanceof HTMLElement)) {
-    return;
-  }
-
+function scrollSearchMatchElementIntoView(targetElement: HTMLElement): void {
   const scrollElement = scrollbarRef.value?.getScrollElement();
   if (!scrollElement) {
     targetElement.scrollIntoView({ block: 'center', inline: 'nearest' });
@@ -129,20 +109,54 @@ function scrollSearchMatchIntoView({ targetElement }: SearchScrollContext): void
   scrollbarRef.value?.scrollTo({ top: nextTop, behavior: 'auto' });
 }
 
-const { editorInstance, setContent: setRichEditorContent } = useRichEditor({
-  bodyContent,
-  editable: toRef(props, 'editable'),
-  editorInstanceId,
-  onContentChange: syncToExternal,
-  onSearchMatchFocus: scrollSearchMatchIntoView
-});
-
 const editorController = useEditorController({ isRichMode, richEditorPaneRef, sourceEditorPaneRef });
 
-function setContent(text: string): void {
-  editorInstanceCounter.value += 1;
+function scrollSourceAnchorIntoView(hostElement: HTMLElement, offsetTop: number) {
+  const scrollElement = scrollbarRef.value?.getScrollElement();
+  if (!scrollElement) {
+    hostElement.scrollIntoView({ block: 'start' });
+    return;
+  }
 
-  setRichEditorContent(text);
+  const scrollRect = scrollElement.getBoundingClientRect();
+  const hostRect = hostElement.getBoundingClientRect();
+  const nextTop = scrollElement.scrollTop + (hostRect.top - scrollRect.top) + offsetTop;
+
+  scrollbarRef.value?.scrollTo({ top: Math.max(0, nextTop), behavior: 'auto' });
+}
+
+function handleEditorAnchorChange(record: AnchorRecord) {
+  handleEditorAnchorNavigation({
+    record,
+    isRichMode: isRichMode.value,
+    setActiveAnchorId,
+    scrollToTop: () => scrollbarRef.value?.scrollTo({ top: 0, behavior: 'auto' }),
+    scrollRichAnchor: handleChangeAnchor,
+    scrollEditorAnchor: editorController.value.scrollToAnchor
+  });
+}
+
+function handleEditorScrollEvent() {
+  if (isRichMode.value) {
+    handleEditorScroll();
+    return;
+  }
+
+  const scrollElement = scrollbarRef.value?.getScrollElement();
+  if (!scrollElement) {
+    return;
+  }
+
+  if (scrollElement.scrollTop < 50) {
+    setActiveAnchorId('');
+    return;
+  }
+
+  setActiveAnchorId(editorController.value.getActiveAnchorId(scrollElement, 100));
+}
+
+function setContent(text: string): void {
+  editorContent.value = text;
 }
 
 function undo(): void {
@@ -162,43 +176,27 @@ function canRedo(): boolean {
 }
 
 function setSearchTerm(term: string): void {
-  if (!isRichMode.value) return;
-
-  const commands = editorInstance.value?.commands;
-  commands?.setSearchTerm?.(term);
+  editorController.value.setSearchTerm(term);
 }
 
-function findNext() {
-  if (!isRichMode.value) return;
-
-  const commands = editorInstance.value?.commands;
-  commands?.findNext?.();
+function findNext(): void {
+  editorController.value.findNext();
 }
 
-function findPrevious() {
-  if (!isRichMode.value) return;
-
-  const commands = editorInstance.value?.commands;
-  commands?.findPrevious?.();
+function findPrevious(): void {
+  editorController.value.findPrevious();
 }
 
-function clearSearch() {
-  if (!isRichMode.value) return;
-
-  const commands = editorInstance.value?.commands;
-  commands?.clearSearch?.();
+function clearSearch(): void {
+  editorController.value.clearSearch();
 }
 
 function focusEditor(): void {
   editorController.value.focusEditor();
 }
 
-function getSearchState(): SearchSnapshot {
-  if (!isRichMode.value) {
-    return { currentIndex: 0, matchCount: 0, term: '' };
-  }
-
-  return getSearchSnapshot(editorInstance.value);
+function getSearchState(): EditorSearchState {
+  return editorController.value.getSearchState();
 }
 
 const editorPublicInstance = computed<BEditorPublicInstance>(() => ({
@@ -215,9 +213,6 @@ const editorPublicInstance = computed<BEditorPublicInstance>(() => ({
 }));
 
 defineExpose({ setContent, undo, redo, canUndo, canRedo, setSearchTerm, findNext, findPrevious, clearSearch, focusEditor, getSearchState });
-
-// @ts-ignore
-useTextareaAutosize({ element: titleTextareaRef, input: editorTitle });
 </script>
 
 <style lang="less">
@@ -245,7 +240,7 @@ useTextareaAutosize({ element: titleTextareaRef, input: editorTitle });
 .b-editor-container {
   position: relative;
   max-width: 900px;
-  padding: 20px 50px 90px;
+  padding: 20px 30px 90px;
   margin: 0 auto;
   font-size: 16px;
 }

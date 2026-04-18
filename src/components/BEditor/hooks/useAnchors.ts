@@ -13,6 +13,7 @@ interface UseBEditorAnchorsResult {
   activeAnchorId: Ref<string>;
   handleChangeAnchor: (record: AnchorRecord) => void;
   handleEditorScroll: () => void;
+  setActiveAnchorId: (anchorId: string) => void;
 }
 
 interface BScrollbarExposed {
@@ -20,7 +21,9 @@ interface BScrollbarExposed {
   scrollTo: (options: ScrollToOptions) => void;
 }
 
-const HEADING_SELECTOR = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].map((tag) => `.b-editor-content ${tag}`).join(', ');
+const RICH_HEADING_SELECTOR = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].map((tag) => `.b-editor-content ${tag}`).join(', ');
+const SOURCE_HEADING_SELECTOR = '.source-editor-codemirror .cm-line[id]';
+const HEADING_SELECTOR = `${RICH_HEADING_SELECTOR}, ${SOURCE_HEADING_SELECTOR}`;
 
 export function useAnchors(layoutRef: Ref<HTMLElement | null>, scrollbarRef: Ref<InstanceType<typeof BScrollbar> | null>): UseBEditorAnchorsResult {
   const activeAnchorId = ref('');
@@ -29,10 +32,25 @@ export function useAnchors(layoutRef: Ref<HTMLElement | null>, scrollbarRef: Ref
     return scrollbarRef.value as unknown as BScrollbarExposed | null;
   }
 
-  function getHeadingElements(): HTMLHeadingElement[] {
+  function getHeadingElements(): HTMLElement[] {
     return Array.from(layoutRef.value?.querySelectorAll(HEADING_SELECTOR) ?? []).filter(
-      (heading): heading is HTMLHeadingElement => heading instanceof HTMLHeadingElement
+      (heading): heading is HTMLElement => heading instanceof HTMLElement
     );
+  }
+
+  function scrollElementToTop(element: HTMLElement): void {
+    const scrollbar = getScrollbar();
+    const container = scrollbar?.getScrollElement();
+    if (!scrollbar || !container) {
+      element.scrollIntoView({ block: 'start' });
+      return;
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const elementRect = element.getBoundingClientRect();
+    const nextTop = container.scrollTop + (elementRect.top - containerRect.top);
+
+    scrollbar.scrollTo({ top: Math.max(0, nextTop), behavior: 'auto' });
   }
 
   function handleChangeAnchor(record: AnchorRecord): void {
@@ -45,7 +63,7 @@ export function useAnchors(layoutRef: Ref<HTMLElement | null>, scrollbarRef: Ref
 
     const element = layoutRef.value?.querySelector<HTMLElement>(`#${CSS.escape(record.id)}`);
     if (element) {
-      element.scrollIntoView({ block: 'start' });
+      scrollElementToTop(element);
     }
   }
 
@@ -81,9 +99,14 @@ export function useAnchors(layoutRef: Ref<HTMLElement | null>, scrollbarRef: Ref
     updateActiveAnchor();
   }
 
+  function setActiveAnchorId(anchorId: string): void {
+    activeAnchorId.value = anchorId;
+  }
+
   return {
     activeAnchorId,
     handleChangeAnchor,
-    handleEditorScroll
+    handleEditorScroll,
+    setActiveAnchorId
   };
 }
