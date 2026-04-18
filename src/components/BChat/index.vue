@@ -14,8 +14,10 @@
       <div class="b-chat__input__container">
         <BPromptEditor v-model:value="inputValue" :placeholder="props.placeholder" :max-height="200" variant="borderless" @submit="handleSubmit" />
 
-        <BButton v-if="loading" size="small" square icon="lucide:square" @click="handleAbort" />
-        <BButton v-else size="small" square :disabled="!inputValue" icon="lucide:arrow-up" @click="handleSubmit" />
+        <div class="b-chat__input__buttons">
+          <BButton v-if="loading" size="small" square icon="lucide:square" @click="handleAbort" />
+          <BButton v-else size="small" square :disabled="!inputValue" icon="lucide:arrow-up" @click="handleSubmit" />
+        </div>
       </div>
     </div>
   </div>
@@ -204,7 +206,7 @@ async function handleRegenerate(message: Message): Promise<void> {
   flex-direction: column;
   gap: 8px;
   align-items: flex-end;
-  padding: 8px 12px;
+  padding: 8px 0 8px 12px;
   background: var(--bg-secondary);
   border: 1px solid var(--input-border);
   border-radius: 8px;
@@ -212,15 +214,16 @@ async function handleRegenerate(message: Message): Promise<void> {
   transition: all 0.2s;
 
   .b-prompt-variable__textarea {
-    padding: 0;
+    padding: 0 12px 0 0;
     background: transparent;
   }
 }
 
 .b-chat__input__buttons {
   display: flex;
-  flex-direction: column;
   gap: 4px;
+  align-items: flex-end;
+  padding: 0 12px 0 0;
 }
 
 .b-chat__input__right {

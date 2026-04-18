@@ -4,7 +4,7 @@
       <SidebarSearch v-model="searchKeyword" :collapsed="sidebarCollapsed" @toggle="toggleSidebarCollapsed" />
 
       <div class="sidebar-inner">
-        <BScrollbar inset>
+        <BScrollbar inset="auto">
           <template v-if="searchKeyword">
             <SidebarSection :collapsed="sidebarCollapsed">
               <div v-if="filteredAllProviders.length === 0" class="empty-state">
@@ -141,7 +141,7 @@ const searchKeyword = ref<string>('');
 const { collapsed: sidebarCollapsed, toggleCollapsed: toggleSidebarCollapsed } = useAutoCollapse(layoutRef, {
   collapsed: providerSidebarCollapsed,
   onCollapsedChange: (collapsed: boolean) => settingStore.setProviderSidebarCollapsed(collapsed),
-  threshold: 900
+  threshold: 600
 });
 
 const providerComputedData = computed<ProviderComputedData>(() => {
