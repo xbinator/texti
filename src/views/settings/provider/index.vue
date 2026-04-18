@@ -6,13 +6,6 @@
         <h2 class="content-title">AI 服务商</h2>
         <span class="enabled-count">已启用 {{ enabledCount }} 个服务商</span>
       </div>
-      <div class="header-right">
-        <AInput v-model:value="searchText" placeholder="搜索服务商" allow-clear class="search-input">
-          <template #prefix>
-            <Icon icon="lucide:search" />
-          </template>
-        </AInput>
-      </div>
     </div>
 
     <div class="provider-scroll">
@@ -98,13 +91,6 @@ async function handleToggleProvider(id: string, enabled: boolean): Promise<void>
   align-items: center;
 }
 
-.header-right {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-}
-
 .content-title {
   margin: 0;
   font-size: 18px;
@@ -118,10 +104,6 @@ async function handleToggleProvider(id: string, enabled: boolean): Promise<void>
   color: var(--color-primary);
   background: var(--color-primary-bg);
   border-radius: 10px;
-}
-
-.search-input {
-  width: 200px;
 }
 
 :deep(.ant-input-affix-wrapper) {

@@ -13,7 +13,7 @@
       <slot name="title"></slot>
     </div>
 
-    <div v-show="!collapsible || !sectionCollapsed">
+    <div v-show="!collapsible || !sectionCollapsed" class="section-content">
       <slot></slot>
     </div>
   </div>
@@ -69,6 +69,12 @@ function handleTitleClick(): void {
   justify-content: space-between;
   padding: 0 8px;
   margin-bottom: 8px;
+}
+
+.section-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .section-title-wrapper {
