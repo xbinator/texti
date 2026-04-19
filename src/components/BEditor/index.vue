@@ -45,14 +45,15 @@
 import type { BEditorPublicInstance, EditorController, EditorSearchState } from './adapters/types';
 import type { AnchorRecord } from './hooks/useAnchors';
 import type { BEditorViewMode } from './types';
-import { computed, ref } from 'vue';
+import { computed, defineAsyncComponent, ref } from 'vue';
 import BScrollbar from '@/components/BScrollbar/index.vue';
 import { handleEditorAnchorNavigation } from './adapters/editorAnchorNavigation';
 import FindBar from './components/FindBar.vue';
-import PaneSourceEditor from './components/PaneSourceEditor.vue';
-import RichEditorHost from './components/RichEditorHost.vue';
 import { useAnchors } from './hooks/useAnchors';
 import { useEditorController } from './hooks/useEditorController';
+
+const RichEditorHost = defineAsyncComponent(() => import('./components/RichEditorHost.vue'));
+const PaneSourceEditor = defineAsyncComponent(() => import('./components/PaneSourceEditor.vue'));
 
 const layoutRef = ref<HTMLElement | null>(null);
 const scrollbarRef = ref<InstanceType<typeof BScrollbar> | null>(null);
@@ -240,7 +241,7 @@ defineExpose({ setContent, undo, redo, canUndo, canRedo, setSearchTerm, findNext
 .b-editor-container {
   position: relative;
   max-width: 900px;
-  padding: 20px 30px 90px;
+  padding: 20px 40px 90px;
   margin: 0 auto;
   font-size: 16px;
 }
