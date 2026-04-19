@@ -22,11 +22,18 @@ import {
 import { markdown } from '@codemirror/lang-markdown';
 import { Compartment, EditorSelection, EditorState } from '@codemirror/state';
 import { EditorView, keymap, placeholder } from '@codemirror/view';
-import { noop } from 'lodash-es';
 import { getRenderedSourceAnchorOffsetTop } from '../adapters/sourceEditorAnchorScroll';
 import { createSourceCodeBlockHighlightExtension } from '../adapters/sourceEditorCodeBlockHighlight';
 import { createSourceHeadingAnchorExtension, getSourceActiveHeadingId, getSourceHeadingLines } from '../adapters/sourceEditorHeadingAnchors';
 import { createSourceEditorLayoutTheme } from '../adapters/sourceEditorLayoutTheme';
+import {
+  clearSourceEditorSearch,
+  createSourceEditorSearchExtension,
+  findNextSourceEditorMatch,
+  findPreviousSourceEditorMatch,
+  getSourceEditorSearchState,
+  setSourceEditorSearchTerm
+} from '../adapters/sourceEditorSearch';
 import { useFrontMatter } from '../hooks/useFrontMatter';
 
 interface Props {
@@ -49,12 +56,6 @@ const editableCompartment = new Compartment();
 const headingAnchorCompartment = new Compartment();
 const { bodyContent } = useFrontMatter(editorContent);
 
-const emptySearchState: EditorSearchState = {
-  currentIndex: 0,
-  matchCount: 0,
-  term: ''
-};
-
 function createEditableExtension(editable: boolean): Extension {
   return EditorView.editable.of(editable);
 }
@@ -64,6 +65,7 @@ function createEditorExtensions(): Extension[] {
     history(),
     markdown(),
     createSourceCodeBlockHighlightExtension(),
+    createSourceEditorSearchExtension(),
     keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
     createSourceEditorLayoutTheme(),
     headingAnchorCompartment.of(createSourceHeadingAnchorExtension(props.editorId)),
@@ -129,13 +131,37 @@ function canRedo(): boolean {
   return view ? redoDepth(view.state) > 0 : false;
 }
 
-const setSearchTerm = noop;
-const findNext = noop;
-const findPrevious = noop;
-const clearSearch = noop;
+function setSearchTerm(term: string): void {
+  const view = getView();
+  if (view) {
+    setSourceEditorSearchTerm(view, term);
+  }
+}
+
+function findNext(): void {
+  const view = getView();
+  if (view) {
+    findNextSourceEditorMatch(view);
+  }
+}
+
+function findPrevious(): void {
+  const view = getView();
+  if (view) {
+    findPreviousSourceEditorMatch(view);
+  }
+}
+
+function clearSearch(): void {
+  const view = getView();
+  if (view) {
+    clearSourceEditorSearch(view);
+  }
+}
 
 function getSearchState(): EditorSearchState {
-  return { ...emptySearchState };
+  const view = getView();
+  return view ? getSourceEditorSearchState(view.state) : { currentIndex: 0, matchCount: 0, term: '' };
 }
 
 function scrollHostToAnchor(hostElement: HTMLElement, anchorId: string, fallbackOffsetTop: number): void {
@@ -330,11 +356,21 @@ defineExpose(controller);
   .cm-selectionBackground,
   .cm-focused .cm-selectionBackground,
   ::selection {
-    background-color: var(--source-editor-markdown-selection);
+    color: var(--selection-color);
+    background: var(--selection-bg);
   }
 
   .cm-selectionMatch {
     background-color: var(--source-editor-markdown-selection-match);
+  }
+
+  .search-match {
+    background: var(--editor-search-highlight);
+  }
+
+  .search-match-current {
+    background: var(--editor-search-active);
+    box-shadow: var(--editor-search-active-border);
   }
 
   .cm-activeLine {
