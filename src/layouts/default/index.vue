@@ -245,7 +245,7 @@ useEventListener(window, 'resize', validateWindowState);
   padding-left: 20px;
 }
 
-:deep(.b-dropdown-menu-item.is-active) {
+.b-dropdown-menu-item.is-active {
   color: var(--color-primary);
   background-color: var(--color-primary-bg);
 }

@@ -236,7 +236,7 @@ async function handleRegenerate(message: Message): Promise<void> {
   width: 100px;
   font-size: 12px;
 
-  :deep(.ant-select-selection-item) {
+  .ant-select-selection-item {
     font-size: 12px;
   }
 }

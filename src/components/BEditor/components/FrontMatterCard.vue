@@ -219,7 +219,7 @@ function confirmComplexEditInline(): void {
 
 <style lang="less" scoped>
 .front-matter-card {
-  margin: 16px 40px;
+  margin: 16px 0;
   background-color: var(--frontmatter-bg);
   border: 1px solid var(--frontmatter-border);
   border-radius: 8px;
