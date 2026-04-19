@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow } from 'electron';
+import { env } from './env.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,6 +18,10 @@ export function getPreloadPath(): string {
 
 export function getDistPath(): string {
   return path.join(__dirname, '../../dist/index.html');
+}
+
+export function getDevServerUrl(): string {
+  return `http://${env.DEV_SERVER_HOST}:${env.DEV_SERVER_PORT}`;
 }
 
 export function getIconPath(): string {
@@ -64,7 +69,7 @@ export function createWindow(): BrowserWindow {
   mainWindow = new BrowserWindow(windowOptions);
 
   if (isDev()) {
-    mainWindow.loadURL('http://localhost:1420');
+    mainWindow.loadURL(getDevServerUrl());
     mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(getDistPath());
