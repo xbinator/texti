@@ -28,12 +28,25 @@ function getStorePath(): string {
 
 function loadOrCreateEncryptionKey(): string {
   const keyPath = getEncryptionKeyPath();
+  const isDev = !app.isPackaged;
+
+  if (isDev) {
+    if (fs.existsSync(keyPath)) {
+      const keyData = fs.readFileSync(keyPath, 'utf-8');
+      if (keyData.startsWith('tibis-encryption-key-')) {
+        return keyData;
+      }
+    }
+    const newKey = `tibis-encryption-key-${Date.now().toString(36)}`;
+    fs.writeFileSync(keyPath, newKey, 'utf-8');
+    return newKey;
+  }
 
   if (fs.existsSync(keyPath)) {
-    const encryptedKey = fs.readFileSync(keyPath);
+    const keyData = fs.readFileSync(keyPath, 'utf-8');
     if (safeStorage.isEncryptionAvailable()) {
       try {
-        return safeStorage.decryptString(encryptedKey);
+        return safeStorage.decryptString(Buffer.from(keyData, 'base64'));
       } catch {
         fs.unlinkSync(keyPath);
       }
@@ -41,12 +54,10 @@ function loadOrCreateEncryptionKey(): string {
   }
 
   const newKey = `tibis-encryption-key-${Date.now().toString(36)}`;
-
   if (safeStorage.isEncryptionAvailable()) {
     const encryptedKey = safeStorage.encryptString(newKey);
-    fs.writeFileSync(keyPath, encryptedKey);
+    fs.writeFileSync(keyPath, encryptedKey.toString('base64'));
   }
-
   return newKey;
 }
 
