@@ -38,6 +38,7 @@ export interface SourceCodeBlockHighlightRange {
 const lowlight = createLowlight(common);
 
 const SOURCE_CODE_BLOCK_LANGUAGE_ALIASES: Record<string, string> = {
+  bash: 'shell',
   cjs: 'javascript',
   htm: 'xml',
   html: 'xml',
@@ -116,14 +117,7 @@ function collectHighlightRanges(
 
     return {
       nextFrom,
-      ranges: [
-        {
-          className: activeClassNames.join(' '),
-          from,
-          text: node.value,
-          to: nextFrom
-        }
-      ]
+      ranges: [{ className: activeClassNames.join(' '), from, text: node.value, to: nextFrom }]
     };
   }
 

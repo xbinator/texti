@@ -5,7 +5,7 @@
 </template>
 
 <script setup lang="ts">
-import type { EditorController, EditorSearchState } from '../adapters/types';
+import type { EditorController, EditorSearchState, EditorSelection as EditorSelectionRange } from '../adapters/types';
 import type { Extension } from '@codemirror/state';
 import type { ViewUpdate } from '@codemirror/view';
 import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
@@ -26,6 +26,7 @@ import { getRenderedSourceAnchorOffsetTop } from '../adapters/sourceEditorAnchor
 import { createSourceCodeBlockHighlightExtension } from '../adapters/sourceEditorCodeBlockHighlight';
 import { createSourceHeadingAnchorExtension, getSourceActiveHeadingId, getSourceHeadingLines } from '../adapters/sourceEditorHeadingAnchors';
 import { createSourceEditorLayoutTheme } from '../adapters/sourceEditorLayoutTheme';
+import { createSourceEditorMarkdownHighlightExtension } from '../adapters/sourceEditorMarkdownHighlight';
 import {
   clearSourceEditorSearch,
   createSourceEditorSearchExtension,
@@ -64,6 +65,7 @@ function createEditorExtensions(): Extension[] {
   return [
     history(),
     markdown(),
+    createSourceEditorMarkdownHighlightExtension(),
     createSourceCodeBlockHighlightExtension(),
     createSourceEditorSearchExtension(),
     keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
@@ -157,6 +159,88 @@ function clearSearch(): void {
   if (view) {
     clearSourceEditorSearch(view);
   }
+}
+
+function getSelection(): EditorSelectionRange | null {
+  const view = getView();
+  if (!view) {
+    return null;
+  }
+
+  const selection = view.state.selection.main;
+  if (selection.from === selection.to) {
+    return null;
+  }
+
+  return {
+    from: selection.from,
+    to: selection.to,
+    text: view.state.sliceDoc(selection.from, selection.to)
+  };
+}
+
+async function insertAtCursor(content: string): Promise<void> {
+  const view = getView();
+  if (!view) {
+    return;
+  }
+
+  const selection = view.state.selection.main;
+  const nextPosition = selection.from + content.length;
+
+  view.dispatch({
+    changes: {
+      from: selection.from,
+      to: selection.to,
+      insert: content
+    },
+    selection: EditorSelection.cursor(nextPosition),
+    scrollIntoView: true
+  });
+  view.focus();
+}
+
+async function replaceSelection(content: string): Promise<void> {
+  const view = getView();
+  if (!view) {
+    return;
+  }
+
+  const selection = view.state.selection.main;
+  if (selection.from === selection.to) {
+    throw new Error('NO_SELECTION');
+  }
+
+  const nextPosition = selection.from + content.length;
+
+  view.dispatch({
+    changes: {
+      from: selection.from,
+      to: selection.to,
+      insert: content
+    },
+    selection: EditorSelection.cursor(nextPosition),
+    scrollIntoView: true
+  });
+  view.focus();
+}
+
+async function replaceDocument(content: string): Promise<void> {
+  const view = getView();
+  if (!view) {
+    return;
+  }
+
+  view.dispatch({
+    changes: {
+      from: 0,
+      to: view.state.doc.length,
+      insert: content
+    },
+    selection: EditorSelection.cursor(content.length),
+    scrollIntoView: true
+  });
+  view.focus();
 }
 
 function getSearchState(): EditorSearchState {
@@ -296,6 +380,10 @@ const controller: EditorController = {
   findNext,
   findPrevious,
   clearSearch,
+  getSelection,
+  insertAtCursor,
+  replaceSelection,
+  replaceDocument,
   getSearchState,
   scrollToAnchor,
   getActiveAnchorId
@@ -438,6 +526,84 @@ defineExpose(controller);
 
   .hljs-constant {
     color: var(--code-constant);
+  }
+
+  .md-heading-marker {
+    font-weight: bold;
+    color: var(--source-editor-markdown-heading-1);
+  }
+
+  .md-bold {
+    font-weight: bold;
+    color: var(--source-editor-markdown-bold);
+  }
+
+  .md-italic {
+    font-style: italic;
+    color: var(--source-editor-markdown-italic);
+  }
+
+  .md-strikethrough {
+    color: var(--source-editor-markdown-strikethrough);
+    text-decoration: line-through;
+  }
+
+  .md-code-marker,
+  .md-code-fence {
+    color: var(--source-editor-markdown-code-fence);
+  }
+
+  .md-code-info {
+    color: var(--source-editor-markdown-code-info);
+  }
+
+  .md-blockquote-marker {
+    color: var(--source-editor-markdown-blockquote-marker);
+  }
+
+  .md-list-marker,
+  .md-list-number {
+    color: var(--source-editor-markdown-list-marker);
+  }
+
+  .md-hr {
+    color: var(--source-editor-markdown-hr);
+  }
+
+  .md-link-bracket {
+    color: var(--source-editor-markdown-link-bracket);
+  }
+
+  .md-link-paren {
+    color: var(--source-editor-markdown-link-paren);
+  }
+
+  .md-image-marker {
+    color: var(--source-editor-markdown-image-marker);
+  }
+
+  .md-table-pipe {
+    color: var(--source-editor-markdown-table-pipe);
+  }
+
+  .md-table-align {
+    color: var(--source-editor-markdown-table-align);
+  }
+
+  .md-task-bracket {
+    color: var(--source-editor-markdown-task-bracket);
+  }
+
+  .md-task-unchecked {
+    color: var(--source-editor-markdown-task-unchecked);
+  }
+
+  .md-task-checked {
+    color: var(--source-editor-markdown-task-checked);
+  }
+
+  .md-escape {
+    color: var(--source-editor-markdown-escape);
   }
 }
 </style>
