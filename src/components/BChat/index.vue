@@ -25,6 +25,10 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * @file BChat/index.vue
+ * @description AI 聊天组件，支持消息流式输出和 AI 工具调用
+ */
 import type { BChatProps as Props, Message } from './types';
 import type { ModelMessage } from 'ai';
 import type { AIServiceError, AIStreamFinishChunk, AIStreamToolCallChunk } from 'types/ai';
@@ -42,9 +46,15 @@ import { Modal } from '@/utils/modal';
 import Container from './components/Container.vue';
 import MessageBubble from './components/MessageBubble.vue';
 
+/**
+ * 服务配置信息
+ */
 interface ServiceConfig {
+  /** 服务商 ID */
   providerId: string;
+  /** 模型 ID */
   modelId: string;
+  /** 工具支持能力 */
   toolSupport: AIToolProviderSupport;
 }
 
@@ -59,15 +69,25 @@ const emit = defineEmits<{ (e: 'complete', message: Message): void }>();
 const inputValue = defineModel<string>('inputValue', { default: '' });
 const messages = defineModel<Message[]>('messages', { default: () => [] });
 
+/** 加载状态 */
 const loading = ref(false);
+/** 工具执行状态文本 */
 const toolStatus = ref('');
+/** 待处理的工具调用结果队列 */
 const pendingToolResults = ref<ExecutedToolCall[]>([]);
+/** 已执行的工具调用 ID 集合，用于防止重复执行 */
 const executedToolCallIds = ref<Set<string>>(new Set());
 
 const router = useRouter();
 const serviceModelStore = useServiceModelStore();
+/** 最近一次请求的服务配置，用于工具循环时复用 */
 let lastServiceConfig: ServiceConfig | null = null;
 
+/**
+ * 将组件消息转换为 AI SDK 的 ModelMessage 格式
+ * @param sourceMessages - 组件内部消息列表
+ * @returns AI SDK 兼容的消息格式
+ */
 function toModelMessages(sourceMessages: Message[]): ModelMessage[] {
   return sourceMessages.map((item) => ({
     role: item.role,
@@ -75,6 +95,10 @@ function toModelMessages(sourceMessages: Message[]): ModelMessage[] {
   }));
 }
 
+/**
+ * 移除末尾空的 assistant 消息
+ * @description 工具循环时，当前轮次的空 assistant 占位不写入历史
+ */
 function removeTrailingEmptyAssistantMessage(): void {
   const lastMessage = messages.value[messages.value.length - 1];
   if (!lastMessage || lastMessage.role !== 'assistant') {
@@ -86,7 +110,13 @@ function removeTrailingEmptyAssistantMessage(): void {
   }
 }
 
+/**
+ * 处理工具调用事件
+ * @param chunk - 工具调用数据块
+ * @description 执行工具调用并将结果加入待处理队列
+ */
 async function handleToolCall(chunk: AIStreamToolCallChunk): Promise<void> {
+  // 防止重复执行同一个工具调用
   if (executedToolCallIds.value.has(chunk.toolCallId)) {
     return;
   }
@@ -94,13 +124,20 @@ async function handleToolCall(chunk: AIStreamToolCallChunk): Promise<void> {
   executedToolCallIds.value.add(chunk.toolCallId);
   toolStatus.value = `正在执行工具：${chunk.toolName}`;
 
+  // 执行工具调用并收集结果
   const result = await executeToolCall(chunk, props.tools ?? [], props.getToolContext?.());
   pendingToolResults.value.push(result);
 
+  // 更新状态显示
   toolStatus.value = result.result.status === 'success' ? `工具已完成：${chunk.toolName}` : `工具处理完成：${chunk.toolName}`;
 }
 
+/**
+ * useChat hook 配置
+ * @description 定义消息流的各种回调处理
+ */
 const { agent } = useChat({
+  /** 处理流式内容块 */
   onChunk: async (content: string): Promise<void> => {
     const message = messages.value[messages.value.length - 1];
 
@@ -108,12 +145,15 @@ const { agent } = useChat({
     message.loading = false;
     message.createdAt ||= new Date().toISOString();
   },
+  /** 处理流式完成事件 */
   onFinish: async ({ usage }: AIStreamFinishChunk): Promise<void> => {
     const message = messages.value[messages.value.length - 1];
 
     message.usage = usage;
   },
+  /** 处理工具调用事件 */
   onToolCall: handleToolCall,
+  /** 处理请求完成事件 */
   onComplete: (): void => {
     loading.value = false;
 
@@ -123,7 +163,7 @@ const { agent } = useChat({
       message.finished = true;
     }
 
-    // 工具轮次完成后立即发起下一轮，当前轮次的空 assistant 占位不写入历史。
+    // 工具轮次完成后立即发起下一轮，当前轮次的空 assistant 占位不写入历史
     if (pendingToolResults.value.length && lastServiceConfig) {
       const nextToolResults = [...pendingToolResults.value];
 
@@ -137,16 +177,22 @@ const { agent } = useChat({
       return;
     }
 
+    // 清理状态
     executedToolCallIds.value = new Set();
     toolStatus.value = '';
 
     emit('complete', message);
   },
+  /** 处理错误事件 */
   onError: (error: AIServiceError): void => {
     aMessage.error(error.message);
   }
 });
 
+/**
+ * 获取当前可用的服务配置
+ * @returns 服务配置，如果未配置则引导用户去设置页面
+ */
 async function getServiceConfig(): Promise<ServiceConfig | undefined> {
   const config = await serviceModelStore.getAvailableServiceConfig('chat');
   if (config?.providerId && config?.modelId) {
@@ -159,6 +205,7 @@ async function getServiceConfig(): Promise<ServiceConfig | undefined> {
     };
   }
 
+  // 未配置服务时引导用户去设置
   const [, confirmed] = await Modal.confirm('提示', '当前未配置可用的大模型服务', { confirmText: '去配置', cancelText: '取消' });
 
   if (confirmed) {
@@ -168,14 +215,24 @@ async function getServiceConfig(): Promise<ServiceConfig | undefined> {
   return undefined;
 }
 
+/**
+ * 创建 assistant 消息占位符
+ * @returns 空的 assistant 消息对象
+ */
 function createAssistantPlaceholder(): Message {
   return { id: nanoid(), role: 'assistant', content: '', createdAt: '', loading: true };
 }
 
+/**
+ * 查找重新生成的起始消息索引
+ * @param targetMessage - 目标消息（需要重新生成的 assistant 消息）
+ * @returns 对应 user 消息的索引，未找到返回 -1
+ */
 function findRegenerateStartIndex(targetMessage: Message): number {
   const targetIndex = messages.value.findIndex((item) => item.id === targetMessage.id);
   if (targetIndex === -1 || targetMessage.role !== 'assistant') return -1;
 
+  // 向前查找最近的 user 消息
   for (let index = targetIndex - 1; index >= 0; index -= 1) {
     if (messages.value[index].role === 'user') return index;
   }
@@ -183,15 +240,22 @@ function findRegenerateStartIndex(targetMessage: Message): number {
   return -1;
 }
 
+/**
+ * 发起流式消息请求
+ * @param _messages - 消息历史
+ * @param config - 服务配置
+ * @param toolResults - 工具调用结果（用于多轮工具调用）
+ */
 function streamMessages(_messages: Message[], config: ServiceConfig, toolResults: ExecutedToolCall[] = []): void {
   loading.value = true;
   lastServiceConfig = config;
 
   const modelMessages = toModelMessages(_messages);
+  // 如果有工具结果，追加到消息历史中
   const continuedMessages = toolResults.length ? [...modelMessages, ...createToolResultMessages(toolResults)] : modelMessages;
   const shouldEnableTools = config.toolSupport.supported && Boolean(props.tools?.length);
 
-  // provider 未验证时直接降级为普通对话，避免把未兼容的 tool schema 发给模型侧。
+  // provider 未验证时直接降级为普通对话，避免把未兼容的 tool schema 发给模型侧
   toolStatus.value =
     !config.toolSupport.supported && props.tools?.length ? `已禁用工具调用：${config.toolSupport.reason ?? '当前服务商暂不支持 AI Tools'}` : '';
 
@@ -202,9 +266,14 @@ function streamMessages(_messages: Message[], config: ServiceConfig, toolResults
     tools: shouldEnableTools ? toTransportTools(props.tools ?? []) : undefined
   });
 
+  // 添加 assistant 消息占位符，用于接收流式内容
   messages.value.push(createAssistantPlaceholder());
 }
 
+/**
+ * 处理消息提交
+ * @description 用户发送消息时调用
+ */
 async function handleSubmit(): Promise<void> {
   if (loading.value) return;
 
@@ -225,6 +294,10 @@ async function handleSubmit(): Promise<void> {
   inputValue.value = '';
 }
 
+/**
+ * 中止当前请求
+ * @description 清理工具状态并中止流式请求
+ */
 function handleAbort(): void {
   pendingToolResults.value = [];
   executedToolCallIds.value = new Set();
@@ -232,10 +305,20 @@ function handleAbort(): void {
   agent.abort();
 }
 
+/**
+ * 处理消息编辑
+ * @param message - 要编辑的消息
+ * @description 将消息内容填入输入框
+ */
 function handleEdit(message: Message): void {
   inputValue.value = message.content;
 }
 
+/**
+ * 处理消息重新生成
+ * @param message - 要重新生成的消息
+ * @description 删除目标消息之后的历史，重新发起请求
+ */
 async function handleRegenerate(message: Message): Promise<void> {
   if (loading.value) return;
 
@@ -297,38 +380,5 @@ async function handleRegenerate(message: Message): Promise<void> {
   flex-direction: column;
   gap: 8px;
   align-items: flex-end;
-  padding: 8px 0 8px 12px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--input-border);
-  border-radius: 8px;
-  box-shadow: var(--shadow-sm);
-  transition: all 0.2s;
-
-  .b-prompt-variable__textarea {
-    padding: 0 12px 0 0;
-    background: transparent;
-  }
-}
-
-.b-chat__input__buttons {
-  display: flex;
-  gap: 4px;
-  align-items: flex-end;
-  padding: 0 12px 0 0;
-}
-
-.b-chat__input__right {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.b-chat__input__model-select {
-  width: 100px;
-  font-size: 12px;
-
-  .ant-select-selection-item {
-    font-size: 12px;
-  }
 }
 </style>
