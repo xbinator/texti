@@ -1,5 +1,5 @@
 <template>
-  <div ref="settingsContainerRef" class="settings-container">
+  <div class="settings-container">
     <div class="settings-sidebar" :class="{ 'settings-sidebar--collapsed': sidebarCollapsed }">
       <RouterLink v-for="item in menuItems" :key="item.key" :to="item.path" class="sidebar-item" :class="{ active: isActive(item.key) }">
         <Icon :icon="item.icon" class="sidebar-item__icon" />
@@ -18,23 +18,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { Icon } from '@iconify/vue';
-import { useAutoCollapse } from '@/hooks/useAutoCollapse';
 import { useSettingStore } from '@/stores/setting';
 import { menuItems, type SettingsMenuKey } from './constants';
 
 const route = useRoute();
 const settingStore = useSettingStore();
-const { settingsSidebarCollapsed } = storeToRefs(settingStore);
-const settingsContainerRef = ref<HTMLElement | null>(null);
-const { collapsed: sidebarCollapsed, toggleCollapsed: toggleSidebarCollapsed } = useAutoCollapse(settingsContainerRef, {
-  collapsed: settingsSidebarCollapsed,
-  onCollapsedChange: (collapsed: boolean) => settingStore.setSettingsSidebarCollapsed(collapsed),
-  threshold: 800
-});
+const { settingsSidebarCollapsed: sidebarCollapsed } = storeToRefs(settingStore);
+
+function toggleSidebarCollapsed(): void {
+  settingStore.setSettingsSidebarCollapsed(!sidebarCollapsed.value);
+}
 
 function isActive(key: SettingsMenuKey): boolean {
   const prefix = `/settings/${key}`;
