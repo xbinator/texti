@@ -61,4 +61,53 @@ describe('useTabsStore', () => {
     expect(tabsStore.tabs.map((tab) => tab.id)).toEqual(['alpha']);
     expect(setItemMock).not.toHaveBeenCalled();
   });
+
+  it('registers cache keys when tabs are added', async () => {
+    const { useTabsStore } = await import('@/stores/tabs');
+    const tabsStore = useTabsStore();
+
+    tabsStore.addTab({ id: 'alpha', path: '/alpha', title: 'Alpha', cacheKey: 'cache:alpha' });
+    tabsStore.addTab({ id: 'beta', path: '/beta', title: 'Beta', cacheKey: 'cache:beta' });
+    tabsStore.addTab({ id: 'alpha', path: '/alpha', title: 'Alpha Updated', cacheKey: 'cache:alpha' });
+
+    expect(tabsStore.cachedKeys).toEqual(['cache:alpha', 'cache:beta']);
+  });
+
+  it('exposes cached component names for KeepAlive include filters', async () => {
+    const { resolveRouteCacheName } = await import('@/router/cache');
+    const { useTabsStore } = await import('@/stores/tabs');
+    const tabsStore = useTabsStore();
+
+    tabsStore.addTab({ id: 'alpha', path: '/alpha', title: 'Alpha', cacheKey: 'cache:alpha' });
+
+    expect(tabsStore.cachedComponentNames).toEqual([resolveRouteCacheName('cache:alpha')]);
+  });
+
+  it('removes the tab cache key when a tab is closed', async () => {
+    const { useTabsStore } = await import('@/stores/tabs');
+    const tabsStore = useTabsStore();
+
+    tabsStore.addTab({ id: 'alpha', path: '/alpha', title: 'Alpha', cacheKey: 'cache:alpha' });
+    tabsStore.addTab({ id: 'beta', path: '/beta', title: 'Beta', cacheKey: 'cache:beta' });
+
+    tabsStore.removeTab('alpha');
+
+    expect(tabsStore.cachedKeys).toEqual(['cache:beta']);
+    expect(tabsStore.tabs.map((tab) => tab.id)).toEqual(['beta']);
+  });
+
+  it('migrates saved tabs without cache keys by using their ids', async () => {
+    getItemMock.mockReturnValue({
+      tabs: [{ id: 'legacy', path: '/legacy', title: 'Legacy' }],
+      dirtyById: { legacy: true }
+    });
+
+    const { loadSavedData } = await import('@/stores/tabs');
+
+    expect(loadSavedData()).toEqual({
+      tabs: [{ id: 'legacy', path: '/legacy', title: 'Legacy', cacheKey: 'legacy' }],
+      dirtyById: { legacy: true },
+      cachedKeys: ['legacy']
+    });
+  });
 });

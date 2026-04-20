@@ -45,6 +45,46 @@
 
 Vue `KeepAlive` 的 `include` 基于组件名称过滤。所有需要缓存的页面组件应具备稳定组件名，避免异步路由组件在不同构建环境下名称不一致。
 
+## 新增页面接入说明
+
+普通页面默认不需要额外接入 KeepAlive。只要路由没有设置 `meta.hideTab: true`，路由守卫会自动创建标签页，`tabsStore` 会自动登记缓存，默认布局会在标签页存在期间保留页面实例，并在关闭标签页时释放缓存。
+
+新增普通页面时，只需要正常新增路由：
+
+```typescript
+/**
+ * @file about.ts
+ * @description 关于页面路由配置。
+ */
+
+import type { AppRouteRecordRaw } from '../../type';
+
+/**
+ * 关于页面路由。
+ */
+const routes: AppRouteRecordRaw[] = [
+  {
+    path: 'about',
+    name: 'about',
+    component: () => import('@/views/about/index.vue'),
+    meta: {
+      title: '关于'
+    }
+  }
+];
+
+export default routes;
+```
+
+以下页面需要额外注明并处理：
+
+- 多实例页面：如果一个路由会按业务 ID 打开多个标签页，例如 `/editor/:id`，需要在 `src/router/cache.ts` 中补充 tab id 和 cache key 解析规则。
+- 分组页面：如果多个子路由需要归并为一个标签页，例如 `/settings/**`，需要在 `src/router/cache.ts` 中补充分组规则。
+- 隐藏标签页页面：如果路由设置 `meta.hideTab: true`，路由守卫不会自动创建标签页，也不会自动进入多标签页缓存生命周期。
+- 含激活态副作用的页面：如果页面有文件监听、定时器、全局注册、当前页面上下文等副作用，需要使用 `onActivated` 接管资源，使用 `onDeactivated` 和 `onUnmounted` 释放资源。
+
+普通表单、列表、滚动状态不需要单独处理，KeepAlive 会随标签页实例自动保留这些状态。
+
 ## 数据流
 
 1. 用户进入路由。

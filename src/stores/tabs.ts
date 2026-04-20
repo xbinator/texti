@@ -4,6 +4,7 @@
  */
 
 import { defineStore } from 'pinia';
+import { resolveRouteCacheName } from '@/router/cache';
 import { local } from '@/shared/storage/base';
 
 /**
@@ -21,6 +22,8 @@ export interface Tab {
   path: string;
   /** 标签页显示的标题 */
   title: string;
+  /** 标签页对应的 KeepAlive 缓存 key */
+  cacheKey?: string;
 }
 
 /**
@@ -31,9 +34,29 @@ export interface TabsState {
   tabs: Tab[];
   /** 标签页未保存修改状态映射 */
   dirtyById: Record<string, boolean>;
+  /** 当前需要保留的 KeepAlive 缓存 key 列表 */
+  cachedKeys: string[];
 }
 
 const TABS_STORAGE_KEY = 'app_tabs';
+
+/**
+ * 规范化标签页数据，兼容历史缓存中缺少 cacheKey 的记录。
+ * @param tab - 待规范化的标签页
+ * @returns 带有缓存 key 的标签页
+ */
+function normalizeTab(tab: Tab): Tab {
+  return { id: tab.id, path: tab.path, title: tab.title, cacheKey: tab.cacheKey || tab.id };
+}
+
+/**
+ * 去重缓存 key，并过滤空值。
+ * @param keys - 缓存 key 列表
+ * @returns 去重后的缓存 key 列表
+ */
+function normalizeCachedKeys(keys: string[]): string[] {
+  return Array.from(new Set(keys.filter(Boolean)));
+}
 
 /**
  * 读取本地持久化的标签页数据。
@@ -41,11 +64,15 @@ const TABS_STORAGE_KEY = 'app_tabs';
  */
 export function loadSavedData(): TabsState {
   const saved = local.getItem<TabsState>(TABS_STORAGE_KEY);
-  if (!saved || !Array.isArray(saved.tabs)) return { tabs: [], dirtyById: {} };
+  if (!saved || !Array.isArray(saved.tabs)) return { tabs: [], dirtyById: {}, cachedKeys: [] };
+
+  const tabs = saved.tabs.map(normalizeTab);
+  const savedCachedKeys = Array.isArray(saved.cachedKeys) ? saved.cachedKeys : [];
 
   return {
-    tabs: saved.tabs.map((tab) => ({ id: tab.id, path: tab.path, title: tab.title })),
-    dirtyById: saved.dirtyById ?? {}
+    tabs,
+    dirtyById: saved.dirtyById ?? {},
+    cachedKeys: normalizeCachedKeys([...savedCachedKeys, ...tabs.map((tab) => tab.cacheKey || tab.id)])
   };
 }
 
@@ -63,6 +90,14 @@ export const useTabsStore = defineStore('tabs', {
 
   getters: {
     /**
+     * 获取当前 KeepAlive 应保留的包装组件名称。
+     * Vue KeepAlive 的 include 按组件名过滤，因此不能直接使用业务缓存 key。
+     * @param state - 标签页状态
+     * @returns 组件名称列表
+     */
+    cachedComponentNames: (state): string[] => state.cachedKeys.map(resolveRouteCacheName),
+
+    /**
      * 获取当前激活的标签页对象。
      * @returns 当前激活标签页，暂未维护 activeId 时返回 null
      */
@@ -78,16 +113,22 @@ export const useTabsStore = defineStore('tabs', {
      * @param tab - 需要加入状态的标签页
      */
     addTab(tab: Tab): void {
-      const index = this.tabs.findIndex((t) => t.id === tab.id);
+      const normalizedTab = normalizeTab(tab);
+      const index = this.tabs.findIndex((t) => t.id === normalizedTab.id);
       if (tab.path.startsWith('/settings')) {
         const _index = this.tabs.findIndex((t) => t.path.includes('/settings'));
 
-        const _tab = { ...tab, title: '设置' };
+        const _tab = { ...normalizedTab, title: '设置' };
         _index === -1 ? this.tabs.push(_tab) : (this.tabs[_index] = _tab);
       } else if (index === -1) {
-        this.tabs.push(tab);
+        this.tabs.push(normalizedTab);
       } else {
-        this.tabs[index] = tab;
+        this.tabs[index] = normalizedTab;
+      }
+
+      const cacheKey = normalizedTab.cacheKey || normalizedTab.id;
+      if (cacheKey && !this.cachedKeys.includes(cacheKey)) {
+        this.cachedKeys.push(cacheKey);
       }
 
       persistData(this.$state);
@@ -134,7 +175,11 @@ export const useTabsStore = defineStore('tabs', {
       const index = this.tabs.findIndex((t) => t.id === id);
       if (index === -1) return;
 
-      this.tabs.splice(index, 1);
+      const [removedTab] = this.tabs.splice(index, 1);
+      const removedCacheKey = removedTab?.cacheKey || removedTab?.id || '';
+      if (removedCacheKey) {
+        this.cachedKeys = this.cachedKeys.filter((cacheKey) => cacheKey !== removedCacheKey);
+      }
       delete this.dirtyById[id];
 
       persistData(this.$state);

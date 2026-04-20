@@ -1,6 +1,7 @@
 import type { App } from 'vue';
 import type { RouteRecordRaw } from 'vue-router';
 import { createRouter, createWebHistory } from 'vue-router';
+import { resolveRouteCacheKey, resolveRouteTabId } from '@/router/cache';
 import { useSettingStore } from '@/stores/setting';
 import { useTabsStore } from '@/stores/tabs';
 import { basicRoutes } from './routes';
@@ -26,9 +27,9 @@ router.afterEach((to) => {
   // 路由拦截添加 Tab
   if (!to.meta?.hideTab) {
     const tabsStore = useTabsStore();
-    const { fullPath } = to;
+    const tabId = resolveRouteTabId(to);
 
-    tabsStore.addTab({ id: fullPath, path: to.fullPath, title: title || (to.name as string) || to.path });
+    tabsStore.addTab({ id: tabId, path: to.fullPath, title: title || (to.name as string) || to.path, cacheKey: resolveRouteCacheKey(to) });
   }
 });
 

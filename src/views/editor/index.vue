@@ -21,7 +21,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, watchEffect, ref } from 'vue';
+import { onActivated, onBeforeUnmount, onDeactivated, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { editorToolContextRegistry } from '@/ai/tools/editor-context';
 import BEditor from '@/components/BEditor/index.vue';
@@ -32,20 +32,34 @@ import { useSession } from './hooks/useSession';
 
 const route = useRoute();
 
-const fileId = computed(() => String(route.params.id || ''));
+const fileId = ref(String(route.params.id || ''));
 
 const { fileState, actions } = useSession(fileId);
 const settingStore = useSettingStore();
 
 const editorRef = ref<BEditorPublicInstance | null>(null);
+const isActive = ref(true);
 
 useBindings(fileId, { fileState, actions, editorInstance: editorRef });
 
-watchEffect(() => {
+/**
+ * 注销当前编辑器工具上下文。
+ */
+function unregisterEditorContext(): void {
+  const documentId = fileState.value.id;
+  if (documentId) {
+    editorToolContextRegistry.unregister(documentId);
+  }
+}
+
+/**
+ * 注册当前激活编辑器的工具上下文。
+ */
+function registerEditorContext(): void {
   const editorInstance = editorRef.value;
   const documentId = fileState.value.id;
 
-  if (!editorInstance || !documentId) {
+  if (!isActive.value || !editorInstance || !documentId) {
     return;
   }
 
@@ -63,13 +77,22 @@ watchEffect(() => {
       replaceDocument: (content: string) => editorInstance.replaceDocument(content)
     }
   });
+}
+
+watch([editorRef, () => fileState.value.id], registerEditorContext);
+
+onActivated(() => {
+  isActive.value = true;
+  registerEditorContext();
+});
+
+onDeactivated(() => {
+  isActive.value = false;
+  unregisterEditorContext();
 });
 
 onBeforeUnmount(() => {
-  const documentId = fileState.value.id;
-  if (documentId) {
-    editorToolContextRegistry.unregister(documentId);
-  }
+  unregisterEditorContext();
 });
 </script>
 

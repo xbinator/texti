@@ -1,8 +1,9 @@
 import type { EditorFile } from '../types';
 import type { Ref } from 'vue';
-import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { customAlphabet } from 'nanoid';
+import { resolveRouteCacheKey } from '@/router/cache';
 import { native } from '@/shared/platform';
 import type { ReadFileResult } from '@/shared/platform/native/types';
 import { useFilesStore } from '@/stores/files';
@@ -26,8 +27,11 @@ export function useSession(fileId: Ref<string>) {
   const filesStore = useFilesStore();
   const { switchWatchedFile, clearWatchedFile, setOnFileChanged, setIsDirty, finishReload } = useFileWatcher();
 
+  const sessionPath = ref(route.fullPath);
+  const sessionCacheKey = ref(resolveRouteCacheKey(route));
   const fileState = ref<EditorFile>({ id: '', name: '', content: '', ext: 'md', path: null });
   const viewState = reactive<{ mode: ViewMode; showOutline: boolean }>({ mode: 'rich', showOutline: true });
+  const isActive = ref(true);
 
   const autoSave = useAutoSave(fileState);
 
@@ -48,7 +52,7 @@ export function useSession(fileId: Ref<string>) {
   function updateTab() {
     if (!fileId.value) return;
 
-    tabsStore.addTab({ id: fileId.value, path: route.fullPath, title: currentTitle.value });
+    tabsStore.addTab({ id: fileId.value, path: sessionPath.value, title: currentTitle.value, cacheKey: sessionCacheKey.value });
   }
 
   setOnFileChanged(fileStateActions.handleExternalFileChange);
@@ -236,7 +240,9 @@ export function useSession(fileId: Ref<string>) {
       // 再次检查版本号
       if (currentVersion !== loadVersion) return;
       // 切换文件监听器到新文件
-      await switchWatchedFile(fileState.value.path);
+      if (isActive.value) {
+        await switchWatchedFile(fileState.value.path);
+      }
 
       // 检查版本号
       if (currentVersion !== loadVersion) return;
@@ -253,11 +259,35 @@ export function useSession(fileId: Ref<string>) {
 
   watch(fileId, () => loadFileState(), { immediate: true });
 
-  watch([fileId, () => route.fullPath, () => fileState.value.name], updateTab);
+  watch([fileId, () => fileState.value.name], updateTab);
+
+  /**
+   * 激活缓存中的编辑器实例，并接管当前文件监听。
+   */
+  async function activate(): Promise<void> {
+    isActive.value = true;
+    await switchWatchedFile(fileState.value.path);
+  }
+
+  /**
+   * 停用缓存中的编辑器实例，并释放当前文件监听。
+   */
+  async function deactivate(): Promise<void> {
+    isActive.value = false;
+    await clearWatchedFile();
+  }
 
   async function dispose(): Promise<void> {
     await clearWatchedFile();
   }
+
+  onActivated(() => {
+    activate();
+  });
+
+  onDeactivated(() => {
+    deactivate();
+  });
 
   onUnmounted(() => {
     dispose();

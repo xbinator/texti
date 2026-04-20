@@ -54,7 +54,11 @@
 
     <div class="b-layout__content">
       <div class="b-layout__content__main">
-        <RouterView />
+        <RouterView v-slot="{ Component, route }">
+          <KeepAlive :include="tabsStore.cachedComponentNames">
+            <component :is="getRouteCacheComponent(route)" v-if="Component" :key="getRouteCacheKey(route)" :route-component="Component" />
+          </KeepAlive>
+        </RouterView>
       </div>
 
       <BPanelSplitter v-show="settingStore.sidebarVisible" v-model:size="settingStore.sidebarWidth" position="left" :min-width="240" :max-width="500">
@@ -79,11 +83,13 @@ import BSearchRecent from '@/components/BSearchRecent/index.vue';
 import { getElectronAPI } from '@/shared/platform/electron-api';
 import { isMac } from '@/shared/platform/env';
 import { useSettingStore } from '@/stores/setting';
+import { useTabsStore } from '@/stores/tabs';
 import HeaderTabs from './components/HeaderTabs.vue';
 import ShortcutsHelp from './components/ShortcutsHelp.vue';
 import { useEditActive } from './hooks/useEditActive';
 import { useFileActive } from './hooks/useFileActive';
 import { useHelpActive } from './hooks/useHelpActive';
+import { useRouteKeepAliveCache } from './hooks/useRouteKeepAliveCache';
 import { useViewActive } from './hooks/useViewActive';
 
 const router = useRouter();
@@ -91,16 +97,24 @@ const router = useRouter();
 const visible = reactive({ searchRecent: false, shortcutsHelp: false });
 
 const settingStore = useSettingStore();
+const tabsStore = useTabsStore();
+const { getRouteCacheKey, getRouteCacheComponent } = useRouteKeepAliveCache();
 
 const { toolbarFileOptions } = useFileActive(visible);
 const { toolbarEditOptions } = useEditActive();
 const { toolbarViewOptions } = useViewActive();
 const { toolbarHelpOptions } = useHelpActive(visible);
 
+/**
+ * 打开设置页。
+ */
 function handleOpenSettings(): void {
   router.push('/settings');
 }
 
+/**
+ * 切换右侧辅助栏显示状态。
+ */
 function handleToggleSidebar(): void {
   settingStore.toggleSidebar();
 }

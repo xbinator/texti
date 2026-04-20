@@ -153,6 +153,42 @@ export function useEditorCore(editorRef: Ref<HTMLDivElement | undefined>, modelV
   }
 
   /**
+   * 获取编辑器当前解码后的文本内容。
+   * @returns 解码后的编辑器内容
+   */
+  function getEditorContent(): string {
+    if (!editorRef.value) return '';
+    return decodeVariables(editorRef.value.innerHTML);
+  }
+
+  /**
+   * 同步编辑器空态标记，确保 contenteditable 清空后仍能显示 placeholder。
+   * @param decodedContent - 可选的解码文本，避免重复解析
+   */
+  function syncEmptyState(decodedContent?: string): void {
+    if (!editorRef.value) {
+      return;
+    }
+
+    const resolvedContent = decodedContent ?? getEditorContent();
+    editorIsEmpty.value = isPromptEditorEffectivelyEmpty(resolvedContent);
+    editorRef.value.dataset.empty = editorIsEmpty.value ? 'true' : 'false';
+  }
+
+  /**
+   * 将外部文本内容编码后写入编辑器 DOM。
+   * @param content - 文本内容
+   */
+  function updateEditorContent(content: string): void {
+    if (!editorRef.value) return;
+    const encoded = encodeVariables(content);
+    if (editorRef.value.innerHTML !== encoded) {
+      editorRef.value.innerHTML = encoded;
+    }
+    syncEmptyState(content);
+  }
+
+  /**
    * 将当前编辑器状态写入历史栈，供撤销/重做使用。
    * @param content - 可选的当前文本内容
    * @param selection - 可选的选区快照
@@ -231,34 +267,6 @@ export function useEditorCore(editorRef: Ref<HTMLDivElement | undefined>, modelV
     if (targetSnapshot) {
       applyHistorySnapshot(targetSnapshot);
     }
-  }
-
-  function getEditorContent(): string {
-    if (!editorRef.value) return '';
-    return decodeVariables(editorRef.value.innerHTML);
-  }
-
-  /**
-   * 同步编辑器空态标记，确保 contenteditable 清空后仍能显示 placeholder。
-   * @param decodedContent - 可选的解码文本，避免重复解析
-   */
-  function syncEmptyState(decodedContent?: string): void {
-    if (!editorRef.value) {
-      return;
-    }
-
-    const resolvedContent = decodedContent ?? getEditorContent();
-    editorIsEmpty.value = isPromptEditorEffectivelyEmpty(resolvedContent);
-    editorRef.value.dataset.empty = editorIsEmpty.value ? 'true' : 'false';
-  }
-
-  function updateEditorContent(content: string): void {
-    if (!editorRef.value) return;
-    const encoded = encodeVariables(content);
-    if (editorRef.value.innerHTML !== encoded) {
-      editorRef.value.innerHTML = encoded;
-    }
-    syncEmptyState(content);
   }
 
   function updateModelValue(): void {
