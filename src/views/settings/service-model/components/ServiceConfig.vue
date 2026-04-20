@@ -27,7 +27,7 @@
         <div class="config-info">
           <div class="config-label">提示词</div>
         </div>
-        <BButton type="secondary" size="small" icon="lucide:edit-2" @click="openPromptModal">编辑</BButton>
+        <BButton type="secondary" size="small" @click="openPromptModal">编 辑</BButton>
       </div>
     </div>
 
@@ -49,6 +49,7 @@
 
 <script setup lang="ts">
 import type { AIProvider } from 'types/ai';
+import type { ServiceModelType } from 'types/model';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import BButton from '@/components/BButton/index.vue';
 import BModal from '@/components/BModal/index.vue';
@@ -56,7 +57,6 @@ import BPromptEditor from '@/components/BPromptEditor/index.vue';
 import type { VariableOptionGroup } from '@/components/BPromptEditor/types';
 import BSelect from '@/components/BSelect/index.vue';
 import { providerStorage, serviceModelsStorage } from '@/shared/storage';
-import type { ServiceModelType } from '@/shared/storage/service-models';
 import { dispatchServiceModelUpdated } from '@/shared/storage/service-models/events';
 
 interface Props {

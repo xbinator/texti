@@ -73,13 +73,7 @@ const visible = ref(false);
 const hovering = ref(false);
 let dragging = false;
 
-const { start: startHide, stop: stopHide } = useTimeoutFn(
-  () => {
-    if (!dragging && !hovering.value) visible.value = false;
-  },
-  1000,
-  { immediate: false }
-);
+const { start: startHide, stop: stopHide } = useTimeoutFn(() => !dragging && !hovering.value && (visible.value = false), 1000, { immediate: false });
 
 const barVisible = computed(() => !props.hide && (props.always || visible.value));
 

@@ -137,7 +137,7 @@ async function handleRefreshModels(): Promise<void> {
 .detail-container {
   display: flex;
   flex-direction: column;
-  min-width: 0;
+  min-width: 500px;
   height: 100%;
   background: var(--bg-primary);
   border-radius: 8px;

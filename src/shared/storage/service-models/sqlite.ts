@@ -1,4 +1,4 @@
-import type { ServiceModelConfig, ServiceModelConfigMap, ServiceModelType } from './types';
+import type { ServiceModelConfig, ServiceModelConfigMap, ServiceModelType } from 'types/model';
 import localforage from 'localforage';
 import { cloneDeep } from 'lodash-es';
 import { dbSelect, dbExecute, isDatabaseAvailable } from '../utils';

@@ -4,7 +4,6 @@
       <div class="b-chat__messages">
         <MessageBubble v-for="item in messages" :key="item.id" :message="item" @edit="handleEdit" @regenerate="handleRegenerate" />
       </div>
-      <div v-if="toolStatus" class="b-chat__tool-status">{{ toolStatus }}</div>
     </Container>
 
     <div v-else class="b-chat__empty">
@@ -13,7 +12,7 @@
 
     <div class="b-chat__input">
       <div class="b-chat__input__container">
-        <BPromptEditor v-model:value="inputValue" :placeholder="props.placeholder" :max-height="200" variant="borderless" @submit="handleSubmit" />
+        <BPromptEditor v-model:value="inputValue" :placeholder="placeholder" :max-height="200" variant="borderless" @submit="handleSubmit" />
 
         <div class="b-chat__input__buttons">
           <BButton v-if="loading" size="small" square icon="lucide:square" @click="handleAbort" />
@@ -89,10 +88,7 @@ let lastServiceConfig: ServiceConfig | null = null;
  * @returns AI SDK 兼容的消息格式
  */
 function toModelMessages(sourceMessages: Message[]): ModelMessage[] {
-  return sourceMessages.map((item) => ({
-    role: item.role,
-    content: item.content
-  }));
+  return sourceMessages.map((item) => ({ role: item.role, content: item.content }));
 }
 
 /**
@@ -253,18 +249,15 @@ function streamMessages(_messages: Message[], config: ServiceConfig, toolResults
   const modelMessages = toModelMessages(_messages);
   // 如果有工具结果，追加到消息历史中
   const continuedMessages = toolResults.length ? [...modelMessages, ...createToolResultMessages(toolResults)] : modelMessages;
-  const shouldEnableTools = config.toolSupport.supported && Boolean(props.tools?.length);
+
+  const { supported, reason } = config.toolSupport;
+
+  const tools = supported && Boolean(props.tools?.length) ? toTransportTools(props.tools ?? []) : undefined;
 
   // provider 未验证时直接降级为普通对话，避免把未兼容的 tool schema 发给模型侧
-  toolStatus.value =
-    !config.toolSupport.supported && props.tools?.length ? `已禁用工具调用：${config.toolSupport.reason ?? '当前服务商暂不支持 AI Tools'}` : '';
+  toolStatus.value = !supported && props.tools?.length ? `已禁用工具调用：${reason ?? '当前服务商暂不支持 AI Tools'}` : '';
 
-  agent.stream({
-    messages: continuedMessages,
-    modelId: config.modelId,
-    providerId: config.providerId,
-    tools: shouldEnableTools ? toTransportTools(props.tools ?? []) : undefined
-  });
+  agent.stream({ messages: continuedMessages, modelId: config.modelId, providerId: config.providerId, tools });
 
   // 添加 assistant 消息占位符，用于接收流式内容
   messages.value.push(createAssistantPlaceholder());
@@ -380,5 +373,19 @@ async function handleRegenerate(message: Message): Promise<void> {
   flex-direction: column;
   gap: 8px;
   align-items: flex-end;
+  padding: 12px 0 12px 12px;
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+
+  .b-prompt-editor {
+    padding: 0 12px 0 0;
+    background-color: transparent;
+    border: none;
+    border-radius: 0;
+  }
+}
+
+.b-chat__input__buttons {
+  padding: 0 12px 0 0;
 }
 </style>
