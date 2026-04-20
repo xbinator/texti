@@ -1,4 +1,4 @@
-import type { ServiceModelType } from './types';
+import type { ServiceModelType } from 'types/model';
 
 export const SERVICE_MODEL_UPDATED_EVENT = 'service-model-updated';
 

@@ -190,17 +190,13 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
   }
 
   h1 {
-    padding-bottom: 0.3em;
     margin: 1.5em 0 0.75em;
     font-size: 24px;
-    border-bottom: 1px solid var(--editor-heading-border);
   }
 
   h2 {
-    padding-bottom: 0.2em;
     margin: 1.25em 0 0.625em;
     font-size: 20px;
-    border-bottom: 1px solid var(--editor-heading-border);
   }
 
   h3 {
