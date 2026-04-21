@@ -4,8 +4,48 @@ import Database from 'better-sqlite3';
 import { app } from 'electron';
 
 type DatabaseInstance = InstanceType<typeof Database>;
+type DatabaseTableName = 'chat_messages' | 'chat_sessions';
+
+interface DatabaseTableInfoRow {
+  name: string;
+}
 
 let db: DatabaseInstance | null = null;
+
+/**
+ * 检查数据表是否已经包含指定列。
+ * @param tableName - 数据表名称
+ * @param columnName - 需要检查的列名
+ * @returns 数据表是否包含该列
+ */
+function hasColumn(tableName: DatabaseTableName, columnName: string): boolean {
+  if (!db) throw new Error('Database not initialized');
+
+  const rows = db.prepare(`PRAGMA table_info(${tableName})`).all() as DatabaseTableInfoRow[];
+
+  return rows.some((row) => row.name === columnName);
+}
+
+/**
+ * 按需补齐已有数据库缺失的表列。
+ * @param tableName - 数据表名称
+ * @param columnName - 需要补齐的列名
+ * @param definition - SQLite 列定义
+ */
+function ensureColumn(tableName: DatabaseTableName, columnName: string, definition: string): void {
+  if (!db) throw new Error('Database not initialized');
+  if (hasColumn(tableName, columnName)) return;
+
+  db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${definition}`);
+}
+
+/**
+ * 执行向后兼容的数据库结构迁移。
+ */
+function migrateDatabase(): void {
+  ensureColumn('chat_sessions', 'usage_json', 'usage_json TEXT');
+  ensureColumn('chat_messages', 'thinking', 'thinking TEXT');
+}
 
 export function getDbPath(): string {
   const userDataPath = app.getPath('userData');
@@ -61,7 +101,8 @@ export async function initDatabase(): Promise<void> {
       title TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      last_message_at TEXT NOT NULL
+      last_message_at TEXT NOT NULL,
+      usage_json TEXT
     );
 
     CREATE TABLE IF NOT EXISTS chat_messages (
@@ -69,6 +110,7 @@ export async function initDatabase(): Promise<void> {
       session_id TEXT NOT NULL,
       role TEXT NOT NULL,
       content TEXT NOT NULL,
+      thinking TEXT,
       files_json TEXT,
       usage_json TEXT,
       created_at TEXT NOT NULL
@@ -80,6 +122,8 @@ export async function initDatabase(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id_created_at
     ON chat_messages(session_id, created_at ASC);
   `);
+
+  migrateDatabase();
 }
 
 export function dbExecute(sql: string, params?: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
