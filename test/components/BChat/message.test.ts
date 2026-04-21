@@ -3,7 +3,7 @@
  * @description BChat 消息工具行为测试
  */
 import { describe, expect, it } from 'vitest';
-import { createErrorMessage, isModelMessage, isPersistableMessage, toModelMessages } from '@/components/BChat/message';
+import { createErrorMessage, isModelMessage, isPersistableMessage, isRemovableAssistantPlaceholder, toModelMessages } from '@/components/BChat/message';
 import type { Message } from '@/components/BChat/types';
 
 describe('BChat message helpers', () => {
@@ -36,5 +36,57 @@ describe('BChat message helpers', () => {
     expect(isPersistableMessage(errorMessage)).toBe(true);
     expect(isModelMessage(errorMessage)).toBe(false);
     expect(isPersistableMessage({ id: 'assistant-1', role: 'assistant', content: '好的', createdAt: '2026-04-21T00:00:02.000Z' })).toBe(true);
+  });
+
+  it('preserves assistant tool-call metadata when converting continued tool loop history', () => {
+    const messages: Message[] = [
+      { id: 'user-1', role: 'user', content: '查看一下文档', createdAt: '2026-04-21T00:00:00.000Z' },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: '',
+        createdAt: '2026-04-21T00:00:01.000Z',
+        toolCalls: [
+          {
+            toolCallId: 'call_function_z4c3rw63ddmt_1',
+            toolName: 'read_current_document',
+            input: {}
+          }
+        ]
+      }
+    ];
+
+    expect(toModelMessages(messages)).toEqual([
+      { role: 'user', content: '查看一下文档' },
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool-call',
+            toolCallId: 'call_function_z4c3rw63ddmt_1',
+            toolName: 'read_current_document',
+            input: {}
+          }
+        ]
+      }
+    ]);
+  });
+
+  it('keeps assistant placeholders that already contain tool-call metadata', () => {
+    const message: Message = {
+      id: 'assistant-1',
+      role: 'assistant',
+      content: '',
+      createdAt: '2026-04-21T00:00:01.000Z',
+      toolCalls: [
+        {
+          toolCallId: 'call_function_z4c3rw63ddmt_1',
+          toolName: 'read_current_document',
+          input: {}
+        }
+      ]
+    };
+
+    expect(isRemovableAssistantPlaceholder(message)).toBe(false);
   });
 });

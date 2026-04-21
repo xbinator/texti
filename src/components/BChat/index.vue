@@ -26,15 +26,15 @@
 <script setup lang="ts">
 /**
  * @file BChat/index.vue
- * @description AI 聊天组件，支持消息流式输出和 AI 工具调用
+ * @description AI 聊天组件，负责消息渲染、流式响应和工具续轮控制。
  */
-import type { BChatProps as Props, Message } from './types';
+import type { BChatProps as Props, Message, MessageToolCall, ServiceConfig, ToolLoopGuardConfig } from './types';
 import type { AIServiceError, AIStreamFinishChunk, AIStreamToolCallChunk } from 'types/ai';
 import { nextTick, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { message as aMessage } from 'ant-design-vue';
 import { nanoid } from 'nanoid';
-import { getModelToolSupport, type AIToolProviderSupport } from '@/ai/tools/policy';
+import { getModelToolSupport } from '@/ai/tools/policy';
 import { createToolResultMessages, executeToolCall, toTransportTools, type ExecutedToolCall } from '@/ai/tools/stream';
 import BButton from '@/components/BButton/index.vue';
 import { useChat } from '@/hooks/useChat';
@@ -42,19 +42,17 @@ import { useServiceModelStore } from '@/stores/service-model';
 import { Modal } from '@/utils/modal';
 import Container from './components/Container.vue';
 import MessageBubble from './components/MessageBubble.vue';
-import { createAssistantPlaceholder, createErrorMessage, toModelMessages } from './message';
+import { createAssistantPlaceholder, createErrorMessage, isRemovableAssistantPlaceholder, toModelMessages } from './message';
+import { createToolCallTracker, type ToolCallTracker } from './utils/tool-call-tracker';
+import { createToolLoopGuard, type ToolLoopGuard } from './utils/tool-loop-guard';
 
 /**
- * 服务配置信息
+ * 工具续轮保护的默认阈值
  */
-interface ServiceConfig {
-  /** 服务商 ID */
-  providerId: string;
-  /** 模型 ID */
-  modelId: string;
-  /** 工具支持能力 */
-  toolSupport: AIToolProviderSupport;
-}
+const TOOL_LOOP_GUARD_CONFIG: ToolLoopGuardConfig = {
+  maxRounds: 5,
+  maxRepeatedCalls: 2
+};
 
 defineOptions({ name: 'BChat' });
 
@@ -67,151 +65,148 @@ const emit = defineEmits<{ (e: 'complete', message: Message): void }>();
 const inputValue = defineModel<string>('inputValue', { default: '' });
 const messages = defineModel<Message[]>('messages', { default: () => [] });
 
-/** 加载状态 */
 const loading = ref(false);
-/** 工具执行状态文本 */
 const toolStatus = ref('');
-/** 待处理的工具调用结果队列 */
 const pendingToolResults = ref<ExecutedToolCall[]>([]);
-/** 已执行的工具调用 ID 集合，用于防止重复执行 */
-const executedToolCallIds = ref<Set<string>>(new Set());
+const blockedToolLoopReason = ref('');
 
 const router = useRouter();
 const serviceModelStore = useServiceModelStore();
-/** 最近一次请求的服务配置，用于工具循环时复用 */
+
 let lastServiceConfig: ServiceConfig | null = null;
+let executedToolCallIds = new Set<string>();
+let currentToolRoundId = 0;
+let currentToolCallTracker: ToolCallTracker = createToolCallTracker();
+let currentToolLoopGuard: ToolLoopGuard = createToolLoopGuard(TOOL_LOOP_GUARD_CONFIG);
 
 /**
- * 移除末尾空的 assistant 消息
- * @description 工具循环时，当前轮次的空 assistant 占位不写入历史
+ * 为一次新的流式请求切换到新的异步跟踪上下文
+ */
+function startStreamRound(): void {
+  currentToolRoundId += 1;
+  currentToolCallTracker = createToolCallTracker();
+}
+
+/**
+ * 为新的用户请求链路重置工具续轮状态
+ */
+function startToolLoopSession(): void {
+  startStreamRound();
+  currentToolLoopGuard = createToolLoopGuard(TOOL_LOOP_GUARD_CONFIG);
+  blockedToolLoopReason.value = '';
+  executedToolCallIds = new Set();
+  pendingToolResults.value = [];
+}
+
+/**
+ * 只有真正空白的 assistant 占位消息才允许在续轮前移除
  */
 function removeTrailingEmptyAssistantMessage(): void {
   const lastMessage = messages.value[messages.value.length - 1];
-  if (!lastMessage || lastMessage.role !== 'assistant') {
-    return;
-  }
-
-  if (!lastMessage.content && !lastMessage.usage) {
+  if (isRemovableAssistantPlaceholder(lastMessage)) {
     messages.value.pop();
   }
 }
 
 /**
- * 处理工具调用事件
- * @param chunk - 工具调用数据块
- * @description 执行工具调用并将结果加入待处理队列
+ * 根据工具支持能力生成状态提示
+ * @param config - 服务配置
  */
-async function handleToolCall(chunk: AIStreamToolCallChunk): Promise<void> {
-  // 防止重复执行同一个工具调用
-  if (executedToolCallIds.value.has(chunk.toolCallId)) {
+function getToolStatusText(config: ServiceConfig): string {
+  const { supported, reason } = config.toolSupport;
+  if (!props.tools?.length || supported) {
+    return '';
+  }
+
+  return `已禁用工具调用：${reason ?? '当前服务商暂不支持 AI Tools'}`;
+}
+
+/**
+ * 在 assistant 占位消息上记录模型发起的工具调用
+ * @param chunk - 工具调用数据块
+ */
+function appendAssistantToolCall(chunk: AIStreamToolCallChunk): void {
+  const message = messages.value[messages.value.length - 1];
+  if (message?.role !== 'assistant') {
     return;
   }
 
-  executedToolCallIds.value.add(chunk.toolCallId);
-  toolStatus.value = `正在执行工具：${chunk.toolName}`;
+  const toolCall: MessageToolCall = {
+    toolCallId: chunk.toolCallId,
+    toolName: chunk.toolName,
+    input: chunk.input
+  };
 
-  // 执行工具调用并收集结果
+  message.toolCalls = [...(message.toolCalls ?? []), toolCall];
+}
+
+/**
+ * 结束工具续轮并写入可见错误消息
+ * @param reason - 终止原因
+ */
+function stopToolLoop(reason: string): void {
+  blockedToolLoopReason.value = reason;
+  toolStatus.value = '';
+  pendingToolResults.value = [];
+  removeTrailingEmptyAssistantMessage();
+
+  const message = createErrorMessage(reason);
+  messages.value.push(message);
+  emit('complete', message);
+}
+
+/**
+ * 执行工具调用，并仅在当前轮次仍有效时写回结果
+ * @param chunk - 工具调用数据块
+ * @param roundId - 发起执行时记录的轮次 ID
+ */
+async function executeTrackedToolCall(chunk: AIStreamToolCallChunk, roundId: number): Promise<void> {
   const result = await executeToolCall(chunk, props.tools ?? [], props.getToolContext?.());
-  pendingToolResults.value.push(result);
+  if (roundId !== currentToolRoundId) {
+    return;
+  }
 
-  // 更新状态显示
+  pendingToolResults.value.push(result);
   toolStatus.value = result.result.status === 'success' ? `工具已完成：${chunk.toolName}` : `工具处理完成：${chunk.toolName}`;
 }
 
 /**
- * useChat hook 配置
- * @description 定义消息流的各种回调处理
+ * 处理模型返回的工具调用
+ * @param chunk - 工具调用数据块
  */
-const { agent } = useChat({
-  /** 处理流式内容块 */
-  onText: async (content: string): Promise<void> => {
-    const message = messages.value[messages.value.length - 1];
-
-    message.content = (message.content ?? '') + content;
-    message.loading = false;
-    message.createdAt ||= new Date().toISOString();
-  },
-  /** 处理思考内容 */
-  onThinking: async (thinking: string): Promise<void> => {
-    const message = messages.value[messages.value.length - 1];
-
-    message.thinking = (message.thinking ?? '') + thinking;
-    message.loading = false;
-    message.createdAt ||= new Date().toISOString();
-  },
-  /** 处理流式完成事件 */
-  onFinish: async ({ usage }: AIStreamFinishChunk): Promise<void> => {
-    const message = messages.value[messages.value.length - 1];
-
-    message.usage = usage;
-  },
-  /** 处理工具调用事件 */
-  onToolCall: handleToolCall,
-  /** 处理请求完成事件 */
-  onComplete: (): void => {
-    loading.value = false;
-
-    const message = messages.value[messages.value.length - 1];
-    if (message) {
-      message.loading = false;
-      message.finished = true;
-    }
-
-    // 错误消息已在 onError 中完成展示和持久化事件派发，避免重复保存
-    if (message?.role === 'error') {
-      return;
-    }
-
-    // 工具轮次完成后立即发起下一轮，当前轮次的空 assistant 占位不写入历史
-    if (pendingToolResults.value.length && lastServiceConfig) {
-      const nextToolResults = [...pendingToolResults.value];
-
-      pendingToolResults.value = [];
-      removeTrailingEmptyAssistantMessage();
-
-      nextTick(() => {
-        // eslint-disable-next-line no-use-before-define
-        streamMessages(messages.value, lastServiceConfig as ServiceConfig, nextToolResults);
-      });
-      return;
-    }
-
-    // 清理状态
-    executedToolCallIds.value = new Set();
-    toolStatus.value = '';
-
-    if (message) {
-      emit('complete', message);
-    }
-  },
-  /** 处理错误事件 */
-  onError: (error: AIServiceError): void => {
-    loading.value = false;
-    pendingToolResults.value = [];
-    executedToolCallIds.value = new Set();
-    toolStatus.value = '';
-    removeTrailingEmptyAssistantMessage();
-    const message = createErrorMessage(error.message);
-
-    messages.value.push(message);
-    emit('complete', message);
+async function handleToolCall(chunk: AIStreamToolCallChunk): Promise<void> {
+  if (executedToolCallIds.has(chunk.toolCallId)) {
+    return;
   }
-});
+
+  executedToolCallIds.add(chunk.toolCallId);
+  appendAssistantToolCall(chunk);
+
+  const guardResult = currentToolLoopGuard.recordToolCall(chunk.toolName, chunk.input);
+  if (!guardResult.allowed) {
+    stopToolLoop(guardResult.reason ?? '工具调用重复次数超过限制，已停止自动续轮。');
+    return;
+  }
+
+  toolStatus.value = `正在执行工具：${chunk.toolName}`;
+  const trackedTask = currentToolCallTracker.track(executeTrackedToolCall(chunk, currentToolRoundId));
+  await trackedTask;
+}
 
 /**
  * 获取当前可用的服务配置
- * @returns 服务配置，如果未配置则引导用户去设置页面
  */
 async function getServiceConfig(): Promise<ServiceConfig | undefined> {
   const config = await serviceModelStore.getAvailableServiceConfig('chat');
   if (config?.providerId && config?.modelId) {
     const toolSupport = await getModelToolSupport(config.providerId, config.modelId);
-
     return { providerId: config.providerId, modelId: config.modelId, toolSupport };
   }
 
-  // 未配置服务时引导用户去设置
-  const [, confirmed] = await Modal.confirm('提示', '当前未配置可用的大模型服务', { confirmText: '去配置', cancelText: '取消' });
+  const [, confirmed] = await Modal.confirm('提示', '当前未配置可用的大模型服务', {
+    confirmText: '去配置',
+    cancelText: '取消'
+  });
 
   if (confirmed) {
     router.push('/settings/service-model');
@@ -221,103 +216,109 @@ async function getServiceConfig(): Promise<ServiceConfig | undefined> {
 }
 
 /**
- * 查找重新生成的起始消息索引
- * @param targetMessage - 目标消息（需要重新生成的 assistant 消息）
- * @returns 对应 user 消息的索引，未找到返回 -1
+ * 查找重新生成应截断到的 user 消息位置
+ * @param targetMessage - 目标 assistant 消息
  */
 function findRegenerateStartIndex(targetMessage: Message): number {
   const targetIndex = messages.value.findIndex((item) => item.id === targetMessage.id);
-  if (targetIndex === -1 || targetMessage.role !== 'assistant') return -1;
+  if (targetIndex === -1 || targetMessage.role !== 'assistant') {
+    return -1;
+  }
 
-  // 向前查找最近的 user 消息
   for (let index = targetIndex - 1; index >= 0; index -= 1) {
-    if (messages.value[index].role === 'user') return index;
+    if (messages.value[index].role === 'user') {
+      return index;
+    }
   }
 
   return -1;
 }
 
 /**
- * 发起流式消息请求
- * @param _messages - 消息历史
+ * 发起一轮新的流式请求
+ * @param sourceMessages - 消息历史
  * @param config - 服务配置
- * @param toolResults - 工具调用结果（用于多轮工具调用）
+ * @param toolResults - 上一轮工具执行结果
  */
-function streamMessages(_messages: Message[], config: ServiceConfig, toolResults: ExecutedToolCall[] = []): void {
+function streamMessages(sourceMessages: Message[], config: ServiceConfig, toolResults: ExecutedToolCall[] = []): void {
   loading.value = true;
   lastServiceConfig = config;
+  startStreamRound();
 
-  const modelMessages = toModelMessages(_messages);
-  // 如果有工具结果，追加到消息历史中
+  const modelMessages = toModelMessages(sourceMessages);
   const continuedMessages = toolResults.length ? [...modelMessages, ...createToolResultMessages(toolResults)] : modelMessages;
+  const tools = config.toolSupport.supported && Boolean(props.tools?.length) ? toTransportTools(props.tools ?? []) : undefined;
 
-  const { supported, reason } = config.toolSupport;
-
-  const tools = supported && Boolean(props.tools?.length) ? toTransportTools(props.tools ?? []) : undefined;
-
-  // provider 未验证时直接降级为普通对话，避免把未兼容的 tool schema 发给模型侧
-  toolStatus.value = !supported && props.tools?.length ? `已禁用工具调用：${reason ?? '当前服务商暂不支持 AI Tools'}` : '';
-
+  toolStatus.value = getToolStatusText(config);
+  // eslint-disable-next-line no-use-before-define
   agent.stream({ messages: continuedMessages, modelId: config.modelId, providerId: config.providerId, tools });
-
-  // 添加 assistant 消息占位符，用于接收流式内容
   messages.value.push(createAssistantPlaceholder());
 }
 
 /**
- * 处理消息提交
- * @description 用户发送消息时调用
+ * 提交用户消息
  */
 async function handleSubmit(): Promise<void> {
-  if (loading.value) return;
+  if (loading.value) {
+    return;
+  }
 
   const config = await getServiceConfig();
-  if (!config) return;
+  if (!config) {
+    return;
+  }
 
   const content = inputValue.value.trim();
-  if (!content) return;
+  if (!content) {
+    return;
+  }
 
-  const message: Message = { id: nanoid(), role: 'user', content, createdAt: new Date().toISOString() };
+  const message: Message = {
+    id: nanoid(),
+    role: 'user',
+    content,
+    createdAt: new Date().toISOString()
+  };
 
   await props.onBeforeSend?.(message);
 
   messages.value.push(message);
-
+  startToolLoopSession();
   streamMessages(messages.value, config);
-
   inputValue.value = '';
 }
 
 /**
  * 中止当前请求
- * @description 清理工具状态并中止流式请求
  */
 function handleAbort(): void {
-  pendingToolResults.value = [];
-  executedToolCallIds.value = new Set();
+  startToolLoopSession();
   toolStatus.value = '';
+  // eslint-disable-next-line no-use-before-define
   agent.abort();
 }
 
 /**
- * 处理消息编辑
- * @param message - 要编辑的消息
- * @description 将消息内容填入输入框
+ * 将消息回填到输入框
+ * @param message - 待编辑的消息
  */
 function handleEdit(message: Message): void {
   inputValue.value = message.content;
 }
 
 /**
- * 处理消息重新生成
- * @param message - 要重新生成的消息
- * @description 删除目标消息之后的历史，重新发起请求
+ * 重新生成 assistant 消息
+ * @param message - 待重新生成的 assistant 消息
  */
 async function handleRegenerate(message: Message): Promise<void> {
-  if (loading.value) return;
+  if (loading.value) {
+    return;
+  }
 
   const config = await getServiceConfig();
-  if (!config) return;
+  if (!config) {
+    return;
+  }
 
   const startIndex = findRegenerateStartIndex(message);
   if (startIndex === -1) {
@@ -325,14 +326,115 @@ async function handleRegenerate(message: Message): Promise<void> {
     return;
   }
 
-  const _messages = messages.value.slice(0, startIndex + 1);
+  const sourceMessages = messages.value.slice(0, startIndex + 1);
+  await props.onBeforeRegenerate?.(sourceMessages, message);
 
-  await props.onBeforeRegenerate?.(_messages, message);
-
-  messages.value = _messages;
-
-  nextTick(() => streamMessages(_messages, config));
+  messages.value = sourceMessages;
+  startToolLoopSession();
+  nextTick(() => streamMessages(sourceMessages, config));
 }
+
+/**
+ * useChat hook 配置
+ */
+const { agent } = useChat({
+  /**
+   * 追加模型文本输出
+   * @param content - 增量文本
+   */
+  onText: async (content: string): Promise<void> => {
+    const message = messages.value[messages.value.length - 1];
+    message.content = (message.content ?? '') + content;
+    message.loading = false;
+    message.createdAt ||= new Date().toISOString();
+  },
+  /**
+   * 追加模型思考输出
+   * @param thinking - 增量思考
+   */
+  onThinking: async (thinking: string): Promise<void> => {
+    const message = messages.value[messages.value.length - 1];
+    message.thinking = (message.thinking ?? '') + thinking;
+    message.loading = false;
+    message.createdAt ||= new Date().toISOString();
+  },
+  /**
+   * 记录 usage
+   * @param finishChunk - 完成数据块
+   */
+  onFinish: async ({ usage }: AIStreamFinishChunk): Promise<void> => {
+    const message = messages.value[messages.value.length - 1];
+    message.usage = usage;
+  },
+  onToolCall: handleToolCall,
+  /**
+   * 收口当前轮次，并在有工具结果时决定是否继续下一轮
+   */
+  onComplete: async (): Promise<void> => {
+    loading.value = false;
+    const roundId = currentToolRoundId;
+    const tracker = currentToolCallTracker;
+
+    await tracker.waitForAll();
+    if (roundId !== currentToolRoundId) {
+      return;
+    }
+
+    if (blockedToolLoopReason.value) {
+      executedToolCallIds = new Set();
+      return;
+    }
+
+    const message = messages.value[messages.value.length - 1];
+    if (message) {
+      message.loading = false;
+      message.finished = true;
+    }
+
+    if (message?.role === 'error') {
+      return;
+    }
+
+    if (pendingToolResults.value.length && lastServiceConfig) {
+      const roundGuardResult = currentToolLoopGuard.advanceRound();
+      if (!roundGuardResult.allowed) {
+        executedToolCallIds = new Set();
+        stopToolLoop(roundGuardResult.reason ?? '工具调用轮次超过限制，已停止自动续轮。');
+        return;
+      }
+
+      const nextToolResults = [...pendingToolResults.value];
+      pendingToolResults.value = [];
+      removeTrailingEmptyAssistantMessage();
+
+      nextTick(() => {
+        streamMessages(messages.value, lastServiceConfig as ServiceConfig, nextToolResults);
+      });
+      return;
+    }
+
+    executedToolCallIds = new Set();
+    toolStatus.value = '';
+
+    if (message) {
+      emit('complete', message);
+    }
+  },
+  /**
+   * 将服务异常显示到聊天记录中
+   * @param error - 错误对象
+   */
+  onError: (error: AIServiceError): void => {
+    loading.value = false;
+    startToolLoopSession();
+    toolStatus.value = '';
+    removeTrailingEmptyAssistantMessage();
+
+    const message = createErrorMessage(error.message);
+    messages.value.push(message);
+    emit('complete', message);
+  }
+});
 </script>
 
 <style lang="less">
