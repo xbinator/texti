@@ -13,8 +13,10 @@ export interface UseStreamOptions {
   ignoreEnabled?: boolean;
   /** 错误回调 */
   onError?: (error: AIServiceError) => void;
-  /** 流式数据回调 */
-  onChunk?: (content: string) => void;
+  /** 流式文本数据回调 */
+  onText?: (content: string) => void;
+  /** 流式思考数据回调 */
+  onThinking?: (thinking: string) => void;
   /** 完成回调 */
   onComplete?: () => void;
   /** 流式完成回调（包含 usage 信息） */
@@ -45,7 +47,7 @@ export function useChat(options: UseStreamOptions) {
       return [{ message: '服务商未启用' }];
     }
 
-    const { id, name, apiKey, baseUrl, type } = provider;
+    const { id, name, apiKey = '', baseUrl = '', type } = provider;
 
     return [undefined, { providerId: id, providerName: name, apiKey, baseUrl, providerType: type }];
   }
@@ -76,8 +78,12 @@ export function useChat(options: UseStreamOptions) {
     const requestId = crypto.randomUUID();
     currentRequestId.value = requestId;
 
-    const cleanupChunk = electronAPI.onAiStreamChunk((content) => {
-      options.onChunk?.(content);
+    const cleanupText = electronAPI.onAiStreamText((content) => {
+      options.onText?.(content);
+    });
+
+    const cleanupThinking = electronAPI.onAiStreamThinking((thinking) => {
+      options.onThinking?.(thinking);
     });
 
     const cleanupFinish = electronAPI.onAiStreamFinish((finishChunk) => {
@@ -98,7 +104,8 @@ export function useChat(options: UseStreamOptions) {
     });
 
     function cleanupAll() {
-      cleanupChunk();
+      cleanupText();
+      cleanupThinking();
       cleanupFinish();
       cleanupToolCall();
       cleanupComplete();

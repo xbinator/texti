@@ -11,6 +11,8 @@ export interface Message {
   role: ChatMessageRole;
   /** 消息内容 */
   content: string;
+  /** 思考内容（可选） */
+  thinking?: string;
   /** 附件文件列表（可选） */
   files?: ChatMessageFile[];
   /** AI 使用情况统计（可选） */

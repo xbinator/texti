@@ -1,7 +1,7 @@
 <template>
   <div class="b-message-bubble">
-    <BBubbleText :content="message.content" :placement="message.role === 'assistant' ? 'left' : 'right'" :loading="message.loading" size="auto">
-      <template v-if="message.role === 'user' && (imageFiles.length || otherFiles.length)" #header>
+    <BBubbleText :content="message.content" :think="message.thinking" :placement="bubblePlacement" :loading="message.loading" size="auto">
+      <template v-if="showHeader" #header>
         <div class="b-message-bubble__header">
           <div v-if="imageFiles.length" class="b-message-bubble__images">
             <img v-for="file in imageFiles" :key="file.id" :src="file.url || file.path" :alt="file.name" class="b-message-bubble__image" />
@@ -14,11 +14,11 @@
           </div>
         </div>
       </template>
-      <template v-if="message.finished" #toolbar>
-        <div class="b-message-bubble__toolbar" :class="{ 'b-message-bubble__toolbar--right': message.role === 'user' }">
+      <template v-if="message.finished && message.role === 'assistant'" #toolbar>
+        <div class="b-message-bubble__toolbar" :class="toolbarClass">
           <BButton type="text" size="small" square icon="lucide:copy" @click="handleCopy(message)" />
-          <BButton v-if="message.role === 'user'" square type="text" size="small" icon="lucide:edit-2" @click="$emit('edit', message)" />
-          <BButton v-if="message.role === 'assistant'" square type="text" size="small" icon="lucide:refresh-cw" @click="$emit('regenerate', message)" />
+          <BButton v-if="isUserMessage" square type="text" size="small" icon="lucide:edit-2" @click="$emit('edit', message)" />
+          <BButton v-if="isAssistantMessage" square type="text" size="small" icon="lucide:refresh-cw" @click="$emit('regenerate', message)" />
         </div>
       </template>
     </BBubbleText>
@@ -44,8 +44,20 @@ defineEmits<{
   (e: 'regenerate', message: Message): void;
 }>();
 
+/** 图片文件列表 */
 const imageFiles = computed(() => props.message.files?.filter((file) => file.type === 'image' && (file.url || file.path)) ?? []);
+/** 其他文件列表 */
 const otherFiles = computed(() => props.message.files?.filter((file) => file.type !== 'image' || (!file.url && !file.path)) ?? []);
+/** 是否为用户消息 */
+const isUserMessage = computed(() => props.message.role === 'user');
+/** 是否为助手消息 */
+const isAssistantMessage = computed(() => props.message.role === 'assistant');
+/** 气泡位置 */
+const bubblePlacement = computed(() => (isAssistantMessage.value ? 'left' : 'right'));
+/** 是否显示头部（仅用户消息且有附件时显示） */
+const showHeader = computed(() => isUserMessage.value && (imageFiles.value.length || otherFiles.value.length));
+/** 工具栏样式类 */
+const toolbarClass = computed(() => ({ 'b-message-bubble__toolbar--right': isUserMessage.value }));
 
 function handleCopy(msg: Message) {
   clipboard(msg.content, { successMessage: '已复制到剪贴板' });

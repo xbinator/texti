@@ -143,10 +143,6 @@ onMounted(loadSessions);
   overflow: hidden;
   background: var(--bg-primary);
   border-radius: 8px;
-
-  :deep(.b-bubble--left .b-bubble__container) {
-    padding: 12px 0 0;
-  }
 }
 
 .sidebar-header {

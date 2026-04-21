@@ -35,11 +35,10 @@ import { nextTick, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { message as aMessage } from 'ant-design-vue';
 import { nanoid } from 'nanoid';
-import { getProviderToolSupport, type AIToolProviderSupport } from '@/ai/tools/policy';
+import { getModelToolSupport, type AIToolProviderSupport } from '@/ai/tools/policy';
 import { createToolResultMessages, executeToolCall, toTransportTools, type ExecutedToolCall } from '@/ai/tools/stream';
 import BButton from '@/components/BButton/index.vue';
 import { useChat } from '@/hooks/useChat';
-import { providerStorage } from '@/shared/storage';
 import { useServiceModelStore } from '@/stores/service-model';
 import { Modal } from '@/utils/modal';
 import Container from './components/Container.vue';
@@ -134,10 +133,18 @@ async function handleToolCall(chunk: AIStreamToolCallChunk): Promise<void> {
  */
 const { agent } = useChat({
   /** 处理流式内容块 */
-  onChunk: async (content: string): Promise<void> => {
+  onText: async (content: string): Promise<void> => {
     const message = messages.value[messages.value.length - 1];
 
-    message.content += content;
+    message.content = (message.content ?? '') + content;
+    message.loading = false;
+    message.createdAt ||= new Date().toISOString();
+  },
+  /** 处理思考内容 */
+  onThinking: async (thinking: string): Promise<void> => {
+    const message = messages.value[messages.value.length - 1];
+
+    message.thinking = (message.thinking ?? '') + thinking;
     message.loading = false;
     message.createdAt ||= new Date().toISOString();
   },
@@ -192,13 +199,9 @@ const { agent } = useChat({
 async function getServiceConfig(): Promise<ServiceConfig | undefined> {
   const config = await serviceModelStore.getAvailableServiceConfig('chat');
   if (config?.providerId && config?.modelId) {
-    const provider = await providerStorage.getProvider(config.providerId);
+    const toolSupport = await getModelToolSupport(config.providerId, config.modelId);
 
-    return {
-      providerId: config.providerId,
-      modelId: config.modelId,
-      toolSupport: getProviderToolSupport(provider)
-    };
+    return { providerId: config.providerId, modelId: config.modelId, toolSupport };
   }
 
   // 未配置服务时引导用户去设置
@@ -216,7 +219,7 @@ async function getServiceConfig(): Promise<ServiceConfig | undefined> {
  * @returns 空的 assistant 消息对象
  */
 function createAssistantPlaceholder(): Message {
-  return { id: nanoid(), role: 'assistant', content: '', createdAt: '', loading: true };
+  return { id: nanoid(), role: 'assistant', content: '', thinking: '', createdAt: '', loading: true };
 }
 
 /**

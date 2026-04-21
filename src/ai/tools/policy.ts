@@ -2,7 +2,8 @@
  * @file policy.ts
  * @description AI 工具服务商支持策略
  */
-import type { AIProvider, AIProviderType } from 'types/ai';
+
+import { providerStorage } from '@/shared/storage/providers';
 
 /**
  * AI 工具服务商支持信息
@@ -15,56 +16,35 @@ export interface AIToolProviderSupport {
 }
 
 /**
- * 工具服务商策略输入
- */
-interface ToolProviderPolicyInput {
-  /** 服务商 ID */
-  id: string;
-  /** 服务商名称 */
-  name: string;
-  /** 服务商类型 */
-  type: AIProviderType;
-  /** 是否为自定义服务商 */
-  isCustom?: boolean;
-}
-
-type ToolProvider = Pick<AIProvider, 'id' | 'name' | 'type' | 'isCustom'> | ToolProviderPolicyInput | null | undefined;
-
-/**
- * 已验证支持工具调用的服务商 ID 集合
- * @description 第一批只放开已经验证过原生 tool calling 行为的 provider
- */
-const VALIDATED_TOOL_PROVIDER_IDS = new Set<string>(['openai', 'anthropic', 'google', 'deepseek']);
-
-/**
  * 默认聊天工具名称列表
  */
 const DEFAULT_CHAT_TOOL_NAMES = ['read_current_document', 'get_current_selection', 'search_current_document', 'insert_at_cursor'] as const;
 
 /**
- * 获取服务商的工具支持状态
- * @param provider - 服务商信息
+ * 获取模型服务商支持的工具支持状态
+ * @param providerId - 服务商 ID
+ * @param modelId - 模型 ID
  * @returns 工具支持信息
  */
-export function getProviderToolSupport(provider: ToolProvider): AIToolProviderSupport {
+export async function getModelToolSupport(providerId: string, modelId: string): Promise<AIToolProviderSupport> {
+  const provider = await providerStorage.getProvider(providerId);
+
   if (!provider) {
     return { supported: false, reason: '当前服务商不存在' };
   }
 
-  // 自定义服务商暂不支持工具调用
-  if (provider.isCustom) {
-    return { supported: false, reason: '自定义服务商的工具调用兼容性尚未验证' };
+  // 在服务商的模型列表中查找指定模型
+  const model = provider.models?.find((m) => m.id === modelId);
+  if (!model) {
+    return { supported: false, reason: '当前模型不存在' };
   }
 
-  // 已验证的服务商支持工具调用
-  if (VALIDATED_TOOL_PROVIDER_IDS.has(provider.id)) {
+  // 优先检查模型的 supportsTools 配置
+  if (model.supportsTools === true) {
     return { supported: true };
   }
 
-  return {
-    supported: false,
-    reason: `${provider.name} 暂未纳入 AI Tools 首批验证范围`
-  };
+  return { supported: false, reason: '当前模型不支持工具调用' };
 }
 
 /**
