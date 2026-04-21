@@ -1,11 +1,27 @@
+/**
+ * @file chat.d.ts
+ * @description 聊天会话、消息与附件类型定义
+ */
 import type { AIUsage } from './ai';
 
+/**
+ * 聊天会话类型
+ */
 export type ChatSessionType = 'assistant';
 
-export type ChatMessageRole = 'user' | 'assistant';
+/**
+ * 聊天消息角色
+ */
+export type ChatMessageRole = 'user' | 'assistant' | 'error';
 
+/**
+ * 聊天消息附件类型
+ */
 export type ChatMessageFileType = 'image' | 'document' | 'audio' | 'video' | 'binary';
 
+/**
+ * 聊天消息附件
+ */
 export interface ChatMessageFile {
   /** 文件唯一标识 */
   id: string;
@@ -29,6 +45,9 @@ export interface ChatMessageFile {
   height?: number;
 }
 
+/**
+ * 聊天会话
+ */
 export interface ChatSession {
   /** 会话唯一标识 */
   id: string;
@@ -42,8 +61,13 @@ export interface ChatSession {
   updatedAt: string;
   /** 最后一条消息时间 */
   lastMessageAt: string;
+  /** 会话累计 Token 使用统计 */
+  usage?: AIUsage;
 }
 
+/**
+ * 聊天消息记录
+ */
 export interface ChatMessageRecord {
   /** 消息唯一标识 */
   id: string;
@@ -53,6 +77,8 @@ export interface ChatMessageRecord {
   role: ChatMessageRole;
   /** 消息内容 */
   content: string;
+  /** 思考内容 */
+  thinking?: string;
   /** 文件列表 */
   files?: ChatMessageFile[];
   /** Token 使用统计 */
