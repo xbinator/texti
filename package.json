@@ -21,10 +21,14 @@
     "lint:style": "stylelint 'src/**/*.{vue,less,css}' --fix"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["electron", "better-sqlite3"]
+    "onlyBuiltDependencies": [
+      "electron",
+      "better-sqlite3"
+    ]
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.71",
+    "@ai-sdk/deepseek": "^2.0.29",
     "@ai-sdk/google": "^3.0.64",
     "@ai-sdk/openai": "^3.0.53",
     "@codemirror/commands": "^6.10.3",
