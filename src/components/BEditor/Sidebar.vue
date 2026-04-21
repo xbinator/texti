@@ -55,7 +55,7 @@ const props = withDefaults(defineProps<Props>(), {
   activeId: ''
 });
 
-const emit = defineEmits(['change', 'rename-file', 'delete-file', 'show-in-folder']);
+const emit = defineEmits(['change', 'rename-file', 'delete-file', 'show-in-folder', 'save', 'save-as', 'copy-path', 'copy-relative-path']);
 
 const sidebarWidth = ref(260);
 
@@ -95,6 +95,38 @@ const headerMenuOptions = computed<DropdownOption[]>(() => [
     label: '重命名',
     icon: 'lucide:pencil',
     onClick: () => emit('rename-file')
+  },
+  {
+    value: 'save',
+    label: '保存',
+    icon: 'lucide:save',
+    onClick: () => emit('save')
+  },
+  {
+    value: 'save-as',
+    label: '另存为',
+    icon: 'lucide:save-all',
+    onClick: () => emit('save-as')
+  },
+  {
+    type: 'divider'
+  },
+  {
+    value: 'copy-path',
+    label: '复制路径',
+    icon: 'lucide:copy',
+    disabled: !props.filePath,
+    onClick: () => emit('copy-path')
+  },
+  {
+    value: 'copy-relative-path',
+    label: '复制相对路径',
+    icon: 'lucide:copy-plus',
+    disabled: !props.filePath,
+    onClick: () => emit('copy-relative-path')
+  },
+  {
+    type: 'divider'
   },
   {
     value: 'reveal',

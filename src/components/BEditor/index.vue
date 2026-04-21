@@ -9,6 +9,10 @@
       :active-id="activeAnchorId"
       @change="handleEditorAnchorChange"
       @rename-file="emit('rename-file')"
+      @save="emit('save')"
+      @save-as="emit('save-as')"
+      @copy-path="emit('copy-path')"
+      @copy-relative-path="emit('copy-relative-path')"
       @show-in-folder="emit('show-in-folder')"
     />
 
@@ -78,7 +82,7 @@ const props = withDefaults(defineProps<Props>(), {
   showOutline: true
 });
 
-const emit = defineEmits(['rename-file', 'show-in-folder']);
+const emit = defineEmits(['rename-file', 'save', 'save-as', 'copy-path', 'copy-relative-path', 'show-in-folder']);
 
 const isRichMode = computed<boolean>(() => props.viewMode === 'rich');
 

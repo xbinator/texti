@@ -70,6 +70,7 @@ function handleThinkCollapse(): void {
   margin-bottom: 10px;
   font-size: 13px;
   cursor: pointer;
+  user-select: none;
   background-color: var(--bg-secondary);
   border-radius: 6px;
   transition: background-color 0.2s;

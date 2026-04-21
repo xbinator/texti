@@ -58,7 +58,7 @@ const sessions = ref<ChatSession[]>([]);
 const loading = ref(false);
 const tools = createBuiltinTools({
   confirm: {
-    async confirm(request: AIToolConfirmationRequest): Promise<boolean> {
+    async confirm(request: AIToolConfirmationRequest) {
       // 先复用统一 confirm modal，后续再升级为更完整的 diff 预览组件。
       const content = [
         request.description,
@@ -68,10 +68,7 @@ const tools = createBuiltinTools({
         .filter(Boolean)
         .join('\n\n');
 
-      const [, confirmed] = await Modal.confirm(request.title, content, {
-        confirmText: '应用',
-        cancelText: '取消'
-      });
+      const [, confirmed] = await Modal.confirm(request.title, content, { confirmText: '应用', cancelText: '取消' });
 
       return confirmed;
     }
