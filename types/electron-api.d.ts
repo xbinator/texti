@@ -65,7 +65,8 @@ export interface ElectronAPI {
   showItemInFolder: (filePath: string) => Promise<void>;
 
   watchFile: (filePath: string) => Promise<void>;
-  unwatchFile: () => Promise<void>;
+  unwatchFile: (filePath: string) => Promise<void>;
+  unwatchAll: () => Promise<void>;
   onFileChanged: (callback: (data: FileChangeEvent) => void) => () => void;
 
   // 窗口控制操作

@@ -29,3 +29,10 @@ export function getDefaultSavePath(file: Pick<EditorFile, 'name' | 'ext'>): stri
   const ext = file.ext || 'md';
   return `${name}.${ext}`;
 }
+
+export function getRecoveredSavePath(filePath: string): string {
+  const { name, ext } = parseFileName(filePath);
+  const recoveredName = `${name || '未命名'}-recovered`;
+
+  return replaceFileName(filePath, recoveredName, ext);
+}

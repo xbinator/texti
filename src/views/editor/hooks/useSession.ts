@@ -6,10 +6,11 @@ import { customAlphabet } from 'nanoid';
 import { resolveRouteCacheKey } from '@/router/cache';
 import { native } from '@/shared/platform';
 import type { ReadFileResult } from '@/shared/platform/native/types';
+import { useEditorFileWatchStore } from '@/stores/editorFileWatch';
 import { useFilesStore } from '@/stores/files';
 import { useTabsStore } from '@/stores/tabs';
 import { Modal } from '@/utils/modal';
-import { getDefaultSavePath, parseFileName, replaceFileName } from '../utils/filePath';
+import { getDefaultSavePath, getRecoveredSavePath, parseFileName, replaceFileName } from '../utils/filePath';
 import { resolveFileReconcileAction } from '../utils/reconcileFileContent';
 import { useAutoSave } from './useAutoSave';
 import { useFileState } from './useFileState';
@@ -25,6 +26,7 @@ export function useSession(fileId: Ref<string>) {
 
   const tabsStore = useTabsStore();
   const filesStore = useFilesStore();
+  const fileWatchStore = useEditorFileWatchStore();
   const { switchWatchedFile, clearWatchedFile, setOnFileChanged, setIsDirty, finishReload } = useFileWatcher();
 
   const sessionPath = ref(route.fullPath);
@@ -46,8 +48,57 @@ export function useSession(fileId: Ref<string>) {
   });
   // 用版本号丢弃过期的异步加载结果，避免快速切换标签时旧请求覆盖新文件状态。
   let loadVersion = 0;
+  // 记录当前会话已经注册到全局 watcher 的文件 ID，避免路由复用时旧 ID 残留。
+  let registeredWatchFileId: string | null = null;
 
   setIsDirty(() => tabsStore.isDirty(fileId.value));
+
+  /**
+   * 同步当前会话在全局 watcher 中的路径引用。
+   * @param currentFileId - 当前编辑器文件 ID
+   * @param filePath - 当前文件磁盘路径
+   */
+  async function syncGlobalWatch(currentFileId: string, filePath: string | null): Promise<void> {
+    if (registeredWatchFileId && registeredWatchFileId !== currentFileId) {
+      await fileWatchStore.unregister(registeredWatchFileId);
+      registeredWatchFileId = null;
+    }
+
+    if (!filePath) {
+      if (registeredWatchFileId === currentFileId) {
+        await fileWatchStore.unregister(currentFileId);
+        registeredWatchFileId = null;
+      }
+      return;
+    }
+
+    await fileWatchStore.register(currentFileId, filePath);
+    registeredWatchFileId = currentFileId;
+  }
+
+  /**
+   * 更新当前会话在全局 watcher 中的路径引用。
+   * @param currentFileId - 当前编辑器文件 ID
+   * @param filePath - 新的磁盘路径
+   */
+  async function updateGlobalWatchPath(currentFileId: string, filePath: string): Promise<void> {
+    if (registeredWatchFileId && registeredWatchFileId !== currentFileId) {
+      await fileWatchStore.unregister(registeredWatchFileId);
+    }
+
+    await fileWatchStore.updatePath(currentFileId, filePath);
+    registeredWatchFileId = currentFileId;
+  }
+
+  /**
+   * 释放当前会话在全局 watcher 中的路径引用。
+   */
+  async function unregisterGlobalWatch(): Promise<void> {
+    if (!registeredWatchFileId) return;
+
+    await fileWatchStore.unregister(registeredWatchFileId);
+    registeredWatchFileId = null;
+  }
 
   function updateTab() {
     if (!fileId.value) return;
@@ -57,30 +108,99 @@ export function useSession(fileId: Ref<string>) {
 
   setOnFileChanged(fileStateActions.handleExternalFileChange);
 
+  /**
+   * 通过保存对话框选择目标路径并完成文件保存。
+   * @returns 是否保存成功
+   */
+  async function saveWithDialog(defaultPathOverride?: string): Promise<boolean> {
+    const defaultPath = defaultPathOverride || fileState.value.path || getDefaultSavePath(fileState.value);
+    const savedPath = await native.saveFile(fileState.value.content, undefined, { defaultPath });
+
+    if (!savedPath) return false;
+
+    await fileStateActions.finalizeSave(savedPath);
+    await updateGlobalWatchPath(fileId.value, savedPath);
+    tabsStore.clearMissing(fileId.value);
+    return true;
+  }
+
+  /**
+   * 检查指定路径当前是否已有可读文件。
+   * @param filePath - 需要检查的文件路径
+   * @returns 文件是否存在且可读
+   */
+  async function isReadableFilePath(filePath: string): Promise<boolean> {
+    try {
+      await native.readFile(filePath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 将当前编辑内容写回已有路径，并恢复标签和文件监听状态。
+   * @param filePath - 写入目标路径
+   */
+  async function restoreCurrentFileAtPath(filePath: string): Promise<void> {
+    await native.writeFile(filePath, fileState.value.content);
+    await fileStateActions.markCurrentContentSaved();
+    await switchWatchedFile(filePath);
+    await updateGlobalWatchPath(fileId.value, filePath);
+    tabsStore.clearMissing(fileId.value);
+  }
+
+  /**
+   * 保存已被外部删除的文件，优先恢复原路径，无法恢复时再走另存为。
+   */
+  async function saveMissingFile(): Promise<void> {
+    const originalPath = fileState.value.path;
+
+    if (!originalPath) {
+      await saveWithDialog();
+      return;
+    }
+
+    if (await isReadableFilePath(originalPath)) {
+      const [cancelled] = await Modal.confirm('文件已存在', '原文件路径已重新出现同名文件。是否覆盖它？', {
+        confirmText: '覆盖',
+        cancelText: '取消'
+      });
+
+      if (cancelled) {
+        return;
+      }
+    }
+
+    try {
+      await restoreCurrentFileAtPath(originalPath);
+    } catch {
+      await saveWithDialog(getRecoveredSavePath(originalPath));
+    }
+  }
+
   async function onSave() {
     await fileStateActions.ensureStoredFile();
+
+    if (tabsStore.isMissing(fileId.value)) {
+      await saveMissingFile();
+      return;
+    }
 
     if (fileState.value.path) {
       await native.writeFile(fileState.value.path, fileState.value.content);
       await fileStateActions.markCurrentContentSaved();
+      tabsStore.clearMissing(fileId.value);
       return;
     }
 
-    const savedPath = await native.saveFile(fileState.value.content, undefined, { defaultPath: getDefaultSavePath(fileState.value) });
-
-    if (!savedPath) return;
-
-    await fileStateActions.finalizeSave(savedPath);
+    await saveWithDialog();
   }
 
   async function onSaveAs() {
     await fileStateActions.ensureStoredFile();
 
-    const savedPath = await native.saveFile(fileState.value.content, undefined, { defaultPath: getDefaultSavePath(fileState.value) });
-
-    if (!savedPath) return;
-
-    await fileStateActions.finalizeSave(savedPath);
+    await saveWithDialog();
   }
 
   async function onRename() {
@@ -100,6 +220,7 @@ export function useSession(fileId: Ref<string>) {
       await native.renameFile(fileState.value.path, nextPath);
       fileState.value.path = nextPath;
       await switchWatchedFile(nextPath);
+      await updateGlobalWatchPath(fileId.value, nextPath);
     }
 
     fileState.value.name = normalizedName;
@@ -133,6 +254,7 @@ export function useSession(fileId: Ref<string>) {
     if (cancelled) return;
 
     if (path) {
+      await unregisterGlobalWatch();
       await clearWatchedFile();
       // 删除文件
       await native.trashFile(path);
@@ -240,6 +362,7 @@ export function useSession(fileId: Ref<string>) {
       // 再次检查版本号
       if (currentVersion !== loadVersion) return;
       // 切换文件监听器到新文件
+      await syncGlobalWatch(currentFileId, fileState.value.path);
       if (isActive.value) {
         await switchWatchedFile(fileState.value.path);
       }
@@ -278,6 +401,7 @@ export function useSession(fileId: Ref<string>) {
   }
 
   async function dispose(): Promise<void> {
+    await unregisterGlobalWatch();
     await clearWatchedFile();
   }
 

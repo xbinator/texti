@@ -66,7 +66,12 @@ export class WebNative implements Native {
     // web 端不支持文件监听
   }
 
-  async unwatchFile(): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async unwatchFile(_path: string): Promise<void> {
+    // web 端不支持文件监听
+  }
+
+  async unwatchAll(): Promise<void> {
     // web 端不支持文件监听
   }
 

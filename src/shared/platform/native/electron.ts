@@ -49,8 +49,12 @@ export class ElectronNative implements Native {
     await getElectronAPI().watchFile(filePath);
   }
 
-  async unwatchFile(): Promise<void> {
-    await getElectronAPI().unwatchFile();
+  async unwatchFile(filePath: string): Promise<void> {
+    await getElectronAPI().unwatchFile(filePath);
+  }
+
+  async unwatchAll(): Promise<void> {
+    await getElectronAPI().unwatchAll();
   }
 
   onFileChanged(callback: (data: FileChangeEvent) => void): () => void {

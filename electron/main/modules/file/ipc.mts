@@ -23,7 +23,11 @@ export function registerFileHandlers(): void {
     await fileWatchService.watch(filePath);
   });
 
-  ipcMain.handle('fs:unwatchFile', async () => {
-    await fileWatchService.unwatch();
+  ipcMain.handle('fs:unwatchFile', async (_event, filePath: string) => {
+    await fileWatchService.unwatch(filePath);
+  });
+
+  ipcMain.handle('fs:unwatchAll', async () => {
+    await fileWatchService.unwatchAll();
   });
 }

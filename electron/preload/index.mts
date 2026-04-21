@@ -48,7 +48,9 @@ const electronAPI: ElectronAPI = {
 
   watchFile: (filePath: string) => ipcRenderer.invoke('fs:watchFile', filePath),
 
-  unwatchFile: () => ipcRenderer.invoke('fs:unwatchFile'),
+  unwatchFile: (filePath: string) => ipcRenderer.invoke('fs:unwatchFile', filePath),
+
+  unwatchAll: () => ipcRenderer.invoke('fs:unwatchAll'),
 
   onFileChanged: (callback) => {
     const handler = (_event: Electron.IpcRendererEvent, data: FileChangeEvent) => {

@@ -42,7 +42,9 @@ export interface Native {
 
   watchFile(path: string): Promise<void>;
 
-  unwatchFile(): Promise<void>;
+  unwatchFile(path: string): Promise<void>;
+
+  unwatchAll(): Promise<void>;
 
   onFileChanged(callback: (data: FileChangeEvent) => void): () => void;
 
