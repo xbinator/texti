@@ -98,7 +98,7 @@ function formatSessionDay(timestamp: string): string {
 }
 
 const groupedSessions = computed<SessionGroup[]>(() => {
-  const groups = groupBy(sessions.value, (session) => toDateKey(session.lastMessageAt));
+  const groups = groupBy(sessions.value, (session) => toDateKey(session.lastMessageAt || session.updatedAt || session.createdAt || ''));
 
   return map(groups, (_sessions, key) => ({ key, label: formatSessionDay(_sessions[0].lastMessageAt), sessions: _sessions }));
 });
