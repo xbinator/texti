@@ -49,7 +49,7 @@
 
 <script setup lang="ts">
 import type { AIProvider } from 'types/ai';
-import type { ServiceModelType } from 'types/model';
+import type { ModelServiceType } from 'types/model';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import BButton from '@/components/BButton/index.vue';
 import BModal from '@/components/BModal/index.vue';
@@ -60,7 +60,7 @@ import { providerStorage, serviceModelsStorage } from '@/shared/storage';
 import { dispatchServiceModelUpdated } from '@/shared/storage/service-models/events';
 
 interface Props {
-  serviceType: ServiceModelType;
+  serviceType: ModelServiceType;
   title: string;
   description: string;
   placeholder?: string;

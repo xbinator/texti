@@ -1,4 +1,4 @@
-import type { ServiceModelConfig, ServiceModelConfigMap, ServiceModelType } from 'types/model';
+import type { ModelServiceConfig, ModeServicelConfigMap, ModelServiceType } from 'types/model';
 import localforage from 'localforage';
 import { cloneDeep } from 'lodash-es';
 import { dbSelect, dbExecute, isDatabaseAvailable } from '../utils';
@@ -28,15 +28,7 @@ interface ServiceModelRow {
   updated_at: number;
 }
 
-function cloneConfig(config: ServiceModelConfig): ServiceModelConfig {
-  return cloneDeep(config);
-}
-
-function cloneConfigMap(configs: ServiceModelConfigMap): ServiceModelConfigMap {
-  return cloneDeep(configs);
-}
-
-function mapRowToConfig(row: ServiceModelRow): ServiceModelConfig {
+function mapRowToConfig(row: ServiceModelRow): ModelServiceConfig {
   return {
     providerId: row.provider_id ?? undefined,
     modelId: row.model_id ?? undefined,
@@ -45,13 +37,13 @@ function mapRowToConfig(row: ServiceModelRow): ServiceModelConfig {
   };
 }
 
-async function loadLegacyConfigs(): Promise<ServiceModelConfigMap> {
-  const configs = await legacyServiceModelStorage.getItem<ServiceModelConfigMap>(LEGACY_SERVICE_MODELS_KEY);
-  return cloneConfigMap(configs || {});
+async function loadLegacyConfigs(): Promise<ModeServicelConfigMap> {
+  const configs = await legacyServiceModelStorage.getItem<ModeServicelConfigMap>(LEGACY_SERVICE_MODELS_KEY);
+  return cloneDeep(configs || {});
 }
 
-async function saveLegacyConfigs(configs: ServiceModelConfigMap): Promise<void> {
-  await legacyServiceModelStorage.setItem(LEGACY_SERVICE_MODELS_KEY, cloneConfigMap(configs));
+async function saveLegacyConfigs(configs: ModeServicelConfigMap): Promise<void> {
+  await legacyServiceModelStorage.setItem(LEGACY_SERVICE_MODELS_KEY, cloneDeep(configs));
 }
 
 async function removeLegacyConfigs(): Promise<void> {
@@ -65,7 +57,7 @@ async function migrateLegacyConfigsToDatabase(): Promise<void> {
   if (!isDatabaseAvailable()) return;
 
   const legacyConfigs = await loadLegacyConfigs();
-  const serviceTypes = Object.keys(legacyConfigs) as ServiceModelType[];
+  const serviceTypes = Object.keys(legacyConfigs) as ModelServiceType[];
 
   if (!serviceTypes.length) {
     return;
@@ -92,7 +84,7 @@ async function migrateLegacyConfigsToDatabase(): Promise<void> {
 }
 
 export const serviceModelsStorage = {
-  async getAllConfigs(): Promise<ServiceModelConfigMap> {
+  async getAllConfigs(): Promise<ModeServicelConfigMap> {
     if (!isDatabaseAvailable()) {
       return loadLegacyConfigs();
     }
@@ -100,19 +92,19 @@ export const serviceModelsStorage = {
     await migrateLegacyConfigsToDatabase();
 
     const rows = await dbSelect<ServiceModelRow>(SELECT_ALL_CONFIGS_SQL);
-    return cloneConfigMap(
-      rows.reduce<ServiceModelConfigMap>((configs, row) => {
-        configs[row.service_type as ServiceModelType] = mapRowToConfig(row);
+    return cloneDeep(
+      rows.reduce<ModeServicelConfigMap>((configs, row) => {
+        configs[row.service_type as ModelServiceType] = mapRowToConfig(row);
         return configs;
       }, {})
     );
   },
 
-  async getConfig(serviceType: ServiceModelType): Promise<ServiceModelConfig | null> {
+  async getConfig(serviceType: ModelServiceType): Promise<ModelServiceConfig | null> {
     if (!isDatabaseAvailable()) {
       const configs = await loadLegacyConfigs();
       const config = configs[serviceType];
-      return config ? cloneConfig(config) : null;
+      return config ? cloneDeep(config) : null;
     }
 
     await migrateLegacyConfigsToDatabase();
@@ -120,11 +112,11 @@ export const serviceModelsStorage = {
     const rows = await dbSelect<ServiceModelRow>(SELECT_ONE_CONFIG_SQL, [serviceType]);
     if (!rows[0]) return null;
 
-    return cloneConfig(mapRowToConfig(rows[0]));
+    return cloneDeep(mapRowToConfig(rows[0]));
   },
 
-  async saveConfig(serviceType: ServiceModelType, config: Omit<ServiceModelConfig, 'updatedAt'>): Promise<ServiceModelConfig> {
-    const nextConfig: ServiceModelConfig = { ...config, updatedAt: Date.now() };
+  async saveConfig(serviceType: ModelServiceType, config: Omit<ModelServiceConfig, 'updatedAt'>): Promise<ModelServiceConfig> {
+    const nextConfig: ModelServiceConfig = { ...config, updatedAt: Date.now() };
 
     if (isDatabaseAvailable()) {
       await dbExecute(UPSERT_CONFIG_SQL, [
@@ -140,10 +132,10 @@ export const serviceModelsStorage = {
       await saveLegacyConfigs(configs);
     }
 
-    return cloneConfig(nextConfig);
+    return cloneDeep(nextConfig);
   },
 
-  async removeConfig(serviceType: ServiceModelType): Promise<void> {
+  async removeConfig(serviceType: ModelServiceType): Promise<void> {
     if (!isDatabaseAvailable()) {
       const configs = await loadLegacyConfigs();
       delete configs[serviceType];

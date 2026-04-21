@@ -1,4 +1,4 @@
-import type { ServiceModelConfig, ServiceModelType } from 'types/model';
+import type { ModelServiceConfig, ModelServiceType } from 'types/model';
 import { defineStore } from 'pinia';
 import { providerStorage, serviceModelsStorage } from '@/shared/storage';
 import { local } from '@/shared/storage/base';
@@ -19,7 +19,7 @@ interface ServiceModelState {
 }
 
 /** 可用的服务模型配置 */
-export interface AvailableServiceModelConfig extends ServiceModelConfig {
+export interface AvailableServiceModelConfig extends ModelServiceConfig {
   /** 提供商ID */
   providerId: string;
   /** 模型ID */
@@ -54,7 +54,7 @@ export const useServiceModelStore = defineStore('serviceModel', {
      * @param serviceType - 服务类型
      * @returns 服务模型配置
      */
-    async getServiceConfig(serviceType: ServiceModelType): Promise<ServiceModelConfig | null> {
+    async getServiceConfig(serviceType: ModelServiceType): Promise<ModelServiceConfig | null> {
       return serviceModelsStorage.getConfig(serviceType);
     },
 
@@ -63,7 +63,7 @@ export const useServiceModelStore = defineStore('serviceModel', {
      * @param serviceType - 服务类型
      * @returns 可用的服务模型配置
      */
-    async getAvailableServiceConfig(serviceType: ServiceModelType): Promise<AvailableServiceModelConfig | null> {
+    async getAvailableServiceConfig(serviceType: ModelServiceType): Promise<AvailableServiceModelConfig | null> {
       const config = await this.getServiceConfig(serviceType);
       if (!config?.providerId || !config?.modelId) return null;
 
@@ -78,7 +78,7 @@ export const useServiceModelStore = defineStore('serviceModel', {
      * @param serviceType - 服务类型
      * @returns 是否可用
      */
-    async isServiceAvailable(serviceType: ServiceModelType): Promise<boolean> {
+    async isServiceAvailable(serviceType: ModelServiceType): Promise<boolean> {
       const config = await this.getAvailableServiceConfig(serviceType);
       return Boolean(config);
     },

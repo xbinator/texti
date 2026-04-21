@@ -36,7 +36,7 @@ export const DEFAULT_PROVIDERS: AIProvider[] = [
     name: 'DeepSeek',
     description: '提供高性能推理与代码生成模型，适用于编程辅助和复杂逻辑任务。',
     baseUrl: 'https://api.deepseek.com/v1',
-    type: 'openai',
+    type: 'deepseek',
     isEnabled: false,
     readonly: true,
     models: []
@@ -126,6 +126,16 @@ export const DEFAULT_PROVIDERS: AIProvider[] = [
     name: 'LongCat',
     description: '提供 LongCat 系列大模型，擅长长上下文、多模态与角色扮演。',
     baseUrl: 'https://api.longcat.chat/openai/v1',
+    type: 'openai',
+    isEnabled: false,
+    readonly: true,
+    models: []
+  },
+  {
+    id: 'ollama',
+    name: 'Ollama',
+    description: '提供本地部署的 AI 模型，支持自定义训练与推理。',
+    baseUrl: 'http://localhost:11434/v1',
     type: 'openai',
     isEnabled: false,
     readonly: true,

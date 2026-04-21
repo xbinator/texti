@@ -25,7 +25,7 @@ const UPSERT_CUSTOM_PROVIDER_SQL = `
 `;
 
 /** 所有合法的请求格式枚举值 */
-const REQUEST_FORMATS: AIProviderType[] = ['openai', 'anthropic', 'google'];
+const REQUEST_FORMATS: AIProviderType[] = ['openai', 'anthropic', 'google', 'deepseek'];
 
 // ─────────────────────────────────────────────
 // 数据库行类型

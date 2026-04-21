@@ -165,12 +165,21 @@ const electronAPI: ElectronAPI = {
   aiStreamAbort: (requestId) => ipcRenderer.invoke('ai:stream:abort', requestId),
 
   // ==================== AI 流式事件监听 ====================
-  onAiStreamChunk: (callback) => {
-    const handler = (_event: Electron.IpcRendererEvent, chunk: string) => callback(chunk);
+  onAiStreamText: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, text: string) => callback(text);
 
-    ipcRenderer.on('ai:stream:chunk', handler);
+    ipcRenderer.on('ai:stream:text', handler);
     return () => {
-      ipcRenderer.removeListener('ai:stream:chunk', handler);
+      ipcRenderer.removeListener('ai:stream:text', handler);
+    };
+  },
+
+  onAiStreamThinking: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, thinking: string) => callback(thinking);
+
+    ipcRenderer.on('ai:stream:thinking', handler);
+    return () => {
+      ipcRenderer.removeListener('ai:stream:thinking', handler);
     };
   },
 
