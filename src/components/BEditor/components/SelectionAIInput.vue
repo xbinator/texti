@@ -68,7 +68,7 @@ const providerId = computed(() => modelConfig.value?.providerId ?? '');
 
 const { agent } = useChat({
   providerId,
-  onChunk(content) {
+  onText(content) {
     previewText.value += content;
   },
   onComplete() {
