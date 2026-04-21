@@ -59,7 +59,6 @@ function handleThinkCollapse(): void {
 
 <style lang="less">
 .b-bubble-text__think {
-  margin: 10px 0 0;
   line-height: 1.6;
 }
 
@@ -68,6 +67,7 @@ function handleThinkCollapse(): void {
   align-items: center;
   width: fit-content;
   padding: 4px 10px;
+  margin-bottom: 10px;
   font-size: 13px;
   cursor: pointer;
   background-color: var(--bg-secondary);
@@ -93,9 +93,9 @@ function handleThinkCollapse(): void {
 
 .b-bubble-text__think-content {
   position: relative;
-  padding: 12px 0 0 14px;
-  margin-top: 10px;
-  font-size: 14px;
+  padding: 0 0 0 8px;
+  margin-bottom: 10px;
+  font-size: 12px;
   color: var(--text-secondary);
 }
 

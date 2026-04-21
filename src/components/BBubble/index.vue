@@ -1,41 +1,41 @@
 <template>
-  <div :class="['b-bubble', `b-bubble--${placement}`, { [`b-bubble--${size}`]: size !== 'auto' }]">
-    <div v-if="avatar" class="b-bubble__avatar">
+  <div :class="['bubble', `bubble--${placement}`, { [`bubble--${size}`]: size !== 'auto' }]">
+    <div v-if="avatar" class="bubble__avatar">
       <slot name="avatar">
         <Avatar v-bind="isObject(avatar) ? avatar : {}" />
       </slot>
     </div>
 
-    <div v-if="$slots.header" class="b-bubble__header">
+    <div v-if="$slots.header" class="bubble__header">
       <slot name="header"></slot>
     </div>
 
-    <div class="b-bubble__main">
-      <div v-if="loading && placement === 'left'" class="b-bubble__container">
+    <div class="bubble__main">
+      <div v-if="loading && placement === 'left'" class="bubble__container">
         <Loading type="dot" />
       </div>
 
       <template v-else>
         <template v-if="placement === 'right'">
-          <Loading v-if="loading" type="circle" class="b-bubble__loading" />
+          <Loading v-if="loading" type="circle" class="bubble__loading" />
         </template>
 
-        <div class="b-bubble__container">
+        <div class="bubble__container">
           <slot name="top"></slot>
 
-          <div ref="contentRef" :class="['b-bubble__content', { 'b-bubble__content--collapse': collapse.value }]">
+          <div ref="contentRef" :class="['bubble__content', { 'bubble__content--collapse': collapse.value }]">
             <slot></slot>
           </div>
 
-          <div v-if="shouldShowCollapseButton" class="b-bubble__collapse" @click="toggleCollapse">
-            <span class="b-bubble__collapse-text">{{ collapse.value ? '展开查看全部' : '收起' }}</span>
-            <Icon :icon="collapse.value ? 'lucide:chevron-down' : 'lucide:chevron-up'" class="b-bubble__collapse-icon" />
+          <div v-if="shouldShowCollapseButton" class="bubble__collapse" @click="toggleCollapse">
+            <span class="bubble__collapse-text">{{ collapse.value ? '展开查看全部' : '收起' }}</span>
+            <Icon :icon="collapse.value ? 'lucide:chevron-down' : 'lucide:chevron-up'" class="bubble__collapse-icon" />
           </div>
         </div>
       </template>
     </div>
 
-    <div v-if="$slots.toolbar" class="b-bubble__toolbar">
+    <div v-if="$slots.toolbar" class="bubble__toolbar">
       <slot name="toolbar"></slot>
     </div>
   </div>
@@ -67,11 +67,11 @@ const shouldShowCollapseButton = computed(() => props.placement === 'left' && co
 </script>
 
 <style lang="less">
-.b-bubble {
+.bubble {
   display: flex;
   flex-direction: column;
 
-  & + .b-bubble {
+  & + .bubble {
     margin: 12px 0 0;
   }
 
@@ -81,13 +81,13 @@ const shouldShowCollapseButton = computed(() => props.placement === 'left' && co
   }
 
   &:hover {
-    .b-bubble__toolbar {
+    .bubble__toolbar {
       opacity: 1;
     }
   }
 
   &--left {
-    .b-bubble__container {
+    .bubble__container {
       background: var(--bg-primary);
       border-radius: 2px 12px 12px;
     }
@@ -96,27 +96,28 @@ const shouldShowCollapseButton = computed(() => props.placement === 'left' && co
   &--right {
     align-items: flex-end;
 
-    .b-bubble__container {
+    .bubble__container {
+      padding: 10px 14px;
       color: var(--text-primary);
       background: var(--color-primary-bg);
       border-radius: 12px 2px 12px 12px;
     }
 
-    .b-bubble-avatar {
+    .bubble__avatar {
       flex-direction: row-reverse;
     }
 
-    .b-bubble-avatar__text {
+    .bubble__avatar-text {
       margin-right: 10px;
     }
 
-    .b-bubble__loading {
+    .bubble__loading {
       margin-right: 10px;
     }
   }
 
   &--fill {
-    .b-bubble__container {
+    .bubble__container {
       width: 100%;
     }
   }
@@ -129,7 +130,6 @@ const shouldShowCollapseButton = computed(() => props.placement === 'left' && co
   &__container {
     width: fit-content;
     max-width: 100%;
-    padding: 10px 14px;
   }
 
   &__content {

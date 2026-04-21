@@ -67,7 +67,6 @@ const renderedMarkdown = computed<string>(() => {
   display: flex;
   flex-direction: column-reverse;
   overflow-y: auto;
-  font-size: 14px;
   line-height: 1.7;
   overflow-wrap: break-word;
   .scrollbar-base();
