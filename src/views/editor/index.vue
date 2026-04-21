@@ -12,6 +12,10 @@
           :view-mode="settingStore.sourceMode ? 'source' : 'rich'"
           :show-outline="settingStore.showOutline"
           @rename-file="actions.onRename"
+          @save="actions.onSave"
+          @save-as="actions.onSaveAs"
+          @copy-path="actions.onCopyPath"
+          @copy-relative-path="actions.onCopyRelativePath"
           @show-in-folder="actions.onShowInFolder"
         />
       </div>

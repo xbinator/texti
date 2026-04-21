@@ -3,6 +3,7 @@ import type { Ref } from 'vue';
 import { computed, nextTick, onActivated, onDeactivated, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { customAlphabet } from 'nanoid';
+import { useClipboard } from '@/hooks/useClipboard';
 import { resolveRouteCacheKey } from '@/router/cache';
 import { native } from '@/shared/platform';
 import type { ReadFileResult } from '@/shared/platform/native/types';
@@ -27,6 +28,7 @@ export function useSession(fileId: Ref<string>) {
   const tabsStore = useTabsStore();
   const filesStore = useFilesStore();
   const fileWatchStore = useEditorFileWatchStore();
+  const { clipboard } = useClipboard();
   const { switchWatchedFile, clearWatchedFile, setOnFileChanged, setIsDirty, finishReload } = useFileWatcher();
 
   const sessionPath = ref(route.fullPath);
@@ -244,6 +246,30 @@ export function useSession(fileId: Ref<string>) {
     await native.showItemInFolder(fileState.value.path);
   }
 
+  /**
+   * 复制当前文件绝对路径。
+   */
+  async function onCopyPath(): Promise<void> {
+    if (!fileState.value.path) {
+      return;
+    }
+
+    await clipboard(fileState.value.path, { successMessage: '已复制路径', trim: false });
+  }
+
+  /**
+   * 复制相对当前工作目录的路径。
+   */
+  async function onCopyRelativePath(): Promise<void> {
+    if (!fileState.value.path) {
+      return;
+    }
+
+    const relativePath = await native.getRelativePath(fileState.value.path);
+    const normalizedPath = relativePath || fileState.value.path;
+    await clipboard(normalizedPath, { successMessage: '已复制相对路径', trim: false });
+  }
+
   async function onDelete() {
     autoSave.pause();
 
@@ -417,7 +443,7 @@ export function useSession(fileId: Ref<string>) {
     dispose();
   });
 
-  const actions = { onSave, onSaveAs, onRename, onDelete, onShowInFolder, onDuplicate };
+  const actions = { onSave, onSaveAs, onRename, onDelete, onShowInFolder, onCopyPath, onCopyRelativePath, onDuplicate };
 
   return {
     fileState,
