@@ -1,5 +1,9 @@
+/**
+ * @file sqlite.ts
+ * @description 聊天会话与消息的 SQLite/本地降级存储实现
+ */
 import type { AIUsage } from 'types/ai';
-import type { ChatMessageFile, ChatMessageRecord, ChatSession, ChatSessionType } from 'types/chat';
+import type { ChatMessageFile, ChatMessageRecord, ChatMessageRole, ChatSession, ChatSessionType } from 'types/chat';
 import { local } from '@/shared/storage/base';
 import { dbSelect, dbExecute, isDatabaseAvailable, parseJson, stringifyJson } from '../utils';
 
@@ -7,32 +11,34 @@ const CHAT_SESSIONS_STORAGE_KEY = 'chat_sessions_fallback';
 const CHAT_MESSAGES_STORAGE_KEY = 'chat_messages_fallback';
 
 const SELECT_SESSIONS_BY_TYPE_SQL = `
-  SELECT id, type, title, created_at, updated_at, last_message_at
+  SELECT id, type, title, created_at, updated_at, last_message_at, usage_json
   FROM chat_sessions
   WHERE type = ?
   ORDER BY last_message_at DESC, updated_at DESC, created_at DESC
 `;
 const UPSERT_SESSION_SQL = `
   INSERT OR REPLACE INTO chat_sessions
-    (id, type, title, created_at, updated_at, last_message_at)
-  VALUES (?, ?, ?, ?, ?, ?)
+    (id, type, title, created_at, updated_at, last_message_at, usage_json)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
 `;
 const UPDATE_SESSION_LAST_MESSAGE_AT_SQL = `
   UPDATE chat_sessions
   SET last_message_at = ?
   WHERE id = ?
 `;
+const SELECT_SESSION_USAGE_SQL = 'SELECT usage_json FROM chat_sessions WHERE id = ?';
+const UPDATE_SESSION_USAGE_SQL = 'UPDATE chat_sessions SET usage_json = ? WHERE id = ?';
 
 const SELECT_MESSAGES_BY_SESSION_SQL = `
-  SELECT id, session_id, role, content, files_json, usage_json, created_at
+  SELECT id, session_id, role, content, thinking, files_json, usage_json, created_at
   FROM chat_messages
   WHERE session_id = ?
   ORDER BY created_at ASC
 `;
 const UPSERT_MESSAGE_SQL = `
   INSERT OR REPLACE INTO chat_messages
-    (id, session_id, role, content, files_json, usage_json, created_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?)
+    (id, session_id, role, content, thinking, files_json, usage_json, created_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `;
 const DELETE_SESSION_SQL = 'DELETE FROM chat_sessions WHERE id = ?';
 const DELETE_MESSAGES_BY_SESSION_SQL = 'DELETE FROM chat_messages WHERE session_id = ?';
@@ -44,6 +50,7 @@ interface ChatSessionRow {
   created_at: string;
   updated_at: string;
   last_message_at: string;
+  usage_json: string | null;
 }
 
 interface ChatMessageRow {
@@ -51,6 +58,7 @@ interface ChatMessageRow {
   session_id: string;
   role: string;
   content: string;
+  thinking: string | null;
   files_json: string | null;
   usage_json: string | null;
   created_at: string;
@@ -60,8 +68,21 @@ interface FallbackMessagesMap {
   [sessionId: string]: ChatMessageRecord[] | undefined;
 }
 
+interface ChatSessionUsageRow {
+  usage_json: string | null;
+}
+
 function isChatSessionType(value: string): value is ChatSessionType {
   return ['chat', 'document', 'assistant', 'workflow'].includes(value);
+}
+
+/**
+ * 判断数据库角色字段是否为支持的聊天消息角色
+ * @param value - 数据库读取到的角色字段
+ * @returns 是否为有效聊天消息角色
+ */
+function isChatMessageRole(value: string): value is ChatMessageRole {
+  return value === 'user' || value === 'assistant' || value === 'error';
 }
 
 function mapSessionRow(row: ChatSessionRow): ChatSession | null {
@@ -73,7 +94,8 @@ function mapSessionRow(row: ChatSessionRow): ChatSession | null {
     title: row.title,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    lastMessageAt: row.last_message_at
+    lastMessageAt: row.last_message_at,
+    usage: parseJson<AIUsage>(row.usage_json)
   };
 }
 
@@ -81,8 +103,9 @@ function mapMessageRow(row: ChatMessageRow): ChatMessageRecord {
   return {
     id: row.id,
     sessionId: row.session_id,
-    role: row.role === 'assistant' ? 'assistant' : 'user',
+    role: isChatMessageRole(row.role) ? row.role : 'user',
     content: row.content,
+    thinking: row.thinking ?? undefined,
     files: parseJson<ChatMessageFile[]>(row.files_json),
     usage: parseJson<AIUsage>(row.usage_json),
     createdAt: row.created_at
@@ -117,6 +140,20 @@ function sortMessages(messages: ChatMessageRecord[]): ChatMessageRecord[] {
   return [...messages].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
 
+/**
+ * 累加两段 Token 使用统计
+ * @param currentUsage - 当前会话已记录的 Token 使用统计
+ * @param nextUsage - 本次消息新增的 Token 使用统计
+ * @returns 累加后的 Token 使用统计
+ */
+function addUsage(currentUsage: AIUsage | undefined, nextUsage: AIUsage): AIUsage {
+  return {
+    inputTokens: (currentUsage?.inputTokens ?? 0) + nextUsage.inputTokens,
+    outputTokens: (currentUsage?.outputTokens ?? 0) + nextUsage.outputTokens,
+    totalTokens: (currentUsage?.totalTokens ?? 0) + nextUsage.totalTokens
+  };
+}
+
 async function upsertSessionMessages(messages: ChatMessageRecord[]): Promise<void> {
   await Promise.all(
     messages.map((message) =>
@@ -125,6 +162,7 @@ async function upsertSessionMessages(messages: ChatMessageRecord[]): Promise<voi
         message.sessionId,
         message.role,
         message.content,
+        message.thinking,
         stringifyJson(message.files),
         stringifyJson(message.usage),
         message.createdAt
@@ -151,7 +189,15 @@ export const chatStorage = {
       return;
     }
 
-    await dbExecute(UPSERT_SESSION_SQL, [session.id, session.type, session.title, session.createdAt, session.updatedAt, session.lastMessageAt]);
+    await dbExecute(UPSERT_SESSION_SQL, [
+      session.id,
+      session.type,
+      session.title,
+      session.createdAt,
+      session.updatedAt,
+      session.lastMessageAt,
+      stringifyJson(session.usage)
+    ]);
   },
 
   async updateSessionLastMessageAt(sessionId: string, lastMessageAt: string): Promise<void> {
@@ -166,6 +212,37 @@ export const chatStorage = {
     }
 
     await dbExecute(UPDATE_SESSION_LAST_MESSAGE_AT_SQL, [lastMessageAt, sessionId]);
+  },
+
+  async addSessionUsage(sessionId: string, usage: AIUsage): Promise<void> {
+    if (!isDatabaseAvailable()) {
+      const sessions = loadFallbackSessions();
+      const index = sessions.findIndex((item) => item.id === sessionId);
+      if (index === -1) return;
+
+      sessions[index] = { ...sessions[index], usage: addUsage(sessions[index].usage, usage) };
+      saveFallbackSessions(sortSessions(sessions));
+      return;
+    }
+
+    const rows = await dbSelect<ChatSessionUsageRow>(SELECT_SESSION_USAGE_SQL, [sessionId]);
+    const currentUsage = parseJson<AIUsage>(rows[0]?.usage_json ?? null);
+
+    await dbExecute(UPDATE_SESSION_USAGE_SQL, [stringifyJson(addUsage(currentUsage, usage)), sessionId]);
+  },
+
+  async updateSessionUsage(sessionId: string, usage: AIUsage | undefined): Promise<void> {
+    if (!isDatabaseAvailable()) {
+      const sessions = loadFallbackSessions();
+      const index = sessions.findIndex((item) => item.id === sessionId);
+      if (index === -1) return;
+
+      sessions[index] = { ...sessions[index], usage };
+      saveFallbackSessions(sortSessions(sessions));
+      return;
+    }
+
+    await dbExecute(UPDATE_SESSION_USAGE_SQL, [stringifyJson(usage), sessionId]);
   },
 
   async getMessages(sessionId: string): Promise<ChatMessageRecord[]> {
@@ -193,6 +270,7 @@ export const chatStorage = {
       message.sessionId,
       message.role,
       message.content,
+      message.thinking,
       stringifyJson(message.files),
       stringifyJson(message.usage),
       message.createdAt
