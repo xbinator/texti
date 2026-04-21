@@ -2,11 +2,33 @@
  * @file ipc.mts
  * @description AI 服务 IPC 处理器，负责处理渲染进程与主进程之间的 AI 相关通信
  */
+import type { WebContents } from 'electron';
 import type { AICreateOptions, AIRequestOptions } from 'types/ai';
 import { ipcMain } from 'electron';
 import { getWindowFromWebContents } from '../../window.mjs';
 import { aiService } from './service.mjs';
 
+function emitTextDelta(text: string, isThinking: { value: boolean }, webContents: WebContents): void {
+  let remaining = text;
+
+  while (remaining.length > 0) {
+    const tag = isThinking.value ? '</think>' : '<think>';
+    const channel = isThinking.value ? 'ai:stream:thinking' : 'ai:stream:text';
+    const tagIndex = remaining.indexOf(tag);
+
+    if (tagIndex === -1) {
+      webContents.send(channel, remaining);
+      break;
+    }
+
+    if (tagIndex > 0) {
+      webContents.send(channel, remaining.slice(0, tagIndex));
+    }
+
+    isThinking.value = !isThinking.value;
+    remaining = remaining.slice(tagIndex + tag.length);
+  }
+}
 /**
  * 注册 AI 相关的 IPC 处理器
  * @description 注册 ai:stream:abort、ai:invoke、ai:stream 三个 IPC 通道
@@ -50,12 +72,14 @@ export function registerAIHandlers(): void {
       }
 
       // 遍历流式响应，根据类型分发不同事件
+      const thinkingState = { value: false };
       for await (const chunk of result.stream) {
-        console.log('🚀 ~ forawait ~ chunk:', chunk);
         if (chunk.type === 'text-delta') {
-          // 文本增量更新
-          process.stdout.write(chunk.text);
-          win.webContents.send('ai:stream:chunk', chunk.text);
+          // 检测 <think> 标签来识别思考内容
+          emitTextDelta(chunk.text, thinkingState, win.webContents);
+        } else if (chunk.type === 'reasoning-delta') {
+          // 思考状态更新
+          win.webContents.send('ai:stream:thinking', chunk.text);
         } else if (chunk.type === 'tool-call') {
           // 工具调用
           win.webContents.send('ai:stream:tool-call', { toolCallId: chunk.toolCallId, toolName: chunk.toolName, input: chunk.input });

@@ -7,7 +7,7 @@ import type { JSONSchema7 } from 'json-schema';
  * - anthropic: Anthropic 格式
  * - google: Google 格式
  */
-export type AIProviderType = 'openai' | 'anthropic' | 'google';
+export type AIProviderType = 'openai' | 'anthropic' | 'google' | 'deepseek';
 
 /** AI 工具来源类型 */
 export type AIToolSource = 'builtin' | 'custom' | 'mcp';
@@ -223,7 +223,7 @@ export interface AIProviderModel {
   /** 上下文窗口大小 */
   contextWindow?: number;
   /** 是否支持技能使用 */
-  supportsSkills?: boolean;
+  supportsTools?: boolean;
   /** 是否支持视觉识别 */
   supportsVision?: boolean;
   /** 是否支持深度思考 */

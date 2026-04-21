@@ -6,12 +6,12 @@
 /**
  * 服务模型类型
  */
-export type ServiceModelType = 'polish' | 'chat';
+export type ModelServiceType = 'polish' | 'chat';
 
 /**
  * 服务模型配置
  */
-export interface ServiceModelConfig {
+export interface ModelServiceConfig {
   /** 提供商 ID */
   providerId?: string;
   /** 模型 ID */
@@ -25,4 +25,4 @@ export interface ServiceModelConfig {
 /**
  * 服务模型配置映射
  */
-export type ServiceModelConfigMap = Partial<Record<ServiceModelType, ServiceModelConfig>>;
+export type ModeServicelConfigMap = Partial<Record<ModelServiceType, ModelServiceConfig>>;

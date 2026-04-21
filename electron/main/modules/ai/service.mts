@@ -78,7 +78,7 @@ class AIService {
       const model = this.createModel(createOptions, request.modelId);
       const { prompt = '', system, temperature, messages } = request;
 
-      log.info(`[AIService] generateText: Provider=${createOptions.providerType}, Model=${request.modelId}`);
+      log.info(`[AIService] generateText: Provider=${createOptions.providerType}, Model=${request.modelId}, tools=${JSON.stringify(request.tools)}`);
       log.info(`[AIService] generateText payload:`, { prompt, system, temperature, messages });
 
       const baseOptions = { model, system, temperature, tools: toSdkTools(request.tools) };
@@ -115,7 +115,7 @@ class AIService {
         abortSignal = controller.signal;
       }
 
-      log.info(`[AIService] streamText: Provider=${createOptions.providerType}, Model=${request.modelId}, RequestId=${requestId}`);
+      log.info(`[AIService] streamText: Provider=${createOptions.providerType}, Model=${request.modelId}, tools=${JSON.stringify(request.tools)}`);
       log.info(`[AIService] streamText payload:`, { prompt, system, temperature, messages });
 
       const baseOptions = { model, system, temperature, abortSignal, tools: toSdkTools(request.tools) };

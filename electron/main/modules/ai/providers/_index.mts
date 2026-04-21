@@ -6,6 +6,7 @@ import type { AIProvider } from '../types.mjs';
 import type { LanguageModel } from 'ai';
 import type { AIServiceError, AIProviderType, AICreateOptions } from 'types/ai';
 import { AnthropicProvider } from './anthropic.mjs';
+import { DeepSeekProvider } from './deepseek.mjs';
 import { GoogleProvider } from './google.mjs';
 import { OpenAIProvider } from './openai.mjs';
 
@@ -22,6 +23,7 @@ export class AIProviderRegistry {
     this.register(new OpenAIProvider());
     this.register(new AnthropicProvider());
     this.register(new GoogleProvider());
+    this.register(new DeepSeekProvider());
   }
 
   /**

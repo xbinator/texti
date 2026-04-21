@@ -94,7 +94,8 @@ export interface ElectronAPI {
   aiStreamAbort: (requestId: string) => Promise<void>;
 
   // AI 流式事件监听
-  onAiStreamChunk: (callback: (chunk: string) => void) => () => void;
+  onAiStreamText: (callback: (text: string) => void) => () => void;
+  onAiStreamThinking: (callback: (thinking: string) => void) => () => void;
   onAiStreamComplete: (callback: () => void) => () => void;
   onAiStreamError: (callback: (error: AIServiceError) => void) => () => void;
   onAiStreamFinish: (callback: (payload: AIStreamFinishChunk) => void) => () => void;
