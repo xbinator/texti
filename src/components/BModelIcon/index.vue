@@ -55,7 +55,8 @@ const providerIcons: Record<string, string> = {
   siliconflow: 'siliconcloud-color',
   hunyuan: 'hunyuan-color',
   longcat: 'longcat-color',
-  tencentcloud: 'tencentcloud-color'
+  tencentcloud: 'tencentcloud-color',
+  ollama: 'ollama'
 };
 
 const modelIcons: Record<string, string> = {
