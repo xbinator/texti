@@ -15,6 +15,8 @@
         :style="editorStyle"
         data-empty="true"
         @paste="handlePaste"
+        @dragover="handleDragOver"
+        @drop="handleDrop"
         @keydown="handleKeyDown"
         @blur="handleBlur"
         @input="handleInput"
@@ -98,7 +100,7 @@ const { handleKeyDown } = useEditorKeyboard({
   hideMenu: trigger.hide
 });
 
-const { handlePaste } = useEditorPaste({
+const { handlePaste, handleDragOver, handleDrop } = useEditorPaste({
   disabled: disabledRef,
   insertTextAtCursor: selectionHook.insertTextAtCursor,
   updateModelValue
