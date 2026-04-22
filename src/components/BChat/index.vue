@@ -66,7 +66,6 @@ const inputValue = defineModel<string>('inputValue', { default: '' });
 const messages = defineModel<Message[]>('messages', { default: () => [] });
 
 const loading = ref(false);
-const toolStatus = ref('');
 const pendingToolResults = ref<ExecutedToolCall[]>([]);
 const blockedToolLoopReason = ref('');
 
@@ -109,19 +108,6 @@ function removeTrailingEmptyAssistantMessage(): void {
 }
 
 /**
- * 根据工具支持能力生成状态提示
- * @param config - 服务配置
- */
-function getToolStatusText(config: ServiceConfig): string {
-  const { supported, reason } = config.toolSupport;
-  if (!props.tools?.length || supported) {
-    return '';
-  }
-
-  return `已禁用工具调用：${reason ?? '当前服务商暂不支持 AI Tools'}`;
-}
-
-/**
  * 在 assistant 占位消息上记录模型发起的工具调用
  * @param chunk - 工具调用数据块
  */
@@ -146,7 +132,6 @@ function appendAssistantToolCall(chunk: AIStreamToolCallChunk): void {
  */
 function stopToolLoop(reason: string): void {
   blockedToolLoopReason.value = reason;
-  toolStatus.value = '';
   pendingToolResults.value = [];
   removeTrailingEmptyAssistantMessage();
 
@@ -167,7 +152,6 @@ async function executeTrackedToolCall(chunk: AIStreamToolCallChunk, roundId: num
   }
 
   pendingToolResults.value.push(result);
-  toolStatus.value = result.result.status === 'success' ? `工具已完成：${chunk.toolName}` : `工具处理完成：${chunk.toolName}`;
 }
 
 /**
@@ -188,7 +172,6 @@ async function handleToolCall(chunk: AIStreamToolCallChunk): Promise<void> {
     return;
   }
 
-  toolStatus.value = `正在执行工具：${chunk.toolName}`;
   const trackedTask = currentToolCallTracker.track(executeTrackedToolCall(chunk, currentToolRoundId));
   await trackedTask;
 }
@@ -203,10 +186,7 @@ async function getServiceConfig(): Promise<ServiceConfig | undefined> {
     return { providerId: config.providerId, modelId: config.modelId, toolSupport };
   }
 
-  const [, confirmed] = await Modal.confirm('提示', '当前未配置可用的大模型服务', {
-    confirmText: '去配置',
-    cancelText: '取消'
-  });
+  const [, confirmed] = await Modal.confirm('提示', '当前未配置可用的大模型服务', { confirmText: '去配置', cancelText: '取消' });
 
   if (confirmed) {
     router.push('/settings/service-model');
@@ -249,7 +229,6 @@ function streamMessages(sourceMessages: Message[], config: ServiceConfig, toolRe
   const continuedMessages = toolResults.length ? [...modelMessages, ...createToolResultMessages(toolResults)] : modelMessages;
   const tools = config.toolSupport.supported && Boolean(props.tools?.length) ? toTransportTools(props.tools ?? []) : undefined;
 
-  toolStatus.value = getToolStatusText(config);
   // eslint-disable-next-line no-use-before-define
   agent.stream({ messages: continuedMessages, modelId: config.modelId, providerId: config.providerId, tools });
   messages.value.push(createAssistantPlaceholder());
@@ -293,7 +272,6 @@ async function handleSubmit(): Promise<void> {
  */
 function handleAbort(): void {
   startToolLoopSession();
-  toolStatus.value = '';
   // eslint-disable-next-line no-use-before-define
   agent.abort();
 }
@@ -414,7 +392,6 @@ const { agent } = useChat({
     }
 
     executedToolCallIds = new Set();
-    toolStatus.value = '';
 
     if (message) {
       emit('complete', message);
@@ -427,7 +404,6 @@ const { agent } = useChat({
   onError: (error: AIServiceError): void => {
     loading.value = false;
     startToolLoopSession();
-    toolStatus.value = '';
     removeTrailingEmptyAssistantMessage();
 
     const message = createErrorMessage(error.message);
