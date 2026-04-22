@@ -1,6 +1,6 @@
 <template>
   <div :class="['b-message-bubble', { 'b-message-bubble--error': isErrorMessage }]">
-    <BBubble :placement="bubblePlacement" :loading="message.loading" size="auto">
+    <BBubble :placement="bubblePlacement" :loading="message.loading" :size="message.role === 'user' ? 'auto' : 'fill'">
       <template v-if="showHeader" #header>
         <div class="b-message-bubble__header">
           <div v-if="imageFiles.length" class="b-message-bubble__images">
@@ -131,7 +131,8 @@ function toggleThinkingCollapse(index: number): void {
  * @param index - 片段索引
  */
 function isToolResultCollapsed(index: number): boolean {
-  return collapsedToolResultIndexes.value.has(index);
+  // 默认折叠工具结果；仅当用户主动展开后，才在集合中记录该片段索引。
+  return !collapsedToolResultIndexes.value.has(index);
 }
 
 /**

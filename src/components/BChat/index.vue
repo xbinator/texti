@@ -12,7 +12,14 @@
 
     <div class="b-chat__input">
       <div class="b-chat__input__container">
-        <BPromptEditor v-model:value="inputValue" :placeholder="placeholder" :max-height="200" variant="borderless" @submit="handleSubmit" />
+        <BPromptEditor
+          ref="promptEditorRef"
+          v-model:value="inputValue"
+          :placeholder="placeholder"
+          :max-height="200"
+          variant="borderless"
+          @submit="handleSubmit"
+        />
 
         <div class="b-chat__input__buttons">
           <BButton v-if="loading" size="small" square icon="lucide:square" @click="handleAbort" />
@@ -75,9 +82,20 @@ const emit = defineEmits<{ (e: 'complete', message: Message): void }>();
 const inputValue = defineModel<string>('inputValue', { default: '' });
 const messages = defineModel<Message[]>('messages', { default: () => [] });
 
+/**
+ * BPromptEditor 暴露的最小聚焦能力。
+ */
+interface PromptEditorExpose {
+  /**
+   * 聚焦编辑器输入区域。
+   */
+  focus: () => void;
+}
+
 const loading = ref(false);
 const pendingToolResults = ref<ExecutedToolCall[]>([]);
 const blockedToolLoopReason = ref('');
+const promptEditorRef = ref<PromptEditorExpose | null>(null);
 
 const router = useRouter();
 const serviceModelStore = useServiceModelStore();
@@ -350,6 +368,13 @@ function handleEdit(message: Message): void {
 }
 
 /**
+ * 对外暴露输入框聚焦能力，供宿主组件在切换或新建会话后恢复输入焦点。
+ */
+function focusInput(): void {
+  promptEditorRef.value?.focus();
+}
+
+/**
  * 重新生成 assistant 消息。
  * @param message - 待重新生成的 assistant 消息
  */
@@ -491,6 +516,8 @@ const { agent } = useChat({
     emit('complete', message);
   }
 });
+
+defineExpose({ focusInput });
 </script>
 
 <style lang="less">
