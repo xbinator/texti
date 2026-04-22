@@ -23,4 +23,11 @@ describe('MessageBubble confirmation card extraction', () => {
     expect(source).toContain('<ConfirmationCard');
     expect(source).toContain('@confirmation-action="$emit(\'confirmation-action\', $event.confirmationId, $event.action)"');
   });
+
+  test('keeps confirmation card class names on the shared namespace helper', () => {
+    const source = readSource('src/components/BChat/components/ConfirmationCard.vue');
+
+    expect(source).toContain("import { createNamespace } from '@/utils/namespace';");
+    expect(source).toContain("createNamespace('confirmation-card')");
+  });
 });

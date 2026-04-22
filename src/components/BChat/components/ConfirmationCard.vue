@@ -50,7 +50,7 @@ defineEmits<{
 
 const manuallyCollapsed = ref(false);
 const manuallyExpanded = ref(false);
-const [, bem] = createNamespace('message-bubble');
+const [, bem] = createNamespace('confirmation-card');
 
 /**
  * 当前是否折叠。
@@ -78,7 +78,7 @@ function toggleCollapse(): void {
 </script>
 
 <style lang="less">
-.m-message-bubble {
+.b-confirmation-card {
   padding: 10px 12px;
   font-size: 12px;
   color: var(--text-secondary);
@@ -87,24 +87,24 @@ function toggleCollapse(): void {
   border-radius: 8px;
 }
 
-.m-message-bubble--confirmation {
+.b-confirmation-card--confirmation {
   background: var(--bg-tertiary);
 }
 
-.m-message-bubble--permission-dangerous {
+.b-confirmation-card--permission-dangerous {
   border-color: var(--color-warning, #faad14);
 }
 
-.m-message-bubble--success {
+.b-confirmation-card--success {
   border-color: var(--color-success);
 }
 
-.m-message-bubble--cancelled,
-.m-message-bubble--expired {
+.b-confirmation-card--cancelled,
+.b-confirmation-card--expired {
   opacity: 0.86;
 }
 
-.m-message-bubble__title {
+.b-confirmation-card__title {
   display: flex;
   gap: 6px;
   align-items: center;
@@ -112,28 +112,28 @@ function toggleCollapse(): void {
   color: var(--text-primary);
 }
 
-.m-message-bubble__title--clickable {
+.b-confirmation-card__title--clickable {
   width: fit-content;
   cursor: pointer;
   user-select: none;
 }
 
-.m-message-bubble__description,
-.m-message-bubble__status,
-.m-message-bubble__tip {
+.b-confirmation-card__description,
+.b-confirmation-card__status,
+.b-confirmation-card__tip {
   margin-top: 8px;
   font-size: 12px;
   line-height: 1.6;
 }
 
-.m-message-bubble__label {
+.b-confirmation-card__label {
   margin-top: 8px;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
-.m-message-bubble__code {
+.b-confirmation-card__code {
   max-height: 180px;
   padding: 8px;
   margin: 0;
@@ -147,7 +147,7 @@ function toggleCollapse(): void {
   border-radius: 6px;
 }
 
-.m-message-bubble__actions {
+.b-confirmation-card__actions {
   display: flex;
   gap: 8px;
   margin-top: 10px;

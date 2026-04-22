@@ -44,6 +44,21 @@ describe('confirmation card helpers', () => {
     expect(text).toContain('正在应用');
   });
 
+  it('returns a failure status message after approval when execution fails', () => {
+    const text = getConfirmationStatusText(createConfirmationPart({
+      confirmationStatus: 'approved',
+      executionStatus: 'failure',
+      executionError: '写入失败'
+    }));
+
+    expect(text).toContain('已确认');
+    expect(text).toContain('写入失败');
+  });
+
+  it('lets manual collapse win while a confirmation is still pending', () => {
+    expect(isConfirmationCollapsed(createConfirmationPart(), true, false)).toBe(true);
+  });
+
   it('truncates replace-document previews', () => {
     const preview = formatConfirmationPreviewText('a'.repeat(900), 'replace_document');
 
