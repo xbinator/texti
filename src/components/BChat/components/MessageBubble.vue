@@ -1,6 +1,6 @@
 <template>
   <div :class="['b-message-bubble', { 'b-message-bubble--error': isErrorMessage }]">
-    <BBubbleText content="" :placement="bubblePlacement" :loading="message.loading" size="auto">
+    <BBubble :placement="bubblePlacement" :loading="message.loading" size="auto">
       <template v-if="showHeader" #header>
         <div class="b-message-bubble__header">
           <div v-if="imageFiles.length" class="b-message-bubble__images">
@@ -40,7 +40,6 @@
             <pre v-show="!isToolResultCollapsed(index)" class="b-message-bubble__part-code">{{ formatValue(part.result) }}</pre>
           </div>
         </template>
-        <BMessage v-if="!message.parts.length" content="" type="markdown" :loading="message.loading" />
       </div>
       <template v-if="message.finished && message.role === 'assistant'" #toolbar>
         <div class="b-message-bubble__toolbar" :class="toolbarClass">
@@ -49,7 +48,7 @@
           <BButton v-if="isAssistantMessage" square type="text" size="small" icon="lucide:refresh-cw" @click="$emit('regenerate', message)" />
         </div>
       </template>
-    </BBubbleText>
+    </BBubble>
   </div>
 </template>
 
@@ -61,7 +60,7 @@
 import type { Message } from '../types';
 import { computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
-import BBubbleText from '@/components/BBubbleText/index.vue';
+import BBubble from '@/components/BBubble/index.vue';
 import BButton from '@/components/BButton/index.vue';
 import BMessage from '@/components/BMessage/index.vue';
 import { useClipboard } from '@/hooks/useClipboard';

@@ -11,28 +11,26 @@
     </div>
 
     <div class="bubble__main">
-      <div v-if="loading && placement === 'left'" class="bubble__container">
-        <Loading type="dot" />
-      </div>
-
-      <template v-else>
-        <template v-if="placement === 'right'">
-          <Loading v-if="loading" type="circle" class="bubble__loading" />
-        </template>
-
-        <div class="bubble__container">
-          <slot name="top"></slot>
-
-          <div ref="contentRef" :class="['bubble__content', { 'bubble__content--collapse': collapse.value }]">
-            <slot></slot>
-          </div>
-
-          <div v-if="shouldShowCollapseButton" class="bubble__collapse" @click="toggleCollapse">
-            <span class="bubble__collapse-text">{{ collapse.value ? '展开查看全部' : '收起' }}</span>
-            <Icon :icon="collapse.value ? 'lucide:chevron-down' : 'lucide:chevron-up'" class="bubble__collapse-icon" />
-          </div>
-        </div>
+      <template v-if="placement === 'right'">
+        <Loading v-if="loading" type="circle" class="bubble__loading" />
       </template>
+
+      <div class="bubble__container">
+        <slot name="top"></slot>
+
+        <div ref="contentRef" :class="['bubble__content', { 'bubble__content--collapse': collapse.value }]">
+          <slot></slot>
+        </div>
+
+        <div v-if="shouldShowCollapseButton" class="bubble__collapse" @click="toggleCollapse">
+          <span class="bubble__collapse-text">{{ collapse.value ? '展开查看全部' : '收起' }}</span>
+          <Icon :icon="collapse.value ? 'lucide:chevron-down' : 'lucide:chevron-up'" class="bubble__collapse-icon" />
+        </div>
+      </div>
+    </div>
+
+    <div v-if="loading && placement === 'left'" class="bubble__container">
+      <Loading type="dot" />
     </div>
 
     <div v-if="$slots.toolbar" class="bubble__toolbar">
