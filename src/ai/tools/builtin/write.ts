@@ -79,12 +79,7 @@ async function confirmOrCancel(adapter: AIToolConfirmationAdapter, request: AITo
  * @param operation - 实际写操作
  * @returns 工具执行结果
  */
-async function executeConfirmedWrite(
-  adapter: AIToolConfirmationAdapter,
-  request: AIToolConfirmationRequest,
-  toolName: string,
-  operation: () => Promise<void>
-) {
+async function executeConfirmedWrite(adapter: AIToolConfirmationAdapter, request: AIToolConfirmationRequest, toolName: string, operation: () => Promise<void>) {
   await adapter.onExecutionStart?.(request);
 
   try {

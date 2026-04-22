@@ -20,6 +20,7 @@
         placeholder="输入消息..."
         :on-before-send="handleBeforeSend"
         :on-before-regenerate="handleBeforeRegenerate"
+        :on-confirmation-action="handleConfirmationAction"
         :tools="tools"
         :get-tool-context="editorToolContextRegistry.getCurrentContext"
         @complete="handleComplete"
@@ -47,17 +48,16 @@
  * @description 聊天侧边栏，负责会话列表切换、会话持久化和聊天面板接入。
  */
 import type { ChatSession } from 'types/chat';
-import { computed, nextTick, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { createBuiltinTools } from '@/ai/tools/builtin';
-import type { AIToolConfirmationRequest } from '@/ai/tools/confirmation';
 import { editorToolContextRegistry } from '@/ai/tools/editor-context';
 import { getDefaultChatToolNames } from '@/ai/tools/policy';
 import type { Message } from '@/components/BChat/types';
 import { useChatStore } from '@/stores/chat';
 import { useSettingStore } from '@/stores/setting';
-import { Modal } from '@/utils/modal';
 import SessionHistory from './components/SessionHistory.vue';
+import { createChatConfirmationController } from './utils/confirmation-controller';
 
 const CHAT_SESSION_TYPE = 'assistant';
 
@@ -69,6 +69,9 @@ const messages = ref<Message[]>([]);
 const sessions = ref<ChatSession[]>([]);
 const loading = ref(false);
 const chatRef = ref<{ focusInput: () => void } | null>(null);
+const confirmationController = createChatConfirmationController({
+  getMessages: () => messages.value
+});
 const currentSession = computed<ChatSession | undefined>(() => {
   const activeSessionId = settingStore.chatSidebarActiveSessionId;
   if (!activeSessionId) {
@@ -78,28 +81,15 @@ const currentSession = computed<ChatSession | undefined>(() => {
   return sessions.value.find((session) => session.id === activeSessionId);
 });
 const tools = createBuiltinTools({
-  confirm: {
-    async confirm(request: AIToolConfirmationRequest) {
-      // 先复用统一 confirm modal，后续再升级为更完整的 diff 预览组件。
-      const content = [
-        request.description,
-        request.beforeText ? `原文：\n${request.beforeText}` : '',
-        request.afterText ? `新内容：\n${request.afterText}` : ''
-      ]
-        .filter(Boolean)
-        .join('\n\n');
-
-      const [, confirmed] = await Modal.confirm(request.title, content, { confirmText: '应用', cancelText: '取消' });
-
-      return confirmed;
-    }
-  }
+  confirm: confirmationController.createAdapter()
 }).filter((tool) => {
   // MVP 聊天侧先只开放低风险工具，避免默认暴露替换类操作。
   return getDefaultChatToolNames().includes(tool.definition.name);
 });
 
 async function handleBeforeSend(message: Message): Promise<void> {
+  confirmationController.expirePendingConfirmation();
+
   if (!settingStore.chatSidebarActiveSessionId) {
     const session = await chatStore.createSession(CHAT_SESSION_TYPE, { title: message.content });
 
@@ -111,6 +101,7 @@ async function handleBeforeSend(message: Message): Promise<void> {
 }
 
 async function handleBeforeRegenerate(nextMessages: Message[]): Promise<void> {
+  confirmationController.expirePendingConfirmation();
   await chatStore.setSessionMessages(settingStore.chatSidebarActiveSessionId, nextMessages);
 }
 
@@ -119,6 +110,7 @@ async function handleComplete(message: Message): Promise<void> {
 }
 
 async function handleNewSession(): Promise<void> {
+  confirmationController.dispose();
   settingStore.setChatSidebarActiveSessionId(null);
   messages.value = [];
   inputValue.value = '';
@@ -147,6 +139,7 @@ async function handleSwitchSession(sessionId: string): Promise<void> {
   if (loading.value) return;
 
   loading.value = true;
+  confirmationController.dispose();
   settingStore.setChatSidebarActiveSessionId(sessionId);
 
   try {
@@ -163,11 +156,29 @@ async function handleDeleteSession(sessionId: string): Promise<void> {
   sessions.value.splice(index, 1);
 
   if (settingStore.chatSidebarActiveSessionId === sessionId) {
+    confirmationController.dispose();
     await handleNewSession();
   }
 }
 
+/**
+ * 处理聊天流中的确认卡片操作。
+ * @param confirmationId - 确认项 ID
+ * @param action - 用户操作
+ */
+async function handleConfirmationAction(confirmationId: string, action: 'approve' | 'cancel'): Promise<void> {
+  if (action === 'approve') {
+    confirmationController.approveConfirmation(confirmationId);
+    return;
+  }
+
+  confirmationController.cancelConfirmation(confirmationId);
+}
+
 onMounted(loadSessions);
+onUnmounted(() => {
+  confirmationController.dispose();
+});
 </script>
 
 <style scoped lang="less">
@@ -186,7 +197,7 @@ onMounted(loadSessions);
   display: flex;
   gap: 8px;
   align-items: center;
-  padding: 8px;
+  padding: 8px 8px 8px 12px;
   border-bottom: 1px solid var(--border-color);
 }
 
