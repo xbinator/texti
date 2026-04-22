@@ -273,6 +273,31 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
     margin: 0.25em 0;
   }
 
+  ul[data-type='taskList'] {
+    padding: 0;
+    margin-left: 0;
+    list-style: none;
+
+    li {
+      display: flex;
+      align-items: center;
+
+      > label {
+        flex: 0 0 auto;
+        margin-right: 0.5rem;
+        user-select: none;
+      }
+
+      > div {
+        flex: 1 1 auto;
+      }
+    }
+
+    input[type='checkbox'] {
+      cursor: pointer;
+    }
+  }
+
   blockquote {
     padding: 0.5em 1em 0.5em 1.25em;
     margin: 0.75em 0;
