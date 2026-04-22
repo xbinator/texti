@@ -67,8 +67,8 @@ import {
   isRemovableAssistantPlaceholder,
   toCachedModelMessages
 } from './message';
-import { createToolCallTracker, type ToolCallTracker } from './utils/tool-call-tracker';
-import { createToolLoopGuard, type ToolLoopGuard } from './utils/tool-loop-guard';
+import { createToolCallTracker, type ToolCallTracker } from './utils/toolCallTracker';
+import { createToolLoopGuard, type ToolLoopGuard } from './utils/toolLoopGuard';
 
 /**
  * 工具续轮保护的默认阈值。

@@ -16,7 +16,7 @@
 import type { ChatMessageToolCallPart } from 'types/chat';
 import { Icon } from '@iconify/vue';
 import { createNamespace } from '@/utils/namespace';
-import { formatStructuredValue, hasStructuredValueContent } from '../utils/message-part';
+import { formatStructuredValue, hasStructuredValueContent } from '../utils/messagePart';
 
 defineOptions({ name: 'MessageBubblePartToolCall' });
 

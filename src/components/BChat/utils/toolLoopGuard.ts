@@ -1,5 +1,5 @@
 /**
- * @file tool-loop-guard.ts
+ * @file toolLoopGuard.ts
  * @description BChat 工具续轮防护器。
  */
 

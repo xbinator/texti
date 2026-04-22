@@ -1,7 +1,7 @@
 ﻿<template>
   <div class="editor-sidebar">
     <div class="sidebar-header">
-      <div class="sidebar-header__title truncate">{{ currentSession?.title || '' }}</div>
+      <div class="sidebar-header__title truncate">{{ currentSession?.title || '新会话' }}</div>
       <BButton square size="small" type="text" @click="handleNewSession">
         <Icon icon="lucide:message-circle-plus" width="16" height="16" />
       </BButton>
@@ -57,7 +57,7 @@ import type { Message } from '@/components/BChat/types';
 import { useChatStore } from '@/stores/chat';
 import { useSettingStore } from '@/stores/setting';
 import SessionHistory from './components/SessionHistory.vue';
-import { createChatConfirmationController } from './utils/confirmation-controller';
+import { createChatConfirmationController } from './utils/confirmationController';
 
 const CHAT_SESSION_TYPE = 'assistant';
 

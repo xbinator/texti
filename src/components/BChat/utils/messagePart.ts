@@ -1,5 +1,5 @@
 /**
- * @file message-part.ts
+ * @file messagePart.ts
  * @description 聊天消息片段展示辅助函数。
  */
 

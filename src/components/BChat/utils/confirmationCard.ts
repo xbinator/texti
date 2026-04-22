@@ -1,5 +1,5 @@
 /**
- * @file confirmation-card.ts
+ * @file confirmationCard.ts
  * @description 确认卡片展示逻辑辅助函数。
  */
 import type { ChatMessageConfirmationPart } from 'types/chat';

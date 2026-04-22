@@ -1,6 +1,6 @@
 /* eslint-disable no-use-before-define */
 /**
- * @file confirmation-controller.ts
+ * @file confirmationController.ts
  * @description 聊天侧边栏会话级确认控制器，负责卡片状态与 Promise 桥接。
  */
 import type { ChatMessageConfirmationPart, ChatMessageConfirmationStatus } from 'types/chat';

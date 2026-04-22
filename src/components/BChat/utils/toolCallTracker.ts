@@ -1,6 +1,6 @@
 /* eslint-disable no-await-in-loop */
 /**
- * @file tool-call-tracker.ts
+ * @file toolCallTracker.ts
  * @description BChat 工具调用异步任务跟踪器。
  */
 
@@ -28,6 +28,7 @@ export function createToolCallTracker(): ToolCallTracker {
   return {
     track<T>(task: Promise<T>): Promise<T> {
       inflightTasks.add(task);
+      // eslint-disable-next-line no-void
       void task.finally(() => {
         inflightTasks.delete(task);
       });

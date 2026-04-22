@@ -35,7 +35,7 @@ import { computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import BButton from '@/components/BButton/index.vue';
 import { createNamespace } from '@/utils/namespace';
-import { formatConfirmationPreviewText, getConfirmationStatusText, isConfirmationCollapsed } from '../utils/confirmation-card';
+import { formatConfirmationPreviewText, getConfirmationStatusText, isConfirmationCollapsed } from '../utils/confirmationCard';
 
 defineOptions({ name: 'ConfirmationCard' });
 
