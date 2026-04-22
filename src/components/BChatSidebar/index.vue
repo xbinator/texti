@@ -1,13 +1,20 @@
 ﻿<template>
   <div class="editor-sidebar">
     <div class="sidebar-header">
+      <div class="sidebar-header__title truncate">{{ currentSession?.title || '' }}</div>
       <BButton square size="small" type="text" @click="handleNewSession">
         <Icon icon="lucide:message-circle-plus" width="16" height="16" />
       </BButton>
-      <SessionHistory :sessions="sessions" :active-session-id="activeSessionId" @delete-session="handleDeleteSession" @switch-session="handleSwitchSession" />
+      <SessionHistory
+        :sessions="sessions"
+        :active-session-id="settingStore.chatSidebarActiveSessionId"
+        @delete-session="handleDeleteSession"
+        @switch-session="handleSwitchSession"
+      />
     </div>
     <div class="chat-sidebar-container">
       <BChat
+        ref="chatRef"
         v-model:messages="messages"
         v-model:input-value="inputValue"
         placeholder="输入消息..."
@@ -35,8 +42,12 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * @file BChatSidebar/index.vue
+ * @description 聊天侧边栏，负责会话列表切换、会话持久化和聊天面板接入。
+ */
 import type { ChatSession } from 'types/chat';
-import { onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { createBuiltinTools } from '@/ai/tools/builtin';
 import type { AIToolConfirmationRequest } from '@/ai/tools/confirmation';
@@ -44,18 +55,28 @@ import { editorToolContextRegistry } from '@/ai/tools/editor-context';
 import { getDefaultChatToolNames } from '@/ai/tools/policy';
 import type { Message } from '@/components/BChat/types';
 import { useChatStore } from '@/stores/chat';
+import { useSettingStore } from '@/stores/setting';
 import { Modal } from '@/utils/modal';
 import SessionHistory from './components/SessionHistory.vue';
 
 const CHAT_SESSION_TYPE = 'assistant';
 
 const chatStore = useChatStore();
+const settingStore = useSettingStore();
 
 const inputValue = ref('');
-const activeSessionId = ref<string | null>(null);
 const messages = ref<Message[]>([]);
 const sessions = ref<ChatSession[]>([]);
 const loading = ref(false);
+const chatRef = ref<{ focusInput: () => void } | null>(null);
+const currentSession = computed<ChatSession | undefined>(() => {
+  const activeSessionId = settingStore.chatSidebarActiveSessionId;
+  if (!activeSessionId) {
+    return undefined;
+  }
+
+  return sessions.value.find((session) => session.id === activeSessionId);
+});
 const tools = createBuiltinTools({
   confirm: {
     async confirm(request: AIToolConfirmationRequest) {
@@ -79,41 +100,60 @@ const tools = createBuiltinTools({
 });
 
 async function handleBeforeSend(message: Message): Promise<void> {
-  if (!activeSessionId.value) {
+  if (!settingStore.chatSidebarActiveSessionId) {
     const session = await chatStore.createSession(CHAT_SESSION_TYPE, { title: message.content });
 
-    activeSessionId.value = session.id;
+    settingStore.setChatSidebarActiveSessionId(session.id);
     sessions.value.unshift(session);
   }
 
-  await chatStore.addSessionMessage(activeSessionId.value, message);
+  await chatStore.addSessionMessage(settingStore.chatSidebarActiveSessionId, message);
 }
 
 async function handleBeforeRegenerate(nextMessages: Message[]): Promise<void> {
-  await chatStore.setSessionMessages(activeSessionId.value, nextMessages);
+  await chatStore.setSessionMessages(settingStore.chatSidebarActiveSessionId, nextMessages);
 }
 
 async function handleComplete(message: Message): Promise<void> {
-  await chatStore.addSessionMessage(activeSessionId.value, message);
+  await chatStore.addSessionMessage(settingStore.chatSidebarActiveSessionId, message);
 }
 
 async function handleNewSession(): Promise<void> {
-  activeSessionId.value = null;
+  settingStore.setChatSidebarActiveSessionId(null);
   messages.value = [];
+  inputValue.value = '';
+  // 新会话创建后自动聚焦输入框，提升用户体验。
+  await nextTick();
+  chatRef.value?.focusInput();
 }
 
 async function loadSessions(): Promise<void> {
   sessions.value = await chatStore.getSessions(CHAT_SESSION_TYPE);
+
+  if (!settingStore.chatSidebarActiveSessionId) {
+    return;
+  }
+
+  const activeSession = sessions.value.find((session) => session.id === settingStore.chatSidebarActiveSessionId);
+  if (!activeSession) {
+    settingStore.setChatSidebarActiveSessionId(null);
+    return;
+  }
+
+  messages.value = await chatStore.getSessionMessages(activeSession.id);
 }
 
 async function handleSwitchSession(sessionId: string): Promise<void> {
   if (loading.value) return;
 
   loading.value = true;
-  activeSessionId.value = sessionId;
+  settingStore.setChatSidebarActiveSessionId(sessionId);
 
-  messages.value = await chatStore.getSessionMessages(sessionId);
-  loading.value = false;
+  try {
+    messages.value = await chatStore.getSessionMessages(sessionId);
+  } finally {
+    loading.value = false;
+  }
 }
 
 async function handleDeleteSession(sessionId: string): Promise<void> {
@@ -122,7 +162,7 @@ async function handleDeleteSession(sessionId: string): Promise<void> {
 
   sessions.value.splice(index, 1);
 
-  if (activeSessionId.value === sessionId) {
+  if (settingStore.chatSidebarActiveSessionId === sessionId) {
     await handleNewSession();
   }
 }
@@ -144,10 +184,18 @@ onMounted(loadSessions);
 
 .sidebar-header {
   display: flex;
-  gap: 4px;
-  justify-content: flex-end;
+  gap: 8px;
+  align-items: center;
   padding: 8px;
   border-bottom: 1px solid var(--border-color);
+}
+
+.sidebar-header__title {
+  flex: 1;
+  width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .chat-sidebar-container {
