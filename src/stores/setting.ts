@@ -1,3 +1,7 @@
+/**
+ * @file setting.ts
+ * @description 应用设置 Store，负责管理主题、侧边栏和聊天侧状态等持久化设置。
+ */
 import { defineStore } from 'pinia';
 import { defaultsDeep } from 'lodash-es';
 import { native } from '@/shared/platform';
@@ -15,12 +19,21 @@ const LEGACY_SIDEBAR_VISIBLE_KEY = 'sidebar_visible';
 const LEGACY_SIDEBAR_WIDTH_KEY = 'sidebar_width';
 
 interface PersistedSettingState {
+  // 聊天侧边栏当前激活的会话 ID，null 表示没有激活会话
+  chatSidebarActiveSessionId: string | null;
+  // 提供商侧边栏是否折叠
   providerSidebarCollapsed: boolean;
+  // 设置侧边栏是否折叠
   settingsSidebarCollapsed: boolean;
+  // 主题模式：dark、light 或 system
   theme: ThemeMode;
+  // 是否显示大纲，开启后在消息气泡中显示大纲按钮，点击可查看消息的大纲结构
   showOutline: boolean;
+  // 源代码模式开关，开启后在消息气泡中显示源代码按钮，点击可查看消息的原始 Markdown 内容
   sourceMode: boolean;
+  // 侧边栏是否可见
   sidebarVisible: boolean;
+  // 侧边栏宽度，单位像素
   sidebarWidth: number;
 }
 
@@ -29,6 +42,7 @@ interface SettingState extends PersistedSettingState {
 }
 
 const DEFAULT_SETTINGS: PersistedSettingState = {
+  chatSidebarActiveSessionId: null,
   providerSidebarCollapsed: false,
   settingsSidebarCollapsed: false,
   theme: 'system',
@@ -147,6 +161,7 @@ export const useSettingStore = defineStore('setting', {
 
     persistSettings(): void {
       const settings: PersistedSettingState = {
+        chatSidebarActiveSessionId: this.chatSidebarActiveSessionId,
         providerSidebarCollapsed: this.providerSidebarCollapsed,
         settingsSidebarCollapsed: this.settingsSidebarCollapsed,
         theme: this.theme,
@@ -242,6 +257,15 @@ export const useSettingStore = defineStore('setting', {
 
     setProviderSidebarCollapsed(collapsed: boolean): void {
       this.providerSidebarCollapsed = collapsed;
+      this.persistSettings();
+    },
+
+    /**
+     * 设置聊天侧边栏当前激活的会话 ID。
+     * @param sessionId - 当前激活的会话 ID，空值表示没有激活会话
+     */
+    setChatSidebarActiveSessionId(sessionId: string | null): void {
+      this.chatSidebarActiveSessionId = sessionId;
       this.persistSettings();
     },
 

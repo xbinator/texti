@@ -36,6 +36,10 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * @file BPromptEditor/index.vue
+ * @description Prompt 输入编辑器，负责纯文本输入、变量插入与提交交互。
+ */
 import type { Variable, BPromptEditorProps as Props } from './types';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { addCssUnit } from '@/utils/css';
@@ -122,6 +126,13 @@ function handleContainerClick(): void {
   }
 }
 
+/**
+ * 聚焦到底层可编辑区域，供父组件在外部主动触发。
+ */
+function focus(): void {
+  editorRef.value?.focus();
+}
+
 function handleSelectionChange(): void {
   if (props.disabled || !selectionHook.isSelectionInsideEditor()) {
     if (trigger.visible.value) trigger.hide();
@@ -166,6 +177,8 @@ onUnmounted(() => {
   window.removeEventListener('resize', handleViewportChange);
   window.removeEventListener('scroll', handleViewportChange, true);
 });
+
+defineExpose({ focus });
 </script>
 
 <style lang="less">
