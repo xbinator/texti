@@ -94,9 +94,52 @@ export interface ChatMessageToolResultPart {
 }
 
 /**
+ * 确认卡片状态
+ */
+export type ChatMessageConfirmationStatus = 'pending' | 'approved' | 'cancelled' | 'expired';
+
+/**
+ * 确认卡片执行状态
+ */
+export type ChatMessageConfirmationExecutionStatus = 'idle' | 'running' | 'success' | 'failure';
+
+/**
+ * 聊天消息确认卡片片段
+ */
+export interface ChatMessageConfirmationPart {
+  /** 片段类型 */
+  type: 'confirmation';
+  /** 确认项唯一标识 */
+  confirmationId: string;
+  /** 工具名称 */
+  toolName: string;
+  /** 标题 */
+  title: string;
+  /** 描述 */
+  description: string;
+  /** 权限级别 */
+  permission: 'write' | 'dangerous';
+  /** 原始文本 */
+  beforeText?: string;
+  /** 新文本 */
+  afterText?: string;
+  /** 确认状态 */
+  confirmationStatus: ChatMessageConfirmationStatus;
+  /** 执行状态 */
+  executionStatus: ChatMessageConfirmationExecutionStatus;
+  /** 执行失败信息 */
+  executionError?: string;
+}
+
+/**
  * 聊天消息结构化片段
  */
-export type ChatMessagePart = ChatMessageTextPart | ChatMessageThinkingPart | ChatMessageToolCallPart | ChatMessageToolResultPart;
+export type ChatMessagePart =
+  | ChatMessageTextPart
+  | ChatMessageThinkingPart
+  | ChatMessageToolCallPart
+  | ChatMessageToolResultPart
+  | ChatMessageConfirmationPart;
 
 /**
  * 聊天会话

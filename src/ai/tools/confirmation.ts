@@ -34,4 +34,15 @@ export interface AIToolConfirmationAdapter {
    * @returns 用户是否确认
    */
   confirm: (request: AIToolConfirmationRequest) => Promise<boolean>;
+  /**
+   * 通知确认项开始执行写入操作。
+   * @param request - 确认请求信息
+   */
+  onExecutionStart?: (request: AIToolConfirmationRequest) => void | Promise<void>;
+  /**
+   * 通知确认项执行完成。
+   * @param request - 确认请求信息
+   * @param result - 执行结果
+   */
+  onExecutionComplete?: (request: AIToolConfirmationRequest, result: { status: 'success' | 'failure'; errorMessage?: string }) => void | Promise<void>;
 }
