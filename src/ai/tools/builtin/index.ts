@@ -4,6 +4,8 @@
  */
 import type { AIToolConfirmationAdapter } from '../confirmation';
 import type { AIToolExecutor } from 'types/ai';
+import { isDefaultBuiltinReadonlyToolName, isDefaultBuiltinWritableToolName } from './catalog';
+import { createBuiltinEnvironmentTools } from './environment';
 import { createBuiltinReadTools } from './read';
 import { createBuiltinWriteTools } from './write';
 
@@ -25,28 +27,39 @@ interface CreateBuiltinToolsOptions {
  * @returns 工具执行器列表
  */
 export function createBuiltinTools(options: CreateBuiltinToolsOptions = {}): AIToolExecutor[] {
-  // 创建只读工具
+  // 创建文档只读工具
   const readTools = createBuiltinReadTools();
-  const tools: AIToolExecutor[] = [readTools.readCurrentDocument, readTools.getCurrentSelection, readTools.searchCurrentDocument];
+  // 创建环境只读工具
+  const environmentTools = createBuiltinEnvironmentTools();
+  // 先汇总全部只读工具，再通过共享清单筛选默认暴露项。
+  const allReadonlyTools: AIToolExecutor[] = [
+    readTools.readCurrentDocument,
+    readTools.getCurrentSelection,
+    environmentTools.getCurrentTime,
+    readTools.searchCurrentDocument
+  ];
+  const readonlyTools = allReadonlyTools.filter((tool) => isDefaultBuiltinReadonlyToolName(tool.definition.name));
 
   // 没有确认适配器时只返回只读工具
   if (!options.confirm) {
-    return tools;
+    return readonlyTools;
   }
 
   // 创建写入工具
   const writeTools = createBuiltinWriteTools(options.confirm);
-  tools.push(writeTools.insertAtCursor);
+  // 先汇总默认低风险写工具，再通过共享清单筛选默认暴露项。
+  const allDefaultWritableTools: AIToolExecutor[] = [writeTools.insertAtCursor];
+  const writableTools = allDefaultWritableTools.filter((tool) => isDefaultBuiltinWritableToolName(tool.definition.name));
 
   // 聊天侧默认只放开低风险写工具，替换类操作需要显式开启
   if (options.includeSelectionReplace) {
-    tools.push(writeTools.replaceSelection);
+    writableTools.push(writeTools.replaceSelection);
   }
 
   // 危险操作需要显式开启
   if (options.includeDangerous) {
-    tools.push(writeTools.replaceDocument);
+    writableTools.push(writeTools.replaceDocument);
   }
 
-  return tools;
+  return [...readonlyTools, ...writableTools];
 }

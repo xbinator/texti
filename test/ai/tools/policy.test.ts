@@ -2,8 +2,9 @@
  * @file policy.test.ts
  * @description AI 工具策略测试。
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AIProvider } from 'types/ai';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { getDefaultBuiltinChatToolNames } from '@/ai/tools/builtin/catalog';
 import { getDefaultChatToolNames, getModelToolSupport } from '@/ai/tools/policy';
 
 type GetProviderMock = (providerId: string) => Promise<AIProvider | null>;
@@ -71,6 +72,6 @@ describe('AI tool policy', () => {
   });
 
   it('returns the default low-risk chat tool names', () => {
-    expect(getDefaultChatToolNames()).toEqual(['read_current_document', 'get_current_selection', 'search_current_document', 'insert_at_cursor']);
+    expect(getDefaultChatToolNames()).toEqual(getDefaultBuiltinChatToolNames());
   });
 });

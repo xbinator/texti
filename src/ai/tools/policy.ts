@@ -4,6 +4,7 @@
  */
 
 import { providerStorage } from '@/shared/storage/providers';
+import { getDefaultBuiltinChatToolNames } from './builtin/catalog';
 
 /**
  * AI 工具服务商支持信息
@@ -14,11 +15,6 @@ export interface AIToolProviderSupport {
   /** 不支持时的原因 */
   reason?: string;
 }
-
-/**
- * 默认聊天工具名称列表
- */
-const DEFAULT_CHAT_TOOL_NAMES = ['read_current_document', 'get_current_selection', 'search_current_document', 'insert_at_cursor'] as const;
 
 /**
  * 获取模型服务商支持的工具支持状态
@@ -52,5 +48,5 @@ export async function getModelToolSupport(providerId: string, modelId: string): 
  * @returns 工具名称数组
  */
 export function getDefaultChatToolNames(): string[] {
-  return [...DEFAULT_CHAT_TOOL_NAMES];
+  return getDefaultBuiltinChatToolNames();
 }
