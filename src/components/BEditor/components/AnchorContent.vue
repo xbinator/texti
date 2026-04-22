@@ -14,7 +14,7 @@
           <Icon :icon="isCollapsed(item.id) ? 'lucide:chevron-right' : 'lucide:chevron-down'" />
         </div>
 
-        <span v-else class="anchor-item__toggle anchor-item__toggle--empty"></span>
+        <span v-else class="anchor-item__toggle--empty"></span>
 
         <span class="anchor-item__text">{{ item.text }}</span>
       </div>
@@ -173,6 +173,11 @@ watch(
   &:hover {
     background: var(--bg-hover);
   }
+}
+
+.anchor-item__toggle--empty {
+  width: 18px;
+  height: 18px;
 }
 
 .anchor-item__text {
