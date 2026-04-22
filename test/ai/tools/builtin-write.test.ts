@@ -88,4 +88,21 @@ describe('built-in write tools', () => {
     // @ts-ignore
     expect(confirm.mock.calls[0]?.[0].permission).toBe('dangerous');
   });
+
+  it('notifies adapter execution lifecycle around a confirmed write', async () => {
+    const confirm = vi.fn(async () => true);
+    const onExecutionStart = vi.fn();
+    const onExecutionComplete = vi.fn();
+    const tools = createBuiltinWriteTools({ confirm, onExecutionStart, onExecutionComplete });
+    const { context } = createContext();
+
+    const result = await tools.insertAtCursor.execute({ content: ' ++' }, context);
+
+    expect(result.status).toBe('success');
+    expect(onExecutionStart).toHaveBeenCalledTimes(1);
+    expect(onExecutionComplete).toHaveBeenCalledWith(
+      expect.objectContaining({ toolName: 'insert_at_cursor' }),
+      { status: 'success' }
+    );
+  });
 });
