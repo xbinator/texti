@@ -134,10 +134,15 @@
 更详细的当前落地情况见：
 
 - `docs/ai-tools/2026-04-19-progress.md`
+- `docs/ai-tools/2026-04-22-chat-message-parts.md`
 
 ## 2026-04-19 更新
 
 - Task 05 现在可以视为已完成的主链路任务
+
+## 2026-04-22 更新
+
+- Task 05 的聊天消息结构已补充 `parts` 设计，工具调用和工具结果会随 assistant message 持久化。
 - 已加入 provider capability gating，只有首批验证过的 provider 会进入 AI Tools 流程
 - 聊天侧默认开放的内置工具已收敛为：
   - `read_current_document`

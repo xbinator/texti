@@ -61,7 +61,6 @@
 
 ## 不包括
 
-- 不做工具调用历史持久化。
 - 不做调试时间线界面。
 
 ## 2026-04-19 更新
@@ -70,3 +69,12 @@
 - 已加入 provider capability gating，未验证的 provider 不会进入工具调用流程。
 - 聊天侧默认只暴露低风险工具：`read_current_document`、`get_current_selection`、`search_current_document` 和 `insert_at_cursor`。
 - `replace_selection` 和 `replace_document` 保留在内置工具能力中，但暂不作为聊天侧默认开放范围。
+
+## 2026-04-22 更新
+
+- 聊天消息已改为以 `parts` 作为 UI 展示、模型上下文和工具链恢复的主数据。
+- 工具调用和工具结果都会写入 assistant message 的 `parts`，工具结果不再只依赖临时 `pendingToolResults` 拼接到下一轮请求。
+- `content` 保留为纯文本聚合字段，默认复制仍复制 `content`。
+- 工具续轮时会复用当前 assistant message 继续追加内容，不再为工具结果后的继续生成新建一条 assistant 消息。
+- 深度思考和工具结果片段都支持折叠，降低长链路工具回复的阅读噪音。
+- 详细设计见 `docs/ai-tools/2026-04-22-chat-message-parts.md`。
