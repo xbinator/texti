@@ -31,6 +31,11 @@
             </div>
             <pre v-if="hasValueContent(part.input)" class="b-message-bubble__part-code">{{ formatValue(part.input) }}</pre>
           </div>
+          <ConfirmationCard
+            v-else-if="part.type === 'confirmation'"
+            :part="part"
+            @confirmation-action="$emit('confirmation-action', $event.confirmationId, $event.action)"
+          />
           <div v-else class="b-message-bubble__part" :class="getToolResultClass(part.result.status)">
             <div class="b-message-bubble__part-title b-message-bubble__part-title--clickable" @click="toggleToolResultCollapse(index)">
               <Icon :icon="isToolResultCollapsed(index) ? 'lucide:chevron-down' : 'lucide:chevron-up'" width="14" height="14" />
@@ -64,6 +69,7 @@ import BBubble from '@/components/BBubble/index.vue';
 import BButton from '@/components/BButton/index.vue';
 import BMessage from '@/components/BMessage/index.vue';
 import { useClipboard } from '@/hooks/useClipboard';
+import ConfirmationCard from './ConfirmationCard.vue';
 
 defineOptions({ name: 'BMessageBubble' });
 
@@ -76,6 +82,7 @@ const collapsedToolResultIndexes = ref<Set<number>>(new Set());
 defineEmits<{
   (e: 'edit', message: Message): void;
   (e: 'regenerate', message: Message): void;
+  (e: 'confirmation-action', confirmationId: string, action: 'approve' | 'cancel'): void;
 }>();
 
 /** 图片文件列表 */

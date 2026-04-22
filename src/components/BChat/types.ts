@@ -70,4 +70,6 @@ export interface BChatProps {
   tools?: AIToolExecutor[];
   /** 获取工具上下文 */
   getToolContext?: () => AIToolContext | undefined;
+  /** 确认卡片操作回调 */
+  onConfirmationAction?: (confirmationId: string, action: 'approve' | 'cancel') => void | Promise<void>;
 }

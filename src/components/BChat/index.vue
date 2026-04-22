@@ -2,7 +2,14 @@
   <div class="b-chat">
     <Container v-if="messages.length" :loading="loading" class="b-chat__container">
       <div class="b-chat__messages">
-        <MessageBubble v-for="item in messages" :key="item.id" :message="item" @edit="handleEdit" @regenerate="handleRegenerate" />
+        <MessageBubble
+          v-for="item in messages"
+          :key="item.id"
+          :message="item"
+          @edit="handleEdit"
+          @regenerate="handleRegenerate"
+          @confirmation-action="handleConfirmationAction"
+        />
       </div>
     </Container>
 
@@ -365,6 +372,15 @@ function handleAbort(): void {
  */
 function handleEdit(message: Message): void {
   inputValue.value = message.content;
+}
+
+/**
+ * 处理确认卡片操作。
+ * @param confirmationId - 确认项 ID
+ * @param action - 确认动作
+ */
+async function handleConfirmationAction(confirmationId: string, action: 'approve' | 'cancel'): Promise<void> {
+  await props.onConfirmationAction?.(confirmationId, action);
 }
 
 /**
