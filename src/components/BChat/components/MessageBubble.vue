@@ -243,20 +243,10 @@ function handleCopy(msg: Message): void {
   background: var(--bg-tertiary);
 }
 
-/* 工具调用片段样式 */
-.b-message-bubble__part--tool-call {
+/* 工具调用和工具结果片段样式 */
+.b-message-bubble__part--tool-call,
+.b-message-bubble__part--tool-result {
   border-style: dashed;
-}
-
-/* 工具结果成功样式 */
-.b-message-bubble__part--tool-result-success {
-  border-color: var(--color-success);
-}
-
-/* 工具结果失败/取消样式 */
-.b-message-bubble__part--tool-result-failure,
-.b-message-bubble__part--tool-result-cancelled {
-  border-color: var(--color-error);
 }
 
 /* 片段标题样式 */
@@ -273,6 +263,30 @@ function handleCopy(msg: Message): void {
   width: fit-content;
   cursor: pointer;
   user-select: none;
+}
+
+/* 工具结果标题占满容器，便于状态标签右对齐 */
+.b-message-bubble__part-title--tool-result {
+  width: 100%;
+}
+
+/* 片段名称文本 */
+.b-message-bubble__part-name {
+  flex: 1;
+}
+
+/* 片段状态标签 */
+.b-message-bubble__part-status {
+  padding: 1px 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  border-radius: 999px;
+}
+
+/* 片段失败状态标签 */
+.b-message-bubble__part-status--failure {
+  color: var(--color-error);
+  background: var(--color-error-bg);
 }
 
 /* 片段内容区域 */

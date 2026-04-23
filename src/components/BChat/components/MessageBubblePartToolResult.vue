@@ -1,9 +1,10 @@
 <template>
-  <div :class="bem('part', { [`tool-result-${part.result.status}`]: true })">
-    <div :class="bem('part-title', { clickable: true })" @click="toggleCollapse">
+  <div :class="bem('part', { 'tool-result': true })">
+    <div :class="bem('part-title', { clickable: true, 'tool-result': true })" @click="toggleCollapse">
       <Icon :icon="collapsed ? 'lucide:chevron-down' : 'lucide:chevron-up'" width="14" height="14" />
       <Icon :icon="part.result.status === 'success' ? 'lucide:check-circle-2' : 'lucide:circle-alert'" width="14" height="14" />
-      <span>工具结果：{{ part.toolName }}</span>
+      <span :class="bem('part-name')">工具结果：{{ part.toolName }}</span>
+      <span v-if="part.result.status === 'failure'" :class="bem('part-status', { failure: true })">失败</span>
     </div>
     <pre v-show="!collapsed" :class="bem('part-code')">{{ formatStructuredValue(part.result) }}</pre>
   </div>
