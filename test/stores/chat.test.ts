@@ -2,12 +2,13 @@
  * @file chat.test.ts
  * @description 验证聊天 store 的消息持久化字段映射。
  */
+import type { ChatMessageHistoryCursor, ChatMessageRecord } from 'types/chat';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChatMessageRecord } from 'types/chat';
 import type { Message } from '@/components/BChat/types';
 
 type AddMessageMock = (message: ChatMessageRecord) => Promise<void>;
+type GetMessagesMock = (sessionId: string, cursor?: ChatMessageHistoryCursor) => Promise<ChatMessageRecord[]>;
 type SetSessionMessagesMock = (sessionId: string, messages: ChatMessageRecord[]) => Promise<void>;
 type UpdateSessionLastMessageAtMock = (sessionId: string, lastMessageAt: string) => Promise<void>;
 type AddSessionUsageMock = (sessionId: string, usage: NonNullable<Message['usage']>) => Promise<void>;
@@ -17,6 +18,11 @@ type UpdateSessionUsageMock = (sessionId: string, usage: NonNullable<Message['us
  * 模拟消息写入存储层的行为。
  */
 const addMessageMock = vi.fn<AddMessageMock>();
+
+/**
+ * 模拟按游标读取会话消息的行为。
+ */
+const getMessagesMock = vi.fn<GetMessagesMock>();
 
 /**
  * 模拟会话消息整体替换行为。
@@ -40,6 +46,7 @@ const updateSessionUsageMock = vi.fn<UpdateSessionUsageMock>();
 
 vi.mock('@/shared/storage', () => ({
   chatStorage: {
+    getMessages: getMessagesMock,
     addMessage: addMessageMock,
     setSessionMessages: setSessionMessagesMock,
     updateSessionLastMessageAt: updateSessionLastMessageAtMock,
@@ -52,11 +59,44 @@ describe('useChatStore', () => {
   beforeEach(() => {
     vi.resetModules();
     addMessageMock.mockReset();
+    getMessagesMock.mockReset();
     setSessionMessagesMock.mockReset();
     updateSessionLastMessageAtMock.mockReset();
     addSessionUsageMock.mockReset();
     updateSessionUsageMock.mockReset();
     setActivePinia(createPinia());
+  });
+
+  it('loads session messages with a timestamp cursor', async () => {
+    const { useChatStore } = await import('@/stores/chat');
+    const chatStore = useChatStore();
+    const cursor: ChatMessageHistoryCursor = { beforeCreatedAt: '2026-04-21T00:00:02.000Z', beforeId: 'message-2' };
+
+    getMessagesMock.mockResolvedValue([
+      {
+        id: 'message-1',
+        sessionId: 'session-1',
+        role: 'user',
+        content: '历史消息',
+        parts: [{ type: 'text', text: '历史消息' }],
+        createdAt: '2026-04-21T00:00:01.000Z'
+      }
+    ]);
+
+    const messages = await chatStore.getSessionMessages('session-1', cursor);
+
+    expect(getMessagesMock).toHaveBeenCalledWith('session-1', cursor);
+    expect(messages).toEqual([
+      {
+        id: 'message-1',
+        sessionId: 'session-1',
+        role: 'user',
+        content: '历史消息',
+        parts: [{ type: 'text', text: '历史消息' }],
+        createdAt: '2026-04-21T00:00:01.000Z',
+        finished: true
+      }
+    ]);
   });
 
   it('persists assistant thinking content with chat messages', async () => {

@@ -1,6 +1,6 @@
 <template>
   <div class="b-chat">
-    <Container v-if="messages.length" :loading="loading" class="b-chat__container">
+    <Container v-if="messages.length" ref="containerRef" :loading="loading" class="b-chat__container" @load-history="handleLoadHistory">
       <div class="b-chat__messages">
         <MessageBubble
           v-for="item in messages"
@@ -103,11 +103,22 @@ interface PromptEditorExpose {
   focus: () => void;
 }
 
+/**
+ * 聊天滚动容器暴露能力。
+ */
+interface ChatContainerExpose {
+  /**
+   * 将下一次消息插入包裹在滚动锚定中。
+   */
+  withScrollAnchor: (callback: () => Promise<void> | void) => Promise<void>;
+}
+
 const loading = ref(false);
 const pendingToolResults = ref<ExecutedToolCall[]>([]);
 const blockedToolLoopReason = ref('');
 const awaitingUserChoice = ref(false);
 const promptEditorRef = ref<PromptEditorExpose | null>(null);
+const containerRef = ref<ChatContainerExpose | null>(null);
 
 const router = useRouter();
 const serviceModelStore = useServiceModelStore();
@@ -393,6 +404,15 @@ function handleEdit(message: Message): void {
  */
 async function handleConfirmationAction(confirmationId: string, action: ChatMessageConfirmationAction): Promise<void> {
   await props.onConfirmationAction?.(confirmationId, action);
+}
+
+/**
+ * 处理消息区触顶前的历史加载请求。
+ */
+async function handleLoadHistory(): Promise<void> {
+  await containerRef.value?.withScrollAnchor(async () => {
+    await props.onLoadHistory?.();
+  });
 }
 
 /**

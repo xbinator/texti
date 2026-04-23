@@ -66,6 +66,8 @@ export interface BChatProps {
   onBeforeSend?: (message: Message) => Message | Promise<Message | void> | void;
   /** 重新生成前回调 */
   onBeforeRegenerate?: (messages: Message[], triggerMessage: Message) => Promise<void> | void;
+  /** 加载更早历史消息回调 */
+  onLoadHistory?: () => Promise<void> | void;
   /** 可用 AI 工具 */
   tools?: AIToolExecutor[];
   /** 获取工具上下文 */
