@@ -49,10 +49,12 @@ import { useChatStore } from '@/stores/chat';
 import { asyncTo } from '@/utils/asyncTo';
 
 interface Props {
-  // 会话列表
+  /** 会话列表 */
   sessions?: ChatSession[];
-  // 当前选中的会话ID
+  /** 当前选中的会话 ID */
   activeSessionId?: string | null;
+  /** 是否禁用历史会话操作 */
+  disabled?: boolean;
 }
 
 interface SessionGroup {
@@ -64,7 +66,7 @@ interface SessionGroup {
 const props = withDefaults(defineProps<Props>(), {
   sessions: () => [],
   activeSessionId: null,
-  loading: false
+  disabled: false
 });
 
 const open = ref(false);
@@ -79,7 +81,7 @@ const sessions = computed(() => props.sessions);
 
 const loading = ref(false);
 
-const isDisabled = computed(() => !sessions.value.length);
+const isDisabled = computed(() => props.disabled || !sessions.value.length);
 
 function toDateKey(timestamp: string): string {
   return dayjs(timestamp).format('YYYY-MM-DD');
@@ -104,6 +106,7 @@ const groupedSessions = computed<SessionGroup[]>(() => {
 });
 
 function handleSwitchSession(sessionId: string): void {
+  if (props.disabled) return;
   if (sessionId === props.activeSessionId) return;
 
   open.value = false;
@@ -112,6 +115,7 @@ function handleSwitchSession(sessionId: string): void {
 }
 
 async function handleDeleteSession(sessionId: string) {
+  if (props.disabled) return;
   if (loading.value) return;
 
   loading.value = true;

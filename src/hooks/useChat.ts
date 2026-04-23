@@ -53,6 +53,7 @@ export function useChat(options: UseStreamOptions) {
   }
 
   const currentRequestId = ref<string | null>(null);
+  const currentCleanup = ref<(() => void) | null>(null);
 
   const onInvoke = async (payload: AIRequestOptions): AsyncResult<{ text: string }, { message: string }> => {
     const [error, provider] = await resolveProvider(payload);
@@ -79,27 +80,33 @@ export function useChat(options: UseStreamOptions) {
     currentRequestId.value = requestId;
 
     const cleanupText = electronAPI.onAiStreamText((content) => {
+      if (currentRequestId.value !== requestId) return;
       options.onText?.(content);
     });
 
     const cleanupThinking = electronAPI.onAiStreamThinking((thinking) => {
+      if (currentRequestId.value !== requestId) return;
       options.onThinking?.(thinking);
     });
 
     const cleanupFinish = electronAPI.onAiStreamFinish((finishChunk) => {
+      if (currentRequestId.value !== requestId) return;
       options.onFinish?.(finishChunk);
     });
 
     const cleanupToolCall = electronAPI.onAiStreamToolCall((toolCallChunk) => {
+      if (currentRequestId.value !== requestId) return;
       options.onToolCall?.(toolCallChunk);
     });
 
     const cleanupComplete = electronAPI.onAiStreamComplete(() => {
+      if (currentRequestId.value !== requestId) return;
       options.onComplete?.();
       cleanupAll();
     });
 
     const cleanupError = electronAPI.onAiStreamError((err) => {
+      if (currentRequestId.value !== requestId) return;
       _onError(err as AIServiceError);
     });
 
@@ -112,7 +119,10 @@ export function useChat(options: UseStreamOptions) {
       cleanupError();
       // 只有当前请求 ID 与当前请求 ID 一致时才重置为 null
       currentRequestId.value === requestId && (currentRequestId.value = null);
+      currentCleanup.value === cleanupAll && (currentCleanup.value = null);
     }
+
+    currentCleanup.value = cleanupAll;
 
     try {
       await electronAPI.aiStream(provider, cloneDeep({ ...payload, requestId }));
@@ -128,6 +138,7 @@ export function useChat(options: UseStreamOptions) {
     if (!currentRequestId.value) return;
 
     electronAPI.aiStreamAbort(currentRequestId.value);
+    currentCleanup.value?.();
     currentRequestId.value = null;
     options.onComplete?.();
   };

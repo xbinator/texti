@@ -2,12 +2,13 @@
   <div class="editor-sidebar">
     <div class="sidebar-header">
       <div class="sidebar-header__title truncate">{{ currentSession?.title || '新会话' }}</div>
-      <BButton square size="small" type="text" @click="handleNewSession">
+      <BButton square size="small" type="text" :disabled="chatBusy" @click="handleNewSession">
         <Icon icon="lucide:message-circle-plus" width="16" height="16" />
       </BButton>
       <SessionHistory
         :sessions="sessions"
         :active-session-id="settingStore.chatSidebarActiveSessionId"
+        :disabled="chatBusy"
         @delete-session="handleDeleteSession"
         @switch-session="handleSwitchSession"
       />
@@ -24,6 +25,7 @@
         :on-confirmation-action="handleConfirmationAction"
         :tools="tools"
         :get-tool-context="editorToolContextRegistry.getCurrentContext"
+        @busy-change="handleChatBusyChange"
         @complete="handleComplete"
       >
         <template #empty>
@@ -72,6 +74,7 @@ const sessions = ref<ChatSession[]>([]);
 const loading = ref(false);
 const historyLoading = ref(false);
 const hasMoreHistory = ref(false);
+const chatBusy = ref(false);
 const chatRef = ref<{ focusInput: () => void } | null>(null);
 const confirmationController = createChatConfirmationController({
   getMessages: () => messages.value
@@ -175,7 +178,17 @@ async function handleComplete(message: Message): Promise<void> {
   await chatStore.addSessionMessage(settingStore.chatSidebarActiveSessionId, message);
 }
 
+/**
+ * 同步聊天组件的流式输出状态。
+ * @param busy - 是否正在输出
+ */
+function handleChatBusyChange(busy: boolean): void {
+  chatBusy.value = busy;
+}
+
 async function handleNewSession(): Promise<void> {
+  if (chatBusy.value) return;
+
   confirmationController.dispose();
   settingStore.setChatSidebarActiveSessionId(null);
   messages.value = [];
@@ -204,6 +217,7 @@ async function loadSessions(): Promise<void> {
 }
 
 async function handleSwitchSession(sessionId: string): Promise<void> {
+  if (chatBusy.value) return;
   if (loading.value) return;
 
   loading.value = true;
@@ -242,6 +256,8 @@ async function handleLoadHistory(): Promise<void> {
 }
 
 async function handleDeleteSession(sessionId: string): Promise<void> {
+  if (chatBusy.value) return;
+
   const index = sessions.value.findIndex((session) => session.id === sessionId);
   if (index === -1) return;
 

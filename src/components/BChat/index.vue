@@ -47,7 +47,7 @@ import type { CachedModelMessagesResult } from './message';
 import type { BChatProps as Props, Message, ServiceConfig, ToolLoopGuardConfig } from './types';
 import type { AIServiceError, AIStreamFinishChunk, AIStreamToolCallChunk } from 'types/ai';
 import type { AIUserChoiceAnswerData, ChatMessageConfirmationAction } from 'types/chat';
-import { nextTick, ref } from 'vue';
+import { nextTick, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { message as aMessage } from 'ant-design-vue';
 import { nanoid } from 'nanoid';
@@ -88,7 +88,10 @@ const props = withDefaults(defineProps<Props>(), {
   placeholder: '输入消息...'
 });
 
-const emit = defineEmits<{ (e: 'complete', message: Message): void }>();
+const emit = defineEmits<{
+  (e: 'complete', message: Message): void;
+  (e: 'busy-change', busy: boolean): void;
+}>();
 
 const inputValue = defineModel<string>('inputValue', { default: '' });
 const messages = defineModel<Message[]>('messages', { default: () => [] });
@@ -129,6 +132,10 @@ let currentToolRoundId = 0;
 let currentToolCallTracker: ToolCallTracker = createToolCallTracker();
 let currentToolLoopGuard: ToolLoopGuard = createToolLoopGuard(TOOL_LOOP_GUARD_CONFIG);
 let currentModelMessageCache: CachedModelMessagesResult | undefined;
+
+watch(loading, (value) => {
+  emit('busy-change', value);
+});
 
 /**
  * 为一次新的流式请求切换到新的异步跟踪上下文。

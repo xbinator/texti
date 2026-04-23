@@ -26,6 +26,21 @@ describe('BChat focus exposure', () => {
   });
 });
 
+describe('BChat stream busy state', () => {
+  test('notifies busy state and disables sidebar session changes while streaming', () => {
+    const chatSource = readSource('src/components/BChat/index.vue');
+    const sidebarSource = readSource('src/components/BChatSidebar/index.vue');
+    const sessionHistorySource = readSource('src/components/BChatSidebar/components/SessionHistory.vue');
+
+    expect(chatSource).toContain("(e: 'busy-change', busy: boolean): void;");
+    expect(chatSource).toContain("emit('busy-change', value);");
+    expect(sidebarSource).toContain(':disabled="chatBusy"');
+    expect(sidebarSource).toContain('@busy-change="handleChatBusyChange"');
+    expect(sidebarSource).toContain('if (chatBusy.value) return;');
+    expect(sessionHistorySource).toContain('disabled?: boolean;');
+  });
+});
+
 describe('BChat user choice continuation', () => {
   test('resolves service config again when a restored pending choice is answered', () => {
     const source = readSource('src/components/BChat/index.vue');
