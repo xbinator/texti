@@ -162,4 +162,5 @@ describe('useChatStore', () => {
 
     expect(updateSessionUsageMock).toHaveBeenCalledWith('session-1', { inputTokens: 5, outputTokens: 9, totalTokens: 14 });
   });
+
 });

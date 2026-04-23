@@ -21,14 +21,6 @@
             :options="POLISH_SERVICE_CONFIG_OPTIONS"
             :default-prompt="POLISH_DEFAULT_PROMPT"
           />
-
-          <ServiceConfig
-            service-type="topic-naming"
-            title="话题自动命名助理"
-            description="指定用于自动生成话题名称的模型"
-            :options="TOPIC_NAMING_SERVICE_CONFIG_OPTIONS"
-            :default-prompt="TOPIC_NAMING_DEFAULT_PROMPT"
-          />
         </div>
       </BScrollbar>
     </div>
@@ -38,13 +30,7 @@
 <script setup lang="ts">
 import BScrollbar from '@/components/BScrollbar/index.vue';
 import ServiceConfig from './components/ServiceConfig.vue';
-import {
-  CHAT_SERVICE_CONFIG_OPTIONS,
-  POLISH_DEFAULT_PROMPT,
-  POLISH_SERVICE_CONFIG_OPTIONS,
-  TOPIC_NAMING_DEFAULT_PROMPT,
-  TOPIC_NAMING_SERVICE_CONFIG_OPTIONS
-} from './constants';
+import { CHAT_SERVICE_CONFIG_OPTIONS, POLISH_DEFAULT_PROMPT, POLISH_SERVICE_CONFIG_OPTIONS } from './constants';
 </script>
 
 <style scoped lang="less">

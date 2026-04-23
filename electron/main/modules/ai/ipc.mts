@@ -6,7 +6,6 @@ import type { WebContents } from 'electron';
 import type { AICreateOptions, AIRequestOptions } from 'types/ai';
 import { ipcMain } from 'electron';
 import { getWindowFromWebContents } from '../../window.mjs';
-import { log } from '../logger/service.mjs';
 import { aiService } from './service.mjs';
 
 function emitTextDelta(text: string, isThinking: { value: boolean }, webContents: WebContents): void {
@@ -82,7 +81,6 @@ export function registerAIHandlers(): void {
           // 思考状态更新
           win.webContents.send('ai:stream:thinking', chunk.text);
         } else if (chunk.type === 'tool-call') {
-          log.log('🚀 ~ onStream ~ toolCallChunk:', chunk);
           // 工具调用
           win.webContents.send('ai:stream:tool-call', { toolCallId: chunk.toolCallId, toolName: chunk.toolName, input: chunk.input });
         } else if (chunk.type === 'error') {

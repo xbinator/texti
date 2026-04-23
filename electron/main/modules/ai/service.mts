@@ -5,6 +5,7 @@
 import type { AICreateOptions, AIRequestOptions, AIInvokeResult, AIStreamResult, AIServiceError } from 'types/ai';
 import { generateText, jsonSchema, streamText, tool } from 'ai';
 import { log } from '../logger/service.mjs';
+import { AI_ERROR_CODE } from './errors/codes.mjs';
 import { AIProviderRegistry } from './providers/_index.mjs';
 
 /**
@@ -24,6 +25,30 @@ function toSdkTools(tools: AIRequestOptions['tools']) {
       })
     ])
   );
+}
+
+/**
+ * 判断错误是否属于可预期的临时服务问题。
+ * @param error - 标准化 AI 错误
+ * @returns 是否应该使用简短日志输出
+ */
+function isExpectedTransientError(error: AIServiceError): boolean {
+  return error.code === AI_ERROR_CODE.RATE_LIMITED || error.code === AI_ERROR_CODE.SERVICE_UNAVAILABLE;
+}
+
+/**
+ * 记录 AI 服务调用错误，避免限流/过载类错误刷出冗长堆栈。
+ * @param scope - 调用范围
+ * @param error - 原始错误
+ * @param normalizedError - 标准化错误
+ */
+function logAIServiceError(scope: string, error: unknown, normalizedError: AIServiceError): void {
+  if (isExpectedTransientError(normalizedError)) {
+    log.warn(`[AIService] ${scope} ${normalizedError.code}:`, normalizedError.message);
+    return;
+  }
+
+  log.error(`[AIService] ${scope} error:`, error);
 }
 
 /**
@@ -90,9 +115,10 @@ class AIService {
 
       return [undefined, { text: result.text, usage: { inputTokens, outputTokens, totalTokens } }];
     } catch (error: unknown) {
-      log.error('[AIService] generateText error:', error);
+      const normalizedError = this.aiProvider.normalizeError(error, createOptions.providerType);
+      logAIServiceError('generateText', error, normalizedError);
 
-      return [this.aiProvider.normalizeError(error, createOptions.providerType)];
+      return [normalizedError];
     }
   }
 
@@ -125,9 +151,10 @@ class AIService {
 
       return [undefined, { stream: result.fullStream }];
     } catch (error: unknown) {
-      log.error('[AIService] streamText error:', error);
+      const normalizedError = this.aiProvider.normalizeError(error, createOptions.providerType);
+      logAIServiceError('streamText', error, normalizedError);
 
-      return [this.aiProvider.normalizeError(error, createOptions.providerType)];
+      return [normalizedError];
     }
   }
 }

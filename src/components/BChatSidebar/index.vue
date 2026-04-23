@@ -185,7 +185,7 @@ async function handleBeforeSend(message: Message): Promise<void> {
   confirmationController.expirePendingConfirmation();
 
   if (!settingStore.chatSidebarActiveSessionId) {
-    // 没有激活会话时创建新会话，使用消息内容作为标题
+    // 没有激活会话时创建新会话，使用消息内容作为标题。
     const session = await chatStore.createSession(CHAT_SESSION_TYPE, { title: message.content });
 
     settingStore.setChatSidebarActiveSessionId(session.id);
