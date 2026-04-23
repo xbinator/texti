@@ -42,7 +42,7 @@ function isActive(key: SettingsMenuKey): boolean {
 <style scoped lang="less">
 .settings-container {
   --sidebar-width-large: 280px;
-  --sidebar-width-small: 60px;
+  --sidebar-width-small: 42px;
 
   display: flex;
   height: 100%;
@@ -54,7 +54,7 @@ function isActive(key: SettingsMenuKey): boolean {
   flex-direction: column;
   width: var(--sidebar-width-large);
   height: 100%;
-  padding: 16px 14px 12px 8px;
+  padding: 16px 8px 12px 2px;
   overflow-y: auto;
   transition: width 0.3s ease;
 
@@ -95,7 +95,7 @@ function isActive(key: SettingsMenuKey): boolean {
   gap: 12px;
   align-items: center;
   justify-content: flex-start;
-  height: 38px;
+  height: 32px;
   padding: 0 14px;
   margin-bottom: 8px;
   font-size: 14px;
@@ -112,7 +112,6 @@ function isActive(key: SettingsMenuKey): boolean {
   }
 
   &.active {
-    font-weight: 500;
     color: var(--text-primary);
     background: var(--color-primary-bg);
   }
@@ -135,7 +134,7 @@ function isActive(key: SettingsMenuKey): boolean {
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 38px;
+  height: 32px;
   margin-top: auto;
   color: var(--text-secondary);
   cursor: pointer;
