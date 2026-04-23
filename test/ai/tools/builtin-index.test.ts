@@ -42,12 +42,7 @@ function getToolNames(includeWriteTools = false): string[] {
 
 describe('createBuiltinTools', () => {
   it('returns read tools by default', () => {
-    expect(getToolNames()).toEqual([
-      'read_current_document',
-      'get_current_time',
-      'search_current_document',
-      'ask_user_choice'
-    ]);
+    expect(getToolNames()).toEqual(['read_current_document', 'get_current_time', 'search_current_document', 'ask_user_choice']);
   });
 
   it('only exposes low-risk write tools by default when confirmation is available', () => {
@@ -56,7 +51,8 @@ describe('createBuiltinTools', () => {
       'get_current_time',
       'search_current_document',
       'ask_user_choice',
-      'insert_at_cursor'
+      'insert_at_cursor',
+      'update_settings'
     ]);
   });
 
@@ -75,6 +71,7 @@ describe('createBuiltinTools', () => {
       'search_current_document',
       'ask_user_choice',
       'insert_at_cursor',
+      'update_settings',
       'replace_selection',
       'replace_document'
     ]);

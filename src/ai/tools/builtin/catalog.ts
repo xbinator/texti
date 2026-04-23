@@ -11,7 +11,7 @@ export const DEFAULT_BUILTIN_READONLY_TOOL_NAMES = ['read_current_document', 'ge
 /**
  * 默认开放的低风险写入内置工具名称列表。
  */
-export const DEFAULT_BUILTIN_WRITABLE_TOOL_NAMES = ['insert_at_cursor'] as const;
+export const DEFAULT_BUILTIN_WRITABLE_TOOL_NAMES = ['insert_at_cursor', 'update_settings'] as const;
 
 /**
  * 获取默认聊天工具名称列表。

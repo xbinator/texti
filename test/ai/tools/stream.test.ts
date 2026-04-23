@@ -40,6 +40,24 @@ const echoTool: AIToolExecutor<{ value: string }, { value: string }> = {
   }
 };
 
+const contextFreeTool: AIToolExecutor<Record<string, never>, { applied: true }> = {
+  definition: {
+    name: 'context_free',
+    description: 'Context free tool',
+    source: 'builtin',
+    permission: 'write',
+    requiresActiveDocument: false,
+    parameters: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false
+    }
+  },
+  async execute() {
+    return createToolSuccessResult('context_free', { applied: true });
+  }
+};
+
 describe('AI tool stream helpers', () => {
   it('converts executors to transport tools', () => {
     expect(toTransportTools([echoTool])).toEqual([
@@ -122,6 +140,16 @@ describe('AI tool stream helpers', () => {
 
     expect(result.result.status).toBe('failure');
     expect(result.result.error?.code).toBe('NO_ACTIVE_DOCUMENT');
+  });
+
+  it('executes tools that do not require an active document without editor context', async () => {
+    const result = await executeToolCall({ toolCallId: 'call-4', toolName: 'context_free', input: {} }, [contextFreeTool], undefined);
+
+    expect(result.result).toEqual({
+      toolName: 'context_free',
+      status: 'success',
+      data: { applied: true }
+    });
   });
 
   it('creates tool-result model messages from executed tool calls', () => {

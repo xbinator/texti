@@ -83,6 +83,8 @@ export interface AIToolDefinition {
   permission: AIToolPermission;
   /** Parameter schema. */
   parameters: AIToolParameterSchema;
+  /** Whether this tool needs the current editor document context. Defaults to true. */
+  requiresActiveDocument?: boolean;
 }
 
 /**
@@ -229,10 +231,10 @@ export interface AIToolExecutor<TInput = unknown, TResult = unknown> {
   /**
    * Execute the tool.
    * @param input - Tool input.
-   * @param context - Execution context.
+   * @param context - Execution context, omitted for tools that do not require an active document.
    * @returns Tool execution result.
    */
-  execute(input: TInput, context: AIToolContext): Promise<AIToolExecutionResult<TResult>>;
+  execute(input: TInput, context?: AIToolContext): Promise<AIToolExecutionResult<TResult>>;
 }
 
 export interface AICreateOptions {

@@ -9,6 +9,7 @@ import { createAskUserChoiceTool, type PendingQuestionSnapshot } from './ask-use
 import { isDefaultBuiltinReadonlyToolName, isDefaultBuiltinWritableToolName } from './catalog';
 import { createBuiltinEnvironmentTools } from './environment';
 import { createBuiltinReadTools } from './read';
+import { createBuiltinSettingsTools } from './settings';
 import { createBuiltinWriteTools } from './write';
 
 /**
@@ -56,8 +57,10 @@ export function createBuiltinTools(options: CreateBuiltinToolsOptions = {}): AIT
 
   // 创建写入工具
   const writeTools = createBuiltinWriteTools(options.confirm);
+  // 创建设置修改工具
+  const settingsTools = createBuiltinSettingsTools(options.confirm);
   // 先汇总默认低风险写工具，再通过共享清单筛选默认暴露项。
-  const allDefaultWritableTools: AIToolExecutor[] = [writeTools.insertAtCursor];
+  const allDefaultWritableTools: AIToolExecutor[] = [writeTools.insertAtCursor, settingsTools.updateSettings];
   const writableTools = allDefaultWritableTools.filter((tool) => isDefaultBuiltinWritableToolName(tool.definition.name));
 
   // 聊天侧默认只放开低风险写工具，替换类操作需要显式开启

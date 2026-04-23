@@ -84,8 +84,8 @@ export async function executeToolCall(call: AIStreamToolCallChunk, tools: AITool
     };
   }
 
-  // 检查上下文是否可用
-  if (!context) {
+  // 仅文档类工具需要活动编辑器上下文；全局工具（如设置修改）可在无文档时执行。
+  if (executor.definition.requiresActiveDocument !== false && !context) {
     return {
       toolCallId: call.toolCallId,
       toolName: call.toolName,

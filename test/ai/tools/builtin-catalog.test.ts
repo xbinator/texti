@@ -13,16 +13,11 @@ import {
 
 describe('built-in tool catalog', () => {
   it('exposes the default readonly tool names', () => {
-    expect([...DEFAULT_BUILTIN_READONLY_TOOL_NAMES]).toEqual([
-      'read_current_document',
-      'get_current_time',
-      'search_current_document',
-      'ask_user_choice'
-    ]);
+    expect([...DEFAULT_BUILTIN_READONLY_TOOL_NAMES]).toEqual(['read_current_document', 'get_current_time', 'search_current_document', 'ask_user_choice']);
   });
 
   it('exposes the default low-risk writable tool names', () => {
-    expect([...DEFAULT_BUILTIN_WRITABLE_TOOL_NAMES]).toEqual(['insert_at_cursor']);
+    expect([...DEFAULT_BUILTIN_WRITABLE_TOOL_NAMES]).toEqual(['insert_at_cursor', 'update_settings']);
   });
 
   it('combines readonly and writable tools for chat defaults', () => {
@@ -31,7 +26,8 @@ describe('built-in tool catalog', () => {
       'get_current_time',
       'search_current_document',
       'ask_user_choice',
-      'insert_at_cursor'
+      'insert_at_cursor',
+      'update_settings'
     ]);
   });
 
