@@ -44,4 +44,10 @@ describe('built-in environment tools', () => {
     });
     expect(new Date(result.data.iso).toISOString()).toBe(result.data.iso);
   });
+
+  it('does not require an active editor document', () => {
+    const tools = createBuiltinEnvironmentTools();
+
+    expect(tools.getCurrentTime.definition.requiresActiveDocument).toBe(false);
+  });
 });

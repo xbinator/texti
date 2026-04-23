@@ -133,6 +133,8 @@ export function createAskUserChoiceTool(options: CreateAskUserChoiceToolOptions)
       description: '向用户发起单选或多选问题，并等待用户选择后继续。',
       source: 'builtin',
       riskLevel: 'read',
+      permissionCategory: 'system',
+      requiresActiveDocument: false,
       parameters: {
         type: 'object',
         properties: {

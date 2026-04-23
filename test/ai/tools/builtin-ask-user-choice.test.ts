@@ -28,6 +28,15 @@ function createContext(): AIToolContext {
 }
 
 describe('createAskUserChoiceTool', () => {
+  it('does not require an active editor document', () => {
+    const tool = createAskUserChoiceTool({
+      getPendingQuestion: () => null,
+      createQuestionId: () => 'question-global'
+    });
+
+    expect(tool.definition.requiresActiveDocument).toBe(false);
+  });
+
   it('returns awaiting user input for a valid single-choice question', async () => {
     const tool = createAskUserChoiceTool({
       getPendingQuestion: () => null,

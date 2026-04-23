@@ -37,6 +37,8 @@ export function createBuiltinEnvironmentTools(): BuiltinEnvironmentTools {
         description: '获取当前系统时间，返回 ISO、时间戳和本地格式化字符串。',
         source: 'builtin',
         riskLevel: 'read',
+        permissionCategory: 'system',
+        requiresActiveDocument: false,
         parameters: { type: 'object', properties: {}, additionalProperties: false }
       },
       async execute() {
