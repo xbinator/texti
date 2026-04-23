@@ -7,7 +7,7 @@
 - 输入框里看到的是 chip，聊天气泡里却被改写成普通文本，显示层不一致。
 - 模型上下文依赖路径和即时展开逻辑，未保存文件、重名临时文件和历史重放都不够稳定。
 
-本次设计要把“可见消息”和“模型上下文”彻底拆开：聊天消息始终保留用户看到的 chip 形态，模型使用单独构建的引用上下文；同时把 `file-ref` 的定位主键从路径切换为文档 `id`，避免未保存文件路径缺失或重复的问题。
+本次设计要把“可见消息”和“模型上下文”拆开：聊天消息始终保留用户看到的 chip 形态，模型使用单独构建的引用上下文；同时把 `file-ref` 的定位主键从路径切换为文档 `id`，避免未保存文件路径缺失或重复的问题。
 
 ## 目标
 
@@ -23,10 +23,11 @@
 - 本阶段不让 `excerpt` 参与模型上下文构建。
 - 本阶段不引入可配置阈值面板，三档阈值先写死在实现里。
 - 本阶段不设计引用外部网页、数据库记录或非文档型上下文资产，只覆盖编辑器文档引用。
+- 本阶段不实现孤儿 `snapshot` 与 `summary` 的自动清理；会话删除后数据暂时保留，后续再单独设计清理策略。
 
 ## 核心设计
 
-### 一、显示层与模型层分离
+### 显示层与模型层分离
 
 用户消息正文继续保存 `file-ref` token，用于输入框和聊天气泡的可见渲染。模型侧不直接消费这些 token，而是在消息转换为 `ModelMessage` 时，读取引用元数据和快照，额外构建引用上下文。
 
@@ -36,7 +37,7 @@
 - `references` 负责“正文中的 token 对应哪一个内联引用”。
 - `snapshot` 和 `summary` 负责“发送当时给模型使用的事实材料”。
 
-### 二、引用数据与附件数据分离
+### 引用数据与附件数据分离
 
 `file-reference` 不挂在 `files` 中，而是单独使用 `references` 字段。
 
@@ -86,6 +87,24 @@ interface ChatMessageFileReference {
 - `snapshotId`：指向发送时文档快照。
 - `excerpt`：只用于 UI 预览，例如 hover、历史列表提示，不参与模型上下文构建。
 
+### line 解析契约
+
+`line` 虽然使用 `string` 存储，但语义只允许两种格式：
+
+- 单行：`"12"`
+- 闭区间范围：`"12-18"`
+
+实现中的 `parseLineRange` 需要遵守下面的固定规则：
+
+- 输入单行时，返回 `start = end = 12`。
+- 输入闭区间时，返回 `start = 12`、`end = 18`。
+- 行号使用 1-based，与编辑器界面显示的行号保持一致。
+- 只接受正整数行号，不接受 `0`、负数、小数和空字符串。
+- 范围必须满足 `start <= end`。
+- 解析失败时不抛异常，调用方仍按文档总行数走三档策略，但跳过局部片段裁剪：
+  - 小文档继续注入全文。
+  - 中文档和超长文档只注入概览层，不注入局部片段层。
+
 ### ChatReferenceSnapshot
 
 ```ts
@@ -99,6 +118,10 @@ interface ChatReferenceSnapshot {
 ```
 
 `snapshot` 保存发送时的原始文档事实，是模型上下文的唯一事实源。历史重放时只依赖它，不依赖当前活动编辑器是否还开着、文件路径是否变化、文件内容是否已被用户改写。
+
+### snapshot 复用策略
+
+同一 `documentId` 在同一次发送中只生成一份 `snapshot`，多个 `reference` 可以共享同一个 `snapshotId`。跨消息不复用 `snapshot`，每次发送都生成独立快照，保证历史语义互不干扰。
 
 ### ChatReferenceSummary
 
@@ -128,7 +151,7 @@ interface ChatReferenceSummary {
 - token 只用于消息正文和 `references[]` 之间建立稳定映射。
 - token 不承载路径、行号或 JSON 负载，避免正文过重和解析脆弱。
 - 聊天气泡渲染时根据 `token -> reference` 映射恢复 chip。
-- 手动粘贴 token 到输入框时，如果能在当前消息草稿里找到对应 `reference`，则自动还原为 chip；找不到则按普通文本保留。
+- 手动粘贴 token 到输入框时，只允许在当前消息草稿的 `references` 集合里查找对应 `reference`；找不到则按普通文本保留，不做跨消息或全局查找。
 
 ## 发送与持久化流程
 
@@ -148,7 +171,7 @@ interface ChatReferenceSummary {
 
 1. 正文 `content` 原样进入用户消息，保持 token 不变。
 2. 从当前活动编辑器上下文按 `documentId` 读取文档内容。
-3. 为每个引用创建 `snapshot`。
+3. 同一 `documentId` 在本次发送内只创建一份 `snapshot`，多个引用共享该 `snapshotId`。
 4. 将 `references` 与 `snapshotId` 一起写入消息记录。
 5. 模型上下文构建器读取 `references + snapshot`，按固定策略生成引用上下文。
 
@@ -249,11 +272,13 @@ interface ChatReferenceSummary {
 - 将 `file-ref` token 改为 `{{file-ref:ref_xxx}}`。
 - 新增 `references` 字段。
 - 聊天气泡支持按 `token -> reference` 渲染 chip。
-- 发送时不再改写用户正文。
+- 输入框和聊天气泡的显示统一基于 `content + references`。
+- 阶段一暂时保留现有发送逻辑不变，仅完成显示层统一；正文停止改写在阶段二随 `snapshot` 一起落地。
 
 ### 阶段二：快照与固定三档策略
 
 - 发送时生成 `snapshot`。
+- 发送阶段停止改写用户正文，改由 `snapshot` 构建模型引用上下文。
 - 模型上下文改为从 `snapshot` 构建。
 - 落地固定三档阈值与规则概览。
 
@@ -268,7 +293,10 @@ interface ChatReferenceSummary {
 - 插入 `file-ref` 后，输入框和聊天气泡显示一致。
 - 用户消息发送后，`content` 仍保存 token，不被展开为路径文本。
 - 未保存文件使用 `documentId` 仍能唯一引用，不受路径为空影响。
+- 同一次发送中相同 `documentId` 的多个引用共享同一个 `snapshotId`，跨消息不复用 `snapshot`。
 - 历史重放时，即便当前编辑器关闭，仍可用 `snapshot` 生成模型上下文。
+- `parseLineRange` 对单行、范围和非法输入的行为符合约定，非法输入不会阻塞发送。
 - 小文档命中全文策略，中文档命中局部片段策略，超长文档命中概览加片段策略。
 - `excerpt` 仅影响 UI 预览，不影响模型上下文。
+- 手动粘贴 token 只在当前草稿的 `references` 范围内尝试还原，不会跨消息串联引用。
 - 动态摘要失败时，会回退到规则概览，不阻塞发送。
