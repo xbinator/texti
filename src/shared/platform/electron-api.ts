@@ -6,6 +6,8 @@ export type {
   ElectronDialogFilter,
   ElectronFileResult,
   ElectronOpenFileOptions,
+  ElectronReadWorkspaceFileOptions,
+  ElectronReadWorkspaceFileResult,
   ElectronSaveFileOptions
 } from 'types/electron-api';
 

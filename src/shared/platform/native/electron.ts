@@ -1,12 +1,16 @@
 /* eslint-disable class-methods-use-this */
+import type { Native, OpenFileOptions, SaveFileOptions, FileChangeEvent, ReadFileResult, ReadWorkspaceFileOptions, ReadWorkspaceFileResult } from './types';
 import type { PlatformRecentFile } from 'types/electron-api';
-import type { Native, OpenFileOptions, SaveFileOptions, FileChangeEvent, ReadFileResult } from './types';
 import { getElectronAPI } from '../electron-api';
 
 export class ElectronNative implements Native {
   async readFile(filePath: string): Promise<ReadFileResult> {
     const result = await getElectronAPI().readFile(filePath);
     return { content: result.content, name: result.fileName, ext: result.ext };
+  }
+
+  async readWorkspaceFile(options: ReadWorkspaceFileOptions): Promise<ReadWorkspaceFileResult> {
+    return getElectronAPI().readWorkspaceFile(options);
   }
 
   async openFile(options?: OpenFileOptions) {

@@ -14,6 +14,7 @@ import { contextBridge, ipcRenderer } from 'electron';
  */
 const electronAPI: ElectronAPI = {
   readFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
+  readWorkspaceFile: (options) => ipcRenderer.invoke('fs:readWorkspaceTextFile', options),
 
   // ==================== 文件对话框操作 ====================
 

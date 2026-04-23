@@ -9,6 +9,7 @@ import { createAskUserChoiceTool, type PendingQuestionSnapshot } from './ask-use
 import { isDefaultBuiltinReadonlyToolName, isDefaultBuiltinWritableToolName } from './catalog';
 import { createBuiltinEnvironmentTools } from './environment';
 import { createBuiltinReadTools } from './read';
+import { createBuiltinReadFileTool } from './read-file';
 import { createBuiltinSettingsTools } from './settings';
 import { createBuiltinWriteTools } from './write';
 
@@ -26,6 +27,8 @@ interface CreateBuiltinToolsOptions {
   getPendingQuestion?: () => PendingQuestionSnapshot | null;
   /** 创建用户选择问题 ID */
   createQuestionId?: () => string;
+  /** 获取工作区根目录，无工作区时返回 null */
+  getWorkspaceRoot?: () => string | null;
 }
 
 /**
@@ -46,6 +49,10 @@ export function createBuiltinTools(options: CreateBuiltinToolsOptions = {}): AIT
     createAskUserChoiceTool({
       getPendingQuestion: options.getPendingQuestion ?? (() => null),
       createQuestionId: options.createQuestionId ?? (() => nanoid())
+    }),
+    createBuiltinReadFileTool({
+      confirm: options.confirm,
+      getWorkspaceRoot: options.getWorkspaceRoot
     })
   ];
   const readonlyTools = allReadonlyTools.filter((tool) => isDefaultBuiltinReadonlyToolName(tool.definition.name));

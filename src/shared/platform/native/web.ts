@@ -1,10 +1,26 @@
 /* eslint-disable class-methods-use-this */
+import type {
+  Native,
+  OpenFileOptions,
+  SaveFileOptions,
+  File,
+  FileChangeEvent,
+  ReadFileResult,
+  ReadWorkspaceFileOptions,
+  ReadWorkspaceFileResult
+} from './types';
 import type { PlatformRecentFile } from 'types/electron-api';
-import type { Native, OpenFileOptions, SaveFileOptions, File, FileChangeEvent, ReadFileResult } from './types';
 
 export class WebNative implements Native {
   async readFile(): Promise<ReadFileResult> {
     throw new Error('Web platform does not support reading files by path');
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async readWorkspaceFile(_options: ReadWorkspaceFileOptions): Promise<ReadWorkspaceFileResult> {
+    const error = new Error('Web platform does not support reading files by path') as Error & { code: 'UNSUPPORTED_PROVIDER' };
+    error.code = 'UNSUPPORTED_PROVIDER';
+    throw error;
   }
 
   async openFile(options?: OpenFileOptions) {

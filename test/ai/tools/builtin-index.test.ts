@@ -42,7 +42,7 @@ function getToolNames(includeWriteTools = false): string[] {
 
 describe('createBuiltinTools', () => {
   it('returns read tools by default', () => {
-    expect(getToolNames()).toEqual(['read_current_document', 'get_current_time', 'search_current_document', 'ask_user_choice']);
+    expect(getToolNames()).toEqual(['read_current_document', 'get_current_time', 'search_current_document', 'ask_user_choice', 'read_file']);
   });
 
   it('only exposes low-risk write tools by default when confirmation is available', () => {
@@ -51,6 +51,7 @@ describe('createBuiltinTools', () => {
       'get_current_time',
       'search_current_document',
       'ask_user_choice',
+      'read_file',
       'insert_at_cursor',
       'update_settings'
     ]);
@@ -70,6 +71,7 @@ describe('createBuiltinTools', () => {
       'get_current_time',
       'search_current_document',
       'ask_user_choice',
+      'read_file',
       'insert_at_cursor',
       'update_settings',
       'replace_selection',
@@ -120,6 +122,20 @@ describe('createBuiltinTools', () => {
     expect(result).toMatchObject({
       status: 'failure',
       error: { code: 'EXECUTION_FAILED' }
+    });
+  });
+
+  it('passes workspace root provider to read_file', async () => {
+    const tools = createBuiltinTools({
+      getWorkspaceRoot: () => '/workspace'
+    });
+    const readFileTool = tools.find((tool) => tool.definition.name === 'read_file');
+
+    const result = await readFileTool?.execute({ path: 'missing.ts' }, createToolContext());
+
+    expect(result).toMatchObject({
+      status: 'failure',
+      error: { code: 'UNSUPPORTED_PROVIDER' }
     });
   });
 });
