@@ -1,4 +1,4 @@
-import type { ElectronDialogFilter, ElectronOpenFileOptions, ElectronSaveFileOptions } from 'types/electron-api';
+import type { ElectronDialogFilter, ElectronOpenFileOptions, ElectronSaveFileOptions, PlatformRecentFile } from 'types/electron-api';
 
 export type FileFilter = ElectronDialogFilter;
 
@@ -57,4 +57,6 @@ export interface Native {
   onMenuAction?(callback: (action: string) => void): () => void;
 
   updateMenuItem?(id: string, properties: { checked?: boolean }): void;
+
+  syncPlatformRecentFiles?(files: PlatformRecentFile[]): Promise<void>;
 }

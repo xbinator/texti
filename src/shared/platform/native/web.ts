@@ -1,4 +1,5 @@
 /* eslint-disable class-methods-use-this */
+import type { PlatformRecentFile } from 'types/electron-api';
 import type { Native, OpenFileOptions, SaveFileOptions, File, FileChangeEvent, ReadFileResult } from './types';
 
 export class WebNative implements Native {
@@ -99,5 +100,10 @@ export class WebNative implements Native {
     return () => {
       // web 端不需要清理
     };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async syncPlatformRecentFiles(_files: PlatformRecentFile[]): Promise<void> {
+    // Linux / Web 环境不支持系统快捷入口时安全跳过。
   }
 }

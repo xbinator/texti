@@ -44,6 +44,12 @@ export interface FileChangeEvent {
   content?: string;
 }
 
+export interface PlatformRecentFile {
+  id: string;
+  name: string;
+  path: string | null;
+}
+
 export interface ElectronAPI {
   readFile: (filePath: string) => Promise<ElectronReadFileResult>;
 
@@ -107,6 +113,7 @@ export interface ElectronAPI {
   // 菜单操作
   onMenuAction: (callback: (action: string) => void) => () => void;
   updateMenuItem: (id: string, properties: { checked?: boolean }) => void;
+  syncPlatformRecentFiles: (files: PlatformRecentFile[]) => Promise<void>;
 }
 
 declare global {

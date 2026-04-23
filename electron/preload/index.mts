@@ -242,7 +242,9 @@ const electronAPI: ElectronAPI = {
 
   updateMenuItem: (id: string, properties: { checked?: boolean }) => {
     ipcRenderer.send('menu:update-item', id, properties);
-  }
+  },
+
+  syncPlatformRecentFiles: (files) => ipcRenderer.invoke('platform-shortcuts:sync-recent-files', files)
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

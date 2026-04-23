@@ -1,4 +1,5 @@
 /* eslint-disable class-methods-use-this */
+import type { PlatformRecentFile } from 'types/electron-api';
 import type { Native, OpenFileOptions, SaveFileOptions, FileChangeEvent, ReadFileResult } from './types';
 import { getElectronAPI } from '../electron-api';
 
@@ -79,5 +80,9 @@ export class ElectronNative implements Native {
 
   onMenuAction(callback: (action: string) => void): () => void {
     return getElectronAPI().onMenuAction(callback);
+  }
+
+  async syncPlatformRecentFiles(files: PlatformRecentFile[]): Promise<void> {
+    await getElectronAPI().syncPlatformRecentFiles(files);
   }
 }

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import type { StoredFile } from '@/shared/storage';
+import { native } from '@/shared/platform';
 import { recentFilesStorage } from '@/shared/storage';
 
 export interface FilesState {
@@ -16,6 +17,7 @@ export const useFilesStore = defineStore('files', {
       if (this.recentFiles !== null) return;
 
       this.recentFiles = await recentFilesStorage.getAllRecentFiles();
+      await this.syncPlatformRecentFiles();
     },
 
     async getFileById(id: string) {
@@ -34,6 +36,7 @@ export const useFilesStore = defineStore('files', {
       await recentFilesStorage.addRecentFile(file);
       if (this.recentFiles === null) {
         this.recentFiles = [file];
+        await this.syncPlatformRecentFiles();
         return;
       }
       const index = this.recentFiles.findIndex((f) => f.id === file.id);
@@ -43,6 +46,7 @@ export const useFilesStore = defineStore('files', {
       } else {
         this.recentFiles[index] = file;
       }
+      await this.syncPlatformRecentFiles();
     },
 
     async updateFile(id: string, file: StoredFile) {
@@ -52,17 +56,35 @@ export const useFilesStore = defineStore('files', {
       if (index !== -1) {
         this.recentFiles[index] = file;
       }
+      await this.syncPlatformRecentFiles();
     },
 
     async removeFile(...ids: string[]) {
       await recentFilesStorage.removeRecentFile(...ids);
       if (this.recentFiles === null) return;
       this.recentFiles = this.recentFiles.filter((file) => !ids.includes(file.id));
+      await this.syncPlatformRecentFiles();
     },
 
     async clearFiles() {
       await recentFilesStorage.clearRecentFiles();
       this.recentFiles = [];
+      await this.syncPlatformRecentFiles();
+    },
+
+    /**
+     * 将最近文件摘要同步给主进程系统快捷入口，避免正文内容进入系统菜单模型。
+     */
+    async syncPlatformRecentFiles(): Promise<void> {
+      if (!native.syncPlatformRecentFiles || this.recentFiles === null) return;
+
+      await native.syncPlatformRecentFiles(
+        this.recentFiles.map((file) => ({
+          id: file.id,
+          name: file.name,
+          path: file.path
+        }))
+      );
     }
   }
 });

@@ -1,14 +1,68 @@
 import { app, Menu, MenuItemConstructorOptions, BrowserWindow } from 'electron';
 import { getWindow } from '../../window.mjs';
 
+const pendingActions: string[] = [];
+
+/**
+ * 确保窗口可见并聚焦，避免系统快捷入口触发后用户没有可见反馈。
+ * @param win - 需要展示的浏览器窗口
+ */
+function ensureWindowVisible(win: BrowserWindow): void {
+  if (win.isMinimized()) win.restore();
+  if (!win.isVisible()) win.show();
+  win.focus();
+}
+
+/**
+ * 刷新等待页面加载完成后发送的菜单动作。
+ * @param win - 接收动作的浏览器窗口
+ */
+function flushPendingActions(win: BrowserWindow): void {
+  while (pendingActions.length > 0) {
+    const action = pendingActions.shift();
+    if (action) win.webContents.send('menu:action', action);
+  }
+}
+
+/**
+ * 注册页面加载完成后的等待动作刷新逻辑。
+ * @param win - 接收动作的浏览器窗口
+ */
+function registerPendingActionFlush(win: BrowserWindow): void {
+  win.webContents.once('did-finish-load', () => {
+    flushPendingActions(win);
+  });
+}
+
+/**
+ * 向当前可用窗口发送应用菜单动作。
+ * @param action - 菜单动作标识
+ */
+export function sendMenuAction(action: string): void {
+  const win = BrowserWindow.getFocusedWindow() ?? getWindow() ?? BrowserWindow.getAllWindows()[0];
+
+  if (!win) {
+    pendingActions.push(action);
+    return;
+  }
+
+  ensureWindowVisible(win);
+
+  if (win.webContents.isLoadingMainFrame()) {
+    pendingActions.push(action);
+    registerPendingActionFlush(win);
+    return;
+  }
+
+  flushPendingActions(win);
+  win.webContents.send('menu:action', action);
+}
+
+/**
+ * 设置应用系统菜单。
+ */
 export function setupAppMenu(): void {
   const isMac = process.platform === 'darwin';
-
-  const sendAction = (action: string) => {
-    const win = BrowserWindow.getFocusedWindow() ?? getWindow() ?? BrowserWindow.getAllWindows()[0];
-
-    win && win.webContents.send('menu:action', action);
-  };
 
   const template: MenuItemConstructorOptions[] = [];
 
@@ -34,16 +88,16 @@ export function setupAppMenu(): void {
   template.push({
     label: '文件',
     submenu: [
-      { label: '新建', accelerator: 'CmdOrCtrl+Alt+N', click: () => sendAction('file:new') },
+      { label: '新建', accelerator: 'CmdOrCtrl+Alt+N', click: () => sendMenuAction('file:new') },
       { type: 'separator' as const },
-      { label: '打开...', accelerator: 'CmdOrCtrl+Shift+O', click: () => sendAction('file:open') },
-      { label: '打开最近的文件', accelerator: 'CmdOrCtrl+R', click: () => sendAction('file:recent') },
+      { label: '打开...', accelerator: 'CmdOrCtrl+Shift+O', click: () => sendMenuAction('file:open') },
+      { label: '打开最近的文件', accelerator: 'CmdOrCtrl+R', click: () => sendMenuAction('file:recent') },
       { type: 'separator' as const },
-      { label: '复制为新文件', accelerator: 'CmdOrCtrl+Alt+D', click: () => sendAction('file:duplicate') },
-      { label: '保存', accelerator: 'CmdOrCtrl+S', click: () => sendAction('file:save') },
-      { label: '另存为...', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendAction('file:saveAs') },
+      { label: '复制为新文件', accelerator: 'CmdOrCtrl+Alt+D', click: () => sendMenuAction('file:duplicate') },
+      { label: '保存', accelerator: 'CmdOrCtrl+S', click: () => sendMenuAction('file:save') },
+      { label: '另存为...', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendMenuAction('file:saveAs') },
       { type: 'separator' as const },
-      { label: '重命名', accelerator: 'F2', click: () => sendAction('file:rename') },
+      { label: '重命名', accelerator: 'F2', click: () => sendMenuAction('file:rename') },
       { type: 'separator' as const },
       { role: 'close' as const, label: '关闭' }
     ]
@@ -61,9 +115,9 @@ export function setupAppMenu(): void {
       { role: 'paste' as const, label: '粘贴', accelerator: 'CmdOrCtrl+V' },
       { role: 'selectAll' as const, label: '全选', accelerator: 'CmdOrCtrl+A' },
       { type: 'separator' as const },
-      { label: '复制为纯文本', click: () => sendAction('edit:copy-plain-text') },
-      { label: '复制为 Markdown', click: () => sendAction('edit:copy-markdown') },
-      { label: '复制为 HTML 代码', click: () => sendAction('edit:copy-html') }
+      { label: '复制为纯文本', click: () => sendMenuAction('edit:copy-plain-text') },
+      { label: '复制为 Markdown', click: () => sendMenuAction('edit:copy-markdown') },
+      { label: '复制为 HTML 代码', click: () => sendMenuAction('edit:copy-html') }
     ]
   });
 
@@ -71,15 +125,15 @@ export function setupAppMenu(): void {
   template.push({
     label: '视图',
     submenu: [
-      { id: 'view:source', type: 'checkbox', label: '源代码模式', accelerator: 'CmdOrCtrl+E', click: () => sendAction('view:toggleSource') },
-      { id: 'view:outline', type: 'checkbox', label: '大纲', click: () => sendAction('view:toggleOutline') },
+      { id: 'view:source', type: 'checkbox', label: '源代码模式', accelerator: 'CmdOrCtrl+E', click: () => sendMenuAction('view:toggleSource') },
+      { id: 'view:outline', type: 'checkbox', label: '大纲', click: () => sendMenuAction('view:toggleOutline') },
       { type: 'separator' as const },
       {
         label: '主题',
         submenu: [
-          { id: 'theme:light', type: 'checkbox', label: '浅色模式', click: () => sendAction('theme:light') },
-          { id: 'theme:dark', type: 'checkbox', label: '深色模式', click: () => sendAction('theme:dark') },
-          { id: 'theme:system', type: 'checkbox', label: '跟随系统', click: () => sendAction('theme:system') }
+          { id: 'theme:light', type: 'checkbox', label: '浅色模式', click: () => sendMenuAction('theme:light') },
+          { id: 'theme:dark', type: 'checkbox', label: '深色模式', click: () => sendMenuAction('theme:dark') },
+          { id: 'theme:system', type: 'checkbox', label: '跟随系统', click: () => sendMenuAction('theme:system') }
         ]
       },
       { type: 'separator' as const },
@@ -108,7 +162,7 @@ export function setupAppMenu(): void {
   // 帮助菜单（所有平台）
   template.push({
     label: '帮助',
-    submenu: [{ label: '快捷键', accelerator: 'CmdOrCtrl+/', click: () => sendAction('help:shortcuts') }]
+    submenu: [{ label: '快捷键', accelerator: 'CmdOrCtrl+/', click: () => sendMenuAction('help:shortcuts') }]
   });
 
   const menu = Menu.buildFromTemplate(template);

@@ -9,6 +9,11 @@ export function useMenuAction() {
   let unregisterMenuAction: (() => void) | undefined;
 
   function handleMenuAction(action: string) {
+    if (action.startsWith('file:openRecent:')) {
+      emitter.emit('file:openRecent', action.slice('file:openRecent:'.length));
+      return;
+    }
+
     switch (action) {
       case 'file:new':
         emitter.emit('file:new');

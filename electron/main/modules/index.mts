@@ -4,6 +4,7 @@ import { registerDialogHandlers } from './dialog/ipc.mjs';
 import { registerFileHandlers } from './file/ipc.mjs';
 import { registerLoggerHandlers } from './logger/ipc.mjs';
 import { registerMenuHandlers } from './menu/ipc.mjs';
+import { registerPlatformShortcutHandlers } from './platform-shortcuts/ipc.mjs';
 import { registerShellHandlers } from './shell/ipc.mjs';
 import { registerStoreHandlers } from './store/ipc.mjs';
 import { registerWindowHandlers } from './window/ipc.mjs';
@@ -18,6 +19,7 @@ export function registerAllIpcHandlers() {
   registerAIHandlers();
   registerLoggerHandlers();
   registerMenuHandlers();
+  registerPlatformShortcutHandlers();
 }
 
 export {
@@ -28,7 +30,8 @@ export {
   registerStoreHandlers,
   registerShellHandlers,
   registerAIHandlers,
-  registerLoggerHandlers
+  registerLoggerHandlers,
+  registerPlatformShortcutHandlers
 };
 
 export { aiService } from './ai/service.mjs';
@@ -39,4 +42,6 @@ export { initDatabase, closeDatabase, dbExecute, dbSelect, getDbPath } from './d
 
 export { initStore, getStore } from './store/service.mjs';
 
-export { setupAppMenu } from './menu/service.mjs';
+export { setupAppMenu, sendMenuAction } from './menu/service.mjs';
+
+export { getShortcutActionFromArgv, refreshPlatformShortcuts, setPlatformShortcutActionSender } from './platform-shortcuts/service.mjs';

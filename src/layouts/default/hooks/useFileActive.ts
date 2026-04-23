@@ -121,11 +121,25 @@ export function useFileActive(visible: UseFileActiveOptions['visible']) {
     visible.searchRecent = true;
   });
 
+  const unregisterOpenRecent = emitter.on('file:openRecent', async (payload: unknown) => {
+    const id = typeof payload === 'string' ? payload : '';
+    if (!id) return;
+
+    const file = await filesStore.getFileById(id);
+    if (!file) {
+      visible.searchRecent = true;
+      return;
+    }
+
+    router.push({ name: 'editor', params: { id: file.id } });
+  });
+
   onUnmounted(() => {
     cleanup();
     unregisterNew();
     unregisterOpen();
     unregisterRecent();
+    unregisterOpenRecent();
   });
 
   return { toolbarFileOptions };
