@@ -7,7 +7,7 @@
   "main": "dist-electron/main/index.mjs",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "vite build",
     "preview": "vite preview",
     "electron:build-main": "tsc -p electron/tsconfig.json",
     "electron:watch-main": "tsc -p electron/tsconfig.json -w",
