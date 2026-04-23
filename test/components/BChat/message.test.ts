@@ -3,7 +3,19 @@
  * @description BChat 消息工具行为测试
  */
 import { describe, expect, it } from 'vitest';
-import { createErrorMessage, isModelMessage, isPersistableMessage, isRemovableAssistantPlaceholder, toCachedModelMessages, toModelMessages } from '@/components/BChat/message';
+import {
+  appendToolCallPart,
+  appendToolResultPart,
+  createAssistantPlaceholder,
+  createErrorMessage,
+  findPendingUserChoiceQuestion,
+  isModelMessage,
+  isPersistableMessage,
+  isRemovableAssistantPlaceholder,
+  submitUserChoiceAnswer,
+  toCachedModelMessages,
+  toModelMessages
+} from '@/components/BChat/message';
 import type { Message } from '@/components/BChat/types';
 
 /**
@@ -196,5 +208,91 @@ describe('BChat message helpers', () => {
     };
 
     expect(isRemovableAssistantPlaceholder(message)).toBe(false);
+  });
+
+  it('finds an awaiting ask_user_choice question in assistant history', () => {
+    const message = createAssistantPlaceholder();
+
+    appendToolCallPart(message, 'tool-call-1', 'ask_user_choice', { question: '请选择渠道' });
+    appendToolResultPart(message, 'tool-call-1', 'ask_user_choice', {
+      toolName: 'ask_user_choice',
+      status: 'awaiting_user_input',
+      data: {
+        questionId: 'question-1',
+        toolCallId: 'tool-call-1',
+        mode: 'single',
+        question: '请选择渠道',
+        options: [{ label: '官网', value: 'official' }],
+        allowOther: false
+      }
+    });
+
+    expect(findPendingUserChoiceQuestion([message])).toMatchObject({
+      questionId: 'question-1',
+      toolCallId: 'tool-call-1'
+    });
+  });
+
+  it('replaces awaiting ask_user_choice result with the submitted answer for model history', () => {
+    const message = createAssistantPlaceholder();
+
+    appendToolCallPart(message, 'tool-call-1', 'ask_user_choice', { question: '请选择渠道' });
+    appendToolResultPart(message, 'tool-call-1', 'ask_user_choice', {
+      toolName: 'ask_user_choice',
+      status: 'awaiting_user_input',
+      data: {
+        questionId: 'question-1',
+        toolCallId: 'tool-call-1',
+        mode: 'single',
+        question: '请选择渠道',
+        options: [{ label: '官网', value: 'official' }],
+        allowOther: false
+      }
+    });
+
+    const submitted = submitUserChoiceAnswer([message], {
+      questionId: 'question-1',
+      toolCallId: 'tool-call-1',
+      answers: ['official'],
+      otherText: ''
+    });
+
+    expect(submitted).toBe(true);
+    expect(toModelMessages([message])).toEqual([
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool-call',
+            toolCallId: 'tool-call-1',
+            toolName: 'ask_user_choice',
+            input: { question: '请选择渠道' }
+          }
+        ]
+      },
+      {
+        role: 'tool',
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: 'tool-call-1',
+            toolName: 'ask_user_choice',
+            output: {
+              type: 'json',
+              value: {
+                toolName: 'ask_user_choice',
+                status: 'success',
+                data: {
+                  questionId: 'question-1',
+                  toolCallId: 'tool-call-1',
+                  answers: ['official'],
+                  otherText: ''
+                }
+              }
+            }
+          }
+        ]
+      }
+    ]);
   });
 });

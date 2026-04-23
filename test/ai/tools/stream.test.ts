@@ -1,6 +1,6 @@
 import type { AIToolContext, AIToolExecutor } from 'types/ai';
 import { describe, expect, it } from 'vitest';
-import { createToolSuccessResult } from '@/ai/tools/results';
+import { createAwaitingUserInputResult, createToolSuccessResult } from '@/ai/tools/results';
 import { createToolResultMessages, executeToolCall, toTransportTools } from '@/ai/tools/stream';
 
 function createContext(): AIToolContext {
@@ -71,6 +71,43 @@ describe('AI tool stream helpers', () => {
         data: { value: 'hi' }
       }
     });
+  });
+
+  it('injects toolCallId into awaiting user input results', async () => {
+    const awaitingTool: AIToolExecutor<Record<string, never>> = {
+      definition: {
+        name: 'ask_user_choice',
+        description: 'Ask user choice',
+        source: 'builtin',
+        permission: 'read',
+        parameters: {
+          type: 'object',
+          properties: {},
+          additionalProperties: false
+        }
+      },
+      async execute() {
+        return createAwaitingUserInputResult('ask_user_choice', {
+          questionId: 'question-1',
+          toolCallId: '',
+          mode: 'single',
+          question: '请选择',
+          options: [{ label: '官网', value: 'official' }],
+          allowOther: false
+        });
+      }
+    };
+
+    const result = await executeToolCall({ toolCallId: 'tool-call-1', toolName: 'ask_user_choice', input: {} }, [awaitingTool], createContext());
+    const messages = createToolResultMessages([result]);
+
+    expect(result.result).toMatchObject({
+      status: 'awaiting_user_input',
+      data: {
+        toolCallId: 'tool-call-1'
+      }
+    });
+    expect(messages[0]).toMatchObject({ role: 'tool' });
   });
 
   it('returns a failure for unknown tools', async () => {

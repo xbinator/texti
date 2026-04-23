@@ -32,6 +32,26 @@ function toJsonValue(value: unknown): JSONValue {
 }
 
 /**
+ * 为等待用户输入的工具结果补齐真实 toolCallId。
+ * @param result - 原始工具执行结果
+ * @param toolCallId - AI SDK 工具调用 ID
+ * @returns 补齐关联 ID 后的工具结果
+ */
+function attachToolCallIdToAwaitingResult(result: AIToolExecutionResult, toolCallId: string): AIToolExecutionResult {
+  if (result.status !== 'awaiting_user_input') {
+    return result;
+  }
+
+  return {
+    ...result,
+    data: {
+      ...result.data,
+      toolCallId
+    }
+  };
+}
+
+/**
  * 将工具执行器列表转换为传输格式
  * @param tools - 工具执行器列表
  * @returns 传输格式的工具列表
@@ -74,12 +94,14 @@ export async function executeToolCall(call: AIStreamToolCallChunk, tools: AITool
     };
   }
 
-  // 执行工具
+  // 执行工具，等待用户输入结果仍作为普通终态 tool-result 进入消息历史。
+  const rawResult = await executor.execute(call.input, context);
+
   return {
     toolCallId: call.toolCallId,
     toolName: call.toolName,
     input: call.input,
-    result: await executor.execute(call.input, context)
+    result: attachToolCallIdToAwaitingResult(rawResult, call.toolCallId)
   };
 }
 

@@ -3,7 +3,7 @@
  * @description BChat 工具调用跟踪器测试
  */
 import { describe, expect, it } from 'vitest';
-import { createToolCallTracker } from '@/components/BChat/utils/tool-call-tracker';
+import { createToolCallTracker } from '@/components/BChat/utils/toolCallTracker';
 
 /**
  * 创建可手动控制完成时机的 Promise

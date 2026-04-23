@@ -2,11 +2,11 @@
  * @file builtin/index.ts
  * @description 内置工具工厂函数
  */
-import { randomUUID } from 'node:crypto';
 import type { AIToolConfirmationAdapter } from '../confirmation';
 import type { AIToolExecutor } from 'types/ai';
+import { nanoid } from 'nanoid';
+import { createAskUserChoiceTool, type PendingQuestionSnapshot } from './ask-user-choice';
 import { isDefaultBuiltinReadonlyToolName, isDefaultBuiltinWritableToolName } from './catalog';
-import { createAskUserChoiceTool } from './ask-user-choice';
 import { createBuiltinEnvironmentTools } from './environment';
 import { createBuiltinReadTools } from './read';
 import { createBuiltinWriteTools } from './write';
@@ -21,6 +21,10 @@ interface CreateBuiltinToolsOptions {
   includeSelectionReplace?: boolean;
   /** 是否包含危险操作工具（如替换整个文档） */
   includeDangerous?: boolean;
+  /** 获取当前待回答问题，用于避免重复发起用户选择 */
+  getPendingQuestion?: () => PendingQuestionSnapshot | null;
+  /** 创建用户选择问题 ID */
+  createQuestionId?: () => string;
 }
 
 /**
@@ -40,8 +44,8 @@ export function createBuiltinTools(options: CreateBuiltinToolsOptions = {}): AIT
     environmentTools.getCurrentTime,
     readTools.searchCurrentDocument,
     createAskUserChoiceTool({
-      getPendingQuestion: () => null,
-      createQuestionId: () => randomUUID()
+      getPendingQuestion: options.getPendingQuestion ?? (() => null),
+      createQuestionId: options.createQuestionId ?? (() => nanoid())
     })
   ];
   const readonlyTools = allReadonlyTools.filter((tool) => isDefaultBuiltinReadonlyToolName(tool.definition.name));

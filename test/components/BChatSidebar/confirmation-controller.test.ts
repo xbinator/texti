@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { Message } from '@/components/BChat/types';
-import { createChatConfirmationController } from '@/components/BChatSidebar/utils/confirmation-controller';
+import { createChatConfirmationController } from '@/components/BChatSidebar/utils/confirmationController';
 
 /**
  * 创建测试消息列表。

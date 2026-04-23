@@ -36,6 +36,7 @@
           />
 
           <!-- 工具结果片段：展示工具执行结果 -->
+          <AskUserChoiceCard v-else-if="isAwaitingUserChoicePart(part)" :question="part.result.data" @submit-choice="$emit('user-choice-submit', $event)" />
           <MessageBubblePartToolResult v-else :part="part" />
         </template>
       </div>
@@ -58,12 +59,15 @@
  * @description 聊天气泡组件，按结构化消息片段渲染文本、思考、工具调用和工具结果。
  */
 import type { Message } from '../types';
+import type { AIToolExecutionAwaitingUserInputResult } from 'types/ai';
+import type { AIUserChoiceAnswerData, ChatMessagePart, ChatMessageToolResultPart } from 'types/chat';
 import { computed } from 'vue';
 import { Icon } from '@iconify/vue';
 import BBubble from '@/components/BBubble/index.vue';
 import BButton from '@/components/BButton/index.vue';
 import { useClipboard } from '@/hooks/useClipboard';
 import { createNamespace } from '@/utils/namespace';
+import AskUserChoiceCard from './AskUserChoiceCard.vue';
 import ConfirmationCard from './ConfirmationCard.vue';
 import MessageBubblePartText from './MessageBubblePartText.vue';
 import MessageBubblePartThinking from './MessageBubblePartThinking.vue';
@@ -87,6 +91,8 @@ defineEmits<{
   (e: 'regenerate', message: Message): void;
   /** 确认操作事件 */
   (e: 'confirmation-action', confirmationId: string, action: 'approve' | 'cancel'): void;
+  /** 用户选择题提交事件 */
+  (e: 'user-choice-submit', answer: AIUserChoiceAnswerData): void;
 }>();
 
 /** 图片文件列表 */
@@ -110,6 +116,14 @@ const showHeader = computed(() => isUserMessage.value && (imageFiles.value.lengt
  */
 function isLastPart(index: number): boolean {
   return index === props.message.parts.length - 1;
+}
+
+/**
+ * 判断片段是否为等待用户选择的工具结果。
+ * @param part - 消息片段
+ */
+function isAwaitingUserChoicePart(part: ChatMessagePart): part is ChatMessageToolResultPart & { result: AIToolExecutionAwaitingUserInputResult } {
+  return part.type === 'tool-result' && part.toolName === 'ask_user_choice' && part.result.status === 'awaiting_user_input';
 }
 
 /**

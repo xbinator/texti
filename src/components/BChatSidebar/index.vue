@@ -53,6 +53,7 @@ import { Icon } from '@iconify/vue';
 import { createBuiltinTools } from '@/ai/tools/builtin';
 import { editorToolContextRegistry } from '@/ai/tools/editor-context';
 import { getDefaultChatToolNames } from '@/ai/tools/policy';
+import { findPendingUserChoiceQuestion } from '@/components/BChat/message';
 import type { Message } from '@/components/BChat/types';
 import { useChatStore } from '@/stores/chat';
 import { useSettingStore } from '@/stores/setting';
@@ -81,7 +82,18 @@ const currentSession = computed<ChatSession | undefined>(() => {
   return sessions.value.find((session) => session.id === activeSessionId);
 });
 const tools = createBuiltinTools({
-  confirm: confirmationController.createAdapter()
+  confirm: confirmationController.createAdapter(),
+  getPendingQuestion: () => {
+    const pendingQuestion = findPendingUserChoiceQuestion(messages.value);
+    if (!pendingQuestion) {
+      return null;
+    }
+
+    return {
+      questionId: pendingQuestion.questionId,
+      toolCallId: pendingQuestion.toolCallId
+    };
+  }
 }).filter((tool) => {
   // MVP 聊天侧先只开放低风险工具，避免默认暴露替换类操作。
   return getDefaultChatToolNames().includes(tool.definition.name);

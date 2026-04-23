@@ -4,7 +4,8 @@
  */
 import type { Message } from './types';
 import type { JSONValue, ModelMessage } from 'ai';
-import type { ChatMessagePart, ChatMessageRole } from 'types/chat';
+import type { AIAwaitingUserChoiceQuestion, AIToolExecutionAwaitingUserInputResult } from 'types/ai';
+import type { AIUserChoiceAnswerData, ChatMessagePart, ChatMessageRole, ChatMessageToolResultPart } from 'types/chat';
 import { nanoid } from 'nanoid';
 
 /**
@@ -153,6 +154,58 @@ export function appendToolResultPart(message: Message, toolCallId: string, toolN
   }
 
   message.parts.splice(toolCallIndex + 1, 0, resultPart);
+}
+
+/**
+ * 判断工具结果是否为等待用户选择的问题。
+ * @param part - 消息片段
+ */
+function isAwaitingUserChoiceResult(part: ChatMessagePart): part is ChatMessageToolResultPart & { result: AIToolExecutionAwaitingUserInputResult } {
+  return part.type === 'tool-result' && part.toolName === 'ask_user_choice' && part.result.status === 'awaiting_user_input';
+}
+
+/**
+ * 查找消息历史中尚未回答的用户选择问题。
+ * @param sourceMessages - 组件内部消息
+ */
+export function findPendingUserChoiceQuestion(sourceMessages: Message[]): AIAwaitingUserChoiceQuestion | null {
+  for (let messageIndex = sourceMessages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const message = sourceMessages[messageIndex];
+    const pendingPart = message.parts.find((part) => isAwaitingUserChoiceResult(part));
+
+    if (pendingPart?.result.status === 'awaiting_user_input') {
+      return pendingPart.result.data;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 将等待用户选择的工具结果替换为用户答案。
+ * @param sourceMessages - 组件内部消息
+ * @param answer - 用户提交的答案
+ */
+export function submitUserChoiceAnswer(sourceMessages: Message[], answer: AIUserChoiceAnswerData): boolean {
+  for (let messageIndex = sourceMessages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const message = sourceMessages[messageIndex];
+    const resultPart = message.parts.find(
+      (part) => isAwaitingUserChoiceResult(part) && part.toolCallId === answer.toolCallId && part.result.data.questionId === answer.questionId
+    );
+
+    if (resultPart?.type !== 'tool-result') {
+      continue;
+    }
+
+    resultPart.result = {
+      toolName: 'ask_user_choice',
+      status: 'success',
+      data: answer
+    };
+    return true;
+  }
+
+  return false;
 }
 
 /**

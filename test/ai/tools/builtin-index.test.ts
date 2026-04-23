@@ -1,5 +1,27 @@
+import type { AIToolContext } from 'types/ai';
 import { describe, expect, it } from 'vitest';
 import { createBuiltinTools } from '@/ai/tools/builtin';
+
+/**
+ * 创建工具执行上下文。
+ * @returns 测试用工具上下文
+ */
+function createToolContext(): AIToolContext {
+  return {
+    document: {
+      id: 'doc-1',
+      title: 'Doc',
+      path: null,
+      getContent: () => ''
+    },
+    editor: {
+      getSelection: () => null,
+      insertAtCursor: async () => undefined,
+      replaceSelection: async () => undefined,
+      replaceDocument: async () => undefined
+    }
+  };
+}
 
 /**
  * 提取工具名称列表。
@@ -59,5 +81,51 @@ describe('createBuiltinTools', () => {
       'replace_selection',
       'replace_document'
     ]);
+  });
+
+  it('passes pending question and question id providers to ask_user_choice', async () => {
+    const tools = createBuiltinTools({
+      getPendingQuestion: () => null,
+      createQuestionId: () => 'question-from-host'
+    });
+    const askUserChoiceTool = tools.find((tool) => tool.definition.name === 'ask_user_choice');
+
+    const result = await askUserChoiceTool?.execute(
+      {
+        question: '请选择渠道类型',
+        mode: 'single',
+        options: [{ label: '官网', value: 'official' }]
+      },
+      createToolContext()
+    );
+
+    expect(result).toMatchObject({
+      status: 'awaiting_user_input',
+      data: {
+        questionId: 'question-from-host'
+      }
+    });
+  });
+
+  it('uses host pending question state to reject concurrent ask_user_choice calls', async () => {
+    const tools = createBuiltinTools({
+      getPendingQuestion: () => ({ questionId: 'pending-1', toolCallId: 'tool-call-1' }),
+      createQuestionId: () => 'question-2'
+    });
+    const askUserChoiceTool = tools.find((tool) => tool.definition.name === 'ask_user_choice');
+
+    const result = await askUserChoiceTool?.execute(
+      {
+        question: '请选择渠道类型',
+        mode: 'single',
+        options: [{ label: '官网', value: 'official' }]
+      },
+      createToolContext()
+    );
+
+    expect(result).toMatchObject({
+      status: 'failure',
+      error: { code: 'EXECUTION_FAILED' }
+    });
   });
 });

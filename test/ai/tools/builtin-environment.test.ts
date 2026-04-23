@@ -33,11 +33,15 @@ describe('built-in environment tools', () => {
     const result = await tools.getCurrentTime.execute({}, createContext());
 
     expect(result.status).toBe('success');
+    if (result.status !== 'success') {
+      throw new Error('Expected get_current_time to succeed');
+    }
+
     expect(result.data).toEqual({
       iso: expect.any(String),
       timestamp: expect.any(Number),
       locale: expect.any(String)
     });
-    expect(new Date(result.data?.iso ?? '').toISOString()).toBe(result.data?.iso);
+    expect(new Date(result.data.iso).toISOString()).toBe(result.data.iso);
   });
 });

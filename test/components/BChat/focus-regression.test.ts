@@ -26,6 +26,15 @@ describe('BChat focus exposure', () => {
   });
 });
 
+describe('BChat user choice continuation', () => {
+  test('resolves service config again when a restored pending choice is answered', () => {
+    const source = readSource('src/components/BChat/index.vue');
+
+    expect(source).toContain('const config = lastServiceConfig ?? await ensureServiceConfig();');
+    expect(source).not.toContain('if (loading.value || !lastServiceConfig)');
+  });
+});
+
 describe('BChatSidebar new session focus', () => {
   test('focuses the chat input after resetting the current session', () => {
     const source = readSource('src/components/BChatSidebar/index.vue');

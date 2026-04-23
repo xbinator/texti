@@ -9,6 +9,7 @@
           @edit="handleEdit"
           @regenerate="handleRegenerate"
           @confirmation-action="handleConfirmationAction"
+          @user-choice-submit="handleUserChoiceSubmit"
         />
       </div>
     </Container>
@@ -45,6 +46,7 @@
 import type { CachedModelMessagesResult } from './message';
 import type { BChatProps as Props, Message, ServiceConfig, ToolLoopGuardConfig } from './types';
 import type { AIServiceError, AIStreamFinishChunk, AIStreamToolCallChunk } from 'types/ai';
+import type { AIUserChoiceAnswerData } from 'types/chat';
 import { nextTick, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { message as aMessage } from 'ant-design-vue';
@@ -64,7 +66,9 @@ import {
   appendToolResultPart,
   createAssistantPlaceholder,
   createErrorMessage,
+  findPendingUserChoiceQuestion,
   isRemovableAssistantPlaceholder,
+  submitUserChoiceAnswer,
   toCachedModelMessages
 } from './message';
 import { createToolCallTracker, type ToolCallTracker } from './utils/toolCallTracker';
@@ -102,6 +106,7 @@ interface PromptEditorExpose {
 const loading = ref(false);
 const pendingToolResults = ref<ExecutedToolCall[]>([]);
 const blockedToolLoopReason = ref('');
+const awaitingUserChoice = ref(false);
 const promptEditorRef = ref<PromptEditorExpose | null>(null);
 
 const router = useRouter();
@@ -131,6 +136,7 @@ function resetToolLoopState(): void {
   blockedToolLoopReason.value = '';
   executedToolCallIds = new Set();
   pendingToolResults.value = [];
+  awaitingUserChoice.value = false;
   lastServiceConfig = null;
 }
 
@@ -204,6 +210,12 @@ async function executeTrackedToolCall(chunk: AIStreamToolCallChunk, roundId: num
   }
 
   appendAssistantToolResult(result);
+
+  if (result.result.status === 'awaiting_user_input') {
+    awaitingUserChoice.value = true;
+    return;
+  }
+
   pendingToolResults.value.push(result);
 }
 
@@ -384,6 +396,32 @@ async function handleConfirmationAction(confirmationId: string, action: 'approve
 }
 
 /**
+ * 处理用户选择题答案，并恢复下一轮模型生成。
+ * @param answer - 用户提交的选择答案
+ */
+async function handleUserChoiceSubmit(answer: AIUserChoiceAnswerData): Promise<void> {
+  if (loading.value) {
+    return;
+  }
+
+  const submitted = submitUserChoiceAnswer(messages.value, answer);
+  if (!submitted) {
+    return;
+  }
+
+  const config = lastServiceConfig ?? await ensureServiceConfig();
+  if (!config) {
+    return;
+  }
+
+  awaitingUserChoice.value = false;
+  pendingToolResults.value = [];
+  nextTick(() => {
+    streamMessages(messages.value, config, true);
+  });
+}
+
+/**
  * 对外暴露输入框聚焦能力，供宿主组件在切换或新建会话后恢复输入焦点。
  */
 function focusInput(): void {
@@ -483,6 +521,14 @@ const { agent } = useChat({
 
     // 如果最后一条消息是错误消息，直接返回
     if (message?.role === 'error') {
+      return;
+    }
+
+    // 等待用户输入的问题需要停在当前消息，直到交互卡片提交答案。
+    if (awaitingUserChoice.value || findPendingUserChoiceQuestion(messages.value)) {
+      if (message) {
+        emit('complete', message);
+      }
       return;
     }
 

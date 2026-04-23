@@ -94,6 +94,20 @@ export interface ChatMessageToolResultPart {
 }
 
 /**
+ * 用户选择题答案数据
+ */
+export interface AIUserChoiceAnswerData {
+  /** 对应问题 ID */
+  questionId: string;
+  /** 对应工具调用 ID */
+  toolCallId: string;
+  /** 选中的选项值列表 */
+  answers: string[];
+  /** 其他手动输入文本 */
+  otherText?: string;
+}
+
+/**
  * 确认卡片状态
  */
 export type ChatMessageConfirmationStatus = 'pending' | 'approved' | 'cancelled' | 'expired';
