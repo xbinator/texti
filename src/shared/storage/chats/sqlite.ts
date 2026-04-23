@@ -3,12 +3,13 @@
  * @description 聊天会话与消息的 SQLite/本地降级存储实现
  */
 import type { AIUsage } from 'types/ai';
-import type { ChatMessageFile, ChatMessagePart, ChatMessageRecord, ChatMessageRole, ChatSession, ChatSessionType } from 'types/chat';
+import type { ChatMessageFile, ChatMessageHistoryCursor, ChatMessagePart, ChatMessageRecord, ChatMessageRole, ChatSession, ChatSessionType } from 'types/chat';
 import { local } from '@/shared/storage/base';
 import { dbSelect, dbExecute, isDatabaseAvailable, parseJson, stringifyJson } from '../utils';
 
 const CHAT_SESSIONS_STORAGE_KEY = 'chat_sessions_fallback';
 const CHAT_MESSAGES_STORAGE_KEY = 'chat_messages_fallback';
+const CHAT_MESSAGE_HISTORY_LIMIT = 30;
 
 const SELECT_SESSIONS_BY_TYPE_SQL = `
   SELECT id, type, title, created_at, updated_at, last_message_at, usage_json
@@ -33,7 +34,16 @@ const SELECT_MESSAGES_BY_SESSION_SQL = `
   SELECT id, session_id, role, content, parts_json, thinking, files_json, usage_json, created_at
   FROM chat_messages
   WHERE session_id = ?
-  ORDER BY created_at ASC
+  ORDER BY created_at DESC, id DESC
+  LIMIT ?
+`;
+const SELECT_MESSAGES_BEFORE_CURSOR_SQL = `
+  SELECT id, session_id, role, content, parts_json, thinking, files_json, usage_json, created_at
+  FROM chat_messages
+  WHERE session_id = ?
+    AND (created_at < ? OR (created_at = ? AND id < ?))
+  ORDER BY created_at DESC, id DESC
+  LIMIT ?
 `;
 const UPSERT_MESSAGE_SQL = `
   INSERT OR REPLACE INTO chat_messages
@@ -138,8 +148,43 @@ function sortSessions(sessions: ChatSession[]): ChatSession[] {
   });
 }
 
+/**
+ * 按消息创建时间和 ID 排序，保证同时间戳消息的顺序稳定。
+ * @param messages - 待排序消息
+ * @returns 按时间正序排列的消息
+ */
 function sortMessages(messages: ChatMessageRecord[]): ChatMessageRecord[] {
-  return [...messages].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  return [...messages].sort((left, right) => {
+    if (left.createdAt !== right.createdAt) return left.createdAt.localeCompare(right.createdAt);
+    return left.id.localeCompare(right.id);
+  });
+}
+
+/**
+ * 判断消息是否位于历史游标之前。
+ * @param message - 待判断消息
+ * @param cursor - 历史加载游标
+ * @returns 消息是否早于游标边界
+ */
+function isBeforeHistoryCursor(message: ChatMessageRecord, cursor: ChatMessageHistoryCursor): boolean {
+  if (message.createdAt !== cursor.beforeCreatedAt) {
+    return message.createdAt < cursor.beforeCreatedAt;
+  }
+
+  return message.id < cursor.beforeId;
+}
+
+/**
+ * 截取指定游标之前的一段历史消息。
+ * @param messages - 完整消息列表
+ * @param cursor - 历史加载游标
+ * @returns 按时间正序排列的消息片段
+ */
+function sliceMessagesByCursor(messages: ChatMessageRecord[], cursor?: ChatMessageHistoryCursor): ChatMessageRecord[] {
+  const sortedMessages = sortMessages(messages);
+  const filteredMessages = cursor ? sortedMessages.filter((message) => isBeforeHistoryCursor(message, cursor)) : sortedMessages;
+
+  return filteredMessages.slice(-CHAT_MESSAGE_HISTORY_LIMIT);
 }
 
 /**
@@ -248,14 +293,23 @@ export const chatStorage = {
     await dbExecute(UPDATE_SESSION_USAGE_SQL, [stringifyJson(usage), sessionId]);
   },
 
-  async getMessages(sessionId: string): Promise<ChatMessageRecord[]> {
+  async getMessages(sessionId: string, cursor?: ChatMessageHistoryCursor): Promise<ChatMessageRecord[]> {
     if (!isDatabaseAvailable()) {
       const messages = loadFallbackMessages()[sessionId] ?? [];
-      return sortMessages(messages);
+      return sliceMessagesByCursor(messages, cursor);
     }
 
-    const rows = await dbSelect<ChatMessageRow>(SELECT_MESSAGES_BY_SESSION_SQL, [sessionId]);
-    return rows.map(mapMessageRow);
+    const rows = cursor
+      ? await dbSelect<ChatMessageRow>(SELECT_MESSAGES_BEFORE_CURSOR_SQL, [
+          sessionId,
+          cursor.beforeCreatedAt,
+          cursor.beforeCreatedAt,
+          cursor.beforeId,
+          CHAT_MESSAGE_HISTORY_LIMIT
+        ])
+      : await dbSelect<ChatMessageRow>(SELECT_MESSAGES_BY_SESSION_SQL, [sessionId, CHAT_MESSAGE_HISTORY_LIMIT]);
+
+    return sortMessages(rows.map(mapMessageRow));
   },
 
   async addMessage(message: ChatMessageRecord): Promise<void> {

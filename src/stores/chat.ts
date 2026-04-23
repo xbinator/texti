@@ -3,7 +3,7 @@
  * @description 聊天会话与消息状态管理
  */
 import type { AIUsage } from 'types/ai';
-import type { ChatMessageRecord, ChatSession, ChatSessionType } from 'types/chat';
+import type { ChatMessageHistoryCursor, ChatMessageRecord, ChatSession, ChatSessionType } from 'types/chat';
 import { defineStore } from 'pinia';
 import { nanoid } from 'nanoid';
 import { isPersistableMessage, type PersistableMessage } from '@/components/BChat/message';
@@ -44,8 +44,14 @@ function sumMessagesUsage(messages: PersistableMessage[]): AIUsage | undefined {
 
 export const useChatStore = defineStore('chat', {
   actions: {
-    async getSessionMessages(sessionId: string): Promise<Message[]> {
-      const messages = await chatStorage.getMessages(sessionId);
+    /**
+     * 读取会话消息，未传游标时返回最新一段，传游标时返回更早历史。
+     * @param sessionId - 会话 ID
+     * @param cursor - 历史加载游标
+     * @returns 已补齐完成状态的组件消息
+     */
+    async getSessionMessages(sessionId: string, cursor?: ChatMessageHistoryCursor): Promise<Message[]> {
+      const messages = await chatStorage.getMessages(sessionId, cursor);
 
       return messages.map((message) => ({ ...message, finished: true }));
     },

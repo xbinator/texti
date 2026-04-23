@@ -35,6 +35,19 @@ describe('BChat user choice continuation', () => {
   });
 });
 
+describe('BChat history pagination', () => {
+  test('emits history loading from the chat container and anchors prepended messages', () => {
+    const chatSource = readSource('src/components/BChat/index.vue');
+    const containerSource = readSource('src/components/BChat/components/Container.vue');
+
+    expect(chatSource).toContain('@load-history="handleLoadHistory"');
+    expect(chatSource).toContain('async function handleLoadHistory(): Promise<void>');
+    expect(chatSource).toContain('await containerRef.value?.withScrollAnchor(async () => {');
+    expect(containerSource).toContain('function withScrollAnchor(callback: () => Promise<void> | void): Promise<void>');
+    expect(containerSource).toContain("emit('load-history');");
+  });
+});
+
 describe('BChatSidebar new session focus', () => {
   test('focuses the chat input after resetting the current session', () => {
     const source = readSource('src/components/BChatSidebar/index.vue');

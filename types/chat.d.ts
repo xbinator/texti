@@ -212,3 +212,13 @@ export interface ChatMessageRecord {
   /** 创建时间 */
   createdAt: string;
 }
+
+/**
+ * 聊天历史消息加载游标
+ */
+export interface ChatMessageHistoryCursor {
+  /** 仅加载早于该创建时间的消息 */
+  beforeCreatedAt: string;
+  /** 同创建时间下的边界消息 ID，用于规避时间戳精度冲突 */
+  beforeId: string;
+}

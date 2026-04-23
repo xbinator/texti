@@ -20,6 +20,7 @@
         placeholder="输入消息..."
         :on-before-send="handleBeforeSend"
         :on-before-regenerate="handleBeforeRegenerate"
+        :on-load-history="handleLoadHistory"
         :on-confirmation-action="handleConfirmationAction"
         :tools="tools"
         :get-tool-context="editorToolContextRegistry.getCurrentContext"
@@ -47,7 +48,7 @@
  * @file BChatSidebar/index.vue
  * @description 聊天侧边栏，负责会话列表切换、会话持久化和聊天面板接入。
  */
-import type { ChatMessageConfirmationAction, ChatSession } from 'types/chat';
+import type { ChatMessageConfirmationAction, ChatMessageHistoryCursor, ChatSession } from 'types/chat';
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { createBuiltinTools } from '@/ai/tools/builtin';
@@ -69,6 +70,8 @@ const inputValue = ref('');
 const messages = ref<Message[]>([]);
 const sessions = ref<ChatSession[]>([]);
 const loading = ref(false);
+const historyLoading = ref(false);
+const hasMoreHistory = ref(false);
 const chatRef = ref<{ focusInput: () => void } | null>(null);
 const confirmationController = createChatConfirmationController({
   getMessages: () => messages.value
@@ -99,6 +102,53 @@ const tools = createBuiltinTools({
   return getDefaultChatToolNames().includes(tool.definition.name);
 });
 
+/**
+ * 根据当前已加载消息计算更早历史的加载游标。
+ * @returns 历史加载游标，没有消息时返回 undefined
+ */
+function getHistoryCursor(): ChatMessageHistoryCursor | undefined {
+  const firstMessage = messages.value[0];
+  if (!firstMessage) {
+    return undefined;
+  }
+
+  return { beforeCreatedAt: firstMessage.createdAt, beforeId: firstMessage.id };
+}
+
+/**
+ * 用一段消息刷新当前会话的历史加载状态。
+ * @param loadedMessages - 已加载消息
+ */
+function setLoadedMessages(loadedMessages: Message[]): void {
+  messages.value = loadedMessages;
+  hasMoreHistory.value = loadedMessages.length > 0;
+}
+
+/**
+ * 读取当前可见消息之前的所有持久化历史，避免重新生成时覆盖未加载消息。
+ * @param sessionId - 会话 ID
+ * @returns 当前可见消息之前的历史消息
+ */
+async function loadPersistedMessagesBeforeVisible(sessionId: string): Promise<Message[]> {
+  const historyMessages: Message[] = [];
+  let cursor = getHistoryCursor();
+
+  while (cursor) {
+    // 顺序读取上一段历史，下一轮游标依赖本轮返回的最早消息。
+    // eslint-disable-next-line no-await-in-loop
+    const batchMessages = await chatStore.getSessionMessages(sessionId, cursor);
+    if (!batchMessages.length) {
+      break;
+    }
+
+    historyMessages.unshift(...batchMessages);
+    const firstMessage = batchMessages[0];
+    cursor = { beforeCreatedAt: firstMessage.createdAt, beforeId: firstMessage.id };
+  }
+
+  return historyMessages;
+}
+
 async function handleBeforeSend(message: Message): Promise<void> {
   confirmationController.expirePendingConfirmation();
 
@@ -114,7 +164,11 @@ async function handleBeforeSend(message: Message): Promise<void> {
 
 async function handleBeforeRegenerate(nextMessages: Message[]): Promise<void> {
   confirmationController.expirePendingConfirmation();
-  await chatStore.setSessionMessages(settingStore.chatSidebarActiveSessionId, nextMessages);
+  const sessionId = settingStore.chatSidebarActiveSessionId;
+  if (!sessionId) return;
+
+  const historyMessages = await loadPersistedMessagesBeforeVisible(sessionId);
+  await chatStore.setSessionMessages(sessionId, [...historyMessages, ...nextMessages]);
 }
 
 async function handleComplete(message: Message): Promise<void> {
@@ -125,6 +179,8 @@ async function handleNewSession(): Promise<void> {
   confirmationController.dispose();
   settingStore.setChatSidebarActiveSessionId(null);
   messages.value = [];
+  hasMoreHistory.value = false;
+  historyLoading.value = false;
   inputValue.value = '';
   // 新会话创建后自动聚焦输入框，提升用户体验。
   await nextTick();
@@ -144,7 +200,7 @@ async function loadSessions(): Promise<void> {
     return;
   }
 
-  messages.value = await chatStore.getSessionMessages(activeSession.id);
+  setLoadedMessages(await chatStore.getSessionMessages(activeSession.id));
 }
 
 async function handleSwitchSession(sessionId: string): Promise<void> {
@@ -153,11 +209,35 @@ async function handleSwitchSession(sessionId: string): Promise<void> {
   loading.value = true;
   confirmationController.dispose();
   settingStore.setChatSidebarActiveSessionId(sessionId);
+  hasMoreHistory.value = false;
 
   try {
-    messages.value = await chatStore.getSessionMessages(sessionId);
+    setLoadedMessages(await chatStore.getSessionMessages(sessionId));
   } finally {
     loading.value = false;
+  }
+}
+
+/**
+ * 加载当前会话中更早的一段历史消息。
+ */
+async function handleLoadHistory(): Promise<void> {
+  if (historyLoading.value || !hasMoreHistory.value) return;
+
+  const sessionId = settingStore.chatSidebarActiveSessionId;
+  const cursor = getHistoryCursor();
+  if (!sessionId || !cursor) return;
+
+  historyLoading.value = true;
+
+  try {
+    const historyMessages = await chatStore.getSessionMessages(sessionId, cursor);
+    hasMoreHistory.value = historyMessages.length > 0;
+    if (!historyMessages.length) return;
+
+    messages.value = [...historyMessages, ...messages.value];
+  } finally {
+    historyLoading.value = false;
   }
 }
 
