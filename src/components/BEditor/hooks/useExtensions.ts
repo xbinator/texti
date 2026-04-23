@@ -195,60 +195,36 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
 
   const ListItem = BaseListItem.extend({
     parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
+      if (token.type !== 'list_item') {
+        return [];
+      }
+
       const parseBlockChildren = helpers.parseBlockChildren ?? helpers.parseChildren;
       let contentNodes: JSONContent[] = [];
-      let inlineBuffer: JSONContent[] = [];
-
-      function flushInlineBuffer(forceEmpty = false): void {
-        if (inlineBuffer.length > 0 || forceEmpty) {
-          contentNodes.push(createParagraphNode(inlineBuffer));
-          inlineBuffer = [];
-        }
-      }
 
       if (token.tokens && token.tokens.length > 0) {
-        token.tokens.forEach((itemToken) => {
-          if (itemToken.type === 'space') {
-            return;
-          }
+        const hasParagraphTokens = token.tokens.some((itemToken) => itemToken.type === 'paragraph');
 
-          if (itemToken.type === 'text' && itemToken.tokens && itemToken.tokens.length > 0) {
-            inlineBuffer.push(...parseInlinePreservingReferenceLinks(itemToken.tokens, helpers));
-            return;
-          }
+        // 优先保留 list_item 的块级上下文，避免把普通列表项拆成顶层 heading。
+        if (hasParagraphTokens) {
+          contentNodes = parseBlockChildren(token.tokens);
+        } else {
+          const [firstToken, ...remainingTokens] = token.tokens;
 
-          const parsedNodes = parseBlockChildren([itemToken]);
+          if (firstToken?.type === 'text' && firstToken.tokens && firstToken.tokens.length > 0) {
+            contentNodes = [createParagraphNode(parseInlinePreservingReferenceLinks(firstToken.tokens, helpers))];
 
-          if (!parsedNodes.length) {
-            return;
-          }
-
-          const inlineNodes = parsedNodes.filter((node) => node.type === 'text');
-          if (inlineNodes.length === parsedNodes.length) {
-            inlineBuffer.push(...inlineNodes);
-            return;
-          }
-
-          if (contentNodes.length === 0) {
-            flushInlineBuffer(true);
+            if (remainingTokens.length > 0) {
+              contentNodes.push(...parseBlockChildren(remainingTokens));
+            }
           } else {
-            flushInlineBuffer();
+            contentNodes = parseBlockChildren(token.tokens);
           }
-
-          contentNodes.push(...parsedNodes);
-        });
-      }
-
-      if (inlineBuffer.length > 0) {
-        flushInlineBuffer(contentNodes.length === 0);
+        }
       }
 
       if (contentNodes.length === 0) {
         contentNodes = [createParagraphNode()];
-      }
-
-      if (contentNodes[0]?.type !== 'paragraph') {
-        contentNodes = [createParagraphNode(), ...contentNodes];
       }
 
       return { type: 'listItem', content: contentNodes };
