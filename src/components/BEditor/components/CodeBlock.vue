@@ -97,6 +97,22 @@ const LANGUAGE_OPTIONS = [
 let mermaidInitialized = false;
 let mermaidCurrentTheme = '';
 let mermaidModulePromise: Promise<typeof import('mermaid')> | null = null;
+const themeChangeCallbacks = new Set<() => void>();
+
+/**
+ * 通知已挂载的 Mermaid 预览在主题变化后重新渲染
+ */
+function handleMermaidThemeChange(): void {
+  mermaidInitialized = false;
+  themeChangeCallbacks.forEach((callback: () => void) => callback());
+}
+
+if (typeof window !== 'undefined') {
+  new MutationObserver(handleMermaidThemeChange).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme']
+  });
+}
 
 async function loadMermaidModule(): Promise<typeof import('mermaid')> {
   if (!mermaidModulePromise) {
@@ -286,11 +302,13 @@ watch(isMermaidPreviewVisible, (visible: boolean) => {
 
 onMounted(() => {
   if (isMermaidPreviewVisible.value) renderMermaid();
+  themeChangeCallbacks.add(renderMermaid);
 });
 
 onUnmounted(() => {
   // 使所有进行中的异步渲染失效
   mermaidRenderIndex++;
+  themeChangeCallbacks.delete(renderMermaid);
 
   if (resetTimer !== null) {
     clearTimeout(resetTimer);
