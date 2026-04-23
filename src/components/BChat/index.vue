@@ -46,7 +46,6 @@
  */
 import type { CachedModelMessagesResult } from './message';
 import type { BChatProps as Props, Message, ServiceConfig, ToolLoopGuardConfig } from './types';
-import type { FileReferenceChip } from '@/components/BPromptEditor/hooks/useVariableEncoder';
 import type { AIServiceError, AIStreamFinishChunk, AIStreamToolCallChunk } from 'types/ai';
 import type { AIUserChoiceAnswerData, ChatMessageConfirmationAction } from 'types/chat';
 import { nextTick, ref, watch } from 'vue';
@@ -56,6 +55,7 @@ import { nanoid } from 'nanoid';
 import { getModelToolSupport } from '@/ai/tools/policy';
 import { executeToolCall, toTransportTools, type ExecutedToolCall } from '@/ai/tools/stream';
 import BButton from '@/components/BButton/index.vue';
+import type { FileReferenceChip } from '@/components/BPromptEditor/hooks/useVariableEncoder';
 import { useChat } from '@/hooks/useChat';
 import { useServiceModelStore } from '@/stores/service-model';
 import { Modal } from '@/utils/modal';
@@ -385,7 +385,13 @@ async function handleSubmit(): Promise<void> {
   }
 
   const modelContent = expandFileReferencesForModel(content);
-  const message: Message = { id: nanoid(), role: 'user', content: modelContent, parts: [{ type: 'text', text: modelContent }], createdAt: new Date().toISOString() };
+  const message: Message = {
+    id: nanoid(),
+    role: 'user',
+    content: modelContent,
+    parts: [{ type: 'text', text: modelContent }],
+    createdAt: new Date().toISOString()
+  };
 
   await props.onBeforeSend?.(message);
 
