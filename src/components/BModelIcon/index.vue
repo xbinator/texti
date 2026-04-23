@@ -72,7 +72,9 @@ const modelIcons: Record<string, string> = {
   minimax: 'minimax-color',
   longcat: 'longcat-color',
   hunyuan: 'hunyuan-color',
-  deepseek: 'deepseek-color'
+  deepseek: 'deepseek-color',
+  gemini: 'google-color',
+  grok: 'grok'
 };
 
 const iconId = computed(() => {
