@@ -48,7 +48,8 @@
 <script setup lang="ts">
 /**
  * @file BChatSidebar/index.vue
- * @description 聊天侧边栏，负责会话列表切换、会话持久化和聊天面板接入。
+ * @description 聊天侧边栏组件，负责会话列表切换、会话持久化和聊天面板接入。
+ *              支持多会话管理、历史消息加载、流式输出和工具调用确认。
  */
 import type { ChatMessageConfirmationAction, ChatMessageHistoryCursor, ChatSession } from 'types/chat';
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
@@ -63,22 +64,38 @@ import { useSettingStore } from '@/stores/setting';
 import SessionHistory from './components/SessionHistory.vue';
 import { createChatConfirmationController } from './utils/confirmationController';
 
+/** 聊天会话类型标识 */
 const CHAT_SESSION_TYPE = 'assistant';
 
+/** 聊天数据存储 */
 const chatStore = useChatStore();
+/** 应用设置存储 */
 const settingStore = useSettingStore();
 
+/** 聊天输入框内容 */
 const inputValue = ref('');
+/** 当前会话的消息列表 */
 const messages = ref<Message[]>([]);
+/** 所有会话列表 */
 const sessions = ref<ChatSession[]>([]);
+/** 会话加载状态 */
 const loading = ref(false);
+/** 历史消息加载状态 */
 const historyLoading = ref(false);
+/** 是否还有更多历史消息可加载 */
 const hasMoreHistory = ref(false);
+/** 聊天是否正在输出（流式响应中） */
 const chatBusy = ref(false);
+/** 聊天组件引用，用于调用组件方法 */
 const chatRef = ref<{ focusInput: () => void } | null>(null);
+/** 确认控制器，管理工具调用的用户确认流程 */
 const confirmationController = createChatConfirmationController({
   getMessages: () => messages.value
 });
+/**
+ * 当前激活的会话对象
+ * 根据设置中存储的激活会话 ID 从会话列表中查找对应会话
+ */
 const currentSession = computed<ChatSession | undefined>(() => {
   const activeSessionId = settingStore.chatSidebarActiveSessionId;
   if (!activeSessionId) {
@@ -87,6 +104,11 @@ const currentSession = computed<ChatSession | undefined>(() => {
 
   return sessions.value.find((session) => session.id === activeSessionId);
 });
+
+/**
+ * 聊天工具列表
+ * 创建内置工具并过滤出默认允许的低风险工具，避免暴露替换类操作
+ */
 const tools = createBuiltinTools({
   confirm: confirmationController.createAdapter(),
   getPendingQuestion: () => {
@@ -101,7 +123,7 @@ const tools = createBuiltinTools({
     };
   }
 }).filter((tool) => {
-  // MVP 聊天侧先只开放低风险工具，避免默认暴露替换类操作。
+  // MVP 阶段聊天侧边栏只开放低风险工具，避免默认暴露替换类操作
   return getDefaultChatToolNames().includes(tool.definition.name);
 });
 
@@ -152,10 +174,18 @@ async function loadPersistedMessagesBeforeVisible(sessionId: string): Promise<Me
   return historyMessages;
 }
 
+/**
+ * 消息发送前的处理函数
+ * 1. 清理待处理的确认状态
+ * 2. 如果没有激活会话则创建新会话
+ * 3. 将消息持久化到存储
+ * @param message - 待发送的消息
+ */
 async function handleBeforeSend(message: Message): Promise<void> {
   confirmationController.expirePendingConfirmation();
 
   if (!settingStore.chatSidebarActiveSessionId) {
+    // 没有激活会话时创建新会话，使用消息内容作为标题
     const session = await chatStore.createSession(CHAT_SESSION_TYPE, { title: message.content });
 
     settingStore.setChatSidebarActiveSessionId(session.id);
@@ -165,15 +195,28 @@ async function handleBeforeSend(message: Message): Promise<void> {
   await chatStore.addSessionMessage(settingStore.chatSidebarActiveSessionId, message);
 }
 
+/**
+ * 消息重新生成前的处理函数
+ * 1. 清理待处理的确认状态
+ * 2. 加载当前可见消息之前的所有持久化历史
+ * 3. 合并历史消息和新的消息列表并持久化
+ * @param nextMessages - 重新生成后的消息列表
+ */
 async function handleBeforeRegenerate(nextMessages: Message[]): Promise<void> {
   confirmationController.expirePendingConfirmation();
   const sessionId = settingStore.chatSidebarActiveSessionId;
   if (!sessionId) return;
 
+  // 加载当前可见消息之前的历史，避免重新生成时覆盖未加载的消息
   const historyMessages = await loadPersistedMessagesBeforeVisible(sessionId);
   await chatStore.setSessionMessages(sessionId, [...historyMessages, ...nextMessages]);
 }
 
+/**
+ * 消息完成后的处理函数
+ * 将 AI 回复的消息持久化到存储
+ * @param message - 完成的消息
+ */
 async function handleComplete(message: Message): Promise<void> {
   await chatStore.addSessionMessage(settingStore.chatSidebarActiveSessionId, message);
 }
@@ -186,6 +229,13 @@ function handleChatBusyChange(busy: boolean): void {
   chatBusy.value = busy;
 }
 
+/**
+ * 创建新会话
+ * 1. 检查是否正在输出，是则中断
+ * 2. 清理确认控制器状态
+ * 3. 重置会话相关状态
+ * 4. 自动聚焦输入框
+ */
 async function handleNewSession(): Promise<void> {
   if (chatBusy.value) return;
 
@@ -195,11 +245,16 @@ async function handleNewSession(): Promise<void> {
   hasMoreHistory.value = false;
   historyLoading.value = false;
   inputValue.value = '';
-  // 新会话创建后自动聚焦输入框，提升用户体验。
+  // 新会话创建后自动聚焦输入框，提升用户体验
   await nextTick();
   chatRef.value?.focusInput();
 }
 
+/**
+ * 加载所有会话列表
+ * 1. 从存储获取会话列表
+ * 2. 如果有激活会话 ID，验证并加载该会话的消息
+ */
 async function loadSessions(): Promise<void> {
   sessions.value = await chatStore.getSessions(CHAT_SESSION_TYPE);
 
@@ -207,6 +262,7 @@ async function loadSessions(): Promise<void> {
     return;
   }
 
+  // 验证激活会话是否存在于列表中
   const activeSession = sessions.value.find((session) => session.id === settingStore.chatSidebarActiveSessionId);
   if (!activeSession) {
     settingStore.setChatSidebarActiveSessionId(null);
@@ -216,6 +272,14 @@ async function loadSessions(): Promise<void> {
   setLoadedMessages(await chatStore.getSessionMessages(activeSession.id));
 }
 
+/**
+ * 切换会话
+ * 1. 检查是否正在输出或加载中，是则中断
+ * 2. 清理确认控制器状态
+ * 3. 更新激活会话 ID
+ * 4. 加载新会话的消息列表
+ * @param sessionId - 目标会话 ID
+ */
 async function handleSwitchSession(sessionId: string): Promise<void> {
   if (chatBusy.value) return;
   if (loading.value) return;
@@ -255,6 +319,13 @@ async function handleLoadHistory(): Promise<void> {
   }
 }
 
+/**
+ * 删除会话
+ * 1. 检查是否正在输出，是则中断
+ * 2. 从会话列表中移除
+ * 3. 如果删除的是当前激活会话，则创建新会话
+ * @param sessionId - 要删除的会话 ID
+ */
 async function handleDeleteSession(sessionId: string): Promise<void> {
   if (chatBusy.value) return;
 
@@ -263,6 +334,7 @@ async function handleDeleteSession(sessionId: string): Promise<void> {
 
   sessions.value.splice(index, 1);
 
+  // 如果删除的是当前激活会话，清理状态并创建新会话
   if (settingStore.chatSidebarActiveSessionId === sessionId) {
     confirmationController.dispose();
     await handleNewSession();
@@ -293,7 +365,10 @@ async function handleConfirmationAction(confirmationId: string, action: ChatMess
   confirmationController.cancelConfirmation(confirmationId);
 }
 
+/** 组件挂载时加载会话列表 */
 onMounted(loadSessions);
+
+/** 组件卸载时清理确认控制器 */
 onUnmounted(() => {
   confirmationController.dispose();
 });
