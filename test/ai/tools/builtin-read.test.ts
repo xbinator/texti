@@ -33,25 +33,6 @@ describe('built-in read tools', () => {
     });
   });
 
-  it('reads the current selection', async () => {
-    const tools = createBuiltinReadTools();
-    const result = await tools.getCurrentSelection.execute({}, createContext());
-
-    expect(result.status).toBe('success');
-    expect(result.data).toEqual({ from: 1, to: 5, text: 'lpha' });
-  });
-
-  it('returns an empty selection when nothing is selected', async () => {
-    const context = createContext();
-    context.editor.getSelection = () => null;
-
-    const tools = createBuiltinReadTools();
-    const result = await tools.getCurrentSelection.execute({}, context);
-
-    expect(result.status).toBe('success');
-    expect(result.data).toEqual({ from: 0, to: 0, text: '' });
-  });
-
   it('searches the current document case-insensitively', async () => {
     const tools = createBuiltinReadTools();
     const result = await tools.searchCurrentDocument.execute({ query: 'BETA' }, createContext());

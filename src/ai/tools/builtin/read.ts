@@ -2,7 +2,7 @@
  * @file read.ts
  * @description 内置文档只读工具实现
  */
-import type { AIToolContext, AIToolExecutor, EditorSelection } from 'types/ai';
+import type { AIToolContext, AIToolExecutor } from 'types/ai';
 import { createToolFailureResult, createToolSuccessResult } from '../results';
 
 /**
@@ -55,8 +55,6 @@ export interface SearchCurrentDocumentResult {
 export interface BuiltinReadTools {
   /** 读取当前文档工具 */
   readCurrentDocument: AIToolExecutor<Record<string, never>, ReadCurrentDocumentResult>;
-  /** 获取当前选区工具 */
-  getCurrentSelection: AIToolExecutor<Record<string, never>, EditorSelection>;
   /** 搜索当前文档工具 */
   searchCurrentDocument: AIToolExecutor<SearchCurrentDocumentInput, SearchCurrentDocumentResult>;
 }
@@ -121,18 +119,6 @@ export function createBuiltinReadTools(): BuiltinReadTools {
           path: context.document.path,
           content: context.document.getContent()
         });
-      }
-    },
-    getCurrentSelection: {
-      definition: {
-        name: 'get_current_selection',
-        description: '读取当前编辑器选区文本和范围。',
-        source: 'builtin',
-        permission: 'read',
-        parameters: { type: 'object', properties: {}, additionalProperties: false }
-      },
-      async execute(_input: Record<string, never>, context: AIToolContext) {
-        return createToolSuccessResult('get_current_selection', context.editor.getSelection() ?? { from: 0, to: 0, text: '' });
       }
     },
     searchCurrentDocument: {

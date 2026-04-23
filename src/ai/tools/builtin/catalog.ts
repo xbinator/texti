@@ -6,13 +6,7 @@
 /**
  * 默认开放的只读内置工具名称列表。
  */
-export const DEFAULT_BUILTIN_READONLY_TOOL_NAMES = [
-  'read_current_document',
-  'get_current_selection',
-  'get_current_time',
-  'search_current_document',
-  'ask_user_choice'
-] as const;
+export const DEFAULT_BUILTIN_READONLY_TOOL_NAMES = ['read_current_document', 'get_current_time', 'search_current_document', 'ask_user_choice'] as const;
 
 /**
  * 默认开放的低风险写入内置工具名称列表。

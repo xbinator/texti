@@ -40,7 +40,6 @@ export function createBuiltinTools(options: CreateBuiltinToolsOptions = {}): AIT
   // 先汇总全部只读工具，再通过共享清单筛选默认暴露项。
   const allReadonlyTools: AIToolExecutor[] = [
     readTools.readCurrentDocument,
-    readTools.getCurrentSelection,
     environmentTools.getCurrentTime,
     readTools.searchCurrentDocument,
     createAskUserChoiceTool({

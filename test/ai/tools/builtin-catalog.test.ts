@@ -15,7 +15,6 @@ describe('built-in tool catalog', () => {
   it('exposes the default readonly tool names', () => {
     expect([...DEFAULT_BUILTIN_READONLY_TOOL_NAMES]).toEqual([
       'read_current_document',
-      'get_current_selection',
       'get_current_time',
       'search_current_document',
       'ask_user_choice'
@@ -29,7 +28,6 @@ describe('built-in tool catalog', () => {
   it('combines readonly and writable tools for chat defaults', () => {
     expect(getDefaultBuiltinChatToolNames()).toEqual([
       'read_current_document',
-      'get_current_selection',
       'get_current_time',
       'search_current_document',
       'ask_user_choice',
