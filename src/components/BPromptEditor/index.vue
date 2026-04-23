@@ -51,7 +51,7 @@ const props = withDefaults(defineProps<Props>(), {
   options: () => [],
   disabled: false,
   maxHeight: undefined,
-  submitOnEnter: true
+  submitOnEnter: false
 });
 
 const emit = defineEmits<{

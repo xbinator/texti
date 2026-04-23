@@ -26,6 +26,7 @@
           :placeholder="placeholder"
           :max-height="200"
           variant="borderless"
+          submit-on-enter
           @submit="handleSubmit"
         />
 
