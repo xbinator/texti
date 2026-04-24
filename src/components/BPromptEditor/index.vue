@@ -38,7 +38,7 @@
 <script setup lang="ts">
 /**
  * @file BPromptEditor/index.vue
- * @description Prompt 输入编辑器，负责纯文本输入、变量插入与提交交互。
+ * @description Prompt editor input surface, variable insertion, and submit interactions.
  */
 import type { FileReferenceChip } from './hooks/useVariableEncoder';
 import type { Variable, BPromptEditorProps as Props } from './types';
@@ -48,7 +48,7 @@ import VariableSelect from './components/VariableSelect.vue';
 import { useEditorCore, useEditorKeyboard, useEditorPaste, useEditorTrigger } from './hooks';
 
 const props = withDefaults(defineProps<Props>(), {
-  placeholder: '请输入内容...',
+  placeholder: '����������...',
   options: () => [],
   disabled: false,
   maxHeight: undefined,
@@ -115,6 +115,9 @@ const { handlePaste, handleDragOver, handleDrop } = useEditorPaste({
   updateModelValue
 });
 
+/**
+ * Keeps the editor model synchronized after direct typing or chip edits.
+ */
 function handleInput(): void {
   if (props.disabled) return;
   updateModelValue();
@@ -122,10 +125,16 @@ function handleInput(): void {
   trigger.updateVisibility();
 }
 
+/**
+ * Hides the suggestion menu shortly after the editor loses focus.
+ */
 function handleBlur(): void {
   if (!props.disabled) setTimeout(trigger.hide, 200);
 }
 
+/**
+ * Focuses the editable surface when the wrapper is clicked.
+ */
 function handleContainerClick(): void {
   if (!props.disabled && editorRef.value) {
     editorRef.value.focus();
@@ -133,15 +142,15 @@ function handleContainerClick(): void {
 }
 
 /**
- * 聚焦到底层可编辑区域，供父组件在外部主动触发。
+ * Focuses the underlying contenteditable node for external callers.
  */
 function focus(): void {
   editorRef.value?.focus();
 }
 
 /**
- * 插入文件引用 chip，供外部将文件名与行号写入 Prompt 输入框。
- * @param reference - 文件引用数据
+ * Inserts a file-reference chip into the editor.
+ * @param reference - File reference metadata.
  */
 function insertFileReference(reference: FileReferenceChip): void {
   if (props.disabled) return;
@@ -149,6 +158,9 @@ function insertFileReference(reference: FileReferenceChip): void {
   trigger.insertFileReference(reference);
 }
 
+/**
+ * Recomputes the variable picker visibility when the selection changes.
+ */
 function handleSelectionChange(): void {
   if (props.disabled || !selectionHook.isSelectionInsideEditor()) {
     if (trigger.visible.value) trigger.hide();
@@ -158,6 +170,10 @@ function handleSelectionChange(): void {
   trigger.updateMenuPosition();
 }
 
+/**
+ * Closes the variable menu when clicks land outside the editor wrapper.
+ * @param event - Mouse click event.
+ */
 function handleClickOutside(event: MouseEvent): void {
   if (trigger.visible.value && !wrapperRef.value?.contains(event.target as HTMLElement)) {
     trigger.hide();
@@ -165,6 +181,10 @@ function handleClickOutside(event: MouseEvent): void {
 }
 
 let rafId = 0;
+
+/**
+ * Repositions the variable menu on viewport changes.
+ */
 function handleViewportChange(): void {
   cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(trigger.updateMenuPosition);

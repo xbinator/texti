@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * @file BPromptEditorRegression.test.ts
- * @description BPromptEditor 回归测试，覆盖空态占位与关键交互修复
+ * @description BPromptEditor 回归测试，覆盖空态占位与文件引用 chip 行为。
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -9,9 +9,9 @@ import { describe, expect, test } from 'vitest';
 import { isPromptEditorEffectivelyEmpty, useVariableEncoder } from '@/components/BPromptEditor/hooks/useVariableEncoder';
 
 /**
- * 读取组件源码
- * @param relativePath - 相对仓库根目录的源码路径
- * @returns 源码字符串
+ * 读取组件源码。
+ * @param relativePath - 相对仓库根目录的源码路径。
+ * @returns 源码字符串。
  */
 function readSource(relativePath: string): string {
   return readFileSync(resolve(process.cwd(), relativePath), 'utf-8');
@@ -98,47 +98,69 @@ describe('BPromptEditor DOM safety regressions', () => {
 });
 
 describe('BPromptEditor file reference chips', () => {
-  test('serializes file reference chips back to stable model placeholders', () => {
+  test('serializes file reference chips back to stable reference-id placeholders', () => {
     const { createFileReferenceSpan, decodeVariables } = useVariableEncoder({
       getVariableLabel: () => undefined
     });
-    const chip = createFileReferenceSpan({
+    const reference = {
+      referenceId: 'ref_123',
+      documentId: 'doc_123',
+      filePath: 'src/foo/file.ts',
+      fileName: 'file.ts',
+      line: '123-145'
+    };
+    const chip = createFileReferenceSpan(reference);
+
+    expect(chip.getAttribute('data-reference-id')).toBe('ref_123');
+    expect(chip.getAttribute('data-document-id')).toBe('doc_123');
+    expect(decodeVariables(`请看 ${chip.outerHTML}`)).toBe('请看 {{file-ref:ref_123}}');
+  });
+
+  test('renders file reference placeholders as non-editable inline chips', () => {
+    const { createFileReferenceSpan, encodeVariables } = useVariableEncoder({
+      getVariableLabel: () => undefined
+    });
+    createFileReferenceSpan({
+      referenceId: 'ref_123',
+      documentId: 'doc_123',
       filePath: 'src/foo/file.ts',
       fileName: 'file.ts',
       line: '123-145'
     });
 
-    expect(decodeVariables(`请看 ${chip.outerHTML}`)).toBe('请看 {{file-ref:{"path":"src/foo/file.ts","name":"file.ts","line":"123-145"}}}');
-  });
-
-  test('renders file reference placeholders as non-editable inline chips', () => {
-    const { encodeVariables } = useVariableEncoder({
-      getVariableLabel: () => undefined
-    });
-    const encoded = encodeVariables('定位 {{file-ref:{"path":"src/foo/file.ts","name":"file.ts","line":123}}}');
+    const encoded = encodeVariables('定位 {{file-ref:ref_123}}');
     const container = document.createElement('div');
     container.innerHTML = encoded;
     const chip = container.querySelector('[data-value="file-reference"]');
 
     expect(chip?.getAttribute('contenteditable')).toBe('false');
-    expect(chip?.getAttribute('data-file-path')).toBe('src/foo/file.ts');
-    expect(chip?.textContent).toBe('file.ts:123');
+    expect(chip?.getAttribute('data-reference-id')).toBe('ref_123');
+    expect(chip?.getAttribute('data-document-id')).toBe('doc_123');
+    expect(chip?.textContent).toBe('file.ts:123-145');
   });
 
   test('renders unsaved file reference placeholders as non-editable inline chips', () => {
-    const { encodeVariables, decodeVariables } = useVariableEncoder({
+    const { createFileReferenceSpan, encodeVariables, decodeVariables } = useVariableEncoder({
       getVariableLabel: () => undefined
     });
-    const encoded = encodeVariables('定位 {{file-ref:{"path":null,"name":"临时笔记","line":"3"}}}');
+    createFileReferenceSpan({
+      referenceId: 'ref_temp',
+      documentId: 'doc_temp',
+      filePath: null,
+      fileName: '临时笔记',
+      line: '3'
+    });
+
+    const encoded = encodeVariables('定位 {{file-ref:ref_temp}}');
     const container = document.createElement('div');
     container.innerHTML = encoded;
     const chip = container.querySelector('[data-value="file-reference"]');
 
     expect(chip?.getAttribute('contenteditable')).toBe('false');
-    expect(chip?.getAttribute('data-file-path')).toBeNull();
-    expect(chip?.getAttribute('data-temporary')).toBe('true');
+    expect(chip?.getAttribute('data-reference-id')).toBe('ref_temp');
+    expect(chip?.getAttribute('data-document-id')).toBe('doc_temp');
     expect(chip?.textContent).toBe('临时笔记:3');
-    expect(decodeVariables(encoded)).toBe('定位 {{file-ref:{"path":null,"name":"临时笔记","line":"3"}}}');
+    expect(decodeVariables(encoded)).toBe('定位 {{file-ref:ref_temp}}');
   });
 
   test('keeps file reference chip support wired through the prompt editor insert API and deletion path', () => {
