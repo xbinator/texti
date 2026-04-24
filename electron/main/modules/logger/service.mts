@@ -11,7 +11,9 @@ import log from 'electron-log/main.js';
 const consoleInspectOptions: InspectOptions = {
   depth: null,
   maxArrayLength: null,
-  maxStringLength: null
+  maxStringLength: null,
+  breakLength: Infinity, // ← 禁止自动换行
+  compact: true // ← 紧凑单行模式
 };
 
 /**
