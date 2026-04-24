@@ -48,7 +48,7 @@ import VariableSelect from './components/VariableSelect.vue';
 import { useEditorCore, useEditorKeyboard, useEditorPaste, useEditorTrigger } from './hooks';
 
 const props = withDefaults(defineProps<Props>(), {
-  placeholder: 'ÇëÊäÈëÄÚÈÝ...',
+  placeholder: 'ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½...',
   options: () => [],
   disabled: false,
   maxHeight: undefined,
@@ -293,7 +293,7 @@ defineExpose({ focus, insertFileReference });
   height: 100%;
   resize: none;
   outline: none;
-  background: transparent;
+  background: var(--input-bg);
   border: none;
 }
 </style>

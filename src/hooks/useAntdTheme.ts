@@ -35,16 +35,16 @@ export function useAntdTheme(): UseAntdThemeResult {
       return {
         algorithm: darkAlgorithm,
         token: {
-          colorPrimary: '#c8a98b',
-          colorPrimaryBg: '#3d342d',
-          colorPrimaryBorder: '#8a755f',
-          colorBgBase: '#2d2d2d',
-          colorBgContainer: '#1a1a1a',
-          colorBgElevated: '#353535',
-          colorText: '#f3efe8',
-          colorTextSecondary: '#b7aea6',
-          colorBorder: '#4a453f',
-          controlOutline: 'rgb(200 169 139 / 20%)'
+          colorPrimary: '#cc6444',
+          colorPrimaryBg: '#221510',
+          colorPrimaryBorder: '#7a3a22',
+          colorBgBase: '#1a1a1a',
+          colorBgContainer: '#0d0d0d',
+          colorBgElevated: '#222222',
+          colorText: '#f2f2f2',
+          colorTextSecondary: '#999999',
+          colorBorder: '#2e2e2e',
+          controlOutline: 'rgb(204 100 68 / 25%)'
         }
       };
     }
