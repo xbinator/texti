@@ -5,7 +5,7 @@
         <AInput v-model:value="keyword" placeholder="搜索最近文件" @keydown.esc.prevent="handleClose" />
       </div>
 
-      <BScrollbar :max-height="maxHeight" inset="auto-horizontal">
+      <BScrollbar :max-height="maxHeight" inset="auto">
         <div class="b-search-recent-list">
           <button
             v-for="file in filteredFiles"

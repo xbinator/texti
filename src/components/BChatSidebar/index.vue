@@ -237,7 +237,7 @@ function handleChatBusyChange(busy: boolean): void {
  * 处理编辑器文件引用插入请求。
  * @param reference - 文件引用数据
  */
-async function handleFileReferenceInsert(reference: FileReferenceChip): Promise<void> {
+async function handleFileReferenceInsert(reference: FileReferenceChip) {
   settingStore.setSidebarVisible(true);
 
   await nextTick();

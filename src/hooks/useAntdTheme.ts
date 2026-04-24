@@ -35,16 +35,23 @@ export function useAntdTheme(): UseAntdThemeResult {
       return {
         algorithm: darkAlgorithm,
         token: {
-          colorPrimary: '#cc6444',
-          colorPrimaryBg: '#221510',
-          colorPrimaryBorder: '#7a3a22',
-          colorBgBase: '#1a1a1a',
-          colorBgContainer: '#0d0d0d',
-          colorBgElevated: '#222222',
-          colorText: '#f2f2f2',
-          colorTextSecondary: '#999999',
-          colorBorder: '#2e2e2e',
-          controlOutline: 'rgb(204 100 68 / 25%)'
+          // 背景
+          colorBgBase: '#111111',
+          colorBgContainer: '#000000',
+          colorBgElevated: '#1a1a1a',
+
+          // 文本
+          colorText: '#f0f0f0',
+          colorTextSecondary: '#8a8a8a',
+
+          // 边框
+          colorBorder: '#2a2a2a',
+
+          // 主题色 — 与 CSS 变量对齐
+          colorPrimary: '#c8a98b',
+          colorPrimaryBg: '#0d0b09',
+          colorPrimaryBorder: '#3d3028',
+          controlOutline: 'rgb(200 169 139 / 15%)'
         }
       };
     }
