@@ -57,6 +57,12 @@
 - 可以直接返回 `createToolSuccessResult`
 - 不需要走 `executeWithPermission`
 
+补充说明：
+
+- 只读工具不等于永远不需要用户确认。
+- 如果工具允许读取工作区外的绝对路径资源，例如本地文件或本地目录，仍然应该在无工作区约束时要求用户确认。
+- `read_file` 和 `read_directory` 都属于这种“只读但有边界风险”的工具。
+
 ### 2. 写工具
 
 适合修改编辑器内容或应用状态，例如：
@@ -196,6 +202,8 @@ export interface ExampleToolResult {
 - 平台不支持：`UNSUPPORTED_PROVIDER`
 - 运行期异常：`EXECUTION_FAILED`
 
+如果是“只读但需要确认”的工具，也应该在用户拒绝时返回 `createToolCancelledResult`，而不是把这类场景混成普通失败。
+
 ## 什么时候走 `permission.ts`
 
 结论很简单：
@@ -286,6 +294,22 @@ export interface ExampleToolResult {
 
 如果是非默认开放工具，也可以只在特定开关下暴露。
 
+这里有一个很容易漏掉的点：
+
+- 如果工具实现支持确认流程，例如绝对路径读取确认
+- 那么在 `createBuiltinTools` 里组装它时，要把 `confirm: options.confirm` 一并传进去
+
+不要只传 `getWorkspaceRoot`，否则工具内部虽然写了确认逻辑，但聊天侧真正创建出来的实例拿不到确认适配器，最终只会返回“需要用户确认”，却不会弹出确认卡片。
+
+`read_directory` 就踩过这个坑，修复方式就是在 `builtin/index.ts` 中改成：
+
+```ts
+createBuiltinReadDirectoryTool({
+  confirm: options.confirm,
+  getWorkspaceRoot: options.getWorkspaceRoot
+})
+```
+
 ### 4. 在 `builtin/catalog.ts` 决定是否默认开放
 
 这里不要写裸字符串，要引用共享常量，例如：
@@ -307,6 +331,27 @@ export const DEFAULT_BUILTIN_READONLY_TOOL_NAMES = [
 - 默认聊天工具名集合
 
 一般新增默认工具后，不需要单独修改逻辑，只要默认清单正确即可。
+
+## 只读工具的绝对路径确认模式
+
+当工具既是只读工具，又可能访问工作区外的本地资源时，推荐沿用 `read_file` / `read_directory` 这套模式：
+
+1. 有 `workspaceRoot` 时：
+   只允许读取工作区内路径，由底层平台层做安全校验。
+2. 没有 `workspaceRoot` 时：
+   相对路径直接拒绝。
+3. 没有 `workspaceRoot` 且传入绝对路径时：
+   先通过 `AIToolConfirmationAdapter` 请求用户确认，再继续执行。
+4. 如果当前工具实例没有拿到 `confirm`：
+   返回 `PERMISSION_DENIED`，明确说明“需要用户确认”。
+
+这样做的好处是：
+
+- 默认仍然安全
+- 不会静默读取任意本地路径
+- 在用户显式授权时，又能支持跨工作区读取
+
+这类确认一般不走 `executeWithPermission`，因为它不是“写操作授权记忆”问题，而是“对当前一次绝对路径读取做单次确认”。
 
 ## 新建一个 `builtin/*.ts` 文件时的建议模板
 
@@ -393,6 +438,7 @@ export function createExampleTools(): ExampleTools {
 - 输入校验失败
 - 权限拒绝或用户取消
 - 特殊上下文分支
+- 无工作区时的绝对路径确认分支
 
 例如：
 
@@ -406,6 +452,8 @@ export function createExampleTools(): ExampleTools {
 - `test/ai/tools/builtin-index.test.ts`
 
 确认默认工具集合是否符合预期。
+
+如果工具依赖 `confirm` 或 `getWorkspaceRoot`，这里还应该补一条“宿主参数是否真的传进工具实例”的回归测试。否则工具本身测试可能是绿的，但聊天侧实际接线仍然可能失效。
 
 ### 3. `catalog.ts` 默认清单测试
 
@@ -437,8 +485,10 @@ export function createExampleTools(): ExampleTools {
 - 是否明确了 `requiresActiveDocument`
 - 是否使用统一结果工厂
 - 写工具是否接入权限或确认流程
+- 只读绝对路径工具是否接入单次确认流程
 - 是否更新了 `catalog.ts`
 - 是否更新了 `builtin/index.ts`
+- `builtin/index.ts` 是否把 `confirm` / `getWorkspaceRoot` 等依赖真实传入
 - 是否补了相关测试
 - 是否把改动记录进当日 changelog
 

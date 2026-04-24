@@ -171,6 +171,25 @@ async function confirmAbsoluteRead(adapter: AIToolConfirmationAdapter, filePath:
 }
 
 /**
+ * 请求用户确认读取本地绝对路径目录。
+ * @param adapter - 确认适配器
+ * @param directoryPath - 目录路径
+ * @returns 是否已确认
+ */
+async function confirmAbsoluteDirectoryRead(adapter: AIToolConfirmationAdapter, directoryPath: string): Promise<boolean> {
+  const request: AIToolConfirmationRequest = {
+    toolName: READ_DIRECTORY_TOOL_NAME,
+    title: 'AI 想要读取本地目录',
+    description: `AI 请求读取本地目录：${directoryPath}\n仅返回当前目录的直接子项。`,
+    riskLevel: 'read',
+    beforeText: directoryPath
+  };
+  const decision = await adapter.confirm(request);
+
+  return typeof decision === 'boolean' ? decision : decision.approved;
+}
+
+/**
  * 创建内置 read_file 工具。
  * @param options - 工具创建选项
  * @returns read_file 工具执行器
@@ -274,14 +293,28 @@ export function createBuiltinReadDirectoryTool(
       }
 
       const workspaceRoot = options.getWorkspaceRoot?.() ?? null;
+      const confirmationAdapter = options.confirm;
       if (!workspaceRoot) {
-        return createToolFailureResult(READ_DIRECTORY_TOOL_NAME, 'PERMISSION_DENIED', '未配置工作区根目录时只能读取绝对路径');
+        if (!isAbsoluteFilePath(directoryPath)) {
+          return createToolFailureResult(READ_DIRECTORY_TOOL_NAME, 'PERMISSION_DENIED', '未配置工作区根目录时只能读取绝对路径');
+        }
+
+        if (!confirmationAdapter) {
+          return createToolFailureResult(READ_DIRECTORY_TOOL_NAME, 'PERMISSION_DENIED', '读取本地绝对路径目录需要用户确认');
+        }
       }
 
       try {
+        if (!workspaceRoot) {
+          const confirmed = await confirmAbsoluteDirectoryRead(confirmationAdapter!, directoryPath);
+          if (!confirmed) {
+            return createToolCancelledResult(READ_DIRECTORY_TOOL_NAME);
+          }
+        }
+
         const result = await readWorkspaceDirectory({
           directoryPath,
-          workspaceRoot
+          ...(workspaceRoot ? { workspaceRoot } : {})
         });
 
         return createToolSuccessResult(READ_DIRECTORY_TOOL_NAME, result);

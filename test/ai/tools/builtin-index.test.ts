@@ -166,4 +166,21 @@ describe('createBuiltinTools', () => {
       error: { code: 'UNSUPPORTED_PROVIDER' }
     });
   });
+
+  it('passes confirmation adapter to read_directory for absolute paths without workspace root', async () => {
+    const confirm = {
+      confirm: async () => true
+    };
+    const tools = createBuiltinTools({
+      confirm
+    });
+    const readDirectoryTool = tools.find((tool) => tool.definition.name === READ_DIRECTORY_TOOL_NAME);
+
+    const result = await readDirectoryTool?.execute({ path: '/Users/demo/project/docs' }, createToolContext());
+
+    expect(result).toMatchObject({
+      status: 'failure',
+      error: { code: 'UNSUPPORTED_PROVIDER' }
+    });
+  });
 });

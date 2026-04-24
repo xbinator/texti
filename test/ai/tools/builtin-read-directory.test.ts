@@ -34,6 +34,68 @@ describe('read_directory tool', () => {
     expect(result.error?.code).toBe('INVALID_INPUT');
   });
 
+  it('rejects relative directory paths when no workspace root is configured', async () => {
+    const tool = createBuiltinReadDirectoryTool({
+      getWorkspaceRoot: () => null,
+      readWorkspaceDirectory: async () => ({ path: '', entries: [] })
+    });
+
+    const result = await tool.execute({ path: 'docs' });
+
+    expect(result.status).toBe('failure');
+    expect(result.error?.code).toBe('PERMISSION_DENIED');
+    expect(result.error?.message).toBe('未配置工作区根目录时只能读取绝对路径');
+  });
+
+  it('confirms and reads an absolute directory path when no workspace root is configured', async () => {
+    let confirmedTitle = '';
+    let capturedOptions: ReadWorkspaceDirectoryOptions | null = null;
+    const expectedResult: ReadWorkspaceDirectoryResult = {
+      path: '/Users/demo/project/docs',
+      entries: [{ name: 'README.md', path: '/Users/demo/project/docs/README.md', type: 'file' }]
+    };
+    const tool = createBuiltinReadDirectoryTool({
+      confirm: {
+        confirm: async (request) => {
+          confirmedTitle = request.title;
+          return true;
+        }
+      },
+      getWorkspaceRoot: () => null,
+      readWorkspaceDirectory: async (options: ReadWorkspaceDirectoryOptions) => {
+        capturedOptions = options;
+        return expectedResult;
+      }
+    });
+
+    const result = await tool.execute({ path: '/Users/demo/project/docs' });
+
+    expect(confirmedTitle).toBe('AI 想要读取本地目录');
+    expect(capturedOptions).toEqual({
+      directoryPath: '/Users/demo/project/docs'
+    });
+    expect(result).toEqual({
+      toolName: READ_DIRECTORY_TOOL_NAME,
+      status: 'success',
+      data: expectedResult
+    });
+  });
+
+  it('cancels absolute directory reads when the user rejects confirmation', async () => {
+    const tool = createBuiltinReadDirectoryTool({
+      confirm: {
+        confirm: async () => false
+      },
+      getWorkspaceRoot: () => null,
+      readWorkspaceDirectory: async () => ({ path: '', entries: [] })
+    });
+
+    const result = await tool.execute({ path: '/Users/demo/project/docs' });
+
+    expect(result.status).toBe('cancelled');
+    expect(result.error?.code).toBe('USER_CANCELLED');
+  });
+
   it('lists direct children inside the workspace', async () => {
     let capturedOptions: ReadWorkspaceDirectoryOptions | null = null;
     const expectedResult: ReadWorkspaceDirectoryResult = {

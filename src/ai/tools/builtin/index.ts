@@ -55,6 +55,7 @@ export function createBuiltinTools(options: CreateBuiltinToolsOptions = {}): AIT
       getWorkspaceRoot: options.getWorkspaceRoot
     }),
     createBuiltinReadDirectoryTool({
+      confirm: options.confirm,
       getWorkspaceRoot: options.getWorkspaceRoot
     }),
     createBuiltinSettingsTools(options.confirm ?? { confirm: async () => false }).getSettings
