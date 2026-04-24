@@ -61,7 +61,7 @@ import { getDefaultChatToolNames } from '@/ai/tools/policy';
 import { findPendingUserChoiceQuestion } from '@/components/BChat/message';
 import type { Message } from '@/components/BChat/types';
 import type { FileReferenceChip } from '@/components/BPromptEditor/hooks/useVariableEncoder';
-import { onChatFileReferenceInsert } from '@/shared/chat/fileReference';
+import { onChatFileReferenceInsert, type ChatFileReferenceInsertPayload } from '@/shared/chat/fileReference';
 import { chatStorage } from '@/shared/storage';
 import { useChatStore } from '@/stores/chat';
 import { useSettingStore } from '@/stores/setting';
@@ -181,28 +181,6 @@ async function loadPersistedMessagesBeforeVisible(sessionId: string): Promise<Me
 }
 
 /**
- * 消息发送前的处理函数
- * 1. 清理待处理的确认状态
- * 2. 如果没有激活会话则创建新会话
- * 3. 将消息持久化到存储
- * @param message - 待发送的消息
- */
-async function handleBeforeSend(message: Message): Promise<void> {
-  confirmationController.expirePendingConfirmation();
-  await persistReferenceSnapshots(message);
-
-  if (!settingStore.chatSidebarActiveSessionId) {
-    // 没有激活会话时创建新会话，使用消息内容作为标题。
-    const session = await chatStore.createSession(CHAT_SESSION_TYPE, { title: message.content });
-
-    settingStore.setChatSidebarActiveSessionId(session.id);
-    sessions.value.unshift(session);
-  }
-
-  await chatStore.addSessionMessage(settingStore.chatSidebarActiveSessionId, message);
-}
-
-/**
  * Persists per-send document snapshots and binds snapshot ids back onto message references.
  * @param message - Pending user message.
  */
@@ -231,6 +209,28 @@ async function persistReferenceSnapshots(message: Message): Promise<void> {
   });
 
   await chatStorage.upsertReferenceSnapshots([snapshot]);
+}
+
+/**
+ * 消息发送前的处理函数
+ * 1. 清理待处理的确认状态
+ * 2. 如果没有激活会话则创建新会话
+ * 3. 将消息持久化到存储
+ * @param message - 待发送的消息
+ */
+async function handleBeforeSend(message: Message): Promise<void> {
+  confirmationController.expirePendingConfirmation();
+  await persistReferenceSnapshots(message);
+
+  if (!settingStore.chatSidebarActiveSessionId) {
+    // 没有激活会话时创建新会话，使用消息内容作为标题。
+    const session = await chatStore.createSession(CHAT_SESSION_TYPE, { title: message.content });
+
+    settingStore.setChatSidebarActiveSessionId(session.id);
+    sessions.value.unshift(session);
+  }
+
+  await chatStore.addSessionMessage(settingStore.chatSidebarActiveSessionId, message);
 }
 
 /**
@@ -269,13 +269,13 @@ function handleChatBusyChange(busy: boolean): void {
 
 /**
  * 处理编辑器文件引用插入请求。
- * @param reference - 文件引用数据
+ * @param reference - 共享事件总线发出的文件引用插入载荷
  */
-async function handleFileReferenceInsert(reference: FileReferenceChip): Promise<void> {
+async function handleFileReferenceInsert(reference: ChatFileReferenceInsertPayload): Promise<void> {
   const toolContext = editorToolContextRegistry.getCurrentContext();
   const enrichedReference: FileReferenceChip = {
-    referenceId: reference.referenceId || nanoid(),
-    documentId: reference.documentId || toolContext?.document.id || reference.filePath || reference.fileName,
+    referenceId: nanoid(),
+    documentId: toolContext?.document.id || reference.filePath || reference.fileName,
     filePath: reference.filePath ?? toolContext?.document.path ?? null,
     fileName: reference.fileName,
     line: reference.line

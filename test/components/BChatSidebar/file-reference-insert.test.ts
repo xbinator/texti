@@ -68,8 +68,9 @@ describe('chat file reference insert wiring', () => {
     expect(chatSource).not.toContain('expandFileReferencesForModel');
     expect(chatSource).toContain('defineExpose({ focusInput, insertFileReference })');
     expect(sidebarSource).toContain('onChatFileReferenceInsert');
-    expect(sidebarSource).toContain('referenceId: reference.referenceId || nanoid()');
-    expect(sidebarSource).toContain('documentId: reference.documentId || toolContext?.document.id');
+    expect(sidebarSource).toContain('type ChatFileReferenceInsertPayload');
+    expect(sidebarSource).toContain('referenceId: nanoid()');
+    expect(sidebarSource).toContain('documentId: toolContext?.document.id || reference.filePath || reference.fileName');
     expect(sidebarSource).toContain('async function persistReferenceSnapshots');
     expect(sidebarSource).toContain('chatStorage.upsertReferenceSnapshots([snapshot])');
     expect(sidebarSource).toContain('chatRef.value?.insertFileReference');

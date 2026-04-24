@@ -152,39 +152,6 @@ watch(loading, (value) => {
 /**
  * Parsed 1-based line range used for local reference context extraction.
  */
-interface ParsedLineRange {
-  /** Inclusive start line. */
-  start: number;
-  /** Inclusive end line. */
-  end: number;
-}
-
-/**
- * Parses a stored line label such as `12` or `12-18`.
- * @param line - Stored line label.
- * @returns Parsed range or `null` when the label is invalid.
- */
-function parseLineRange(line: string): ParsedLineRange | null {
-  const singleLineMatch = /^(\d+)$/.exec(line);
-  if (singleLineMatch) {
-    const value = Number(singleLineMatch[1]);
-    return value > 0 ? { start: value, end: value } : null;
-  }
-
-  const rangeMatch = /^(\d+)-(\d+)$/.exec(line);
-  if (!rangeMatch) {
-    return null;
-  }
-
-  const start = Number(rangeMatch[1]);
-  const end = Number(rangeMatch[2]);
-  if (start <= 0 || end <= 0 || end < start) {
-    return null;
-  }
-
-  return { start, end };
-}
-
 /**
  * Builds a lightweight overview for long documents before appending a local excerpt.
  * @param toolContext - Active editor context.
@@ -240,31 +207,6 @@ function buildReferenceContextBlock(references: ChatMessageFileReference[], tool
  * @param sourceMessages - Visible chat history.
  * @returns Model-facing message history with hidden reference context appended when available.
  */
-function buildMessagesForModel(sourceMessages: Message[]): Message[] {
-  const toolContext = props.getToolContext?.();
-  if (!toolContext) {
-    return sourceMessages;
-  }
-
-  return sourceMessages.map((message) => {
-    if (message.role !== 'user' || !message.references?.length) {
-      return message;
-    }
-
-    const matchedReferences = message.references.filter((reference) => reference.documentId === toolContext.document.id);
-    if (!matchedReferences.length) {
-      return message;
-    }
-
-    const modelContent = `${message.content}\n\n${buildReferenceContextBlock(matchedReferences, toolContext)}`;
-    return {
-      ...message,
-      content: modelContent,
-      parts: [{ type: 'text', text: modelContent }]
-    };
-  });
-}
-
 /**
  * Keeps draft references aligned with the current visible input content.
  * @param content - Current visible prompt content.
