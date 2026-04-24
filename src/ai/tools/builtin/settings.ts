@@ -16,21 +16,13 @@ export const UPDATE_SETTINGS_TOOL_NAME = 'update_settings';
 export const GET_SETTINGS_TOOL_NAME = 'get_settings';
 
 /** 支持通过 AI 修改的设置键。 */
-const SUPPORTED_SETTING_KEYS = [
-  'theme',
-  'showOutline',
-  'sourceMode',
-  'sidebarVisible',
-  'sidebarWidth',
-  'settingsSidebarCollapsed',
-  'providerSidebarCollapsed'
-] as const;
+const SUPPORTED_SETTING_KEYS = ['theme', 'showOutline', 'sourceMode'] as const;
 
 /** 支持通过 AI 修改的设置键类型。 */
 type SupportedSettingKey = (typeof SUPPORTED_SETTING_KEYS)[number];
 
 /** 布尔设置键列表。 */
-const BOOLEAN_SETTING_KEYS = ['showOutline', 'sourceMode', 'sidebarVisible', 'settingsSidebarCollapsed', 'providerSidebarCollapsed'] as const;
+const BOOLEAN_SETTING_KEYS = ['showOutline', 'sourceMode'] as const;
 
 /** 布尔设置键类型。 */
 type BooleanSettingKey = (typeof BOOLEAN_SETTING_KEYS)[number];
@@ -126,12 +118,6 @@ function validateSettingsInput(input: UpdateSettingsInput): UpdateSettingsInput 
     return isThemeMode(input.value) ? input : 'theme 只能设置为 dark、light 或 system。';
   }
 
-  if (input.key === 'sidebarWidth') {
-    return typeof input.value === 'number' && Number.isFinite(input.value) && input.value >= 240 && input.value <= 500
-      ? input
-      : 'sidebarWidth 必须是 240 到 500 之间的数字。';
-  }
-
   if (isBooleanSettingKey(input.key)) {
     return typeof input.value === 'boolean' ? input : `${input.key} 必须设置为布尔值。`;
   }
@@ -162,11 +148,6 @@ function applySettingValue(input: UpdateSettingsInput): void {
     return;
   }
 
-  if (input.key === 'sidebarWidth' && typeof input.value === 'number') {
-    settingStore.setSidebarWidth(input.value);
-    return;
-  }
-
   if (input.key === 'showOutline' && typeof input.value === 'boolean') {
     settingStore.setShowOutline(input.value);
     return;
@@ -174,21 +155,6 @@ function applySettingValue(input: UpdateSettingsInput): void {
 
   if (input.key === 'sourceMode' && typeof input.value === 'boolean') {
     settingStore.setSourceMode(input.value);
-    return;
-  }
-
-  if (input.key === 'sidebarVisible' && typeof input.value === 'boolean') {
-    settingStore.setSidebarVisible(input.value);
-    return;
-  }
-
-  if (input.key === 'settingsSidebarCollapsed' && typeof input.value === 'boolean') {
-    settingStore.setSettingsSidebarCollapsed(input.value);
-    return;
-  }
-
-  if (input.key === 'providerSidebarCollapsed' && typeof input.value === 'boolean') {
-    settingStore.setProviderSidebarCollapsed(input.value);
   }
 }
 
@@ -202,7 +168,7 @@ export function createBuiltinSettingsTools(adapter: AIToolConfirmationAdapter): 
     updateSettings: {
       definition: {
         name: UPDATE_SETTINGS_TOOL_NAME,
-        description: '修改应用设置。可根据自然语言请求设置主题、大纲、源码模式、聊天侧边栏和侧边栏折叠状态。',
+        description: '修改应用设置。可根据自然语言请求设置主题、大纲和源码模式。',
         source: 'builtin',
         riskLevel: 'write',
         permissionCategory: 'settings',
@@ -217,8 +183,8 @@ export function createBuiltinSettingsTools(adapter: AIToolConfirmationAdapter): 
               description: '要修改的设置键。'
             },
             value: {
-              type: ['string', 'boolean', 'number'],
-              description: '设置值：theme 使用 dark/light/system；布尔设置使用 true/false；sidebarWidth 使用 240 到 500 的数字。'
+              type: ['string', 'boolean'],
+              description: '设置值：theme 使用 dark/light/system；布尔设置使用 true/false。'
             }
           },
           required: ['key', 'value'],
@@ -263,7 +229,7 @@ export function createBuiltinSettingsTools(adapter: AIToolConfirmationAdapter): 
     getSettings: {
       definition: {
         name: GET_SETTINGS_TOOL_NAME,
-        description: '获取应用设置。可获取主题、大纲、源码模式、侧边栏等设置项的当前值。支持传入单个 key、key 数组或不传（返回所有设置）。',
+        description: '获取应用设置。可获取主题、大纲和源码模式等设置项的当前值。支持传入单个 key、key 数组或不传（返回所有设置）。',
         source: 'builtin',
         riskLevel: 'read',
         permissionCategory: 'settings',

@@ -147,7 +147,7 @@ describe('built-in settings tools', () => {
     const tools = createBuiltinSettingsTools({ confirm });
     const settingStore = useSettingStore();
 
-    const result = await tools.updateSettings.execute({ key: 'sidebarWidth', value: 260 }, createToolContext());
+    const result = await tools.updateSettings.execute({ key: 'showOutline', value: false }, createToolContext());
 
     expect(result.status).toBe('success');
     expect(settingStore.alwaysToolPermissionGrants.update_settings).toBe(true);
