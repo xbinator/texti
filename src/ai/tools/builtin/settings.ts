@@ -12,6 +12,9 @@ import { createToolFailureResult } from '../results';
 /** 设置修改工具名称。 */
 const UPDATE_SETTINGS_TOOL_NAME = 'update_settings';
 
+/** 设置获取工具名称。 */
+const GET_SETTINGS_TOOL_NAME = 'get_settings';
+
 /** 支持通过 AI 修改的设置键。 */
 const SUPPORTED_SETTING_KEYS = [
   'theme',
@@ -57,11 +60,29 @@ export interface UpdateSettingsResult {
 }
 
 /**
+ * 设置获取工具输入参数。
+ */
+export interface GetSettingsInput {
+  /** 要获取的设置键，支持单个或数组，不传则返回所有设置。 */
+  keys?: SupportedSettingKey | SupportedSettingKey[];
+}
+
+/**
+ * 设置获取工具结果。
+ */
+export interface GetSettingsResult {
+  /** 获取到的设置键值对。 */
+  settings: Partial<Record<SupportedSettingKey, string | boolean | number>>;
+}
+
+/**
  * 内置设置工具集合。
  */
 export interface BuiltinSettingsTools {
   /** 修改应用设置工具。 */
   updateSettings: AIToolExecutor<UpdateSettingsInput, UpdateSettingsResult>;
+  /** 获取应用设置工具。 */
+  getSettings: AIToolExecutor<GetSettingsInput, GetSettingsResult>;
 }
 
 /**
@@ -237,6 +258,54 @@ export function createBuiltinSettingsTools(adapter: AIToolConfirmationAdapter): 
             };
           }
         });
+      }
+    },
+    getSettings: {
+      definition: {
+        name: GET_SETTINGS_TOOL_NAME,
+        description: '获取应用设置。可获取主题、大纲、源码模式、侧边栏等设置项的当前值。支持传入单个 key、key 数组或不传（返回所有设置）。',
+        source: 'builtin',
+        riskLevel: 'read',
+        permissionCategory: 'settings',
+        safeAutoApprove: true,
+        requiresActiveDocument: false,
+        parameters: {
+          type: 'object',
+          properties: {
+            keys: {
+              oneOf: [
+                { type: 'string', enum: SUPPORTED_SETTING_KEYS },
+                { type: 'array', items: { type: 'string', enum: SUPPORTED_SETTING_KEYS } }
+              ],
+              description: '要获取的设置键，支持单个字符串或数组，不传则返回所有设置。'
+            }
+          },
+          additionalProperties: false
+        }
+      },
+      async execute(input: GetSettingsInput) {
+        const settings: Partial<Record<SupportedSettingKey, string | boolean | number>> = {};
+
+        let targetKeys: SupportedSettingKey[];
+        if (input.keys === undefined) {
+          targetKeys = [...SUPPORTED_SETTING_KEYS];
+        } else if (Array.isArray(input.keys)) {
+          targetKeys = input.keys.filter(isSupportedSettingKey);
+        } else if (isSupportedSettingKey(input.keys)) {
+          targetKeys = [input.keys];
+        } else {
+          return createToolFailureResult(GET_SETTINGS_TOOL_NAME, 'INVALID_INPUT', '不支持的设置键。');
+        }
+
+        for (const key of targetKeys) {
+          settings[key] = getCurrentSettingValue(key);
+        }
+
+        return {
+          toolName: GET_SETTINGS_TOOL_NAME,
+          status: 'success',
+          data: { settings }
+        };
       }
     }
   };
