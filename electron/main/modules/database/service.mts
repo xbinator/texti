@@ -46,6 +46,7 @@ function migrateDatabase(): void {
   ensureColumn('chat_sessions', 'usage_json', 'usage_json TEXT');
   ensureColumn('chat_messages', 'thinking', 'thinking TEXT');
   ensureColumn('chat_messages', 'parts_json', 'parts_json TEXT');
+  ensureColumn('chat_messages', 'references_json', 'references_json TEXT');
 }
 
 export function getDbPath(): string {
@@ -112,9 +113,18 @@ export async function initDatabase(): Promise<void> {
       role TEXT NOT NULL,
       content TEXT NOT NULL,
       parts_json TEXT,
+      references_json TEXT,
       thinking TEXT,
       files_json TEXT,
       usage_json TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS chat_reference_snapshots (
+      id TEXT PRIMARY KEY,
+      document_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
 
@@ -123,6 +133,9 @@ export async function initDatabase(): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id_created_at
     ON chat_messages(session_id, created_at ASC);
+
+    CREATE INDEX IF NOT EXISTS idx_chat_reference_snapshots_document_id_created_at
+    ON chat_reference_snapshots(document_id, created_at DESC);
   `);
 
   migrateDatabase();

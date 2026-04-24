@@ -47,7 +47,7 @@
 import type { CachedModelMessagesResult } from './message';
 import type { BChatProps as Props, Message, ServiceConfig, ToolLoopGuardConfig } from './types';
 import type { AIServiceError, AIStreamFinishChunk, AIStreamToolCallChunk } from 'types/ai';
-import type { AIUserChoiceAnswerData, ChatMessageConfirmationAction } from 'types/chat';
+import type { AIUserChoiceAnswerData, ChatMessageConfirmationAction, ChatMessageFileReference } from 'types/chat';
 import { nextTick, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { message as aMessage } from 'ant-design-vue';
@@ -57,6 +57,7 @@ import { executeToolCall, toTransportTools, type ExecutedToolCall } from '@/ai/t
 import BButton from '@/components/BButton/index.vue';
 import type { FileReferenceChip } from '@/components/BPromptEditor/hooks/useVariableEncoder';
 import { useChat } from '@/hooks/useChat';
+import { chatStorage } from '@/shared/storage';
 import { useServiceModelStore } from '@/stores/service-model';
 import { Modal } from '@/utils/modal';
 import Container from './components/Container.vue';
@@ -68,12 +69,12 @@ import {
   appendToolResultPart,
   createAssistantPlaceholder,
   createErrorMessage,
-  expandFileReferencesForModel,
   findPendingUserChoiceQuestion,
   isRemovableAssistantPlaceholder,
   submitUserChoiceAnswer,
   toCachedModelMessages
 } from './message';
+import { buildModelReadyMessages } from './fileReferenceContext';
 import { createToolCallTracker, type ToolCallTracker } from './utils/toolCallTracker';
 import { createToolLoopGuard, type ToolLoopGuard } from './utils/toolLoopGuard';
 
@@ -127,6 +128,7 @@ const loading = ref(false);
 const pendingToolResults = ref<ExecutedToolCall[]>([]);
 const blockedToolLoopReason = ref('');
 const awaitingUserChoice = ref(false);
+const draftReferences = ref<ChatMessageFileReference[]>([]);
 const promptEditorRef = ref<PromptEditorExpose | null>(null);
 const containerRef = ref<ChatContainerExpose | null>(null);
 
@@ -147,6 +149,151 @@ watch(loading, (value) => {
 /**
  * 为一次新的流式请求切换到新的异步跟踪上下文。
  */
+/**
+ * Parsed 1-based line range used for local reference context extraction.
+ */
+interface ParsedLineRange {
+  /** Inclusive start line. */
+  start: number;
+  /** Inclusive end line. */
+  end: number;
+}
+
+/**
+ * Parses a stored line label such as `12` or `12-18`.
+ * @param line - Stored line label.
+ * @returns Parsed range or `null` when the label is invalid.
+ */
+function parseLineRange(line: string): ParsedLineRange | null {
+  const singleLineMatch = /^(\d+)$/.exec(line);
+  if (singleLineMatch) {
+    const value = Number(singleLineMatch[1]);
+    return value > 0 ? { start: value, end: value } : null;
+  }
+
+  const rangeMatch = /^(\d+)-(\d+)$/.exec(line);
+  if (!rangeMatch) {
+    return null;
+  }
+
+  const start = Number(rangeMatch[1]);
+  const end = Number(rangeMatch[2]);
+  if (start <= 0 || end <= 0 || end < start) {
+    return null;
+  }
+
+  return { start, end };
+}
+
+/**
+ * Builds a lightweight overview for long documents before appending a local excerpt.
+ * @param toolContext - Active editor context.
+ * @param lines - Current document lines.
+ * @returns Human-readable overview text for the model.
+ */
+function buildDocumentOverview(toolContext: AIToolContext, lines: string[]): string {
+  const firstMeaningfulLine = lines.find((line) => line.trim().length > 0) ?? '';
+  const summaryParts = [`文档标题：${toolContext.document.title}`, `总行数：${lines.length}`];
+
+  if (firstMeaningfulLine) {
+    summaryParts.push(`首个非空行：${firstMeaningfulLine}`);
+  }
+
+  return summaryParts.join('\n');
+}
+
+/**
+ * Builds the hidden model-only context block for the current document references.
+ * @param references - References matching the active document.
+ * @param toolContext - Active editor context.
+ * @returns Context block appended after the visible user message.
+ */
+function buildReferenceContextBlock(references: ChatMessageFileReference[], toolContext: AIToolContext): string {
+  const content = toolContext.document.getContent();
+  const lines = content.split(/\r?\n/);
+  const totalLines = lines.length;
+  const lineLabels = references.map((reference) => reference.line).join('、');
+  const header = `引用文件：${toolContext.document.path ?? `未保存文件（${toolContext.document.title}）`}\n引用行：${lineLabels}`;
+  const parsedRanges = references.map((reference) => parseLineRange(reference.line)).filter((range): range is ParsedLineRange => range !== null);
+
+  if (totalLines <= SMALL_DOCUMENT_LINE_THRESHOLD) {
+    return `${header}\n全文内容：\n${content}`;
+  }
+
+  if (!parsedRanges.length) {
+    return `${header}\n${buildDocumentOverview(toolContext, lines)}`;
+  }
+
+  const startLine = Math.max(1, Math.min(...parsedRanges.map((range) => range.start)) - CONTEXT_WINDOW_LINES);
+  const endLine = Math.min(totalLines, Math.max(...parsedRanges.map((range) => range.end)) + CONTEXT_WINDOW_LINES);
+  const excerpt = lines.slice(startLine - 1, endLine).join('\n');
+
+  if (totalLines <= MEDIUM_DOCUMENT_LINE_THRESHOLD) {
+    return `${header}\n附近片段（第 ${startLine}-${endLine} 行）：\n${excerpt}`;
+  }
+
+  return `${header}\n${buildDocumentOverview(toolContext, lines)}\n附近片段（第 ${startLine}-${endLine} 行）：\n${excerpt}`;
+}
+
+/**
+ * Builds the model-facing message list while keeping visible user messages unchanged in the UI.
+ * @param sourceMessages - Visible chat history.
+ * @returns Model-facing message history with hidden reference context appended when available.
+ */
+function buildMessagesForModel(sourceMessages: Message[]): Message[] {
+  const toolContext = props.getToolContext?.();
+  if (!toolContext) {
+    return sourceMessages;
+  }
+
+  return sourceMessages.map((message) => {
+    if (message.role !== 'user' || !message.references?.length) {
+      return message;
+    }
+
+    const matchedReferences = message.references.filter((reference) => reference.documentId === toolContext.document.id);
+    if (!matchedReferences.length) {
+      return message;
+    }
+
+    const modelContent = `${message.content}\n\n${buildReferenceContextBlock(matchedReferences, toolContext)}`;
+    return {
+      ...message,
+      content: modelContent,
+      parts: [{ type: 'text', text: modelContent }]
+    };
+  });
+}
+
+/**
+ * Keeps draft references aligned with the current visible input content.
+ * @param content - Current visible prompt content.
+ * @returns References still present in the prompt.
+ */
+function getActiveDraftReferences(content: string): ChatMessageFileReference[] {
+  return draftReferences.value.filter((reference) => content.includes(reference.token));
+}
+
+/**
+ * Loads persisted snapshots referenced by the current visible chat history.
+ * @param sourceMessages - Visible chat history.
+ * @returns Snapshot map keyed by snapshot id.
+ */
+async function loadReferenceSnapshotMap(sourceMessages: Message[]): Promise<Map<string, import('types/chat').ChatReferenceSnapshot>> {
+  const snapshotIds = Array.from(
+    new Set(
+      sourceMessages.flatMap((message) => message.references?.map((reference) => reference.snapshotId).filter((snapshotId) => snapshotId.length > 0) ?? [])
+    )
+  );
+
+  if (!snapshotIds.length) {
+    return new Map();
+  }
+
+  const snapshots = await chatStorage.getReferenceSnapshots(snapshotIds);
+  return new Map(snapshots.map((snapshot) => [snapshot.id, snapshot]));
+}
+
 function startStreamRound(): void {
   currentToolRoundId += 1;
   currentToolCallTracker = createToolCallTracker();
@@ -350,13 +497,14 @@ function prepareAssistantMessage(reuseLastAssistant: boolean): Message {
  * @param config - 服务配置
  * @param reuseLastAssistant - 是否复用末尾 assistant 消息承接续轮结果
  */
-function streamMessages(sourceMessages: Message[], config: ServiceConfig, reuseLastAssistant = false): void {
+async function streamMessages(sourceMessages: Message[], config: ServiceConfig, reuseLastAssistant = false): Promise<void> {
   loading.value = true;
   lastServiceConfig = config;
   startStreamRound();
   prepareAssistantMessage(reuseLastAssistant);
 
-  currentModelMessageCache = toCachedModelMessages(sourceMessages, currentModelMessageCache);
+  const snapshotsById = await loadReferenceSnapshotMap(sourceMessages);
+  currentModelMessageCache = toCachedModelMessages(buildModelReadyMessages(sourceMessages, snapshotsById), currentModelMessageCache);
 
   const continuedMessages = [...currentModelMessageCache.modelMessages];
 
@@ -384,12 +532,13 @@ async function handleSubmit(): Promise<void> {
     return;
   }
 
-  const modelContent = expandFileReferencesForModel(content);
+  const activeReferences = getActiveDraftReferences(content);
   const message: Message = {
     id: nanoid(),
     role: 'user',
-    content: modelContent,
-    parts: [{ type: 'text', text: modelContent }],
+    content,
+    parts: [{ type: 'text', text: content }],
+    references: activeReferences.length ? activeReferences : undefined,
     createdAt: new Date().toISOString()
   };
 
@@ -399,6 +548,7 @@ async function handleSubmit(): Promise<void> {
   startToolLoopSession();
   streamMessages(messages.value, config);
   inputValue.value = '';
+  draftReferences.value = [];
 }
 
 /**
@@ -416,6 +566,7 @@ function handleAbort(): void {
  */
 function handleEdit(message: Message): void {
   inputValue.value = message.content;
+  draftReferences.value = [...(message.references ?? [])];
 }
 
 /**
@@ -474,6 +625,19 @@ function focusInput(): void {
  * @param reference - 文件引用数据
  */
 function insertFileReference(reference: FileReferenceChip): void {
+  const token = `{{file-ref:${reference.referenceId}}}`;
+  draftReferences.value = [
+    ...draftReferences.value.filter((item) => item.id !== reference.referenceId),
+    {
+      id: reference.referenceId,
+      token,
+      documentId: reference.documentId,
+      fileName: reference.fileName,
+      line: String(reference.line),
+      path: reference.filePath,
+      snapshotId: ''
+    }
+  ];
   promptEditorRef.value?.insertFileReference(reference);
 }
 
