@@ -271,9 +271,9 @@ watch(
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  background-color: var(--bg-secondary);
+  background-color: var(--bg-tertiary);
   border: 0.5px solid var(--border-secondary);
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .capability-info {

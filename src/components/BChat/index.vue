@@ -671,6 +671,7 @@ defineExpose({ focusInput, insertFileReference });
   gap: 8px;
   align-items: flex-end;
   padding: 12px 0 12px 12px;
+  background: var(--input-bg);
   border: 1px solid var(--border-primary);
   border-radius: 6px;
 
