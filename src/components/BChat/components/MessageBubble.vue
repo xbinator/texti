@@ -20,7 +20,13 @@
       <div :class="bem('parts')">
         <template v-for="(part, index) in message.parts" :key="`${part.type}-${index}`">
           <!-- 文本片段：渲染 Markdown 内容 -->
-          <MessageBubblePartText v-if="part.type === 'text'" :part="part" :loading="isLastPart(index) && !!message.loading" />
+          <MessageBubblePartText
+            v-if="part.type === 'text'"
+            :part="part"
+            :loading="isLastPart(index) && !!message.loading"
+            :enable-file-reference-chips="isUserMessage"
+            :references="message.references"
+          />
 
           <!-- 思考片段：可折叠的深度思考内容 -->
           <MessageBubblePartThinking v-else-if="part.type === 'thinking'" :part="part" />

@@ -3,12 +3,23 @@
  * @description 聊天会话与消息的 SQLite/本地降级存储实现
  */
 import type { AIUsage } from 'types/ai';
-import type { ChatMessageFile, ChatMessageHistoryCursor, ChatMessagePart, ChatMessageRecord, ChatMessageRole, ChatSession, ChatSessionType } from 'types/chat';
+import type {
+  ChatMessageFile,
+  ChatMessageFileReference,
+  ChatMessageHistoryCursor,
+  ChatMessagePart,
+  ChatMessageRecord,
+  ChatReferenceSnapshot,
+  ChatMessageRole,
+  ChatSession,
+  ChatSessionType
+} from 'types/chat';
 import { local } from '@/shared/storage/base';
 import { dbSelect, dbExecute, isDatabaseAvailable, parseJson, stringifyJson } from '../utils';
 
 const CHAT_SESSIONS_STORAGE_KEY = 'chat_sessions_fallback';
 const CHAT_MESSAGES_STORAGE_KEY = 'chat_messages_fallback';
+const CHAT_REFERENCE_SNAPSHOTS_STORAGE_KEY = 'chat_reference_snapshots_fallback';
 const CHAT_MESSAGE_HISTORY_LIMIT = 30;
 
 const SELECT_SESSIONS_BY_TYPE_SQL = `
@@ -31,14 +42,14 @@ const SELECT_SESSION_USAGE_SQL = 'SELECT usage_json FROM chat_sessions WHERE id 
 const UPDATE_SESSION_USAGE_SQL = 'UPDATE chat_sessions SET usage_json = ? WHERE id = ?';
 
 const SELECT_MESSAGES_BY_SESSION_SQL = `
-  SELECT id, session_id, role, content, parts_json, thinking, files_json, usage_json, created_at
+  SELECT id, session_id, role, content, parts_json, references_json, thinking, files_json, usage_json, created_at
   FROM chat_messages
   WHERE session_id = ?
   ORDER BY created_at DESC, id DESC
   LIMIT ?
 `;
 const SELECT_MESSAGES_BEFORE_CURSOR_SQL = `
-  SELECT id, session_id, role, content, parts_json, thinking, files_json, usage_json, created_at
+  SELECT id, session_id, role, content, parts_json, references_json, thinking, files_json, usage_json, created_at
   FROM chat_messages
   WHERE session_id = ?
     AND (created_at < ? OR (created_at = ? AND id < ?))
@@ -47,8 +58,18 @@ const SELECT_MESSAGES_BEFORE_CURSOR_SQL = `
 `;
 const UPSERT_MESSAGE_SQL = `
   INSERT OR REPLACE INTO chat_messages
-    (id, session_id, role, content, parts_json, thinking, files_json, usage_json, created_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (id, session_id, role, content, parts_json, references_json, thinking, files_json, usage_json, created_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`;
+const UPSERT_REFERENCE_SNAPSHOT_SQL = `
+  INSERT OR REPLACE INTO chat_reference_snapshots
+    (id, document_id, title, content, created_at)
+  VALUES (?, ?, ?, ?, ?)
+`;
+const SELECT_REFERENCE_SNAPSHOTS_BY_IDS_SQL_PREFIX = `
+  SELECT id, document_id, title, content, created_at
+  FROM chat_reference_snapshots
+  WHERE id IN
 `;
 const DELETE_SESSION_SQL = 'DELETE FROM chat_sessions WHERE id = ?';
 const DELETE_MESSAGES_BY_SESSION_SQL = 'DELETE FROM chat_messages WHERE session_id = ?';
@@ -69,6 +90,7 @@ interface ChatMessageRow {
   role: string;
   content: string;
   parts_json: string | null;
+  references_json: string | null;
   thinking: string | null;
   files_json: string | null;
   usage_json: string | null;
@@ -79,8 +101,20 @@ interface FallbackMessagesMap {
   [sessionId: string]: ChatMessageRecord[] | undefined;
 }
 
+interface FallbackReferenceSnapshotsMap {
+  [snapshotId: string]: ChatReferenceSnapshot | undefined;
+}
+
 interface ChatSessionUsageRow {
   usage_json: string | null;
+}
+
+interface ChatReferenceSnapshotRow {
+  id: string;
+  document_id: string;
+  title: string;
+  content: string;
+  created_at: string;
 }
 
 function isChatSessionType(value: string): value is ChatSessionType {
@@ -110,6 +144,11 @@ function mapSessionRow(row: ChatSessionRow): ChatSession | null {
   };
 }
 
+/**
+ * Maps a SQLite message row into the shared chat message record shape.
+ * @param row - Raw SQLite message row.
+ * @returns Normalized chat message record.
+ */
 function mapMessageRow(row: ChatMessageRow): ChatMessageRecord {
   return {
     id: row.id,
@@ -117,6 +156,7 @@ function mapMessageRow(row: ChatMessageRow): ChatMessageRecord {
     role: isChatMessageRole(row.role) ? row.role : 'user',
     content: row.content,
     parts: parseJson<ChatMessagePart[]>(row.parts_json) ?? [],
+    references: parseJson<ChatMessageFileReference[]>(row.references_json),
     thinking: row.thinking ?? undefined,
     files: parseJson<ChatMessageFile[]>(row.files_json),
     usage: parseJson<AIUsage>(row.usage_json),
@@ -138,6 +178,22 @@ function loadFallbackMessages(): FallbackMessagesMap {
 
 function saveFallbackMessages(messages: FallbackMessagesMap): void {
   local.setItem(CHAT_MESSAGES_STORAGE_KEY, messages);
+}
+
+/**
+ * Loads persisted reference snapshots from local fallback storage.
+ * @returns Snapshot map keyed by snapshot id.
+ */
+function loadFallbackReferenceSnapshots(): FallbackReferenceSnapshotsMap {
+  return local.getItem<FallbackReferenceSnapshotsMap>(CHAT_REFERENCE_SNAPSHOTS_STORAGE_KEY) ?? {};
+}
+
+/**
+ * Saves persisted reference snapshots into local fallback storage.
+ * @param snapshots - Snapshot map keyed by snapshot id.
+ */
+function saveFallbackReferenceSnapshots(snapshots: FallbackReferenceSnapshotsMap): void {
+  local.setItem(CHAT_REFERENCE_SNAPSHOTS_STORAGE_KEY, snapshots);
 }
 
 function sortSessions(sessions: ChatSession[]): ChatSession[] {
@@ -201,6 +257,34 @@ function addUsage(currentUsage: AIUsage | undefined, nextUsage: AIUsage): AIUsag
   };
 }
 
+/**
+ * Maps a SQLite snapshot row into the shared reference snapshot shape.
+ * @param row - Raw SQLite snapshot row.
+ * @returns Normalized reference snapshot.
+ */
+function mapReferenceSnapshotRow(row: ChatReferenceSnapshotRow): ChatReferenceSnapshot {
+  return {
+    id: row.id,
+    documentId: row.document_id,
+    title: row.title,
+    content: row.content,
+    createdAt: row.created_at
+  };
+}
+
+/**
+ * Builds the placeholder list used by SQLite `IN (...)` clauses.
+ * @param ids - Snapshot ids to query.
+ * @returns Parenthesized placeholder list matching the id count.
+ */
+function buildSqlPlaceholders(ids: string[]): string {
+  return `(${ids.map(() => '?').join(', ')})`;
+}
+
+/**
+ * Persists a batch of messages through the shared SQLite upsert statement.
+ * @param messages - Messages to persist.
+ */
 async function upsertSessionMessages(messages: ChatMessageRecord[]): Promise<void> {
   await Promise.all(
     messages.map((message) =>
@@ -210,7 +294,8 @@ async function upsertSessionMessages(messages: ChatMessageRecord[]): Promise<voi
         message.role,
         message.content,
         stringifyJson(message.parts),
-        message.thinking,
+        stringifyJson(message.references),
+        message.thinking ?? null,
         stringifyJson(message.files),
         stringifyJson(message.usage),
         message.createdAt
@@ -312,6 +397,52 @@ export const chatStorage = {
     return sortMessages(rows.map(mapMessageRow));
   },
 
+  /**
+   * Loads persisted reference snapshots by id.
+   * @param snapshotIds - Snapshot ids to load.
+   * @returns Matching snapshots in arbitrary order.
+   */
+  async getReferenceSnapshots(snapshotIds: string[]): Promise<ChatReferenceSnapshot[]> {
+    if (!snapshotIds.length) {
+      return [];
+    }
+
+    if (!isDatabaseAvailable()) {
+      const snapshots = loadFallbackReferenceSnapshots();
+      return snapshotIds
+        .map((snapshotId) => snapshots[snapshotId])
+        .filter((snapshot): snapshot is ChatReferenceSnapshot => snapshot !== undefined);
+    }
+
+    const rows = await dbSelect<ChatReferenceSnapshotRow>(`${SELECT_REFERENCE_SNAPSHOTS_BY_IDS_SQL_PREFIX} ${buildSqlPlaceholders(snapshotIds)}`, snapshotIds);
+    return rows.map(mapReferenceSnapshotRow);
+  },
+
+  /**
+   * Persists one or more reference snapshots.
+   * @param snapshots - Snapshots to persist.
+   */
+  async upsertReferenceSnapshots(snapshots: ChatReferenceSnapshot[]): Promise<void> {
+    if (!snapshots.length) {
+      return;
+    }
+
+    if (!isDatabaseAvailable()) {
+      const snapshotMap = loadFallbackReferenceSnapshots();
+      snapshots.forEach((snapshot) => {
+        snapshotMap[snapshot.id] = snapshot;
+      });
+      saveFallbackReferenceSnapshots(snapshotMap);
+      return;
+    }
+
+    await Promise.all(
+      snapshots.map((snapshot) =>
+        dbExecute(UPSERT_REFERENCE_SNAPSHOT_SQL, [snapshot.id, snapshot.documentId, snapshot.title, snapshot.content, snapshot.createdAt])
+      )
+    );
+  },
+
   async addMessage(message: ChatMessageRecord): Promise<void> {
     if (!isDatabaseAvailable()) {
       const messages = loadFallbackMessages();
@@ -328,7 +459,8 @@ export const chatStorage = {
       message.role,
       message.content,
       stringifyJson(message.parts),
-      message.thinking,
+      stringifyJson(message.references),
+      message.thinking ?? null,
       stringifyJson(message.files),
       stringifyJson(message.usage),
       message.createdAt

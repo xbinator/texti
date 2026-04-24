@@ -51,9 +51,10 @@
  * @description 聊天侧边栏组件，负责会话列表切换、会话持久化和聊天面板接入。
  *              支持多会话管理、历史消息加载、流式输出和工具调用确认。
  */
-import type { ChatMessageConfirmationAction, ChatMessageHistoryCursor, ChatSession } from 'types/chat';
+import type { ChatMessageConfirmationAction, ChatMessageHistoryCursor, ChatReferenceSnapshot, ChatSession } from 'types/chat';
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { Icon } from '@iconify/vue';
+import { nanoid } from 'nanoid';
 import { createBuiltinTools } from '@/ai/tools/builtin';
 import { editorToolContextRegistry } from '@/ai/tools/editor-context';
 import { getDefaultChatToolNames } from '@/ai/tools/policy';
@@ -61,6 +62,7 @@ import { findPendingUserChoiceQuestion } from '@/components/BChat/message';
 import type { Message } from '@/components/BChat/types';
 import type { FileReferenceChip } from '@/components/BPromptEditor/hooks/useVariableEncoder';
 import { onChatFileReferenceInsert } from '@/shared/chat/fileReference';
+import { chatStorage } from '@/shared/storage';
 import { useChatStore } from '@/stores/chat';
 import { useSettingStore } from '@/stores/setting';
 import SessionHistory from './components/SessionHistory.vue';
@@ -187,6 +189,7 @@ async function loadPersistedMessagesBeforeVisible(sessionId: string): Promise<Me
  */
 async function handleBeforeSend(message: Message): Promise<void> {
   confirmationController.expirePendingConfirmation();
+  await persistReferenceSnapshots(message);
 
   if (!settingStore.chatSidebarActiveSessionId) {
     // 没有激活会话时创建新会话，使用消息内容作为标题。
@@ -197,6 +200,37 @@ async function handleBeforeSend(message: Message): Promise<void> {
   }
 
   await chatStore.addSessionMessage(settingStore.chatSidebarActiveSessionId, message);
+}
+
+/**
+ * Persists per-send document snapshots and binds snapshot ids back onto message references.
+ * @param message - Pending user message.
+ */
+async function persistReferenceSnapshots(message: Message): Promise<void> {
+  const toolContext = editorToolContextRegistry.getCurrentContext();
+  if (!toolContext || !message.references?.length) {
+    return;
+  }
+
+  const matchedReferences = message.references.filter((reference) => reference.documentId === toolContext.document.id);
+  if (!matchedReferences.length) {
+    return;
+  }
+
+  const snapshot: ChatReferenceSnapshot = {
+    id: nanoid(),
+    documentId: toolContext.document.id,
+    title: toolContext.document.title,
+    content: toolContext.document.getContent(),
+    createdAt: new Date().toISOString()
+  };
+
+  matchedReferences.forEach((reference) => {
+    reference.snapshotId = snapshot.id;
+    reference.path = reference.path ?? toolContext.document.path;
+  });
+
+  await chatStorage.upsertReferenceSnapshots([snapshot]);
 }
 
 /**
@@ -237,11 +271,20 @@ function handleChatBusyChange(busy: boolean): void {
  * 处理编辑器文件引用插入请求。
  * @param reference - 文件引用数据
  */
-async function handleFileReferenceInsert(reference: FileReferenceChip) {
+async function handleFileReferenceInsert(reference: FileReferenceChip): Promise<void> {
+  const toolContext = editorToolContextRegistry.getCurrentContext();
+  const enrichedReference: FileReferenceChip = {
+    referenceId: reference.referenceId || nanoid(),
+    documentId: reference.documentId || toolContext?.document.id || reference.filePath || reference.fileName,
+    filePath: reference.filePath ?? toolContext?.document.path ?? null,
+    fileName: reference.fileName,
+    line: reference.line
+  };
+
   settingStore.setSidebarVisible(true);
 
   await nextTick();
-  chatRef.value?.insertFileReference(reference);
+  chatRef.value?.insertFileReference(enrichedReference);
   chatRef.value?.focusInput();
 }
 
