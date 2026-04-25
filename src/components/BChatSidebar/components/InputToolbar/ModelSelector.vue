@@ -1,9 +1,7 @@
 <template>
   <BDropdown v-model:open="open">
-    <BButton square size="small" type="text">
+    <BButton size="small" type="text">
       <div class="model-button-content">
-        <BModelIcon v-if="currentProviderId" :provider="currentProviderId" :size="16" />
-        <Icon v-else icon="lucide:bot" width="16" height="16" />
         <span v-if="currentModelName" class="model-name">{{ currentModelName }}</span>
       </div>
     </BButton>
@@ -33,7 +31,6 @@
 <script setup lang="ts">
 import type { AIProvider } from 'types/ai';
 import { computed, onMounted, ref, watch } from 'vue';
-import { Icon } from '@iconify/vue';
 import BButton from '@/components/BButton/index.vue';
 import BDropdown from '@/components/BDropdown/index.vue';
 import BModelIcon from '@/components/BModelIcon/index.vue';
@@ -53,7 +50,20 @@ interface ModelGroup {
 }
 
 interface Props {
-  model: string | undefined;
+  model?: string;
+}
+
+interface ParsedModel {
+  providerId: string;
+  modelId: string;
+}
+
+const MODEL_VALUE_RE = /^([^:]+):(.+)$/;
+
+function parseModelValue(value: string): ParsedModel | null {
+  const match = value.match(MODEL_VALUE_RE);
+  if (!match) return null;
+  return { providerId: match[1], modelId: match[2] };
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -68,37 +78,28 @@ const open = ref(false);
 const providers = ref<AIProvider[]>([]);
 const internalModel = ref<string>();
 
-const currentProviderId = computed<string | undefined>(() => {
-  if (!internalModel.value) return undefined;
-  const match = internalModel.value.match(/^([^:]+):(.+)$/);
-  return match?.[1];
-});
-
 const currentModelName = computed<string>(() => {
   if (!internalModel.value) return '';
-  const match = internalModel.value.match(/^([^:]+):(.+)$/);
-  const modelId = match?.[2];
-  const provider = providers.value.find((p) => p.id === currentProviderId.value);
-  if (!provider || !modelId) return '';
-  const model = provider.models.find((m) => m.id === modelId);
-  return model?.name || '';
+  const parsed = parseModelValue(internalModel.value);
+  if (!parsed) return '';
+  const provider = providers.value.find((p) => p.id === parsed.providerId);
+  return provider?.models?.find((m) => m.id === parsed.modelId)?.name ?? '';
 });
 
 const groupedModels = computed<ModelGroup[]>(() => {
-  return providers.value
-    .filter((provider) => provider.isEnabled && provider.models?.length)
-    .map((provider) => ({
-      providerId: provider.id,
-      providerName: provider.name,
-      models: provider.models
-        .filter((model) => model.isEnabled)
-        .map((model) => ({
-          value: `${provider.id}:${model.id}`,
-          modelId: model.id,
-          modelName: model.name
-        }))
-    }))
-    .filter((group) => group.models.length > 0);
+  const result: ModelGroup[] = [];
+
+  for (const provider of providers.value) {
+    if (!provider.isEnabled || !provider.models?.length) continue;
+
+    const models = provider.models.filter((m) => m.isEnabled).map((m) => ({ value: `${provider.id}:${m.id}`, modelId: m.id, modelName: m.name }));
+
+    if (!models.length) continue;
+
+    result.push({ providerId: provider.id, providerName: provider.name, models });
+  }
+
+  return result;
 });
 
 async function loadProviders(): Promise<void> {
@@ -106,18 +107,19 @@ async function loadProviders(): Promise<void> {
 }
 
 async function loadSavedConfig(): Promise<void> {
+  if (internalModel.value) return;
   const config = await serviceModelsStorage.getConfig('chat');
-  internalModel.value = config?.providerId && config?.modelId ? `${config.providerId}:${config.modelId}` : undefined;
+  if (config?.providerId && config?.modelId) {
+    internalModel.value = `${config.providerId}:${config.modelId}`;
+  }
 }
 
 function handleModelChange(value: string): void {
-  const [, providerId, modelId] = value.match(/^([^:]+):(.+)$/) ?? [];
-
-  if (providerId && modelId) {
-    serviceModelsStorage.saveConfig('chat', { providerId, modelId });
+  const parsed = parseModelValue(value);
+  if (parsed) {
+    serviceModelsStorage.saveConfig('chat', parsed);
     dispatchServiceModelUpdated('chat');
   }
-
   emit('update:model', value);
   open.value = false;
 }
@@ -138,9 +140,13 @@ onMounted(async () => {
 <style scoped lang="less">
 .model-selector {
   width: 260px;
-  padding: 6px;
   max-height: 360px;
+  padding: 6px;
   overflow-y: auto;
+  background: var(--dropdown-bg, var(--bg-primary));
+  border: 1px solid var(--dropdown-border, var(--border-color));
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
 }
 
 .model-group {
@@ -164,8 +170,8 @@ onMounted(async () => {
 
 .model-selector__item {
   display: flex;
-  align-items: center;
   gap: 8px;
+  align-items: center;
   height: 32px;
   padding: 0 8px;
   cursor: pointer;
@@ -182,24 +188,24 @@ onMounted(async () => {
 }
 
 .model-selector__name {
-  font-size: 13px;
-  color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 13px;
+  color: var(--text-primary);
   white-space: nowrap;
 }
 
 .model-button-content {
   display: flex;
-  align-items: center;
   gap: 6px;
+  align-items: center;
 }
 
 .model-name {
   max-width: 80px;
   overflow: hidden;
-  font-size: 12px;
   text-overflow: ellipsis;
+  font-size: 12px;
   color: var(--text-primary);
   white-space: nowrap;
 }

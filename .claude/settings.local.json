@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(npm run *)",
+      "Bash(pnpm run *)",
+      "Bash(npx vue-tsc *)",
+      "Bash(xargs grep *)"
     ]
   }
 }

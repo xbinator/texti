@@ -9,8 +9,8 @@
 </template>
 
 <script setup lang="ts">
-import ModelSelector from './InputToolbar/ModelSelector.vue';
 import BButton from '@/components/BButton/index.vue';
+import ModelSelector from './InputToolbar/ModelSelector.vue';
 
 interface Props {
   /** 是否正在加载 */
@@ -21,7 +21,7 @@ interface Props {
   selectedModel?: string;
 }
 
-const props = withDefaults(defineProps<Props>(), {
+withDefaults(defineProps<Props>(), {
   selectedModel: undefined
 });
 
@@ -39,14 +39,13 @@ function handleModelChange(value: string): void {
 <style scoped lang="less">
 .chat-input-toolbar {
   display: flex;
-  align-items: center;
   gap: 8px;
-  padding: 0 12px;
+  align-items: center;
 }
 
 .action-buttons {
   display: flex;
-  align-items: center;
   gap: 8px;
+  align-items: center;
 }
 </style>

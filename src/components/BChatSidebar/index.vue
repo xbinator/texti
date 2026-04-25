@@ -1,7 +1,7 @@
 <template>
-  <div class="editor-sidebar">
-    <div class="sidebar-header">
-      <div class="sidebar-header__title truncate">{{ currentSession?.title || '新会话' }}</div>
+  <div class="b-chat-sidebar">
+    <div class="b-chat-sidebar__header">
+      <div class="b-chat-sidebar__title truncate">{{ currentSession?.title || '新会话' }}</div>
       <BButton square size="small" type="text" :disabled="chatStream.loading.value" @click="handleNewSession">
         <Icon icon="lucide:message-circle-plus" width="16" height="16" />
       </BButton>
@@ -13,7 +13,7 @@
         @switch-session="handleSwitchSession"
       />
     </div>
-    <div class="chat-sidebar-container">
+    <div class="b-chat-sidebar__container">
       <ConversationView
         v-model:messages="messages"
         :loading="chatStream.loading.value"
@@ -24,8 +24,8 @@
         @user-choice-submit="handleChatUserChoiceSubmit"
       />
 
-      <div class="chat-panel__input">
-        <div class="chat-panel__input-container">
+      <div class="b-chat-sidebar__input">
+        <div class="b-chat-sidebar__input-container">
           <BPromptEditor
             ref="promptEditorRef"
             v-model:value="inputValue"
@@ -481,8 +481,8 @@ onUnmounted(() => {
 });
 </script>
 
-<style scoped lang="less">
-.editor-sidebar {
+<style lang="less">
+.b-chat-sidebar {
   display: flex;
   flex-shrink: 0;
   flex-direction: column;
@@ -493,7 +493,7 @@ onUnmounted(() => {
   border-radius: 8px;
 }
 
-.sidebar-header {
+.b-chat-sidebar__header {
   display: flex;
   gap: 8px;
   align-items: center;
@@ -501,7 +501,7 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--border-color);
 }
 
-.sidebar-header__title {
+.b-chat-sidebar__title {
   flex: 1;
   width: 0;
   font-size: 12px;
@@ -509,19 +509,19 @@ onUnmounted(() => {
   color: var(--text-primary);
 }
 
-.chat-sidebar-container {
+.b-chat-sidebar__container {
   display: flex;
   flex: 1;
   flex-direction: column;
   height: 0;
 }
 
-.chat-panel__input {
+.b-chat-sidebar__input {
   padding: 12px;
   border-top: 1px solid var(--border-primary);
 }
 
-.chat-panel__input-container {
+.b-chat-sidebar__input-container {
   display: flex;
   gap: 12px;
   align-items: flex-end;
@@ -530,9 +530,10 @@ onUnmounted(() => {
   border: 1px solid var(--border-primary);
   border-radius: 6px;
 
-  :deep(.b-prompt-editor) {
+  .b-prompt-editor {
     flex: 1;
     min-width: 0;
+    padding: 0;
     background-color: transparent;
     border: none;
     border-radius: 0;
