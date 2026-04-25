@@ -56,7 +56,7 @@ import { useChat } from '@/hooks/useChat';
 import { chatStorage } from '@/shared/storage';
 import { useServiceModelStore } from '@/stores/service-model';
 import { Modal } from '@/utils/modal';
-import Container from './components/Container.vue';
+import Container from '@/components/BChatSidebar/components/ChatContainer.vue';
 import MessageBubble from './components/MessageBubble.vue';
 import { append, convert, create, is, userChoice } from './message';
 import { buildModelReadyMessages } from './utils/fileReferenceContext';
