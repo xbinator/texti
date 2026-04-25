@@ -2,12 +2,7 @@
  * @file results.ts
  * @description AI tool execution result factories.
  */
-import type {
-  AIAwaitingUserChoiceQuestion,
-  AIToolExecutionAwaitingUserInputResult,
-  AIToolExecutionError,
-  AIToolExecutionResult
-} from 'types/ai';
+import type { AIAwaitingUserChoiceQuestion, AIToolExecutionAwaitingUserInputResult, AIToolExecutionError, AIToolExecutionResult } from 'types/ai';
 
 /**
  * Create a successful tool execution result.
@@ -62,9 +57,6 @@ export function createToolCancelledResult(toolName: string): AIToolExecutionResu
  * @param question - Choice question payload.
  * @returns Awaiting-user-input result.
  */
-export function createAwaitingUserInputResult(
-  toolName: string,
-  question: AIAwaitingUserChoiceQuestion
-): AIToolExecutionAwaitingUserInputResult {
+export function createAwaitingUserInputResult(toolName: string, question: AIAwaitingUserChoiceQuestion): AIToolExecutionAwaitingUserInputResult {
   return { toolName, status: 'awaiting_user_input', data: question };
 }

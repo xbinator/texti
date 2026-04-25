@@ -2,8 +2,8 @@
  * @file fileReferenceContext.ts
  * @description Builds model-only file-reference context from persisted snapshots while keeping visible chat content unchanged.
  */
-import type { Message } from '@/components/BChat/types';
 import type { ChatMessageFileReference, ChatReferenceSnapshot } from 'types/chat';
+import type { Message } from '@/components/BChatSidebar/utils/types';
 
 const SMALL_DOCUMENT_LINE_THRESHOLD = 200;
 const MEDIUM_DOCUMENT_LINE_THRESHOLD = 800;

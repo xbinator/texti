@@ -5,7 +5,7 @@
 import type { ChatMessageHistoryCursor, ChatMessageRecord } from 'types/chat';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Message } from '@/components/BChat/types';
+import type { Message } from '@/components/BChatSidebar/utils/types';
 
 type AddMessageMock = (message: ChatMessageRecord) => Promise<void>;
 type GetMessagesMock = (sessionId: string, cursor?: ChatMessageHistoryCursor) => Promise<ChatMessageRecord[]>;

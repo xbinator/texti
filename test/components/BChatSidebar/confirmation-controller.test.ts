@@ -3,7 +3,7 @@
  * @description 聊天会话确认控制器测试。
  */
 import { describe, expect, it } from 'vitest';
-import type { Message } from '@/components/BChat/types';
+import type { Message } from '@/components/BChatSidebar/utils/types';
 import { createChatConfirmationController } from '@/components/BChatSidebar/utils/confirmationController';
 
 /**

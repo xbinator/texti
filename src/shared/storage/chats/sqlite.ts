@@ -409,9 +409,7 @@ export const chatStorage = {
 
     if (!isDatabaseAvailable()) {
       const snapshots = loadFallbackReferenceSnapshots();
-      return snapshotIds
-        .map((snapshotId) => snapshots[snapshotId])
-        .filter((snapshot): snapshot is ChatReferenceSnapshot => snapshot !== undefined);
+      return snapshotIds.map((snapshotId) => snapshots[snapshotId]).filter((snapshot): snapshot is ChatReferenceSnapshot => snapshot !== undefined);
     }
 
     const rows = await dbSelect<ChatReferenceSnapshotRow>(`${SELECT_REFERENCE_SNAPSHOTS_BY_IDS_SQL_PREFIX} ${buildSqlPlaceholders(snapshotIds)}`, snapshotIds);

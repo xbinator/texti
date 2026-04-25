@@ -4,11 +4,11 @@
  */
 /* @vitest-environment jsdom */
 
-import type { Message } from '@/components/BChat/types';
+import type { Message } from '@/components/BChatSidebar/utils/types';
 import { defineComponent } from 'vue';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount, type VueWrapper } from '@vue/test-utils';
-import MessageBubble from '@/components/BChat/components/MessageBubble.vue';
+import MessageBubble from '@/components/BChatSidebar/components/MessageBubble.vue';
 
 /**
  * BBubble 占位组件，保留默认插槽和命名插槽。

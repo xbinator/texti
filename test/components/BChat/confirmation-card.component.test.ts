@@ -8,7 +8,7 @@ import type { ChatMessageConfirmationPart } from 'types/chat';
 import { defineComponent } from 'vue';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { mount, type VueWrapper } from '@vue/test-utils';
-import ConfirmationCard from '@/components/BChat/components/ConfirmationCard.vue';
+import ConfirmationCard from '@/components/BChatSidebar/components/ConfirmationCard.vue';
 
 /**
  * 图标占位组件，避免测试依赖真实图标渲染。

@@ -6,7 +6,7 @@
 import type { ChatMessageConfirmationPart, ChatMessageConfirmationStatus } from 'types/chat';
 import { nanoid } from 'nanoid';
 import type { AIToolConfirmationAdapter, AIToolConfirmationDecision, AIToolConfirmationRequest } from '@/ai/tools/confirmation';
-import type { Message } from '@/components/BChat/types';
+import type { Message } from '@/components/BChatSidebar/utils/types';
 
 /**
  * 确认控制器依赖。

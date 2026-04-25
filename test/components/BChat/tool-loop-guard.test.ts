@@ -3,7 +3,7 @@
  * @description BChat 工具续轮防护测试
  */
 import { describe, expect, it } from 'vitest';
-import { createToolLoopGuard } from '@/components/BChat/utils/toolLoopGuard';
+import { createToolLoopGuard } from '@/components/BChatSidebar/utils/toolLoopGuard';
 
 describe('BChat tool loop guard', () => {
   it('blocks follow-up rounds after the configured round limit', () => {

@@ -1,6 +1,6 @@
 /**
  * @file types.ts
- * @description BChat 组件消息、服务配置与续轮保护类型定义。
+ * @description BChatSidebar 组件消息、服务配置与续轮保护类型定义。
  */
 import type { AIUsage, AIToolContext, AIToolExecutor } from 'types/ai';
 import type { ChatMessageConfirmationAction, ChatMessageFile, ChatMessageFileReference, ChatMessagePart, ChatMessageRole } from 'types/chat';

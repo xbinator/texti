@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
-import type { StoredFile } from '@/shared/storage';
 import { native } from '@/shared/platform';
+import type { StoredFile } from '@/shared/storage';
 import { recentFilesStorage } from '@/shared/storage';
 
 export interface FilesState {

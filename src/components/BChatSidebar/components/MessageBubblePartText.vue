@@ -17,10 +17,10 @@ import { computed } from 'vue';
 import BMessage from '@/components/BMessage/index.vue';
 import { createNamespace } from '@/utils/namespace';
 
-defineOptions({ name: 'ChatMessageBubblePartText' });
+defineOptions({ name: 'MessageBubblePartText' });
 
 /**
- * @file ChatMessageBubblePartText.vue
+ * @file MessageBubblePartText.vue
  * @description Renders text segments in a message bubble, including file reference chips for user messages.
  */
 
@@ -68,7 +68,7 @@ const props = withDefaults(
 
 const FILE_REFERENCE_TOKEN_PATTERN = /\{\{file-ref:([A-Za-z0-9_-]+)\}\}/g;
 
-const [, bem] = createNamespace('b-message-bubble');
+const [, bem] = createNamespace('message-bubble');
 
 /**
  * Builds a quick lookup table from token string to reference metadata.
@@ -116,8 +116,8 @@ const segments = computed<MessageBubbleTextSegment[]>(() => {
 });
 </script>
 
-<style lang="less">
-.b-message-bubble__part-text {
+<style scoped lang="less">
+.message-bubble__part-text {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }

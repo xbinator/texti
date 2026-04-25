@@ -8,7 +8,7 @@ import type { AIAwaitingUserChoiceQuestion } from 'types/ai';
 import { nextTick } from 'vue';
 import { describe, expect, it } from 'vitest';
 import { mount, type VueWrapper } from '@vue/test-utils';
-import AskUserChoiceCard from '@/components/BChat/components/AskUserChoiceCard.vue';
+import AskUserChoiceCard from '@/components/BChatSidebar/components/AskUserChoiceCard.vue';
 
 /**
  * 创建用户选择问题。

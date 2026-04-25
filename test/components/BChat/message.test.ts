@@ -3,8 +3,8 @@
  * @description BChat 消息工具行为测试
  */
 import { describe, expect, it } from 'vitest';
-import { append, convert, create, expandFileReferencesForModel, is, userChoice } from '@/components/BChat/message';
-import type { Message } from '@/components/BChat/types';
+import { append, convert, create, expandFileReferencesForModel, is, userChoice } from '@/components/BChatSidebar/utils/message';
+import type { Message } from '@/components/BChatSidebar/utils/types';
 
 /**
  * 创建文本消息，便于测试结构化片段。

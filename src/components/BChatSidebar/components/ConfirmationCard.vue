@@ -43,17 +43,17 @@
 
 <script setup lang="ts">
 /**
- * @file ChatConfirmationCard.vue
+ * @file ConfirmationCard.vue
  * @description 聊天流中的确认卡片组件，负责展示确认状态、预览和折叠交互。
  */
 import type { ChatMessageConfirmationActionPayload, ChatMessageConfirmationPart } from 'types/chat';
 import { computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import BButton from '@/components/BButton/index.vue';
-import { createNamespace } from '@/utils/namespace';
 import { formatConfirmationPreviewText, getConfirmationStatusText, isConfirmationCollapsed } from '@/components/BChatSidebar/utils/confirmationCard';
+import { createNamespace } from '@/utils/namespace';
 
-defineOptions({ name: 'ChatConfirmationCard' });
+defineOptions({ name: 'ConfirmationCard' });
 
 const props = defineProps<{
   /** 确认卡片片段 */
@@ -93,8 +93,8 @@ function toggleCollapse(): void {
 }
 </script>
 
-<style lang="less">
-.b-confirmation-card {
+<style scoped lang="less">
+.confirm-card {
   padding: 10px 12px;
   font-size: 12px;
   color: var(--text-secondary);
@@ -103,24 +103,24 @@ function toggleCollapse(): void {
   border-radius: 8px;
 }
 
-.b-confirmation-card--confirmation {
+.confirm-card--confirmation {
   background: var(--bg-tertiary);
 }
 
-.b-confirmation-card--permission-dangerous {
+.confirm-card--permission-dangerous {
   border-color: var(--color-warning, #faad14);
 }
 
-.b-confirmation-card--success {
+.confirm-card--success {
   border-color: var(--color-success);
 }
 
-.b-confirmation-card--cancelled,
-.b-confirmation-card--expired {
+.confirm-card--cancelled,
+.confirm-card--expired {
   opacity: 0.86;
 }
 
-.b-confirmation-card__title {
+.confirm-card__title {
   display: flex;
   gap: 6px;
   align-items: center;
@@ -128,28 +128,28 @@ function toggleCollapse(): void {
   color: var(--text-primary);
 }
 
-.b-confirmation-card__title--clickable {
+.confirm-card__title--clickable {
   width: fit-content;
   cursor: pointer;
   user-select: none;
 }
 
-.b-confirmation-card__description,
-.b-confirmation-card__status,
-.b-confirmation-card__tip {
+.confirm-card__description,
+.confirm-card__status,
+.confirm-card__tip {
   margin-top: 8px;
   font-size: 12px;
   line-height: 1.6;
 }
 
-.b-confirmation-card__label {
+.confirm-card__label {
   margin-top: 8px;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
-.b-confirmation-card__code {
+.confirm-card__code {
   max-height: 180px;
   padding: 8px;
   margin: 0;
@@ -163,7 +163,7 @@ function toggleCollapse(): void {
   border-radius: 6px;
 }
 
-.b-confirmation-card__actions {
+.confirm-card__actions {
   display: flex;
   gap: 8px;
   margin-top: 10px;

@@ -14,7 +14,7 @@
       />
     </div>
     <div class="chat-sidebar-container">
-      <BChat
+      <ChatPanel
         ref="chatRef"
         v-model:messages="messages"
         v-model:input-value="inputValue"
@@ -40,7 +40,7 @@
             <div class="chat-sidebar-empty__text">输入你的问题，跟助手聊聊吧</div>
           </div>
         </template>
-      </BChat>
+      </ChatPanel>
     </div>
   </div>
 </template>
@@ -58,13 +58,14 @@ import { nanoid } from 'nanoid';
 import { createBuiltinTools } from '@/ai/tools/builtin';
 import { editorToolContextRegistry } from '@/ai/tools/editor-context';
 import { getDefaultChatToolNames } from '@/ai/tools/policy';
-import { userChoice } from '@/components/BChat/message';
-import type { Message } from '@/components/BChat/types';
+import { userChoice } from '@/components/BChatSidebar/utils/message';
+import type { Message } from '@/components/BChatSidebar/utils/types';
 import type { FileReferenceChip } from '@/components/BPromptEditor/hooks/useVariableEncoder';
 import { onChatFileReferenceInsert, type ChatFileReferenceInsertPayload } from '@/shared/chat/fileReference';
 import { chatStorage } from '@/shared/storage';
 import { useChatStore } from '@/stores/chat';
 import { useSettingStore } from '@/stores/setting';
+import ChatPanel from './components/ChatPanel.vue';
 import SessionHistory from './components/SessionHistory.vue';
 import { createChatConfirmationController } from './utils/confirmationController';
 

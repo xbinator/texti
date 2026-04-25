@@ -4,7 +4,7 @@
  */
 import type { ChatMessageConfirmationPart } from 'types/chat';
 import { describe, expect, it } from 'vitest';
-import { formatConfirmationPreviewText, getConfirmationStatusText, isConfirmationCollapsed } from '@/components/BChat/utils/confirmationCard';
+import { formatConfirmationPreviewText, getConfirmationStatusText, isConfirmationCollapsed } from '@/components/BChatSidebar/utils/confirmationCard';
 
 /**
  * 创建确认卡片片段。

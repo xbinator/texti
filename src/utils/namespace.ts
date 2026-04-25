@@ -34,7 +34,13 @@ function createBEM(name: string) {
 
 export type BEM = ReturnType<typeof createBEM>;
 
-export function createNamespace(name: string) {
-  const prefixedName = `b-${name}`;
+/**
+ * 创建命名空间，用于生成 BEM 风格的类名
+ * @param name - 组件名称
+ * @param prefix - 类名前缀，默认为 'b'
+ * @returns 返回元组：[带前缀的类名, BEM 函数]
+ */
+export function createNamespace(name: string, prefix = 'b') {
+  const prefixedName = [prefix, name].filter(Boolean).join('-');
   return [prefixedName, createBEM(prefixedName)] as const;
 }

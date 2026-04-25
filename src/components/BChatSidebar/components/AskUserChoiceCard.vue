@@ -1,9 +1,9 @@
 <template>
-  <div class="ask-user-choice-card">
-    <div class="ask-user-choice-card__title">{{ question.question }}</div>
+  <div class="choice-card">
+    <div class="choice-card__title">{{ question.question }}</div>
 
-    <div class="ask-user-choice-card__options">
-      <label v-for="option in question.options" :key="option.value" class="ask-user-choice-card__option">
+    <div class="choice-card__options">
+      <label v-for="option in question.options" :key="option.value" class="choice-card__option">
         <input
           :type="inputType"
           :value="option.value"
@@ -11,16 +11,16 @@
           :disabled="isOptionDisabled(option.value)"
           @change="handleOptionChange(option.value, ($event.target as HTMLInputElement).checked)"
         />
-        <span class="ask-user-choice-card__option-main">
+        <span class="choice-card__option-main">
           <span>{{ option.label }}</span>
           <small v-if="option.description">{{ option.description }}</small>
         </span>
       </label>
     </div>
 
-    <input v-if="question.allowOther" v-model="otherText" class="ask-user-choice-card__other" type="text" placeholder="其他..." />
+    <input v-if="question.allowOther" v-model="otherText" class="choice-card__other" type="text" placeholder="其他..." />
 
-    <div class="ask-user-choice-card__footer">
+    <div class="choice-card__footer">
       <BButton size="small" :disabled="!canSubmit" @click="handleSubmit">提交选择</BButton>
     </div>
   </div>
@@ -28,7 +28,7 @@
 
 <script setup lang="ts">
 /**
- * @file ChatAskUserChoiceCard.vue
+ * @file AskUserChoiceCard.vue
  * @description 渲染 ask_user_choice 等待态工具结果并提交用户答案。
  */
 import type { AIAwaitingUserChoiceQuestion } from 'types/ai';
@@ -111,7 +111,7 @@ function handleSubmit(): void {
 </script>
 
 <style scoped lang="less">
-.ask-user-choice-card {
+.choice-card {
   padding: 12px;
   font-size: 13px;
   color: var(--text-primary);
@@ -120,25 +120,25 @@ function handleSubmit(): void {
   border-radius: 10px;
 }
 
-.ask-user-choice-card__title {
+.choice-card__title {
   margin-bottom: 10px;
   font-weight: 600;
 }
 
-.ask-user-choice-card__options {
+.choice-card__options {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.ask-user-choice-card__option {
+.choice-card__option {
   display: flex;
   gap: 8px;
   align-items: flex-start;
   cursor: pointer;
 }
 
-.ask-user-choice-card__option-main {
+.choice-card__option-main {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -148,7 +148,7 @@ function handleSubmit(): void {
   }
 }
 
-.ask-user-choice-card__other {
+.choice-card__other {
   width: 100%;
   padding: 7px 9px;
   margin-top: 10px;
@@ -159,7 +159,7 @@ function handleSubmit(): void {
   border-radius: 6px;
 }
 
-.ask-user-choice-card__footer {
+.choice-card__footer {
   display: flex;
   justify-content: flex-end;
   margin-top: 10px;

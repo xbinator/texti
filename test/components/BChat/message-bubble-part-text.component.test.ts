@@ -4,13 +4,13 @@
  */
 /* @vitest-environment jsdom */
 
-import type { Message } from '@/components/BChat/types';
+import type { Message } from '@/components/BChatSidebar/utils/types';
 import type { ChatMessageFileReference, ChatMessageTextPart } from 'types/chat';
 import { defineComponent } from 'vue';
 import { describe, expect, it } from 'vitest';
 import { mount, type VueWrapper } from '@vue/test-utils';
-import MessageBubble from '@/components/BChat/components/MessageBubble.vue';
-import MessageBubblePartText from '@/components/BChat/components/MessageBubblePartText.vue';
+import MessageBubble from '@/components/BChatSidebar/components/MessageBubble.vue';
+import MessageBubblePartText from '@/components/BChatSidebar/components/MessageBubblePartText.vue';
 
 /**
  * Markdown 消息占位组件，用于观察 assistant 文本是否仍按原路径渲染。
