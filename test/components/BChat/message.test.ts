@@ -3,7 +3,7 @@
  * @description BChat 消息工具行为测试
  */
 import { describe, expect, it } from 'vitest';
-import { append, convert, create, expandFileReferencesForModel, is, userChoice } from '@/components/BChatSidebar/utils/message';
+import { append, convert, create, expandFileReferencesForModel, is, userChoice } from '@/components/BChatSidebar/utils/messageHelper';
 import type { Message } from '@/components/BChatSidebar/utils/types';
 
 /**
