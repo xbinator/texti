@@ -28,7 +28,7 @@
 
 <script setup lang="ts">
 /**
- * @file AskUserChoiceCard.vue
+ * @file ChatAskUserChoiceCard.vue
  * @description 渲染 ask_user_choice 等待态工具结果并提交用户答案。
  */
 import type { AIAwaitingUserChoiceQuestion } from 'types/ai';
