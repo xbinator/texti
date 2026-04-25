@@ -2,71 +2,70 @@
   <div class="editor-sidebar">
     <div class="sidebar-header">
       <div class="sidebar-header__title truncate">{{ currentSession?.title || '新会话' }}</div>
-      <BButton square size="small" type="text" :disabled="chatBusy" @click="handleNewSession">
+      <BButton square size="small" type="text" :disabled="chatStream.loading.value" @click="handleNewSession">
         <Icon icon="lucide:message-circle-plus" width="16" height="16" />
       </BButton>
       <SessionHistory
         :sessions="sessions"
         :active-session-id="settingStore.chatSidebarActiveSessionId"
-        :disabled="chatBusy"
+        :disabled="chatStream.loading.value"
         @delete-session="handleDeleteSession"
         @switch-session="handleSwitchSession"
       />
     </div>
     <div class="chat-sidebar-container">
       <ChatPanel
-        ref="chatRef"
         v-model:messages="messages"
-        v-model:input-value="inputValue"
-        placeholder="输入消息..."
-        :on-before-send="handleBeforeSend"
-        :on-before-regenerate="handleBeforeRegenerate"
+        :loading="chatStream.loading.value"
         :on-load-history="handleLoadHistory"
-        :on-confirmation-action="handleConfirmationAction"
-        :tools="tools"
-        :get-tool-context="editorToolContextRegistry.getCurrentContext"
-        @busy-change="handleChatBusyChange"
-        @complete="handleComplete"
-      >
-        <template #empty>
-          <div class="chat-sidebar-empty">
-            <div class="chat-sidebar-empty__art" aria-hidden="true">
-              <div class="chat-sidebar-empty__card chat-sidebar-empty__card--back"></div>
-              <div class="chat-sidebar-empty__card chat-sidebar-empty__card--front">
-                <Icon icon="lucide:messages-square" width="26" height="26" />
-              </div>
-            </div>
-            <div class="chat-sidebar-empty__title">开始对话</div>
-            <div class="chat-sidebar-empty__text">输入你的问题，跟助手聊聊吧</div>
+        @edit="handleChatEdit"
+        @regenerate="handleChatRegenerate"
+        @confirmation-action="handleChatConfirmationAction"
+        @user-choice-submit="handleChatUserChoiceSubmit"
+      />
+
+      <div class="chat-panel__input">
+        <div class="chat-panel__input-container">
+          <BPromptEditor
+            ref="promptEditorRef"
+            v-model:value="inputValue"
+            placeholder="输入消息..."
+            :max-height="200"
+            variant="borderless"
+            submit-on-enter
+            @submit="handleChatSubmit"
+          />
+
+          <div class="chat-panel__input-buttons">
+            <BButton v-if="chatStream.loading.value" size="small" square icon="lucide:square" @click="chatStream.abort" />
+            <BButton v-else size="small" square :disabled="!inputValue" icon="lucide:arrow-up" @click="handleChatSubmit" />
           </div>
-        </template>
-      </ChatPanel>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-/**
- * @file BChatSidebar/index.vue
- * @description 聊天侧边栏组件，负责会话列表切换、会话持久化和聊天面板接入。
- *              支持多会话管理、历史消息加载、流式输出和工具调用确认。
- */
-import type { ChatMessageConfirmationAction, ChatMessageHistoryCursor, ChatReferenceSnapshot, ChatSession } from 'types/chat';
+import type { ChatMessageConfirmationAction, ChatMessageHistoryCursor, ChatMessageFileReference, ChatReferenceSnapshot, ChatSession } from 'types/chat';
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { nanoid } from 'nanoid';
 import { createBuiltinTools } from '@/ai/tools/builtin';
 import { editorToolContextRegistry } from '@/ai/tools/editor-context';
 import { getDefaultChatToolNames } from '@/ai/tools/policy';
+import BButton from '@/components/BButton/index.vue';
 import { userChoice } from '@/components/BChatSidebar/utils/messageHelper';
 import type { Message } from '@/components/BChatSidebar/utils/types';
 import type { FileReferenceChip } from '@/components/BPromptEditor/hooks/useVariableEncoder';
+import BPromptEditor from '@/components/BPromptEditor/index.vue';
 import { onChatFileReferenceInsert, type ChatFileReferenceInsertPayload } from '@/shared/chat/fileReference';
 import { chatStorage } from '@/shared/storage';
 import { useChatStore } from '@/stores/chat';
 import { useSettingStore } from '@/stores/setting';
 import ChatPanel from './components/ChatPanel.vue';
 import SessionHistory from './components/SessionHistory.vue';
+import { useChatStream } from './hooks/useChatStream';
 import { createChatConfirmationController } from './utils/confirmationController';
 
 /** 聊天会话类型标识 */
@@ -89,10 +88,10 @@ const loading = ref(false);
 const historyLoading = ref(false);
 /** 是否还有更多历史消息可加载 */
 const hasMoreHistory = ref(false);
-/** 聊天是否正在输出（流式响应中） */
-const chatBusy = ref(false);
-/** 聊天组件引用，用于调用组件方法 */
-const chatRef = ref<{ focusInput: () => void; captureInputCursor: () => void; insertFileReference: (reference: FileReferenceChip) => void } | null>(null);
+/** 输入框编辑器引用 */
+const promptEditorRef = ref<{ focus: () => void; captureCursorPosition: () => void; insertFileReference: (reference: FileReferenceChip) => void } | null>(null);
+/** 草稿文件引用列表 */
+const draftReferences = ref<ChatMessageFileReference[]>([]);
 /** 确认控制器，管理工具调用的用户确认流程 */
 const confirmationController = createChatConfirmationController({
   getMessages: () => messages.value
@@ -133,6 +132,48 @@ const tools = createBuiltinTools({
   // MVP 阶段聊天侧边栏只开放低风险工具，避免默认暴露替换类操作
   return getDefaultChatToolNames().includes(tool.definition.name);
 });
+
+/**
+ * 处理聊天流中的确认卡片操作。
+ * @param confirmationId - 确认项 ID
+ * @param action - 用户操作
+ */
+async function handleConfirmationAction(confirmationId: string, action: ChatMessageConfirmationAction): Promise<void> {
+  if (action === 'approve') {
+    confirmationController.approveConfirmation(confirmationId);
+    return;
+  }
+
+  if (action === 'approve-session') {
+    confirmationController.approveConfirmation(confirmationId, 'session');
+    return;
+  }
+
+  if (action === 'approve-always') {
+    confirmationController.approveConfirmation(confirmationId, 'always');
+    return;
+  }
+
+  confirmationController.cancelConfirmation(confirmationId);
+}
+
+/**
+ * 消息重新生成前的处理函数
+ * 1. 清理待处理的确认状态
+ * 2. 加载当前可见消息之前的所有持久化历史
+ * 3. 合并历史消息和新的消息列表并持久化
+ * @param nextMessages - 重新生成后的消息列表
+ */
+async function handleBeforeRegenerate(nextMessages: Message[]): Promise<void> {
+  confirmationController.expirePendingConfirmation();
+  const sessionId = settingStore.chatSidebarActiveSessionId;
+  if (!sessionId) return;
+
+  // 加载当前可见消息之前的历史，避免重新生成时覆盖未加载的消息
+  // eslint-disable-next-line no-use-before-define
+  const historyMessages = await loadPersistedMessagesBeforeVisible(sessionId);
+  await chatStore.setSessionMessages(sessionId, [...historyMessages, ...nextMessages]);
+}
 
 /**
  * 根据当前已加载消息计算更早历史的加载游标。
@@ -235,23 +276,6 @@ async function handleBeforeSend(message: Message): Promise<void> {
 }
 
 /**
- * 消息重新生成前的处理函数
- * 1. 清理待处理的确认状态
- * 2. 加载当前可见消息之前的所有持久化历史
- * 3. 合并历史消息和新的消息列表并持久化
- * @param nextMessages - 重新生成后的消息列表
- */
-async function handleBeforeRegenerate(nextMessages: Message[]): Promise<void> {
-  confirmationController.expirePendingConfirmation();
-  const sessionId = settingStore.chatSidebarActiveSessionId;
-  if (!sessionId) return;
-
-  // 加载当前可见消息之前的历史，避免重新生成时覆盖未加载的消息
-  const historyMessages = await loadPersistedMessagesBeforeVisible(sessionId);
-  await chatStore.setSessionMessages(sessionId, [...historyMessages, ...nextMessages]);
-}
-
-/**
  * 消息完成后的处理函数
  * 将 AI 回复的消息持久化到存储
  * @param message - 完成的消息
@@ -261,17 +285,95 @@ async function handleComplete(message: Message): Promise<void> {
 }
 
 /**
- * 同步聊天组件的流式输出状态。
- * @param busy - 是否正在输出
+ * 聊天流式处理 hook
  */
-function handleChatBusyChange(busy: boolean): void {
-  chatBusy.value = busy;
-}
+const chatStream = useChatStream({
+  messages,
+  tools,
+  getToolContext: editorToolContextRegistry.getCurrentContext,
+  onBeforeRegenerate: handleBeforeRegenerate,
+  onComplete: handleComplete,
+  onConfirmationAction: handleConfirmationAction
+});
 
 /**
- * 处理编辑器文件引用插入请求。
- * @param reference - 共享事件总线发出的文件引用插入载荷
+ * 获取内容中活跃的草稿文件引用
+ * @param content - 输入内容
+ * @returns 活跃的引用列表
  */
+function getActiveDraftReferences(content: string): ChatMessageFileReference[] {
+  return draftReferences.value.filter((reference) => content.includes(reference.token));
+}
+
+async function handleChatSubmit(): Promise<void> {
+  const content = inputValue.value.trim();
+  if (!content) return;
+
+  const config = await chatStream.resolveServiceConfig();
+  if (!config) return;
+
+  const activeReferences = getActiveDraftReferences(content);
+  const message: Message = {
+    id: nanoid(),
+    role: 'user',
+    content,
+    parts: [{ type: 'text', text: content }],
+    references: activeReferences.length ? activeReferences : undefined,
+    createdAt: new Date().toISOString()
+  };
+
+  await handleBeforeSend(message);
+  messages.value.push(message);
+  promptEditorRef.value?.focus();
+  inputValue.value = '';
+  draftReferences.value = [];
+
+  await chatStream.streamMessages(messages.value, config);
+}
+
+function handleChatEdit(message: Message): void {
+  inputValue.value = message.content;
+  draftReferences.value = [...(message.references ?? [])];
+}
+
+async function handleChatRegenerate(message: Message): Promise<void> {
+  await chatStream.regenerate(message);
+}
+
+async function handleChatConfirmationAction(confirmationId: string, action: ChatMessageConfirmationAction): Promise<void> {
+  // eslint-disable-next-line no-use-before-define
+  await handleConfirmationAction(confirmationId, action);
+}
+
+async function handleChatUserChoiceSubmit(answer: import('types/chat').AIUserChoiceAnswerData): Promise<void> {
+  await chatStream.submitUserChoice(answer);
+}
+
+function handleFocusInput(): void {
+  promptEditorRef.value?.focus();
+}
+
+function handleCaptureInputCursor(): void {
+  promptEditorRef.value?.captureCursorPosition();
+}
+
+function handleChatInsertFileReference(reference: FileReferenceChip): void {
+  const token = `{{file-ref:${reference.referenceId}}}`;
+  draftReferences.value = [
+    ...draftReferences.value.filter((item) => item.id !== reference.referenceId),
+    {
+      id: reference.referenceId,
+      token,
+      documentId: reference.documentId,
+      fileName: reference.fileName,
+      line: String(reference.line),
+      path: reference.filePath,
+      snapshotId: ''
+    }
+  ];
+  promptEditorRef.value?.insertFileReference(reference);
+}
+
 async function handleFileReferenceInsert(reference: ChatFileReferenceInsertPayload): Promise<void> {
   const toolContext = editorToolContextRegistry.getCurrentContext();
   const enrichedReference: FileReferenceChip = {
@@ -283,12 +385,12 @@ async function handleFileReferenceInsert(reference: ChatFileReferenceInsertPaylo
   };
 
   // 先锁定聊天输入框最近一次有效插入位置，再处理侧边栏聚焦与引用插入。
-  chatRef.value?.captureInputCursor();
+  handleCaptureInputCursor();
   settingStore.setSidebarVisible(true);
 
   await nextTick();
-  chatRef.value?.insertFileReference(enrichedReference);
-  chatRef.value?.focusInput();
+  handleChatInsertFileReference(enrichedReference);
+  handleFocusInput();
 }
 
 /**
@@ -299,7 +401,7 @@ async function handleFileReferenceInsert(reference: ChatFileReferenceInsertPaylo
  * 4. 自动聚焦输入框
  */
 async function handleNewSession(): Promise<void> {
-  if (chatBusy.value) return;
+  if (chatStream.loading.value) return;
 
   confirmationController.dispose();
   settingStore.setChatSidebarActiveSessionId(null);
@@ -308,7 +410,7 @@ async function handleNewSession(): Promise<void> {
   historyLoading.value = false;
   // 新会话创建后自动聚焦输入框，提升用户体验
   await nextTick();
-  chatRef.value?.focusInput();
+  promptEditorRef.value?.focus();
 }
 
 /**
@@ -342,7 +444,7 @@ async function loadSessions(): Promise<void> {
  * @param sessionId - 目标会话 ID
  */
 async function handleSwitchSession(sessionId: string): Promise<void> {
-  if (chatBusy.value) return;
+  if (chatStream.loading.value) return;
   if (loading.value) return;
 
   loading.value = true;
@@ -388,7 +490,7 @@ async function handleLoadHistory(): Promise<void> {
  * @param sessionId - 要删除的会话 ID
  */
 async function handleDeleteSession(sessionId: string): Promise<void> {
-  if (chatBusy.value) return;
+  if (chatStream.loading.value) return;
 
   const index = sessions.value.findIndex((session) => session.id === sessionId);
   if (index === -1) return;
@@ -400,30 +502,6 @@ async function handleDeleteSession(sessionId: string): Promise<void> {
     confirmationController.dispose();
     await handleNewSession();
   }
-}
-
-/**
- * 处理聊天流中的确认卡片操作。
- * @param confirmationId - 确认项 ID
- * @param action - 用户操作
- */
-async function handleConfirmationAction(confirmationId: string, action: ChatMessageConfirmationAction): Promise<void> {
-  if (action === 'approve') {
-    confirmationController.approveConfirmation(confirmationId);
-    return;
-  }
-
-  if (action === 'approve-session') {
-    confirmationController.approveConfirmation(confirmationId, 'session');
-    return;
-  }
-
-  if (action === 'approve-always') {
-    confirmationController.approveConfirmation(confirmationId, 'always');
-    return;
-  }
-
-  confirmationController.cancelConfirmation(confirmationId);
 }
 
 /** 组件挂载时加载会话列表并监听编辑器引用插入事件 */
@@ -471,66 +549,36 @@ onUnmounted(() => {
 }
 
 .chat-sidebar-container {
+  display: flex;
   flex: 1;
+  flex-direction: column;
   height: 0;
 }
 
-.chat-sidebar-empty {
+.chat-panel__input {
+  padding: 12px;
+  border-top: 1px solid var(--border-primary);
+}
+
+.chat-panel__input-container {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  padding: 24px;
-  text-align: center;
-}
-
-.chat-sidebar-empty__art {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 136px;
-  height: 136px;
-}
-
-.chat-sidebar-empty__card {
-  position: absolute;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 12px 0 12px 12px;
+  background: var(--input-bg);
   border: 1px solid var(--border-primary);
-  border-radius: 24px;
-  box-shadow: 0 18px 38px rgb(53 43 33 / 8%);
-  backdrop-filter: blur(12px);
+  border-radius: 6px;
+
+  :deep(.b-prompt-editor) {
+    padding: 0 12px 0 0;
+    background-color: transparent;
+    border: none;
+    border-radius: 0;
+  }
 }
 
-.chat-sidebar-empty__card--back {
-  width: 66px;
-  height: 82px;
-  background: linear-gradient(180deg, var(--bg-elevated), var(--bg-secondary));
-  transform: translate(-24px, 8px) rotate(-10deg);
-}
-
-.chat-sidebar-empty__card--front {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 82px;
-  height: 98px;
-  color: var(--color-primary);
-  background: linear-gradient(180deg, var(--bg-elevated), var(--bg-tertiary));
-  transform: translate(18px, -6px) rotate(8deg);
-}
-
-.chat-sidebar-empty__title {
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 1.4;
-  color: var(--text-primary);
-}
-
-.chat-sidebar-empty__text {
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--text-secondary);
+.chat-panel__input-buttons {
+  padding: 0 12px 0 0;
 }
 </style>
