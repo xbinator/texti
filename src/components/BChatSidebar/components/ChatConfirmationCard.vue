@@ -53,7 +53,7 @@ import BButton from '@/components/BButton/index.vue';
 import { createNamespace } from '@/utils/namespace';
 import { formatConfirmationPreviewText, getConfirmationStatusText, isConfirmationCollapsed } from '@/components/BChat/utils/confirmationCard';
 
-defineOptions({ name: 'ConfirmationCard' });
+defineOptions({ name: 'ChatConfirmationCard' });
 
 const props = defineProps<{
   /** 确认卡片片段 */
