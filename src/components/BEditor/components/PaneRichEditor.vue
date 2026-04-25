@@ -20,6 +20,7 @@
       :file-name="props.fileName"
       @ai-input-toggle="handleAIInputToggle"
       @selection-reference-insert="handleSelectionReferenceInsert"
+      @selection-reference-clear="handleSelectionReferenceClear"
     />
     <!-- 选择 AI 输入框 -->
     <SelectionAIInput v-model:visible="aiInputVisible" :editor="props.editor" :selection-range="selectionRange" />
@@ -102,6 +103,13 @@ function handleAIInputToggle(value: boolean, nextSelectionRange?: SelectionRange
     selectionRange.value = { ...nextSelectionRange };
   }
   aiInputVisible.value = value;
+}
+
+/**
+ * 在工具栏真正隐藏后清理“插入对话”留下的临时选区高亮。
+ */
+function handleSelectionReferenceClear(): void {
+  clearAISelectionHighlight(props.editor);
 }
 
 watch(
@@ -193,7 +201,8 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
     }
 
     .ai-selection-highlight {
-      padding: 0.25em 0;
+      padding: 0.32em 0;
+      vertical-align: middle;
       color: var(--selection-color);
       background: var(--selection-bg);
       -webkit-box-decoration-break: clone;
