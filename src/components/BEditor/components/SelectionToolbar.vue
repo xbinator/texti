@@ -69,6 +69,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (e: 'ai-input-toggle', value: boolean, selectionRange?: SelectionRange): void;
   (e: 'selection-reference-insert', selectionRange: SelectionRange): void;
+  (e: 'selection-reference-clear'): void;
 }>();
 
 const visible = ref(false);
@@ -106,6 +107,7 @@ const bubbleMenuOptions = computed(() => ({
   onHide: () => {
     visible.value = false;
     emit('ai-input-toggle', false);
+    emit('selection-reference-clear');
   }
 }));
 
