@@ -6,7 +6,7 @@ import type { AIUsage } from 'types/ai';
 import type { ChatMessageHistoryCursor, ChatMessageRecord, ChatSession, ChatSessionType } from 'types/chat';
 import { defineStore } from 'pinia';
 import { nanoid } from 'nanoid';
-import { isPersistableMessage, type PersistableMessage } from '@/components/BChat/message';
+import { is, type PersistableMessage } from '@/components/BChat/message';
 import type { Message } from '@/components/BChat/types';
 import { chatStorage } from '@/shared/storage';
 
@@ -71,7 +71,7 @@ export const useChatStore = defineStore('chat', {
 
     async addSessionMessage(sessionId: string | null, message: Message): Promise<void> {
       if (!sessionId) return;
-      if (!isPersistableMessage(message)) return;
+      if (!is.persistableMessage(message)) return;
 
       const record = toRecordMessage(sessionId, message);
 
@@ -85,7 +85,7 @@ export const useChatStore = defineStore('chat', {
     async setSessionMessages(sessionId: string | null, messages: Message[]): Promise<void> {
       if (!sessionId) return;
 
-      const persistableMessages = messages.filter(isPersistableMessage);
+      const persistableMessages = messages.filter(is.persistableMessage);
       const records = persistableMessages.map((message) => toRecordMessage(sessionId, message));
 
       await chatStorage.setSessionMessages(sessionId, records);

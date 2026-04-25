@@ -42,12 +42,18 @@ import type { ServiceModelUpdatedDetail } from '@/shared/storage/service-models/
 import { SERVICE_MODEL_UPDATED_EVENT } from '@/shared/storage/service-models/events';
 import { useServiceModelStore } from '@/stores/service-model';
 
+/**
+ * 选区范围信息。
+ */
 interface SelectionRange {
   from: number;
   to: number;
   text: string;
 }
 
+/**
+ * 组件属性。
+ */
 interface Props {
   editor?: Editor | null;
   filePath?: string | null;
@@ -60,7 +66,10 @@ const props = withDefaults(defineProps<Props>(), {
   fileName: ''
 });
 
-const emit = defineEmits<{ (e: 'ai-input-toggle', value: boolean, selectionRange?: SelectionRange): void }>();
+const emit = defineEmits<{
+  (e: 'ai-input-toggle', value: boolean, selectionRange?: SelectionRange): void;
+  (e: 'selection-reference-insert', selectionRange: SelectionRange): void;
+}>();
 
 const visible = ref(false);
 const isModelAvailable = ref(false);
@@ -72,6 +81,10 @@ async function checkModelAvailability(): Promise<void> {
   isModelAvailable.value = await serviceModelStore.isServiceAvailable('polish');
 }
 
+/**
+ * 响应模型配置更新事件，保持工具栏状态与当前服务可用性一致。
+ * @param event - 模型配置更新事件
+ */
 function handleServiceModelUpdated(event: Event): void {
   const { detail } = event as CustomEvent<ServiceModelUpdatedDetail>;
   if (detail.serviceType !== 'polish') return;
@@ -88,6 +101,10 @@ const bubbleMenuOptions = computed(() => ({
   onShow: () => {
     checkModelAvailability();
     visible.value = true;
+    emit('ai-input-toggle', false);
+  },
+  onHide: () => {
+    visible.value = false;
     emit('ai-input-toggle', false);
   }
 }));
@@ -109,18 +126,37 @@ function toggleAIInput(): void {
 }
 
 /**
+ * 读取当前编辑器选区信息，供父组件在失焦后恢复选区与高亮。
+ * @returns 当前选区信息；无有效选区时返回 null
+ */
+function getCurrentSelectionRange(): SelectionRange | null {
+  const { editor } = props;
+  const selection = editor?.state.selection;
+  if (!editor || !selection || selection.from === selection.to) {
+    return null;
+  }
+
+  const text = editor.state.doc.textBetween(selection.from, selection.to, '');
+
+  return { from: selection.from, to: selection.to, text };
+}
+
+/**
  * 将当前选区所在文件与行号插入聊天输入框。
  */
 function insertSelectionReferenceToChat(): void {
   const { filePath } = props;
   const { editor } = props;
-  const selection = editor?.state.selection;
-  if (!editor || !selection || selection.from === selection.to) {
+  const selectionRange = getCurrentSelectionRange();
+  if (!editor || !selectionRange) {
     return;
   }
 
-  const textBeforeStart = editor.state.doc.textBetween(0, selection.from, '\n', '\n');
-  const textBeforeEnd = editor.state.doc.textBetween(0, selection.to, '\n', '\n');
+  // 在工具栏点击导致编辑器失焦前，先把选区交给父组件缓存并恢复显示。
+  emit('selection-reference-insert', selectionRange);
+
+  const textBeforeStart = editor.state.doc.textBetween(0, selectionRange.from, '\n', '\n');
+  const textBeforeEnd = editor.state.doc.textBetween(0, selectionRange.to, '\n', '\n');
 
   emitChatFileReferenceInsert({
     filePath: filePath ?? null,

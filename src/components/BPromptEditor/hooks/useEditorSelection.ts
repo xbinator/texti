@@ -8,8 +8,19 @@ export interface MenuPosition {
   bottom: number;
 }
 
+/**
+ * 记录最近一次有效光标位置的序列化快照。
+ */
+interface SelectionSnapshot {
+  /** 光标容器在编辑器根节点下的路径 */
+  path: number[];
+  /** 光标在目标容器中的偏移 */
+  offset: number;
+}
+
 export function useEditorSelection(editorRef: Ref<HTMLDivElement | undefined>) {
   const cachedRange = ref<Range | null>(null);
+  const cachedSelectionSnapshot = ref<SelectionSnapshot | null>(null);
 
   /**
    * 将折叠选区恢复到父节点的指定 child offset，避免引用已脱离 DOM 的节点。
@@ -34,9 +45,116 @@ export function useEditorSelection(editorRef: Ref<HTMLDivElement | undefined>) {
     return getActiveSelection()?.getRangeAt(0) ?? null;
   }
 
+  /**
+   * 将节点转换为相对编辑器根节点的路径，供光标恢复使用。
+   * @param root - 编辑器根节点
+   * @param targetNode - 需要记录的节点
+   * @returns 节点路径，无法定位时返回 null
+   */
+  function buildNodePath(root: Node, targetNode: Node): number[] | null {
+    const path: number[] = [];
+    let currentNode: Node | null = targetNode;
+
+    while (currentNode && currentNode !== root) {
+      const parentNode = currentNode.parentNode as Node | null;
+      if (!parentNode) return null;
+
+      const childIndex = Array.from(parentNode.childNodes).indexOf(currentNode as ChildNode);
+      if (childIndex < 0) return null;
+
+      path.unshift(childIndex);
+      currentNode = parentNode;
+    }
+
+    return currentNode === root ? path : null;
+  }
+
+  /**
+   * 按路径解析编辑器中的目标节点。
+   * @param root - 编辑器根节点
+   * @param path - 节点路径
+   * @returns 对应节点；路径失效时返回 null
+   */
+  function resolveNodePath(root: Node, path: number[]): Node | null {
+    let currentNode: Node | null = root;
+
+    for (const childIndex of path) {
+      currentNode = currentNode?.childNodes[childIndex] ?? null;
+      if (!currentNode) {
+        return null;
+      }
+    }
+
+    return currentNode;
+  }
+
+  /**
+   * 判断指定 Range 是否仍位于当前编辑器内部。
+   * @param range - 待判断的 Range
+   * @returns 是否属于当前编辑器
+   */
+  function isRangeInsideEditor(range: Range | null): boolean {
+    if (!range || !editorRef.value) {
+      return false;
+    }
+
+    return editorRef.value.contains(range.startContainer) && editorRef.value.contains(range.endContainer);
+  }
+
   function cacheCurrentRange(): void {
     const range = getActiveRange();
-    if (range) cachedRange.value = range.cloneRange();
+    if (!isRangeInsideEditor(range) || !range) return;
+
+    cachedRange.value = range.cloneRange();
+    const path = buildNodePath(editorRef.value as Node, range.startContainer);
+    cachedSelectionSnapshot.value = path ? { path, offset: range.startOffset } : null;
+  }
+
+  /**
+   * 在编辑器仍持有有效光标时缓存当前位置，供失焦后的插入操作恢复。
+   */
+  function cacheCurrentRangeIfInsideEditor(): void {
+    cacheCurrentRange();
+  }
+
+  /**
+   * 恢复上一次缓存的光标位置。
+   * @returns 恢复后的 Range；没有可用缓存时返回 null
+   */
+  function restoreCachedRange(): Range | null {
+    if (!editorRef.value) {
+      return null;
+    }
+
+    const selection = window.getSelection();
+    if (!selection) {
+      return null;
+    }
+
+    if (cachedSelectionSnapshot.value) {
+      const targetNode = resolveNodePath(editorRef.value, cachedSelectionSnapshot.value.path);
+      if (targetNode) {
+        const restoredRange = document.createRange();
+        const maxOffset = targetNode.nodeType === Node.TEXT_NODE ? targetNode.textContent?.length ?? 0 : targetNode.childNodes.length;
+        const restoredOffset = Math.min(cachedSelectionSnapshot.value.offset, maxOffset);
+
+        restoredRange.setStart(targetNode, restoredOffset);
+        restoredRange.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(restoredRange);
+        cachedRange.value = restoredRange.cloneRange();
+        return restoredRange;
+      }
+    }
+
+    if (!cachedRange.value) {
+      return null;
+    }
+
+    const restoredRange = cachedRange.value.cloneRange();
+    selection.removeAllRanges();
+    selection.addRange(restoredRange);
+    return restoredRange;
   }
 
   function getCursorPosition(): MenuPosition | null {
@@ -52,8 +170,8 @@ export function useEditorSelection(editorRef: Ref<HTMLDivElement | undefined>) {
       span.textContent = ZERO_WIDTH_SPACE;
       range.insertNode(span);
       rect = span.getBoundingClientRect();
-      const { parentNode } = span;
-      const restoredOffset = parentNode ? Array.from(parentNode.childNodes).indexOf(span) : -1;
+      const parentNode = span.parentNode as Node | null;
+      const restoredOffset = parentNode ? Array.from(parentNode.childNodes).indexOf(span as ChildNode) : -1;
 
       span.remove();
 
@@ -99,9 +217,12 @@ export function useEditorSelection(editorRef: Ref<HTMLDivElement | undefined>) {
 
   return {
     cachedRange,
+    cachedSelectionSnapshot,
     getActiveSelection,
     getActiveRange,
     cacheCurrentRange,
+    cacheCurrentRangeIfInsideEditor,
+    restoreCachedRange,
     getCursorPosition,
     getTextBeforeCursor,
     isSelectionInsideEditor,

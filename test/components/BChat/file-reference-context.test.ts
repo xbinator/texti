@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessageFileReference, ChatReferenceSnapshot } from 'types/chat';
 import type { Message } from '@/components/BChat/types';
-import { buildModelReadyMessages, parseLineRange } from '@/components/BChat/fileReferenceContext';
+import { buildModelReadyMessages, parseLineRange } from '@/components/BChat/utils/fileReferenceContext';
 
 /**
  * Creates a normalized file reference fixture.

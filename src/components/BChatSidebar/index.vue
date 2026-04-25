@@ -58,7 +58,7 @@ import { nanoid } from 'nanoid';
 import { createBuiltinTools } from '@/ai/tools/builtin';
 import { editorToolContextRegistry } from '@/ai/tools/editor-context';
 import { getDefaultChatToolNames } from '@/ai/tools/policy';
-import { findPendingUserChoiceQuestion } from '@/components/BChat/message';
+import { userChoice } from '@/components/BChat/message';
 import type { Message } from '@/components/BChat/types';
 import type { FileReferenceChip } from '@/components/BPromptEditor/hooks/useVariableEncoder';
 import { onChatFileReferenceInsert, type ChatFileReferenceInsertPayload } from '@/shared/chat/fileReference';
@@ -91,7 +91,7 @@ const hasMoreHistory = ref(false);
 /** 聊天是否正在输出（流式响应中） */
 const chatBusy = ref(false);
 /** 聊天组件引用，用于调用组件方法 */
-const chatRef = ref<{ focusInput: () => void; insertFileReference: (reference: FileReferenceChip) => void } | null>(null);
+const chatRef = ref<{ focusInput: () => void; captureInputCursor: () => void; insertFileReference: (reference: FileReferenceChip) => void } | null>(null);
 /** 确认控制器，管理工具调用的用户确认流程 */
 const confirmationController = createChatConfirmationController({
   getMessages: () => messages.value
@@ -118,7 +118,7 @@ const currentSession = computed<ChatSession | undefined>(() => {
 const tools = createBuiltinTools({
   confirm: confirmationController.createAdapter(),
   getPendingQuestion: () => {
-    const pendingQuestion = findPendingUserChoiceQuestion(messages.value);
+    const pendingQuestion = userChoice.findPending(messages.value);
     if (!pendingQuestion) {
       return null;
     }
@@ -281,6 +281,8 @@ async function handleFileReferenceInsert(reference: ChatFileReferenceInsertPaylo
     line: reference.line
   };
 
+  // 先锁定聊天输入框最近一次有效插入位置，再处理侧边栏聚焦与引用插入。
+  chatRef.value?.captureInputCursor();
   settingStore.setSidebarVisible(true);
 
   await nextTick();

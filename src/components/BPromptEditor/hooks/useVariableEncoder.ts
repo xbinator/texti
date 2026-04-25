@@ -164,7 +164,7 @@ function decodeContent(content: string, registry: Map<string, FileReferenceChip>
   temp.innerHTML = content.split(CARET_SPACER).join('');
 
   temp.querySelectorAll('span[data-value="file-reference"]').forEach((element) => {
-    const reference = readFileReferenceChip(element);
+    const reference = readFileReferenceChip(element as HTMLElement);
     if (!reference) {
       element.replaceWith(document.createTextNode(element.textContent ?? ''));
       return;

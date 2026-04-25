@@ -18,8 +18,10 @@
         @dragover="handleDragOver"
         @drop="handleDrop"
         @keydown="handleKeyDown"
+        @keyup="handleCaretChange"
         @blur="handleBlur"
         @input="handleInput"
+        @mouseup="handleCaretChange"
       ></div>
 
       <VariableSelect
@@ -48,7 +50,7 @@ import VariableSelect from './components/VariableSelect.vue';
 import { useEditorCore, useEditorKeyboard, useEditorPaste, useEditorTrigger } from './hooks';
 
 const props = withDefaults(defineProps<Props>(), {
-  placeholder: '����������...',
+  placeholder: '请输入内容...',
   options: () => [],
   disabled: false,
   maxHeight: undefined,
@@ -122,6 +124,8 @@ function handleInput(): void {
   if (props.disabled) return;
   updateModelValue();
   normalizeInlineTokens();
+  // 输入完成后立即记录最新光标，避免失焦前缓存退化为根节点级 offset。
+  requestAnimationFrame(selectionHook.cacheCurrentRangeIfInsideEditor);
   trigger.updateVisibility();
 }
 
@@ -129,7 +133,17 @@ function handleInput(): void {
  * Hides the suggestion menu shortly after the editor loses focus.
  */
 function handleBlur(): void {
-  if (!props.disabled) setTimeout(trigger.hide, 200);
+  if (props.disabled) return;
+  setTimeout(trigger.hide, 200);
+}
+
+/**
+ * 在用户点击或键盘移动光标后，同步记录最近一次有效插入点。
+ */
+function handleCaretChange(): void {
+  if (props.disabled) return;
+
+  requestAnimationFrame(selectionHook.cacheCurrentRangeIfInsideEditor);
 }
 
 /**
@@ -138,6 +152,7 @@ function handleBlur(): void {
 function handleContainerClick(): void {
   if (!props.disabled && editorRef.value) {
     editorRef.value.focus();
+    selectionHook.restoreCachedRange();
   }
 }
 
@@ -149,12 +164,23 @@ function focus(): void {
 }
 
 /**
+ * 显式记录当前光标位置，供外部在失焦后恢复插入点。
+ */
+function captureCursorPosition(): void {
+  if (props.disabled) return;
+
+  selectionHook.cacheCurrentRangeIfInsideEditor();
+}
+
+/**
  * Inserts a file-reference chip into the editor.
  * @param reference - File reference metadata.
  */
 function insertFileReference(reference: FileReferenceChip): void {
   if (props.disabled) return;
 
+  editorRef.value?.focus();
+  selectionHook.restoreCachedRange();
   trigger.insertFileReference(reference);
 }
 
@@ -162,10 +188,16 @@ function insertFileReference(reference: FileReferenceChip): void {
  * Recomputes the variable picker visibility when the selection changes.
  */
 function handleSelectionChange(): void {
-  if (props.disabled || !selectionHook.isSelectionInsideEditor()) {
+  if (props.disabled) {
     if (trigger.visible.value) trigger.hide();
     return;
   }
+
+  if (!selectionHook.isSelectionInsideEditor()) {
+    if (trigger.visible.value) trigger.hide();
+    return;
+  }
+
   trigger.updateVisibility();
   trigger.updateMenuPosition();
 }
@@ -214,7 +246,7 @@ onUnmounted(() => {
   window.removeEventListener('scroll', handleViewportChange, true);
 });
 
-defineExpose({ focus, insertFileReference });
+defineExpose({ focus, captureCursorPosition, insertFileReference });
 </script>
 
 <style lang="less">

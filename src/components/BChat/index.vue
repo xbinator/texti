@@ -58,19 +58,8 @@ import { useServiceModelStore } from '@/stores/service-model';
 import { Modal } from '@/utils/modal';
 import Container from './components/Container.vue';
 import MessageBubble from './components/MessageBubble.vue';
-import { buildModelReadyMessages } from './fileReferenceContext';
-import {
-  appendTextPart,
-  appendThinkingPart,
-  appendToolCallPart,
-  appendToolResultPart,
-  createAssistantPlaceholder,
-  createErrorMessage,
-  findPendingUserChoiceQuestion,
-  isRemovableAssistantPlaceholder,
-  submitUserChoiceAnswer,
-  toCachedModelMessages
-} from './message';
+import { append, convert, create, is, userChoice } from './message';
+import { buildModelReadyMessages } from './utils/fileReferenceContext';
 import { createToolCallTracker, type ToolCallTracker } from './utils/toolCallTracker';
 import { createToolLoopGuard, type ToolLoopGuard } from './utils/toolLoopGuard';
 
@@ -104,6 +93,10 @@ interface PromptEditorExpose {
    * 聚焦编辑器输入区域。
    */
   focus: () => void;
+  /**
+   * 显式记录当前输入框最近一次有效插入位置。
+   */
+  captureCursorPosition: () => void;
   /**
    * 插入文件引用 chip。
    */
@@ -148,7 +141,6 @@ watch(loading, (value) => {
  * @returns References still present in the prompt.
  */
 function getActiveDraftReferences(content: string): ChatMessageFileReference[] {
-  console.log('content', draftReferences.value);
   return draftReferences.value.filter((reference) => content.includes(reference.token));
 }
 
@@ -203,7 +195,7 @@ function startToolLoopSession(): void {
  */
 function removeTrailingEmptyAssistantMessage(): void {
   const lastMessage = messages.value[messages.value.length - 1];
-  if (isRemovableAssistantPlaceholder(lastMessage)) {
+  if (is.removableAssistantPlaceholder(lastMessage)) {
     messages.value.pop();
   }
 }
@@ -218,7 +210,7 @@ function appendAssistantToolCall(chunk: AIStreamToolCallChunk): void {
     return;
   }
 
-  appendToolCallPart(message, chunk.toolCallId, chunk.toolName, chunk.input);
+  append.toolCallPart(message, chunk.toolCallId, chunk.toolName, chunk.input);
 }
 
 /**
@@ -231,7 +223,7 @@ function appendAssistantToolResult(result: ExecutedToolCall): void {
     return;
   }
 
-  appendToolResultPart(message, result.toolCallId, result.toolName, result.result);
+  append.toolResultPart(message, result.toolCallId, result.toolName, result.result);
 }
 
 /**
@@ -243,7 +235,7 @@ function stopToolLoop(reason: string): void {
   pendingToolResults.value = [];
   removeTrailingEmptyAssistantMessage();
 
-  const message = createErrorMessage(reason);
+  const message = create.errorMessage(reason);
   messages.value.push(message);
   emit('complete', message);
 }
@@ -364,7 +356,7 @@ function prepareAssistantMessage(reuseLastAssistant: boolean): Message {
     return lastMessage;
   }
 
-  const placeholder = createAssistantPlaceholder();
+  const placeholder = create.assistantPlaceholder();
   messages.value.push(placeholder);
   return placeholder;
 }
@@ -382,7 +374,7 @@ async function streamMessages(sourceMessages: Message[], config: ServiceConfig, 
   prepareAssistantMessage(reuseLastAssistant);
 
   const snapshotsById = await loadReferenceSnapshotMap(sourceMessages);
-  currentModelMessageCache = toCachedModelMessages(buildModelReadyMessages(sourceMessages, snapshotsById), currentModelMessageCache);
+  currentModelMessageCache = convert.toCachedModelMessages(buildModelReadyMessages(sourceMessages, snapshotsById), currentModelMessageCache);
 
   const continuedMessages = [...currentModelMessageCache.modelMessages];
 
@@ -474,7 +466,7 @@ async function handleUserChoiceSubmit(answer: AIUserChoiceAnswerData): Promise<v
     return;
   }
 
-  const submitted = submitUserChoiceAnswer(messages.value, answer);
+  const submitted = userChoice.submitAnswer(messages.value, answer);
   if (!submitted) {
     return;
   }
@@ -496,6 +488,13 @@ async function handleUserChoiceSubmit(answer: AIUserChoiceAnswerData): Promise<v
  */
 function focusInput(): void {
   promptEditorRef.value?.focus();
+}
+
+/**
+ * 显式记录当前输入框最近一次有效插入位置。
+ */
+function captureInputCursor(): void {
+  promptEditorRef.value?.captureCursorPosition();
 }
 
 /**
@@ -557,7 +556,7 @@ const { agent } = useChat({
    */
   onText: async (content: string): Promise<void> => {
     const message = messages.value[messages.value.length - 1];
-    appendTextPart(message, content);
+    append.textPart(message, content);
     message.loading = false;
     message.createdAt ||= new Date().toISOString();
   },
@@ -567,7 +566,7 @@ const { agent } = useChat({
    */
   onThinking: async (thinking: string): Promise<void> => {
     const message = messages.value[messages.value.length - 1];
-    appendThinkingPart(message, thinking);
+    append.thinkingPart(message, thinking);
     message.loading = false;
     message.createdAt ||= new Date().toISOString();
   },
@@ -616,7 +615,7 @@ const { agent } = useChat({
     }
 
     // 等待用户输入的问题需要停在当前消息，直到交互卡片提交答案。
-    if (awaitingUserChoice.value || findPendingUserChoiceQuestion(messages.value)) {
+    if (awaitingUserChoice.value || userChoice.findPending(messages.value)) {
       if (message) {
         emit('complete', message);
       }
@@ -664,13 +663,13 @@ const { agent } = useChat({
     resetToolLoopState();
     removeTrailingEmptyAssistantMessage();
 
-    const message = createErrorMessage(error.message);
+    const message = create.errorMessage(error.message);
     messages.value.push(message);
     emit('complete', message);
   }
 });
 
-defineExpose({ focusInput, insertFileReference });
+defineExpose({ focusInput, captureInputCursor, insertFileReference });
 </script>
 
 <style lang="less">

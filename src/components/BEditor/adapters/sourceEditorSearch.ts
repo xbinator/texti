@@ -39,10 +39,7 @@ export function findSourceSearchMatches(content: string, term: string): SourceSe
   let match = pattern.exec(content);
 
   while (match) {
-    matches.push({
-      from: match.index,
-      to: match.index + match[0].length
-    });
+    matches.push({ from: match.index, to: match.index + match[0].length });
 
     if (match[0].length === 0) {
       pattern.lastIndex += 1;

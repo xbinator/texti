@@ -1,6 +1,6 @@
 import type { Variable } from '../types';
-import type { FileReferenceChip } from './useVariableEncoder';
 import type { MenuPosition } from './useEditorSelection';
+import type { FileReferenceChip } from './useVariableEncoder';
 import type { Ref } from 'vue';
 import { ref } from 'vue';
 import { CARET_SPACER, useVariableEncoder } from './useVariableEncoder';
@@ -28,7 +28,8 @@ export function useEditorTrigger(
     getVariableLabel: (value: string) => variables.value.find((v) => v.value === value)?.label
   });
 
-  const { cachedRange, cacheCurrentRange, getCursorPosition, getVariableQueryBeforeCursor, getActiveSelection, getActiveRange } = selectionHook;
+  const { cachedRange, cacheCurrentRange, restoreCachedRange, getCursorPosition, getVariableQueryBeforeCursor, getActiveSelection, getActiveRange } =
+    selectionHook;
 
   const filteredVariables = ref<Variable[]>([]);
 
@@ -186,20 +187,17 @@ export function useEditorTrigger(
     if (!editorRef.value) return null;
     editorRef.value.focus();
 
-    const selection = window.getSelection();
-    if (!selection) return null;
-
     if (cachedRange.value) {
-      const range = cachedRange.value.cloneRange();
-      selection.removeAllRanges();
-      selection.addRange(range);
-      return range;
+      return restoreCachedRange();
     }
 
     const current = getActiveRange();
     if (current && editorRef.value.contains(current.startContainer)) {
       return current;
     }
+
+    const selection = window.getSelection();
+    if (!selection) return null;
 
     const range = document.createRange();
     range.selectNodeContents(editorRef.value);
@@ -230,6 +228,8 @@ export function useEditorTrigger(
     selection.removeAllRanges();
     selection.addRange(range);
 
+    // 插入完成后立即把新光标位置写回缓存，确保下一次插入从最新位置继续。
+    cacheCurrentRange();
     updateModelValue();
     editorRef.value?.focus();
   }

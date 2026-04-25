@@ -14,7 +14,13 @@
     <!-- 当前选中块菜单 -->
     <CurrentBlockMenu :editor="props.editor" />
     <!-- 选择工具栏 -->
-    <SelectionToolbar :editor="props.editor" :file-path="props.filePath" :file-name="props.fileName" @ai-input-toggle="handleAIInputToggle" />
+    <SelectionToolbar
+      :editor="props.editor"
+      :file-path="props.filePath"
+      :file-name="props.fileName"
+      @ai-input-toggle="handleAIInputToggle"
+      @selection-reference-insert="handleSelectionReferenceInsert"
+    />
     <!-- 选择 AI 输入框 -->
     <SelectionAIInput v-model:visible="aiInputVisible" :editor="props.editor" :selection-range="selectionRange" />
     <!-- 编辑器内容 -->
@@ -72,6 +78,25 @@ const focusEditorAtStart = () => props.editor?.commands.focus('start');
 
 // ---- AI Input ----
 
+/**
+ * 缓存并恢复当前选区，供“插入对话”在编辑器失焦后继续保持可见。
+ * @param nextSelectionRange - 当前需要保留的选区
+ */
+function handleSelectionReferenceInsert(nextSelectionRange: SelectionRange): void {
+  selectionRange.value = { ...nextSelectionRange };
+
+  requestAnimationFrame(() => {
+    // “插入对话”只需要保留视觉高亮，不应恢复真实选区；
+    // 否则编辑器重新获取焦点后，浏览器会继续显示原生选中态。
+    setAISelectionHighlight(props.editor, nextSelectionRange);
+  });
+}
+
+/**
+ * 控制选区 AI 面板显隐，并同步记录关联的选区范围。
+ * @param value - 是否显示 AI 面板
+ * @param nextSelectionRange - 需要绑定的选区范围
+ */
 function handleAIInputToggle(value: boolean, nextSelectionRange?: SelectionRange): void {
   if (nextSelectionRange) {
     selectionRange.value = { ...nextSelectionRange };
@@ -84,6 +109,7 @@ watch(
   ([isVisible, from, to]) => {
     if (!props.editor) return;
 
+    // AI 面板显示时用装饰高亮兜底，避免输入框获得焦点后原生选区不再可见。
     if (isVisible && from !== to) {
       requestAnimationFrame(() => {
         setAISelectionHighlight(props.editor, { from: from as number, to: to as number });
