@@ -34,6 +34,10 @@ const [, bem] = createNamespace('', 'message-bubble');
 </script>
 
 <style scoped lang="less">
+.message-bubble__part-name {
+  flex: 1;
+}
+
 .message-bubble__part-status--failure {
   margin-left: 8px;
   color: var(--color-error);

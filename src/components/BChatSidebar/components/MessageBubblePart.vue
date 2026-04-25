@@ -76,7 +76,6 @@ function toggleCollapse(): void {
 }
 
 .message-bubble__part-title--clickable {
-  width: fit-content;
   cursor: pointer;
   user-select: none;
 }
