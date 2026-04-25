@@ -54,7 +54,7 @@
  * @file ChatPanel.vue
  * @description 聊天面板组件，负责消息展示、输入、滚动和流式输出。
  */
-import type { CachedModelMessagesResult } from '../utils/message';
+import type { CachedModelMessagesResult } from '../utils/messageHelper';
 import type { BChatProps as Props, Message, ServiceConfig, ToolLoopGuardConfig } from '../utils/types';
 import type { AIServiceError, AIStreamFinishChunk, AIStreamToolCallChunk } from 'types/ai';
 import type { AIUserChoiceAnswerData, ChatMessageConfirmationAction, ChatMessageFileReference } from 'types/chat';
@@ -76,7 +76,7 @@ import { chatStorage } from '@/shared/storage';
 import { useServiceModelStore } from '@/stores/service-model';
 import { Modal } from '@/utils/modal';
 import { getScrollTop, getScroller, setScrollTop } from '@/utils/scroll';
-import { append, convert, create, is, userChoice } from '../utils/message';
+import { append, convert, create, is, userChoice } from '../utils/messageHelper';
 import MessageBubble from './MessageBubble.vue';
 
 defineOptions({ name: 'ChatPanel' });

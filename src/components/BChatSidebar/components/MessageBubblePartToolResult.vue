@@ -6,7 +6,7 @@
       <span v-if="part.result.status === 'failure'" :class="bem('part-status', { failure: true })">失败</span>
     </template>
 
-    <pre :class="bem('part-code')">{{ formatStructuredValue(part.result) }}</pre>
+    <MessageBubblePartCode :value="part.result" />
   </MessageBubblePart>
 </template>
 
@@ -17,9 +17,9 @@
  */
 import type { ChatMessageToolResultPart } from 'types/chat';
 import { Icon } from '@iconify/vue';
-import { formatStructuredValue } from '@/components/BChatSidebar/utils/messagePart';
 import { createNamespace } from '@/utils/namespace';
 import MessageBubblePart from './MessageBubblePart.vue';
+import MessageBubblePartCode from './MessageBubblePartCode.vue';
 
 defineOptions({ name: 'MessageBubblePartToolResult' });
 
@@ -34,16 +34,8 @@ const [, bem] = createNamespace('', 'message-bubble');
 </script>
 
 <style scoped lang="less">
-.message-bubble__part-code {
-  max-height: 180px;
-  padding: 8px;
-  margin: 0;
-  overflow: auto;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  font-size: 11px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  background: var(--bg-primary);
-  border-radius: 6px;
+.message-bubble__part-status--failure {
+  margin-left: 8px;
+  color: var(--color-error);
 }
 </style>

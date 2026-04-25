@@ -6,7 +6,7 @@ import type { AIUsage } from 'types/ai';
 import type { ChatMessageHistoryCursor, ChatMessageRecord, ChatSession, ChatSessionType } from 'types/chat';
 import { defineStore } from 'pinia';
 import { nanoid } from 'nanoid';
-import { is, type PersistableMessage } from '@/components/BChatSidebar/utils/message';
+import { is, type PersistableMessage } from '@/components/BChatSidebar/utils/messageHelper';
 import type { Message } from '@/components/BChatSidebar/utils/types';
 import { chatStorage } from '@/shared/storage';
 

@@ -85,10 +85,6 @@ function toggleCollapse(): void {
   width: 100%;
 }
 
-.message-bubble__part-name {
-  flex: 1;
-}
-
 .message-bubble__part-status {
   padding: 1px 6px;
   font-size: 11px;

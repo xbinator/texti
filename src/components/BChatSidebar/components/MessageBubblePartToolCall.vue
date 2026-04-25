@@ -4,7 +4,7 @@
       <Icon icon="lucide:wrench" width="14" height="14" />
       <span>调用工具：{{ part.toolName }}</span>
     </template>
-    <pre :class="bem('part-code')">{{ formatStructuredValue(part.input) }}</pre>
+    <MessageBubblePartCode :value="part.input" />
   </MessageBubblePart>
 </template>
 
@@ -16,9 +16,9 @@
 import type { ChatMessageToolCallPart } from 'types/chat';
 import { computed } from 'vue';
 import { Icon } from '@iconify/vue';
-import { formatStructuredValue, hasStructuredValueContent } from '@/components/BChatSidebar/utils/messagePart';
-import { createNamespace } from '@/utils/namespace';
+import { hasStructuredValueContent } from '@/components/BChatSidebar/utils/messagePart';
 import MessageBubblePart from './MessageBubblePart.vue';
+import MessageBubblePartCode from './MessageBubblePartCode.vue';
 
 defineOptions({ name: 'MessageBubblePartToolCall' });
 
@@ -29,22 +29,5 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {});
 
-const [, bem] = createNamespace('', 'message-bubble');
-
 const hasContent = computed(() => hasStructuredValueContent(props.part.input));
 </script>
-
-<style scoped lang="less">
-.message-bubble__part-code {
-  max-height: 180px;
-  padding: 8px;
-  margin: 0;
-  overflow: auto;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  font-size: 11px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  background: var(--bg-primary);
-  border-radius: 6px;
-}
-</style>

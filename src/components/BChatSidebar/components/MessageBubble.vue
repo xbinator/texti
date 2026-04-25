@@ -87,12 +87,19 @@ defineEmits<{
   (e: 'user-choice-submit', answer: AIUserChoiceAnswerData): void;
 }>();
 
+/** 图片文件列表（有 url 或 path 的图片类型文件） */
 const imageFiles = computed(() => props.message.files?.filter((file) => file.type === 'image' && (file.url || file.path)) ?? []);
+/** 非图片文件列表（非图片类型或无 url/path 的文件） */
 const otherFiles = computed(() => props.message.files?.filter((file) => file.type !== 'image' || (!file.url && !file.path)) ?? []);
+/** 是否为用户消息 */
 const isUserMessage = computed(() => props.message.role === 'user');
+/** 是否为助手消息 */
 const isAssistantMessage = computed(() => props.message.role === 'assistant');
+/** 是否为错误消息 */
 const isErrorMessage = computed(() => props.message.role === 'error');
+/** 气泡位置：助手和错误消息靠左，用户消息靠右 */
 const bubblePlacement = computed(() => (isAssistantMessage.value || isErrorMessage.value ? 'left' : 'right'));
+/** 是否显示头部（用户消息且有文件时显示） */
 const showHeader = computed(() => isUserMessage.value && (imageFiles.value.length || otherFiles.value.length));
 
 /**
