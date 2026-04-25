@@ -1,7 +1,6 @@
 <template>
   <div :class="bem({ error: isErrorMessage })">
     <BBubble :placement="bubblePlacement" :loading="message.loading" :size="message.role === 'user' ? 'auto' : 'fill'">
-      <!-- 头部区域：展示用户上传的图片和文件 -->
       <template v-if="showHeader" #header>
         <div :class="bem('header')">
           <div v-if="imageFiles.length" :class="bem('images')">
@@ -16,11 +15,9 @@
         </div>
       </template>
 
-      <!-- 消息内容区域：按片段类型渲染不同内容 -->
       <div :class="bem('parts')">
         <template v-for="(part, index) in message.parts" :key="`${part.type}-${index}`">
-          <!-- 文本片段：渲染 Markdown 内容 -->
-          <MessageBubblePartText
+          <ChatMessageBubblePartText
             v-if="part.type === 'text'"
             :part="part"
             :loading="isLastPart(index) && !!message.loading"
@@ -28,26 +25,21 @@
             :references="message.references"
           />
 
-          <!-- 思考片段：可折叠的深度思考内容 -->
-          <MessageBubblePartThinking v-else-if="part.type === 'thinking'" :part="part" />
+          <ChatMessageBubblePartThinking v-else-if="part.type === 'thinking'" :part="part" />
 
-          <!-- 工具调用片段：展示工具名称和输入参数 -->
-          <MessageBubblePartToolCall v-else-if="part.type === 'tool-call'" :part="part" />
+          <ChatMessageBubblePartToolCall v-else-if="part.type === 'tool-call'" :part="part" />
 
-          <!-- 确认片段：需要用户确认的操作卡片 -->
-          <ConfirmationCard
+          <ChatConfirmationCard
             v-else-if="part.type === 'confirmation'"
             :part="part"
             @confirmation-action="$emit('confirmation-action', $event.confirmationId, $event.action)"
           />
 
-          <!-- 工具结果片段：展示工具执行结果 -->
-          <AskUserChoiceCard v-else-if="isAwaitingUserChoicePart(part)" :question="part.result.data" @submit-choice="$emit('user-choice-submit', $event)" />
-          <MessageBubblePartToolResult v-else :part="part" />
+          <ChatAskUserChoiceCard v-else-if="isAwaitingUserChoicePart(part)" :question="part.result.data" @submit-choice="$emit('user-choice-submit', $event)" />
+          <ChatMessageBubblePartToolResult v-else :part="part" />
         </template>
       </div>
 
-      <!-- 工具栏：复制、编辑、重新生成按钮 -->
       <template v-if="message.finished && message.role === 'assistant'" #toolbar>
         <div :class="bem('toolbar', { right: isUserMessage })">
           <BButton type="text" size="small" square icon="lucide:copy" @click="handleCopy(message)" />
@@ -61,10 +53,10 @@
 
 <script setup lang="ts">
 /**
- * @file MessageBubble.vue
+ * @file ChatMessageBubble.vue
  * @description 聊天气泡组件，按结构化消息片段渲染文本、思考、工具调用和工具结果。
  */
-import type { Message } from '../types';
+import type { Message } from '../../BChat/types';
 import type { AIToolExecutionAwaitingUserInputResult } from 'types/ai';
 import type { AIUserChoiceAnswerData, ChatMessageConfirmationAction, ChatMessagePart, ChatMessageToolResultPart } from 'types/chat';
 import { computed } from 'vue';
@@ -73,47 +65,34 @@ import BBubble from '@/components/BBubble/index.vue';
 import BButton from '@/components/BButton/index.vue';
 import { useClipboard } from '@/hooks/useClipboard';
 import { createNamespace } from '@/utils/namespace';
-import AskUserChoiceCard from './AskUserChoiceCard.vue';
-import ConfirmationCard from './ConfirmationCard.vue';
-import MessageBubblePartText from './MessageBubblePartText.vue';
-import MessageBubblePartThinking from './MessageBubblePartThinking.vue';
-import MessageBubblePartToolCall from './MessageBubblePartToolCall.vue';
-import MessageBubblePartToolResult from './MessageBubblePartToolResult.vue';
+import ChatAskUserChoiceCard from './ChatAskUserChoiceCard.vue';
+import ChatConfirmationCard from './ChatConfirmationCard.vue';
+import ChatMessageBubblePartText from './ChatMessageBubblePartText.vue';
+import ChatMessageBubblePartThinking from './ChatMessageBubblePartThinking.vue';
+import ChatMessageBubblePartToolCall from './ChatMessageBubblePartToolCall.vue';
+import ChatMessageBubblePartToolResult from './ChatMessageBubblePartToolResult.vue';
 
-defineOptions({ name: 'BMessageBubble' });
+defineOptions({ name: 'ChatMessageBubble' });
 
 const { clipboard } = useClipboard();
 
-/** BEM 类名生成器 */
 const [, bem] = createNamespace('message-bubble');
 
-/** 聊天消息数据 */
 const props = defineProps<{ message: Message }>();
 
 defineEmits<{
-  /** 编辑消息事件 */
   (e: 'edit', message: Message): void;
-  /** 重新生成消息事件 */
   (e: 'regenerate', message: Message): void;
-  /** 确认操作事件 */
   (e: 'confirmation-action', confirmationId: string, action: ChatMessageConfirmationAction): void;
-  /** 用户选择题提交事件 */
   (e: 'user-choice-submit', answer: AIUserChoiceAnswerData): void;
 }>();
 
-/** 图片文件列表 */
 const imageFiles = computed(() => props.message.files?.filter((file) => file.type === 'image' && (file.url || file.path)) ?? []);
-/** 其他文件列表 */
 const otherFiles = computed(() => props.message.files?.filter((file) => file.type !== 'image' || (!file.url && !file.path)) ?? []);
-/** 是否为用户消息 */
 const isUserMessage = computed(() => props.message.role === 'user');
-/** 是否为助手消息 */
 const isAssistantMessage = computed(() => props.message.role === 'assistant');
-/** 是否为错误消息 */
 const isErrorMessage = computed(() => props.message.role === 'error');
-/** 气泡位置 */
 const bubblePlacement = computed(() => (isAssistantMessage.value || isErrorMessage.value ? 'left' : 'right'));
-/** 是否显示头部（仅用户消息且有附件时显示） */
 const showHeader = computed(() => isUserMessage.value && (imageFiles.value.length || otherFiles.value.length));
 
 /**
@@ -142,19 +121,16 @@ function handleCopy(msg: Message): void {
 </script>
 
 <style lang="less">
-/* 消息气泡容器 */
 .b-message-bubble {
   display: flex;
   flex-direction: column;
   margin-bottom: 16px;
 }
 
-/* 最后一个气泡移除底部间距 */
 .b-message-bubble:last-child {
   margin-bottom: 0;
 }
 
-/* 错误消息样式 */
 .b-message-bubble--error {
   .bubble__container {
     padding: 10px 14px;
@@ -166,21 +142,18 @@ function handleCopy(msg: Message): void {
   }
 }
 
-/* 头部区域：图片和文件列表容器 */
 .b-message-bubble__header {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-/* 图片预览列表 */
 .b-message-bubble__images {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-/* 单张图片样式 */
 .b-message-bubble__image {
   max-width: 200px;
   max-height: 200px;
@@ -188,14 +161,12 @@ function handleCopy(msg: Message): void {
   border-radius: 8px;
 }
 
-/* 其他文件列表 */
 .b-message-bubble__files {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-/* 单个文件项样式 */
 .b-message-bubble__file {
   display: inline-flex;
   gap: 6px;
@@ -209,32 +180,27 @@ function handleCopy(msg: Message): void {
   border-radius: 999px;
 }
 
-/* 文件名：超出省略 */
 .b-message-bubble__file-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* 工具栏容器 */
 .b-message-bubble__toolbar {
   display: flex;
   gap: 4px;
 }
 
-/* 工具栏右对齐 */
 .b-message-bubble__toolbar--right {
   justify-content: flex-end;
 }
 
-/* 消息片段容器 */
 .b-message-bubble__parts {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-/* 消息片段基础样式 */
 .b-message-bubble__part {
   padding: 10px 12px;
   font-size: 12px;
@@ -244,18 +210,15 @@ function handleCopy(msg: Message): void {
   border-radius: 8px;
 }
 
-/* 思考片段样式 */
 .b-message-bubble__part--thinking {
   background: var(--bg-tertiary);
 }
 
-/* 工具调用和工具结果片段样式 */
 .b-message-bubble__part--tool-call,
 .b-message-bubble__part--tool-result {
   border-style: dashed;
 }
 
-/* 片段标题样式 */
 .b-message-bubble__part-title {
   display: flex;
   gap: 6px;
@@ -264,24 +227,20 @@ function handleCopy(msg: Message): void {
   color: var(--text-primary);
 }
 
-/* 可点击的片段标题 */
 .b-message-bubble__part-title--clickable {
   width: fit-content;
   cursor: pointer;
   user-select: none;
 }
 
-/* 工具结果标题占满容器，便于状态标签右对齐 */
 .b-message-bubble__part-title--tool-result {
   width: 100%;
 }
 
-/* 片段名称文本 */
 .b-message-bubble__part-name {
   flex: 1;
 }
 
-/* 片段状态标签 */
 .b-message-bubble__part-status {
   padding: 1px 6px;
   font-size: 11px;
@@ -289,18 +248,15 @@ function handleCopy(msg: Message): void {
   border-radius: 999px;
 }
 
-/* 片段失败状态标签 */
 .b-message-bubble__part-status--failure {
   color: var(--color-error);
   background: var(--color-error-bg);
 }
 
-/* 片段内容区域 */
 .b-message-bubble__part-content {
   margin-top: 8px;
 }
 
-/* 代码块样式 */
 .b-message-bubble__part-code {
   max-height: 180px;
   padding: 8px;

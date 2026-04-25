@@ -57,7 +57,7 @@ import { chatStorage } from '@/shared/storage';
 import { useServiceModelStore } from '@/stores/service-model';
 import { Modal } from '@/utils/modal';
 import Container from '@/components/BChatSidebar/components/ChatContainer.vue';
-import MessageBubble from './components/MessageBubble.vue';
+import MessageBubble from '@/components/BChatSidebar/components/ChatMessageBubble.vue';
 import { append, convert, create, is, userChoice } from './message';
 import { buildModelReadyMessages } from './utils/fileReferenceContext';
 import { createToolCallTracker, type ToolCallTracker } from './utils/toolCallTracker';
