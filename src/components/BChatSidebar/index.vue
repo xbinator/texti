@@ -64,9 +64,8 @@ import type { Message } from '@/components/BChatSidebar/utils/types';
 import type { FileReferenceChip } from '@/components/BPromptEditor/hooks/useVariableEncoder';
 import BPromptEditor from '@/components/BPromptEditor/index.vue';
 import { onChatFileReferenceInsert, type ChatFileReferenceInsertPayload } from '@/shared/chat/fileReference';
-import { chatStorage } from '@/shared/storage';
+import { chatStorage, serviceModelsStorage } from '@/shared/storage';
 import { useChatStore } from '@/stores/chat';
-import { useServiceModelStore } from '@/stores/service-model';
 import { useSettingStore } from '@/stores/setting';
 import InputToolbar from './components/InputToolbar.vue';
 import ConversationView from './components/ConversationView.vue';
@@ -76,8 +75,6 @@ import { createChatConfirmationController } from './utils/confirmationController
 
 /** 聊天数据存储 */
 const chatStore = useChatStore();
-/** 服务模型存储 */
-const serviceModelStore = useServiceModelStore();
 /** 应用设置存储 */
 const settingStore = useSettingStore();
 
@@ -110,7 +107,7 @@ let unregisterFileReferenceInsert: (() => void) | null = null;
  * 加载当前选中的模型配置
  */
 async function loadSelectedModel(): Promise<void> {
-  const config = await chatStore.serviceModelStore.getServiceConfig('chat');
+  const config = await serviceModelsStorage.getConfig('chat');
   selectedModel.value = config?.providerId && config?.modelId
     ? `${config.providerId}:${config.modelId}`
     : undefined;
