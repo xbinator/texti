@@ -40,10 +40,6 @@
 </template>
 
 <script setup lang="ts">
-/**
- * @file BChat/index.vue
- * @description AI 聊天组件，负责消息渲染、流式响应和工具续轮控制。
- */
 import type { CachedModelMessagesResult } from './message';
 import type { BChatProps as Props, Message, ServiceConfig, ToolLoopGuardConfig } from './types';
 import type { AIServiceError, AIStreamFinishChunk, AIStreamToolCallChunk } from 'types/ai';
@@ -62,6 +58,7 @@ import { useServiceModelStore } from '@/stores/service-model';
 import { Modal } from '@/utils/modal';
 import Container from './components/Container.vue';
 import MessageBubble from './components/MessageBubble.vue';
+import { buildModelReadyMessages } from './fileReferenceContext';
 import {
   appendTextPart,
   appendThinkingPart,
@@ -74,7 +71,6 @@ import {
   submitUserChoiceAnswer,
   toCachedModelMessages
 } from './message';
-import { buildModelReadyMessages } from './fileReferenceContext';
 import { createToolCallTracker, type ToolCallTracker } from './utils/toolCallTracker';
 import { createToolLoopGuard, type ToolLoopGuard } from './utils/toolLoopGuard';
 
@@ -147,72 +143,12 @@ watch(loading, (value) => {
 });
 
 /**
- * 为一次新的流式请求切换到新的异步跟踪上下文。
- */
-/**
- * Parsed 1-based line range used for local reference context extraction.
- */
-/**
- * Builds a lightweight overview for long documents before appending a local excerpt.
- * @param toolContext - Active editor context.
- * @param lines - Current document lines.
- * @returns Human-readable overview text for the model.
- */
-function buildDocumentOverview(toolContext: AIToolContext, lines: string[]): string {
-  const firstMeaningfulLine = lines.find((line) => line.trim().length > 0) ?? '';
-  const summaryParts = [`文档标题：${toolContext.document.title}`, `总行数：${lines.length}`];
-
-  if (firstMeaningfulLine) {
-    summaryParts.push(`首个非空行：${firstMeaningfulLine}`);
-  }
-
-  return summaryParts.join('\n');
-}
-
-/**
- * Builds the hidden model-only context block for the current document references.
- * @param references - References matching the active document.
- * @param toolContext - Active editor context.
- * @returns Context block appended after the visible user message.
- */
-function buildReferenceContextBlock(references: ChatMessageFileReference[], toolContext: AIToolContext): string {
-  const content = toolContext.document.getContent();
-  const lines = content.split(/\r?\n/);
-  const totalLines = lines.length;
-  const lineLabels = references.map((reference) => reference.line).join('、');
-  const header = `引用文件：${toolContext.document.path ?? `未保存文件（${toolContext.document.title}）`}\n引用行：${lineLabels}`;
-  const parsedRanges = references.map((reference) => parseLineRange(reference.line)).filter((range): range is ParsedLineRange => range !== null);
-
-  if (totalLines <= SMALL_DOCUMENT_LINE_THRESHOLD) {
-    return `${header}\n全文内容：\n${content}`;
-  }
-
-  if (!parsedRanges.length) {
-    return `${header}\n${buildDocumentOverview(toolContext, lines)}`;
-  }
-
-  const startLine = Math.max(1, Math.min(...parsedRanges.map((range) => range.start)) - CONTEXT_WINDOW_LINES);
-  const endLine = Math.min(totalLines, Math.max(...parsedRanges.map((range) => range.end)) + CONTEXT_WINDOW_LINES);
-  const excerpt = lines.slice(startLine - 1, endLine).join('\n');
-
-  if (totalLines <= MEDIUM_DOCUMENT_LINE_THRESHOLD) {
-    return `${header}\n附近片段（第 ${startLine}-${endLine} 行）：\n${excerpt}`;
-  }
-
-  return `${header}\n${buildDocumentOverview(toolContext, lines)}\n附近片段（第 ${startLine}-${endLine} 行）：\n${excerpt}`;
-}
-
-/**
- * Builds the model-facing message list while keeping visible user messages unchanged in the UI.
- * @param sourceMessages - Visible chat history.
- * @returns Model-facing message history with hidden reference context appended when available.
- */
-/**
  * Keeps draft references aligned with the current visible input content.
  * @param content - Current visible prompt content.
  * @returns References still present in the prompt.
  */
 function getActiveDraftReferences(content: string): ChatMessageFileReference[] {
+  console.log('content', draftReferences.value);
   return draftReferences.value.filter((reference) => content.includes(reference.token));
 }
 
