@@ -36,11 +36,14 @@
             @submit="handleChatSubmit"
           />
 
-          <div class="chat-panel__input-buttons">
-            <!--  -->
-            <BButton v-if="chatStream.loading.value" size="small" square icon="lucide:square" @click="chatStream.abort" />
-            <BButton v-else size="small" square :disabled="!inputValue" icon="lucide:arrow-up" @click="handleChatSubmit" />
-          </div>
+          <InputToolbar
+            :loading="chatStream.loading.value"
+            :input-value="inputValue"
+            :selected-model="selectedModel"
+            @submit="handleChatSubmit"
+            @abort="chatStream.abort"
+            @model-change="handleModelChange"
+          />
         </div>
       </div>
     </div>
@@ -63,7 +66,9 @@ import BPromptEditor from '@/components/BPromptEditor/index.vue';
 import { onChatFileReferenceInsert, type ChatFileReferenceInsertPayload } from '@/shared/chat/fileReference';
 import { chatStorage } from '@/shared/storage';
 import { useChatStore } from '@/stores/chat';
+import { useServiceModelStore } from '@/stores/service-model';
 import { useSettingStore } from '@/stores/setting';
+import InputToolbar from './components/InputToolbar.vue';
 import ConversationView from './components/ConversationView.vue';
 import SessionHistory from './components/SessionHistory.vue';
 import { useChatStream } from './hooks/useChatStream';
@@ -71,6 +76,8 @@ import { createChatConfirmationController } from './utils/confirmationController
 
 /** 聊天数据存储 */
 const chatStore = useChatStore();
+/** 服务模型存储 */
+const serviceModelStore = useServiceModelStore();
 /** 应用设置存储 */
 const settingStore = useSettingStore();
 
@@ -87,18 +94,27 @@ const historyLoading = ref(false);
 /** 是否还有更多历史消息可加载 */
 const hasMoreHistory = ref(false);
 /** 输入框编辑器引用 */
-const promptEditorRef = ref<{ focus: () => void; captureCursorPosition: () => void; insertFileReference: (reference: FileReferenceChip) => void } | null>(null);
+const promptEditorRef = ref<InstanceType<typeof BPromptEditor>>();
 /** 草稿文件引用列表 */
 const draftReferences = ref<ChatMessageFileReference[]>([]);
+/** 当前选中的模型 */
+const selectedModel = ref<string>();
 /** 确认控制器，管理工具调用的用户确认流程 */
 const confirmationController = createChatConfirmationController({
   getMessages: () => messages.value
 });
 
-/** SessionHistory 组件引用 */
-const sessionHistoryRef = ref<{ refreshSessions: () => Promise<void> } | null>(null);
-
 let unregisterFileReferenceInsert: (() => void) | null = null;
+
+/**
+ * 加载当前选中的模型配置
+ */
+async function loadSelectedModel(): Promise<void> {
+  const config = await chatStore.serviceModelStore.getServiceConfig('chat');
+  selectedModel.value = config?.providerId && config?.modelId
+    ? `${config.providerId}:${config.modelId}`
+    : undefined;
+}
 
 /**
  * 聊天工具列表
@@ -257,8 +273,6 @@ async function handleBeforeSend(message: Message): Promise<void> {
     const session = await chatStore.createSession('assistant', { title: message.content });
 
     settingStore.setChatSidebarActiveSessionId(session.id);
-    currentSession.value = session;
-    await sessionHistoryRef.value?.refreshSessions();
   }
 
   await chatStore.addSessionMessage(settingStore.chatSidebarActiveSessionId, message);
@@ -382,6 +396,10 @@ async function handleFileReferenceInsert(reference: ChatFileReferenceInsertPaylo
   handleFocusInput();
 }
 
+function handleModelChange(value: string): void {
+  selectedModel.value = value;
+}
+
 /**
  * 创建新会话
  * 1. 检查是否正在输出，是则中断
@@ -450,6 +468,7 @@ async function handleLoadHistory(): Promise<void> {
 }
 
 onMounted(async () => {
+  loadSelectedModel();
   if (settingStore.chatSidebarActiveSessionId) {
     setLoadedMessages(await chatStore.getSessionMessages(settingStore.chatSidebarActiveSessionId));
   }
@@ -523,9 +542,5 @@ onUnmounted(() => {
     border: none;
     border-radius: 0;
   }
-}
-
-.chat-panel__input-buttons {
-  padding: 0 12px 0 0;
 }
 </style>
