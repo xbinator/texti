@@ -33,7 +33,7 @@
 import type { FrontMatterData } from '../hooks/useFrontMatter';
 import type { SelectionRange } from '../types';
 import type { Editor } from '@tiptap/vue-3';
-import { ref, watch } from 'vue';
+import { onBeforeUnmount, ref, watch } from 'vue';
 import { EditorContent } from '@tiptap/vue-3';
 import { native } from '@/shared/platform';
 import { clearAISelectionHighlight, setAISelectionHighlight } from '../extensions/AISelectionHighlight';
@@ -80,17 +80,74 @@ const focusEditorAtStart = () => props.editor?.commands.focus('start');
 // ---- AI Input ----
 
 /**
+ * 仅在内容变化时更新选区缓存，避免触发不必要的响应式循环。
+ * @param nextSelectionRange - 最新选区
+ */
+function updateSelectionRange(nextSelectionRange: SelectionRange): void {
+  const currentSelectionRange = selectionRange.value;
+  if (
+    currentSelectionRange.from === nextSelectionRange.from &&
+    currentSelectionRange.to === nextSelectionRange.to &&
+    currentSelectionRange.text === nextSelectionRange.text
+  ) {
+    return;
+  }
+
+  selectionRange.value = nextSelectionRange;
+}
+
+/**
+ * 从编辑器状态中读取当前选区，并同步到本地缓存。
+ * @returns 当前有效选区；无文本选区时返回 null
+ */
+function getCurrentSelectionRange(): SelectionRange | null {
+  const { editor } = props;
+  const selection = editor?.state.selection;
+  if (!editor || !selection || selection.from === selection.to) {
+    return null;
+  }
+
+  const nextSelectionRange = {
+    from: selection.from,
+    to: selection.to,
+    text: editor.state.doc.textBetween(selection.from, selection.to, '')
+  };
+
+  updateSelectionRange(nextSelectionRange);
+
+  return nextSelectionRange;
+}
+
+/**
+ * 将真实选区持续映射到自定义 decoration，高亮统一走同一套视觉层。
+ */
+function syncSelectionHighlight(): void {
+  const { editor } = props;
+  if (!editor) {
+    return;
+  }
+
+  const nextSelectionRange = getCurrentSelectionRange();
+  if (nextSelectionRange) {
+    setAISelectionHighlight(editor, nextSelectionRange);
+    return;
+  }
+
+  if (!aiInputVisible.value) {
+    clearAISelectionHighlight(editor);
+  }
+}
+
+/**
  * 缓存并恢复当前选区，供“插入对话”在编辑器失焦后继续保持可见。
  * @param nextSelectionRange - 当前需要保留的选区
  */
 function handleSelectionReferenceInsert(nextSelectionRange: SelectionRange): void {
-  selectionRange.value = { ...nextSelectionRange };
+  updateSelectionRange({ ...nextSelectionRange });
 
-  requestAnimationFrame(() => {
-    // “插入对话”只需要保留视觉高亮，不应恢复真实选区；
-    // 否则编辑器重新获取焦点后，浏览器会继续显示原生选中态。
-    setAISelectionHighlight(props.editor, nextSelectionRange);
-  });
+  // “插入对话”只需要保留视觉高亮，不应恢复真实选区；
+  // 这里同步写入装饰高亮，避免跨帧切换造成原生选区与装饰高亮来回闪动。
+  setAISelectionHighlight(props.editor, nextSelectionRange);
 }
 
 /**
@@ -100,7 +157,7 @@ function handleSelectionReferenceInsert(nextSelectionRange: SelectionRange): voi
  */
 function handleAIInputToggle(value: boolean, nextSelectionRange?: SelectionRange): void {
   if (nextSelectionRange) {
-    selectionRange.value = { ...nextSelectionRange };
+    updateSelectionRange({ ...nextSelectionRange });
   }
   aiInputVisible.value = value;
 }
@@ -112,21 +169,55 @@ function handleSelectionReferenceClear(): void {
   clearAISelectionHighlight(props.editor);
 }
 
-watch(
-  () => [aiInputVisible.value, selectionRange.value.from, selectionRange.value.to],
-  ([isVisible, from, to]) => {
-    if (!props.editor) return;
-
-    // AI 面板显示时用装饰高亮兜底，避免输入框获得焦点后原生选区不再可见。
-    if (isVisible && from !== to) {
-      requestAnimationFrame(() => {
-        setAISelectionHighlight(props.editor, { from: from as number, to: to as number });
-      });
-    } else {
-      clearAISelectionHighlight(props.editor);
-    }
+/**
+ * 监听编辑器选区与焦点变化，统一维护自定义选区高亮。
+ * @param editor - 当前编辑器实例
+ * @returns 解绑函数
+ */
+function bindSelectionHighlight(editor: Editor | null | undefined): (() => void) | undefined {
+  if (!editor) {
+    return undefined;
   }
+
+  editor.on('selectionUpdate', syncSelectionHighlight);
+  editor.on('focus', syncSelectionHighlight);
+  editor.on('blur', syncSelectionHighlight);
+  syncSelectionHighlight();
+
+  return () => {
+    editor.off('selectionUpdate', syncSelectionHighlight);
+    editor.off('focus', syncSelectionHighlight);
+    editor.off('blur', syncSelectionHighlight);
+    clearAISelectionHighlight(editor);
+  };
+}
+
+let cleanupSelectionHighlight: (() => void) | undefined;
+
+watch(
+  () => props.editor,
+  (editor) => {
+    cleanupSelectionHighlight?.();
+    cleanupSelectionHighlight = bindSelectionHighlight(editor);
+  },
+  { immediate: true }
 );
+
+watch(aiInputVisible, (isVisible) => {
+  if (!props.editor) {
+    return;
+  }
+
+  if (isVisible && selectionRange.value.from !== selectionRange.value.to) {
+    setAISelectionHighlight(props.editor, {
+      from: selectionRange.value.from,
+      to: selectionRange.value.to
+    });
+    return;
+  }
+
+  syncSelectionHighlight();
+});
 
 // ---- Front Matter ----
 function handleFrontMatterUpdate(data: FrontMatterData): void {
@@ -163,6 +254,10 @@ async function handleLinkClick(event: MouseEvent): Promise<void> {
   await native.openExternal(anchor.href);
 }
 
+onBeforeUnmount(() => {
+  cleanupSelectionHighlight?.();
+});
+
 defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
 </script>
 
@@ -185,6 +280,14 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
     caret-color: var(--editor-caret);
     outline: none;
 
+    &::selection {
+      background: transparent;
+    }
+
+    *::selection {
+      background: transparent;
+    }
+
     > *:first-child {
       margin-top: 0;
     }
@@ -201,10 +304,9 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
     }
 
     .ai-selection-highlight {
-      padding: 0.32em 0;
-      vertical-align: middle;
       color: var(--selection-color);
       background: var(--selection-bg);
+      border-radius: 2px;
       -webkit-box-decoration-break: clone;
       box-decoration-break: clone;
     }
