@@ -59,9 +59,9 @@ import { Modal } from '@/utils/modal';
 import Container from '@/components/BChatSidebar/components/ChatContainer.vue';
 import MessageBubble from '@/components/BChatSidebar/components/ChatMessageBubble.vue';
 import { append, convert, create, is, userChoice } from './message';
-import { buildModelReadyMessages } from './utils/fileReferenceContext';
-import { createToolCallTracker, type ToolCallTracker } from './utils/toolCallTracker';
-import { createToolLoopGuard, type ToolLoopGuard } from './utils/toolLoopGuard';
+import { buildModelReadyMessages } from '@/components/BChatSidebar/utils/fileReferenceContext';
+import { createToolCallTracker, type ToolCallTracker } from '@/components/BChatSidebar/utils/toolCallTracker';
+import { createToolLoopGuard, type ToolLoopGuard } from '@/components/BChatSidebar/utils/toolLoopGuard';
 
 /**
  * 工具续轮保护的默认阈值。

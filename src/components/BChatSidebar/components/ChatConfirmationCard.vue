@@ -51,7 +51,7 @@ import { computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import BButton from '@/components/BButton/index.vue';
 import { createNamespace } from '@/utils/namespace';
-import { formatConfirmationPreviewText, getConfirmationStatusText, isConfirmationCollapsed } from '@/components/BChat/utils/confirmationCard';
+import { formatConfirmationPreviewText, getConfirmationStatusText, isConfirmationCollapsed } from '@/components/BChatSidebar/utils/confirmationCard';
 
 defineOptions({ name: 'ChatConfirmationCard' });
 
