@@ -306,7 +306,7 @@ defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });
     .ai-selection-highlight {
       color: var(--selection-color);
       background: var(--selection-bg);
-      border-radius: 2px;
+      box-shadow: 0 0.2em 0 0 var(--selection-bg), 0 -0.2em 0 0 var(--selection-bg);
       -webkit-box-decoration-break: clone;
       box-decoration-break: clone;
     }
