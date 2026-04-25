@@ -67,8 +67,8 @@ import { onChatFileReferenceInsert, type ChatFileReferenceInsertPayload } from '
 import { chatStorage, serviceModelsStorage } from '@/shared/storage';
 import { useChatStore } from '@/stores/chat';
 import { useSettingStore } from '@/stores/setting';
-import InputToolbar from './components/InputToolbar.vue';
 import ConversationView from './components/ConversationView.vue';
+import InputToolbar from './components/InputToolbar.vue';
 import SessionHistory from './components/SessionHistory.vue';
 import { useChatStream } from './hooks/useChatStream';
 import { createChatConfirmationController } from './utils/confirmationController';
@@ -108,9 +108,7 @@ let unregisterFileReferenceInsert: (() => void) | null = null;
  */
 async function loadSelectedModel(): Promise<void> {
   const config = await serviceModelsStorage.getConfig('chat');
-  selectedModel.value = config?.providerId && config?.modelId
-    ? `${config.providerId}:${config.modelId}`
-    : undefined;
+  selectedModel.value = config?.providerId && config?.modelId ? `${config.providerId}:${config.modelId}` : undefined;
 }
 
 /**
@@ -525,8 +523,8 @@ onUnmounted(() => {
 
 .chat-panel__input-container {
   display: flex;
-  align-items: flex-end;
   gap: 12px;
+  align-items: flex-end;
   padding: 12px;
   background: var(--input-bg);
   border: 1px solid var(--border-primary);
