@@ -17,7 +17,12 @@ import { computed } from 'vue';
 import BMessage from '@/components/BMessage/index.vue';
 import { createNamespace } from '@/utils/namespace';
 
-defineOptions({ name: 'MessageBubblePartText' });
+defineOptions({ name: 'ChatMessageBubblePartText' });
+
+/**
+ * @file ChatMessageBubblePartText.vue
+ * @description Renders text segments in a message bubble, including file reference chips for user messages.
+ */
 
 /**
  * Renderable text segment inside a user bubble.
