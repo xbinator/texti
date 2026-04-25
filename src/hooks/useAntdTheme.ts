@@ -35,19 +35,16 @@ export function useAntdTheme(): UseAntdThemeResult {
       return {
         algorithm: darkAlgorithm,
         token: {
-          // 背景
-          colorBgBase: '#111111',
-          colorBgContainer: '#000000',
-          colorBgElevated: '#1a1a1a',
+          colorBgBase: '#13151a',
+          colorBgContainer: '#0d0f12',
+          colorBgElevated: '#1c1f26',
 
-          // 文本
-          colorText: '#f0f0f0',
-          colorTextSecondary: '#8a8a8a',
+          colorText: '#e8ecf2',
+          colorTextSecondary: '#7a8494',
 
-          // 边框
-          colorBorder: '#2a2a2a',
+          colorBorder: '#252a35',
 
-          // 主题色 — 与 CSS 变量对齐
+          // 主题色保持原样
           colorPrimary: '#c8a98b',
           colorPrimaryBg: '#0d0b09',
           colorPrimaryBorder: '#3d3028',
