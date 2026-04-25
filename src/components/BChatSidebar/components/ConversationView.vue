@@ -1,8 +1,8 @@
 <template>
-  <div class="chat-panel">
-    <div ref="containerRef" class="chat-panel__container">
-      <div class="chat-panel__placeholder"></div>
-      <div class="chat-panel__content">
+  <div class="conversation-view">
+    <div ref="containerRef" class="conversation-view__container">
+      <div class="conversation-view__placeholder"></div>
+      <div class="conversation-view__content">
         <MessageBubble
           v-for="item in messages"
           :key="item.id"
@@ -20,15 +20,15 @@
       <div v-if="loading" class="to-bottom__loading"></div>
     </div>
 
-    <div v-if="!messages.length" class="chat-panel__empty">
-      <div class="chat-sidebar-empty__art" aria-hidden="true">
-        <div class="chat-sidebar-empty__card chat-sidebar-empty__card--back"></div>
-        <div class="chat-sidebar-empty__card chat-sidebar-empty__card--front">
+    <div v-if="!messages.length" class="conversation-view__empty">
+      <div class="conversation-view__art" aria-hidden="true">
+        <div class="conversation-view__card conversation-view__card--back"></div>
+        <div class="conversation-view__card conversation-view__card--front">
           <Icon icon="lucide:messages-square" width="26" height="26" />
         </div>
       </div>
-      <div class="chat-sidebar-empty__title">开始对话</div>
-      <div class="chat-sidebar-empty__text">输入你的问题，跟助手聊聊吧</div>
+      <div class="conversation-view__title">开始对话</div>
+      <div class="conversation-view__text">输入你的问题，跟助手聊聊吧</div>
     </div>
   </div>
 </template>
@@ -41,7 +41,7 @@ import { Icon } from '@iconify/vue';
 import { useChatScroll } from '../hooks/useChatScroll';
 import MessageBubble from './MessageBubble.vue';
 
-defineOptions({ name: 'ChatPanel' });
+defineOptions({ name: 'ConversationView' });
 
 const props = defineProps<{
   messages: Message[];
@@ -68,13 +68,13 @@ const { isBackBottom, scrollToBottom } = useChatScroll({
 <style scoped lang="less">
 @import url('@/assets/styles/scrollbar.less');
 
-.chat-panel {
+.conversation-view {
   position: relative;
   flex: 1;
   height: 0;
 }
 
-.chat-panel__container {
+.conversation-view__container {
   display: flex;
   flex-direction: column-reverse;
   height: 100%;
@@ -85,18 +85,18 @@ const { isBackBottom, scrollToBottom } = useChatScroll({
   .scrollbar-style();
 }
 
-.chat-panel__content {
+.conversation-view__content {
   width: 100%;
   max-width: var(--b-chat-max-width, 800px);
   margin: 0 auto;
 }
 
-.chat-panel__placeholder {
+.conversation-view__placeholder {
   flex: 1;
   pointer-events: none;
 }
 
-.chat-panel__empty {
+.conversation-view__empty {
   position: absolute;
   top: 50%;
   left: 50%;
@@ -109,7 +109,7 @@ const { isBackBottom, scrollToBottom } = useChatScroll({
   transform: translate(-50%, -50%);
 }
 
-.chat-sidebar-empty__art {
+.conversation-view__art {
   position: relative;
   display: flex;
   align-items: center;
@@ -118,7 +118,7 @@ const { isBackBottom, scrollToBottom } = useChatScroll({
   height: 136px;
 }
 
-.chat-sidebar-empty__card {
+.conversation-view__card {
   position: absolute;
   border: 1px solid var(--border-primary);
   border-radius: 24px;
@@ -126,14 +126,14 @@ const { isBackBottom, scrollToBottom } = useChatScroll({
   backdrop-filter: blur(12px);
 }
 
-.chat-sidebar-empty__card--back {
+.conversation-view__card--back {
   width: 66px;
   height: 82px;
   background: linear-gradient(180deg, var(--bg-elevated), var(--bg-secondary));
   transform: translate(-24px, 8px) rotate(-10deg);
 }
 
-.chat-sidebar-empty__card--front {
+.conversation-view__card--front {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -144,14 +144,14 @@ const { isBackBottom, scrollToBottom } = useChatScroll({
   transform: translate(18px, -6px) rotate(8deg);
 }
 
-.chat-sidebar-empty__title {
+.conversation-view__title {
   font-size: 16px;
   font-weight: 600;
   line-height: 1.4;
   color: var(--text-primary);
 }
 
-.chat-sidebar-empty__text {
+.conversation-view__text {
   font-size: 13px;
   line-height: 1.6;
   color: var(--text-secondary);

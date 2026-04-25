@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="editor-sidebar">
     <div class="sidebar-header">
       <div class="sidebar-header__title truncate">{{ currentSession?.title || '新会话' }}</div>
@@ -14,7 +14,7 @@
       />
     </div>
     <div class="chat-sidebar-container">
-      <ChatPanel
+      <ConversationView
         v-model:messages="messages"
         :loading="chatStream.loading.value"
         :on-load-history="handleLoadHistory"
@@ -63,7 +63,7 @@ import { onChatFileReferenceInsert, type ChatFileReferenceInsertPayload } from '
 import { chatStorage } from '@/shared/storage';
 import { useChatStore } from '@/stores/chat';
 import { useSettingStore } from '@/stores/setting';
-import ChatPanel from './components/ChatPanel.vue';
+import ConversationView from './components/ConversationView.vue';
 import SessionHistory from './components/SessionHistory.vue';
 import { useChatStream } from './hooks/useChatStream';
 import { createChatConfirmationController } from './utils/confirmationController';
