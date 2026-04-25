@@ -3,20 +3,7 @@
  * @description BChat 消息工具行为测试
  */
 import { describe, expect, it } from 'vitest';
-import {
-  appendToolCallPart,
-  appendToolResultPart,
-  createAssistantPlaceholder,
-  createErrorMessage,
-  findPendingUserChoiceQuestion,
-  expandFileReferencesForModel,
-  isModelMessage,
-  isPersistableMessage,
-  isRemovableAssistantPlaceholder,
-  submitUserChoiceAnswer,
-  toCachedModelMessages,
-  toModelMessages
-} from '@/components/BChat/message';
+import { append, convert, create, expandFileReferencesForModel, is, userChoice } from '@/components/BChat/message';
 import type { Message } from '@/components/BChat/types';
 
 /**
@@ -42,7 +29,7 @@ function createBaseMessages(): Message[] {
 
 describe('BChat message helpers', () => {
   it('creates a finished error message for visible stream failures', () => {
-    const message = createErrorMessage('服务连接失败');
+    const message = create.errorMessage('服务连接失败');
 
     expect(message.role).toBe('error');
     expect(message.content).toBe('服务连接失败');
@@ -59,7 +46,7 @@ describe('BChat message helpers', () => {
       { ...createTextMessage('assistant-1', 'assistant', '你好，有什么可以帮你？'), createdAt: '2026-04-21T00:00:02.000Z' }
     ];
 
-    expect(toModelMessages(messages)).toEqual([
+    expect(convert.toModelMessages(messages)).toEqual([
       { role: 'user', content: '你好' },
       { role: 'assistant', content: [{ type: 'text', text: '你好，有什么可以帮你？' }] }
     ]);
@@ -80,9 +67,9 @@ describe('BChat message helpers', () => {
   it('marks error messages as persistable but not model messages', () => {
     const errorMessage = createTextMessage('error-1', 'error', '服务连接失败');
 
-    expect(isPersistableMessage(errorMessage)).toBe(true);
-    expect(isModelMessage(errorMessage)).toBe(false);
-    expect(isPersistableMessage(createTextMessage('assistant-1', 'assistant', '好的'))).toBe(true);
+    expect(is.persistableMessage(errorMessage)).toBe(true);
+    expect(is.modelMessage(errorMessage)).toBe(false);
+    expect(is.persistableMessage(createTextMessage('assistant-1', 'assistant', '好的'))).toBe(true);
   });
 
   it('preserves assistant tool parts when converting continued tool loop history', () => {
@@ -114,7 +101,7 @@ describe('BChat message helpers', () => {
       }
     ];
 
-    expect(toModelMessages(messages)).toEqual([
+    expect(convert.toModelMessages(messages)).toEqual([
       { role: 'user', content: '查看一下文档' },
       {
         role: 'assistant',
@@ -150,10 +137,10 @@ describe('BChat message helpers', () => {
 
   it('reuses the cached model-message prefix when only new messages are appended', () => {
     const baseMessages = createBaseMessages();
-    const baseCache = toCachedModelMessages(baseMessages);
+    const baseCache = convert.toCachedModelMessages(baseMessages);
     const nextMessages: Message[] = [...baseMessages, createTextMessage('error-1', 'error', '服务连接失败'), createTextMessage('user-2', 'user', '继续')];
 
-    const nextCache = toCachedModelMessages(nextMessages, baseCache);
+    const nextCache = convert.toCachedModelMessages(nextMessages, baseCache);
 
     expect(nextCache.modelMessages).toEqual([
       { role: 'user', content: '你好' },
@@ -166,7 +153,7 @@ describe('BChat message helpers', () => {
 
   it('rebuilds cached entries when an existing assistant message changes', () => {
     const baseMessages = createBaseMessages();
-    const baseCache = toCachedModelMessages(baseMessages);
+    const baseCache = convert.toCachedModelMessages(baseMessages);
     const changedMessages: Message[] = [
       baseMessages[0],
       {
@@ -183,7 +170,7 @@ describe('BChat message helpers', () => {
       }
     ];
 
-    const nextCache = toCachedModelMessages(changedMessages, baseCache);
+    const nextCache = convert.toCachedModelMessages(changedMessages, baseCache);
 
     expect(nextCache.entries[0]).toBe(baseCache.entries[0]);
     expect(nextCache.entries[1]).not.toBe(baseCache.entries[1]);
@@ -215,7 +202,7 @@ describe('BChat message helpers', () => {
       }
     ];
 
-    expect(toModelMessages(messages)).toEqual([{ role: 'user', content: '查看一下文档' }]);
+    expect(convert.toModelMessages(messages)).toEqual([{ role: 'user', content: '查看一下文档' }]);
   });
 
   it('keeps completed tool pairs and drops the final blocked repeated tool call', () => {
@@ -255,7 +242,7 @@ describe('BChat message helpers', () => {
       createTextMessage('user-2', 'user', '重新设置一下')
     ];
 
-    expect(toModelMessages(messages)).toEqual([
+    expect(convert.toModelMessages(messages)).toEqual([
       { role: 'user', content: '切换一下主题色' },
       {
         role: 'assistant',
@@ -306,14 +293,14 @@ describe('BChat message helpers', () => {
       ]
     };
 
-    expect(isRemovableAssistantPlaceholder(message)).toBe(false);
+    expect(is.removableAssistantPlaceholder(message)).toBe(false);
   });
 
   it('finds an awaiting ask_user_choice question in assistant history', () => {
-    const message = createAssistantPlaceholder();
+    const message = create.assistantPlaceholder();
 
-    appendToolCallPart(message, 'tool-call-1', 'ask_user_choice', { question: '请选择渠道' });
-    appendToolResultPart(message, 'tool-call-1', 'ask_user_choice', {
+    append.toolCallPart(message, 'tool-call-1', 'ask_user_choice', { question: '请选择渠道' });
+    append.toolResultPart(message, 'tool-call-1', 'ask_user_choice', {
       toolName: 'ask_user_choice',
       status: 'awaiting_user_input',
       data: {
@@ -326,17 +313,17 @@ describe('BChat message helpers', () => {
       }
     });
 
-    expect(findPendingUserChoiceQuestion([message])).toMatchObject({
+    expect(userChoice.findPending([message])).toMatchObject({
       questionId: 'question-1',
       toolCallId: 'tool-call-1'
     });
   });
 
   it('replaces awaiting ask_user_choice result with the submitted answer for model history', () => {
-    const message = createAssistantPlaceholder();
+    const message = create.assistantPlaceholder();
 
-    appendToolCallPart(message, 'tool-call-1', 'ask_user_choice', { question: '请选择渠道' });
-    appendToolResultPart(message, 'tool-call-1', 'ask_user_choice', {
+    append.toolCallPart(message, 'tool-call-1', 'ask_user_choice', { question: '请选择渠道' });
+    append.toolResultPart(message, 'tool-call-1', 'ask_user_choice', {
       toolName: 'ask_user_choice',
       status: 'awaiting_user_input',
       data: {
@@ -349,7 +336,7 @@ describe('BChat message helpers', () => {
       }
     });
 
-    const submitted = submitUserChoiceAnswer([message], {
+    const submitted = userChoice.submitAnswer([message], {
       questionId: 'question-1',
       toolCallId: 'tool-call-1',
       answers: ['official'],
@@ -357,7 +344,7 @@ describe('BChat message helpers', () => {
     });
 
     expect(submitted).toBe(true);
-    expect(toModelMessages([message])).toEqual([
+    expect(convert.toModelMessages([message])).toEqual([
       {
         role: 'assistant',
         content: [
