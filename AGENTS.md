@@ -23,6 +23,19 @@ const window = (window as WindowWithTauri).__TAURI__
 const data = fetchData() as DataType
 ```
 
+### 组件 Ref 类型定义
+使用 `InstanceType<typeof ComponentName>` 获取组件实例类型，而非手动定义接口：
+
+**错误示例**:
+```typescript
+const conversationRef = ref<{ scrollToBottom: (options?: { behavior?: 'smooth' | 'auto' }) => void } | null>(null);
+```
+
+**正确示例**:
+```typescript
+const conversationRef = ref<InstanceType<typeof ConversationView>>();
+```
+
 ### 类型定义要求
 - 所有函数参数必须有明确的类型注解
 - 所有函数返回值必须有明确的类型注解
@@ -49,6 +62,20 @@ import type { DefineComponent } from 'vue'
 - 动态导入的模块不要删除导入语句
 
 ## 文件组织规范
+
+### 组件引入规范
+- **B 开头的组件**已通过 `unplugin-vue-components` 全局自动引入，无需手动 import
+- 手动引入场景：类型定义、动态导入、编辑器内置组件
+
+### 示例
+```typescript
+// ✅ 无需手动引入（已全局注册）
+import { BButton, BModal } from '@/components'
+
+// ✅ 需要手动引入的场景
+import type { BButtonProps } from '@/components' // 类型定义
+const { open } = await import('@/components/BModal') // 动态导入
+```
 
 ## 注释规范
 
