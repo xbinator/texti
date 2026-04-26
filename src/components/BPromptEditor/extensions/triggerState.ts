@@ -34,8 +34,9 @@ export interface TriggerState {
  * @returns 触发器上下文或 null
  */
 function getTriggerContext(state: EditorState, pos: number): { from: number; to: number; query: string } | null {
+  const windowStart = Math.max(0, pos - 100);
   // 取光标前最多 100 字符
-  const text = state.sliceDoc(Math.max(0, pos - 100), pos);
+  const text = state.sliceDoc(windowStart, pos);
 
   // 找最后一个 {{
   const open = text.lastIndexOf('{{');
@@ -53,7 +54,7 @@ function getTriggerContext(state: EditorState, pos: number): { from: number; to:
   }
 
   return {
-    from: open,
+    from: windowStart + open,
     to: pos,
     query: afterOpen
   };
