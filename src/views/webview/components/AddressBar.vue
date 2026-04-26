@@ -1,30 +1,51 @@
 <template>
   <div class="address-bar">
     <div class="nav-buttons">
-      <button class="nav-btn" :disabled="!canGoBack" title="后退" @click="emit('goBack')">←</button>
-      <button class="nav-btn" :disabled="!canGoForward" title="前进" @click="emit('goForward')">→</button>
-      <button class="nav-btn" title="刷新" @click="emit('reload')">↻</button>
+      <BButton type="text" size="small" square :disabled="!canGoBack" title="后退" icon="lucide:arrow-left" @click="emit('goBack')" />
+      <BButton type="text" size="small" square :disabled="!canGoForward" title="前进" icon="lucide:arrow-right" @click="emit('goForward')" />
+      <BButton type="text" size="small" square title="刷新" icon="lucide:refresh-cw" @click="emit('reload')" />
+    </div>
+
+    <div class="action-buttons">
+      <BButton type="text" size="small" square title="在浏览器打开" icon="lucide:external-link" @click="emit('openInBrowser')" />
+      <BButton type="text" size="small" square title="复制链接" icon="lucide:link" @click="handleCopyUrl" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-interface props {
-  // 是否可以后退
+import { useClipboard } from '@/hooks/useClipboard';
+
+interface Props {
   canGoBack: boolean;
-  // 是否可以前进
   canGoForward: boolean;
-  // 是否正在加载
   isLoading: boolean;
+  url: string;
 }
 
-withDefaults(defineProps<props>(), {
+const props = withDefaults(defineProps<Props>(), {
   canGoBack: false,
   canGoForward: false,
-  isLoading: false
+  isLoading: false,
+  url: ''
 });
 
-const emit = defineEmits(['goBack', 'goForward', 'reload']);
+const emit = defineEmits<{
+  goBack: [];
+  goForward: [];
+  reload: [];
+  openInBrowser: [];
+}>();
+
+const { clipboard } = useClipboard();
+
+/**
+ * 复制当前 URL 到剪贴板
+ */
+async function handleCopyUrl() {
+  await clipboard(props.url, { successMessage: '链接已复制' });
+  console.log('🚀 ~ handleCopyUrl ~ props.url:', props.url);
+}
 </script>
 
 <style scoped>
@@ -32,34 +53,14 @@ const emit = defineEmits(['goBack', 'goForward', 'reload']);
   display: flex;
   gap: 8px;
   align-items: center;
-  padding: 8px 12px;
+  justify-content: space-between;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--border-color);
 }
 
-.nav-buttons {
+.nav-buttons,
+.action-buttons {
   display: flex;
   gap: 4px;
-}
-
-.nav-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  font-size: 16px;
-  cursor: pointer;
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-}
-
-.nav-btn:hover:not(:disabled) {
-  background: var(--hover-bg, #e0e0e0);
-}
-
-.nav-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.4;
 }
 </style>
