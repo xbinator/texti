@@ -160,7 +160,7 @@ function handleVariableSelect(variable: Variable): void {
   const variableText = `{{${variable.value}}}`;
   view.value.dispatch({
     changes: { from: triggerState.from, to: triggerState.to, insert: variableText },
-    effects: closeTrigger.of(null)
+    effects: closeTrigger.of()
   });
 
   view.value.focus();
