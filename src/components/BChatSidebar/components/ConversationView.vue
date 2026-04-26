@@ -1,6 +1,6 @@
 <template>
   <div class="conversation-view">
-    <div ref="containerRef" class="conversation-view__container">
+    <div ref="container" class="conversation-view__container">
       <div class="conversation-view__placeholder"></div>
       <div class="conversation-view__content">
         <MessageBubble
@@ -36,7 +36,6 @@
 <script setup lang="ts">
 import type { Message } from '../utils/types';
 import type { ChatMessageConfirmationAction, AIUserChoiceAnswerData } from 'types/chat';
-import { ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useChatScroll } from '../hooks/useChatScroll';
 import MessageBubble from './MessageBubble.vue';
@@ -57,12 +56,9 @@ defineEmits<{
   (e: 'user-choice-submit', answer: AIUserChoiceAnswerData): void;
 }>();
 
-const containerRef = ref<HTMLElement>();
+const { isBackBottom, scrollToBottom } = useChatScroll({ onLoadHistory: props.onLoadHistory });
 
-const { isBackBottom, scrollToBottom } = useChatScroll({
-  containerRef,
-  onLoadHistory: props.onLoadHistory
-});
+defineExpose({ scrollToBottom });
 </script>
 
 <style scoped lang="less">

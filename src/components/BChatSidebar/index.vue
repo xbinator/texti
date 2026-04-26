@@ -15,6 +15,7 @@
     </div>
     <div class="b-chat-sidebar__container">
       <ConversationView
+        ref="conversationRef"
         v-model:messages="messages"
         :loading="chatStream.loading.value"
         :on-load-history="handleLoadHistory"
@@ -92,6 +93,8 @@ const historyLoading = ref(false);
 const hasMoreHistory = ref(false);
 /** 输入框编辑器引用 */
 const promptEditorRef = ref<InstanceType<typeof BPromptEditor>>();
+/** 对话视图引用 */
+const conversationRef = ref<{ scrollToBottom: (options?: { behavior?: 'smooth' | 'auto' }) => void } | null>(null);
 /** 草稿文件引用列表 */
 const draftReferences = ref<ChatMessageFileReference[]>([]);
 /** 当前选中的模型 */
@@ -119,9 +122,7 @@ const tools = createBuiltinTools({
   confirm: confirmationController.createAdapter(),
   getPendingQuestion: () => {
     const pendingQuestion = userChoice.findPending(messages.value);
-    if (!pendingQuestion) {
-      return null;
-    }
+    if (!pendingQuestion) return null;
 
     return {
       questionId: pendingQuestion.questionId,
@@ -322,6 +323,7 @@ async function handleChatSubmit(): Promise<void> {
 
   await handleBeforeSend(message);
   messages.value.push(message);
+  conversationRef.value?.scrollToBottom({ behavior: 'auto' });
   promptEditorRef.value?.focus();
   inputValue.value = '';
   draftReferences.value = [];
@@ -523,6 +525,7 @@ onUnmounted(() => {
 
 .b-chat-sidebar__input-container {
   display: flex;
+  flex-direction: column;
   gap: 12px;
   align-items: flex-end;
   padding: 12px;

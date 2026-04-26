@@ -2,13 +2,12 @@
  * @file useChatScroll.ts
  * @description 聊天面板滚动状态和历史加载 hook
  */
-import { nextTick, ref, onMounted, type Ref } from 'vue';
+import { nextTick, ref, onMounted, useTemplateRef } from 'vue';
 import { useEventListener } from '@vueuse/core';
 import { getScrollTop, getScroller, setScrollTop } from '@/utils/scroll';
 
 export interface UseChatScrollOptions {
   /** 容器元素引用 */
-  containerRef: Ref<HTMLElement | undefined>;
   /** 历史加载阈值（滚动到此位置时触发加载） */
   historyLoadThreshold?: number;
   /** 回到底部按钮可见阈值 */
@@ -18,7 +17,9 @@ export interface UseChatScrollOptions {
 }
 
 export function useChatScroll(scrollOptions: UseChatScrollOptions) {
-  const { containerRef, historyLoadThreshold = 160, backBottomHeight = 300, onLoadHistory } = scrollOptions;
+  const containerRef = useTemplateRef<HTMLElement>('container');
+
+  const { historyLoadThreshold = 160, backBottomHeight = 300, onLoadHistory } = scrollOptions;
 
   const scroller = ref<HTMLElement | Window>();
   const isBackBottom = ref(false);
