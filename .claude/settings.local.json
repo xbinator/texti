@@ -6,7 +6,11 @@
       "Bash(npm run *)",
       "Bash(pnpm run *)",
       "Bash(npx vue-tsc *)",
-      "Bash(xargs grep *)"
+      "Bash(xargs grep *)",
+      "Bash(git check-ignore:*)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(git worktree:*)",
+      "Bash(npm install:*)"
     ]
   }
 }
