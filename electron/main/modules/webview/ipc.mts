@@ -39,6 +39,9 @@ class WebViewManager {
       callback(false);
     });
 
+    // 设置 WebContentsView 圆角
+    view.setBorderRadius(8);
+
     const win = BrowserWindow.getAllWindows()[0];
     win.contentView.addChildView(view);
     view.webContents.loadURL(url);
