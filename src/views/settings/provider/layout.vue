@@ -127,11 +127,12 @@ import ProviderModal from './components/ProviderModal.vue';
 import SidebarItem from './components/SidebarItem.vue';
 import SidebarSearch from './components/SidebarSearch.vue';
 import SidebarSection from './components/SidebarSection.vue';
-import { useProviders } from './hooks/useProviders';
+import { useProviderStore } from '@/stores/provider';
 
 const router = useRouter();
 const route = useRoute();
-const { providers, deleteCustomProvider } = useProviders();
+const providerStore = useProviderStore();
+const providers = computed(() => providerStore.providers);
 const settingStore = useSettingStore();
 const { providerSidebarCollapsed: sidebarCollapsed } = storeToRefs(settingStore);
 
@@ -242,7 +243,7 @@ async function handleDeleteProvider(providerId: string): Promise<void> {
   const [, confirmed] = await Modal.delete(`确定要删除服务商 "${provider.name}" 吗？`);
   if (!confirmed) return;
 
-  const success = await deleteCustomProvider(providerId);
+  const success = await providerStore.deleteCustomProvider(providerId);
   if (success && activeProvider.value === providerId) {
     router.push('/settings/provider');
   }

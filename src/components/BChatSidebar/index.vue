@@ -94,7 +94,7 @@ const hasMoreHistory = ref(false);
 /** 输入框编辑器引用 */
 const promptEditorRef = ref<InstanceType<typeof BPromptEditor>>();
 /** 对话视图引用 */
-const conversationRef = ref<{ scrollToBottom: (options?: { behavior?: 'smooth' | 'auto' }) => void } | null>(null);
+const conversationRef = ref<InstanceType<typeof ConversationView>>();
 /** 草稿文件引用列表 */
 const draftReferences = ref<ChatMessageFileReference[]>([]);
 /** 当前选中的模型 */

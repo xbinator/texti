@@ -48,7 +48,6 @@
 </template>
 
 <script setup lang="ts">
-import type { AIProvider } from 'types/ai';
 import type { ModelServiceType } from 'types/model';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import BButton from '@/components/BButton/index.vue';
@@ -56,8 +55,9 @@ import BModal from '@/components/BModal/index.vue';
 import BPromptEditor from '@/components/BPromptEditor/index.vue';
 import type { VariableOptionGroup } from '@/components/BPromptEditor/types';
 import BSelect from '@/components/BSelect/index.vue';
-import { providerStorage, serviceModelsStorage } from '@/shared/storage';
+import { serviceModelsStorage } from '@/shared/storage';
 import { dispatchServiceModelUpdated } from '@/shared/storage/service-models/events';
+import { useProviderStore } from '@/stores/provider';
 
 interface Props {
   serviceType: ModelServiceType;
@@ -84,9 +84,10 @@ const props = withDefaults(defineProps<Props>(), {
   showPrompt: true
 });
 
-const loading = ref(false);
-const providers = ref<AIProvider[]>([]);
+const store = useProviderStore();
 const selectedModel = ref<string>();
+
+const providers = computed(() => store.providers);
 const customPrompt = ref<string>();
 const draftPrompt = ref<string>();
 const initialized = ref(false);
@@ -136,12 +137,6 @@ function resetToDefault(): void {
   }
 }
 
-async function loadProviders(): Promise<void> {
-  loading.value = true;
-  providers.value = await providerStorage.listProviders();
-  loading.value = false;
-}
-
 async function loadSavedConfig(): Promise<void> {
   const config = await serviceModelsStorage.getConfig(props.serviceType);
 
@@ -186,7 +181,7 @@ watch([selectedModel, customPrompt], () => {
 });
 
 onMounted(async () => {
-  await Promise.all([loadProviders(), loadSavedConfig()]);
+  await Promise.all([store.loadProviders(), loadSavedConfig()]);
   initialized.value = true;
 });
 

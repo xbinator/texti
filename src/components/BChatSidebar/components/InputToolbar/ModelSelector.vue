@@ -3,6 +3,7 @@
     <BButton size="small" type="text">
       <div class="model-button-content">
         <span v-if="currentModelName" class="model-name">{{ currentModelName }}</span>
+        <Icon v-if="groupedModels.length" class="dropdown-icon" icon="lucide:chevron-down" :style="{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }" />
       </div>
     </BButton>
 
@@ -29,13 +30,14 @@
 </template>
 
 <script setup lang="ts">
-import type { AIProvider } from 'types/ai';
 import { computed, onMounted, ref, watch } from 'vue';
+import { Icon } from '@iconify/vue';
 import BButton from '@/components/BButton/index.vue';
 import BDropdown from '@/components/BDropdown/index.vue';
 import BModelIcon from '@/components/BModelIcon/index.vue';
-import { providerStorage, serviceModelsStorage } from '@/shared/storage';
+import { serviceModelsStorage } from '@/shared/storage';
 import { dispatchServiceModelUpdated } from '@/shared/storage/service-models/events';
+import { useProviderStore } from '@/stores/provider';
 
 interface ModelItem {
   value: string;
@@ -75,8 +77,10 @@ const emit = defineEmits<{
 }>();
 
 const open = ref(false);
-const providers = ref<AIProvider[]>([]);
+const store = useProviderStore();
 const internalModel = ref<string>();
+
+const providers = computed(() => store.providers);
 
 const currentModelName = computed<string>(() => {
   if (!internalModel.value) return '';
@@ -101,10 +105,6 @@ const groupedModels = computed<ModelGroup[]>(() => {
 
   return result;
 });
-
-async function loadProviders(): Promise<void> {
-  providers.value = await providerStorage.listProviders();
-}
 
 async function loadSavedConfig(): Promise<void> {
   if (internalModel.value) return;
@@ -133,7 +133,7 @@ watch(
 );
 
 onMounted(async () => {
-  await Promise.all([loadProviders(), loadSavedConfig()]);
+  await Promise.all([store.loadProviders(), loadSavedConfig()]);
 });
 </script>
 
@@ -202,11 +202,16 @@ onMounted(async () => {
 }
 
 .model-name {
-  max-width: 80px;
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 12px;
   color: var(--text-primary);
   white-space: nowrap;
+}
+
+.dropdown-icon {
+  font-size: 14px;
+  color: var(--text-secondary);
+  transition: transform 0.2s ease;
 }
 </style>

@@ -29,11 +29,12 @@ import { useRoute } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { message } from 'ant-design-vue';
 import ProviderCard from './components/ProviderCard.vue';
-import { useProviders } from './hooks/useProviders';
+import { useProviderStore } from '@/stores/provider';
 
 const route = useRoute();
+const providerStore = useProviderStore();
+const providers = computed(() => providerStore.providers);
 const searchText: Ref<string> = ref('');
-const { providers, toggleProvider } = useProviders();
 
 const enabledCount: ComputedRef<number> = computed(() => providers.value.filter((provider: AIProvider) => provider.isEnabled).length);
 
@@ -60,7 +61,7 @@ const filteredProviders: ComputedRef<AIProvider[]> = computed((): AIProvider[] =
 });
 
 async function handleToggleProvider(id: string, enabled: boolean): Promise<void> {
-  await toggleProvider(id, enabled);
+  await providerStore.toggleProvider(id, enabled);
 
   message.success(enabled ? '已启用服务商' : '已禁用服务商');
 }

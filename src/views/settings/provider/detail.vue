@@ -47,13 +47,12 @@ import ApiConfig from './components/ApiConfig.vue';
 import ModelList from './components/ModelList.vue';
 import ProviderInfo from './components/ProviderInfo.vue';
 import ProviderModal from './components/ProviderModal.vue';
-import { useProviders } from './hooks/useProviders';
+import { useProviderStore } from '@/stores/provider';
 
 const route = useRoute();
+const providerStore = useProviderStore();
 
 const providerId: ComputedRef<string> = computed(() => route.params.provider as string);
-
-const { getProviderById, loadProviders, toggleProvider, saveProviderConfig } = useProviders();
 
 const provider: Ref<AIProvider | null> = ref(null);
 const models: Ref<AIProviderModel[]> = ref([]);
@@ -73,9 +72,9 @@ const providerTypeLabel: ComputedRef<string> = computed((): string => {
 async function loadProvider(): Promise<void> {
   isLoadingProvider.value = true;
 
-  await loadProviders();
+  await providerStore.loadProviders();
 
-  provider.value = await getProviderById(providerId.value);
+  provider.value = await providerStore.getProviderById(providerId.value);
 
   models.value = provider.value?.models ? provider.value.models.map((model) => ({ ...model })) : [];
 
@@ -91,7 +90,7 @@ const persistProviderConfig = debounce(async () => {
     return;
   }
 
-  await saveProviderConfig(provider.value.id, { apiKey: provider.value.apiKey, baseUrl: provider.value.baseUrl });
+  await providerStore.saveProviderConfig(provider.value.id, { apiKey: provider.value.apiKey, baseUrl: provider.value.baseUrl });
 }, 300);
 
 watch(
@@ -123,7 +122,7 @@ async function handleToggle(enabled: boolean): Promise<void> {
     return;
   }
 
-  await toggleProvider(provider.value.id, enabled);
+  await providerStore.toggleProvider(provider.value.id, enabled);
   provider.value = { ...provider.value, isEnabled: enabled };
   message.success(enabled ? '已启用服务商' : '已禁用服务商');
 }
