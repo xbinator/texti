@@ -38,39 +38,28 @@ function isSettingsRoute(route: RouteLocationNormalizedLoaded): boolean {
 }
 
 /**
- * 解析当前路由对应的标签页 ID。
+ * 解析路由对应的标签页 ID 和 KeepAlive 缓存 key。
  * @param route - 当前路由
- * @returns 标签页 ID
+ * @returns 包含 tabId 和 cacheKey 的对象
  */
-export function resolveRouteTabId(route: RouteLocationNormalizedLoaded): string {
-  if (isEditorRoute(route)) {
-    return normalizeRouteParam(route.params.id);
-  }
-
-  if (isSettingsRoute(route)) {
-    return 'settings';
-  }
-
-  return route.fullPath || route.path;
-}
-
-/**
- * 解析当前路由对应的 KeepAlive 缓存 key。
- * @param route - 当前路由
- * @returns 缓存 key
- */
-export function resolveRouteCacheKey(route: RouteLocationNormalizedLoaded): string {
+export function resolveRouteTabInfo(route: RouteLocationNormalizedLoaded): { tabId: string; cacheKey: string } {
   if (isEditorRoute(route)) {
     const editorId = normalizeRouteParam(route.params.id);
+    const fallback = route.fullPath || route.path;
 
-    return editorId ? `editor:${editorId}` : route.fullPath || route.path;
+    return {
+      tabId: editorId || fallback,
+      cacheKey: editorId ? `editor:${editorId}` : fallback
+    };
   }
 
   if (isSettingsRoute(route)) {
-    return 'settings';
+    return { tabId: 'settings', cacheKey: 'settings' };
   }
 
-  return route.fullPath || route.path;
+  const fallback = route.fullPath || route.path;
+
+  return { tabId: fallback, cacheKey: fallback };
 }
 
 /**
