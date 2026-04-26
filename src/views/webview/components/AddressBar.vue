@@ -14,10 +14,10 @@
 
 <script setup lang="ts">
 interface Props {
-  canGoBack: boolean;
-  canGoForward: boolean;
-  isLoading: boolean;
-  url: string;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
+  isLoading?: boolean;
+  url?: string;
 }
 
 withDefaults(defineProps<Props>(), {

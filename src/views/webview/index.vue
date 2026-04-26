@@ -21,7 +21,7 @@
     </div>
 
     <div v-if="webview.state.value.isLoading" class="loading-bar">
-      <div class="loading-progress" :style="{ width: `${webview.state.value.loadProgress * 100}%` }"></div>
+      <div class="loading-progress" :style="{ width: `${(webview.state.value.loadProgress || 0) * 100}%` }"></div>
     </div>
   </div>
 </template>
