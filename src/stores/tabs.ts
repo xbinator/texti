@@ -241,6 +241,18 @@ export const useTabsStore = defineStore('tabs', {
      */
     isMissing(id: string): boolean {
       return this.missingById[id] === true;
+    },
+
+    /**
+     * 更新标签页标题。
+     * @param params - 包含 id 和 title 的对象
+     */
+    updateTabTitle(params: { id: string; title: string }): void {
+      const index = this.tabs.findIndex((t) => t.id === params.id);
+      if (index === -1) return;
+
+      this.tabs[index] = { ...this.tabs[index], title: params.title };
+      persistData(this.$state);
     }
   }
 });
