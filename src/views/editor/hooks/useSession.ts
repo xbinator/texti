@@ -4,7 +4,7 @@ import { computed, nextTick, onActivated, onDeactivated, onUnmounted, reactive, 
 import { useRoute, useRouter } from 'vue-router';
 import { customAlphabet } from 'nanoid';
 import { useClipboard } from '@/hooks/useClipboard';
-import { resolveRouteCacheKey } from '@/router/cache';
+import { resolveRouteTabInfo } from '@/router/cache';
 import { native } from '@/shared/platform';
 import type { ReadFileResult } from '@/shared/platform/native/types';
 import { useEditorFileWatchStore } from '@/stores/editorFileWatch';
@@ -32,7 +32,7 @@ export function useSession(fileId: Ref<string>) {
   const { switchWatchedFile, clearWatchedFile, setOnFileChanged, setIsDirty, finishReload } = useFileWatcher();
 
   const sessionPath = ref(route.fullPath);
-  const sessionCacheKey = ref(resolveRouteCacheKey(route));
+  const sessionCacheKey = ref(resolveRouteTabInfo(route).cacheKey);
   const fileState = ref<EditorFile>({ id: '', name: '', content: '', ext: 'md', path: null });
   const viewState = reactive<{ mode: ViewMode; showOutline: boolean }>({ mode: 'rich', showOutline: true });
   const isActive = ref(true);
