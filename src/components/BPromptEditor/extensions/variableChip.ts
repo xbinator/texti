@@ -1,6 +1,6 @@
+import type { DecorationSet } from '@codemirror/view';
 import { StateField, EditorState, type ChangeSet, type Range } from '@codemirror/state';
 import { Decoration, EditorView } from '@codemirror/view';
-import type { DecorationSet } from '@codemirror/view';
 
 const VARIABLE_PATTERN = /\{\{([^{}\n]+)\}\}/g;
 
@@ -17,9 +17,7 @@ function buildDecorations(text: string): DecorationSet {
       className = 'b-prompt-chip b-prompt-chip--file';
     }
 
-    decorations.push(
-      Decoration.mark({ class: className }).range(match.index)
-    );
+    decorations.push(Decoration.mark({ class: className }).range(match.index, match.index + match[0].length));
   }
 
   return Decoration.set(decorations, true);
@@ -37,5 +35,5 @@ export const variableChipField: StateField<DecorationSet> = StateField.define<De
     return deco.map(tr.changes);
   },
 
-  provide: (field) => EditorView.decorations.from(field),
+  provide: (field) => EditorView.decorations.from(field)
 });
