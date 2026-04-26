@@ -8,14 +8,11 @@
 
     <div class="action-buttons">
       <BButton type="text" size="small" square title="在浏览器打开" icon="lucide:external-link" @click="emit('openInBrowser')" />
-      <BButton type="text" size="small" square title="复制链接" icon="lucide:link" @click="handleCopyUrl" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { useClipboard } from '@/hooks/useClipboard';
-
 interface Props {
   canGoBack: boolean;
   canGoForward: boolean;
@@ -23,7 +20,7 @@ interface Props {
   url: string;
 }
 
-const props = withDefaults(defineProps<Props>(), {
+withDefaults(defineProps<Props>(), {
   canGoBack: false,
   canGoForward: false,
   isLoading: false,
@@ -36,16 +33,6 @@ const emit = defineEmits<{
   reload: [];
   openInBrowser: [];
 }>();
-
-const { clipboard } = useClipboard();
-
-/**
- * 复制当前 URL 到剪贴板
- */
-async function handleCopyUrl() {
-  await clipboard(props.url, { successMessage: '链接已复制' });
-  console.log('🚀 ~ handleCopyUrl ~ props.url:', props.url);
-}
 </script>
 
 <style scoped>

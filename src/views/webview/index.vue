@@ -70,10 +70,9 @@ function updateBounds() {
  * 在系统默认浏览器中打开当前页面 URL
  */
 async function handleOpenInBrowser() {
-  const { url } = webview.state.value;
-  if (url) {
-    await native.openExternal(url);
-  }
+  if (!initialUrl.value) return;
+
+  await native.openExternal(initialUrl.value);
 }
 
 // 使用 VueUse 的 useResizeObserver 监听外层容器大小变化，自动更新 webview bounds
