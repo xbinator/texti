@@ -6,10 +6,8 @@ const VARIABLE_PATTERN = /\{\{([^{}\n]+)\}\}/g;
 
 function buildDecorations(text: string): DecorationSet {
   const decorations: Range<Decoration>[] = [];
-  let match: RegExpExecArray | null;
 
-  VARIABLE_PATTERN.lastIndex = 0;
-  while ((match = VARIABLE_PATTERN.exec(text)) !== null) {
+  for (const match of text.matchAll(VARIABLE_PATTERN)) {
     const body = match[1];
 
     let className = 'b-prompt-chip';
