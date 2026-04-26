@@ -184,18 +184,22 @@ export const append = {
 } as const;
 
 // ── 对外 ─────────────────────────────────────────────
+function createBase(overrides: Partial<Message>): Message {
+  return { id: nanoid(), parts: [], loading: false, createdAt: new Date().toISOString(), ...overrides } as Message;
+}
+
 export const create = {
-  _base(overrides: Partial<Message>) {
-    return { id: nanoid(), parts: [], loading: false, createdAt: new Date().toISOString(), ...overrides } as Message;
-  },
-
+  // 创建 assistant 消息占位符
   assistantPlaceholder(): Message {
-    return create._base({ role: 'assistant', content: '', thinking: '', createdAt: '', loading: true });
+    return createBase({ role: 'assistant', content: '', thinking: '', createdAt: '', loading: true });
   },
-
+  // 创建错误消息
   errorMessage(content: string): Message {
-    const textPart = { type: 'text' as const, text: content };
-    return create._base({ role: 'error', content: textPart.text, parts: [textPart], finished: true });
+    return createBase({ role: 'error', content, parts: [{ type: 'text', text: content }], finished: true });
+  },
+  // 创建用户消息
+  userMessage(content: string, references?: Message['references']): Message {
+    return createBase({ role: 'user', content, references, parts: [{ type: 'text', text: content }] });
   }
 } as const;
 

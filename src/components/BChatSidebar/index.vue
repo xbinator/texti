@@ -60,7 +60,7 @@ import { createBuiltinTools } from '@/ai/tools/builtin';
 import { editorToolContextRegistry } from '@/ai/tools/editor-context';
 import { getDefaultChatToolNames } from '@/ai/tools/policy';
 import BButton from '@/components/BButton/index.vue';
-import { userChoice } from '@/components/BChatSidebar/utils/messageHelper';
+import { create, userChoice } from '@/components/BChatSidebar/utils/messageHelper';
 import type { Message } from '@/components/BChatSidebar/utils/types';
 import type { FileReferenceChip } from '@/components/BPromptEditor/hooks/useVariableEncoder';
 import BPromptEditor from '@/components/BPromptEditor/index.vue';
@@ -300,8 +300,10 @@ const chatStream = useChatStream({
  * @param content - 输入内容
  * @returns 活跃的引用列表
  */
-function getActiveDraftReferences(content: string): ChatMessageFileReference[] {
-  return draftReferences.value.filter((reference) => content.includes(reference.token));
+function getActiveDraftReferences(content: string) {
+  const references = draftReferences.value.filter((reference) => content.includes(reference.token));
+
+  return references.length ? references : undefined;
 }
 
 async function handleChatSubmit(): Promise<void> {
@@ -311,15 +313,8 @@ async function handleChatSubmit(): Promise<void> {
   const config = await chatStream.resolveServiceConfig();
   if (!config) return;
 
-  const activeReferences = getActiveDraftReferences(content);
-  const message: Message = {
-    id: nanoid(),
-    role: 'user',
-    content,
-    parts: [{ type: 'text', text: content }],
-    references: activeReferences.length ? activeReferences : undefined,
-    createdAt: new Date().toISOString()
-  };
+  const references = getActiveDraftReferences(content);
+  const message = create.userMessage(content, references);
 
   await handleBeforeSend(message);
   messages.value.push(message);

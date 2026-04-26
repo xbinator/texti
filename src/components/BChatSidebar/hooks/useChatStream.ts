@@ -220,19 +220,15 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
   /**
    * 加载引用快照映射
    */
-  async function loadReferenceSnapshotMap(sourceMessages: Message[]): Promise<Map<string, import('types/chat').ChatReferenceSnapshot>> {
-    const snapshotIds = Array.from(
-      new Set(
-        sourceMessages.flatMap((message) => message.references?.map((reference) => reference.snapshotId).filter((snapshotId) => snapshotId.length > 0) ?? [])
-      )
-    );
+  async function loadReferenceSnapshotMap(sourceMessages: Message[]) {
+    const references = sourceMessages.flatMap((m) => m.references ?? []);
+    const snapshotIds = references.map((r) => r.snapshotId).filter((id) => id.length > 0);
+    const uniqueSnapshotIds = [...new Set(snapshotIds)];
 
-    if (!snapshotIds.length) {
-      return new Map();
-    }
+    if (!uniqueSnapshotIds.length) return new Map();
 
-    const snapshots = await chatStorage.getReferenceSnapshots(snapshotIds);
-    return new Map(snapshots.map((snapshot) => [snapshot.id, snapshot]));
+    const snapshots = await chatStorage.getReferenceSnapshots(uniqueSnapshotIds);
+    return new Map(snapshots.map((s) => [s.id, s]));
   }
 
   /**
@@ -294,7 +290,8 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     handlePrepareAssistantMessage(reuseLastAssistant);
 
     const snapshotsById = await loadReferenceSnapshotMap(sourceMessages);
-    currentModelMessageCache = convert.toCachedModelMessages(buildModelReadyMessages(sourceMessages, snapshotsById), currentModelMessageCache);
+    const modelMessages = buildModelReadyMessages(sourceMessages, snapshotsById);
+    currentModelMessageCache = convert.toCachedModelMessages(modelMessages, currentModelMessageCache);
 
     const continuedMessages = [...currentModelMessageCache.modelMessages];
 
