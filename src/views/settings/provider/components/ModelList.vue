@@ -45,8 +45,8 @@ import { Icon } from '@iconify/vue';
 import { message } from 'ant-design-vue';
 import BButton from '@/components/BButton/index.vue';
 import BModelIcon from '@/components/BModelIcon/index.vue';
-import { Modal } from '@/utils/modal';
 import { useProviderStore } from '@/stores/provider';
+import { Modal } from '@/utils/modal';
 import ModelModal from './ModelModal.vue';
 
 interface Category {

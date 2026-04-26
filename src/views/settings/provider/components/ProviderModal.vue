@@ -53,9 +53,9 @@ import type { AIProvider, AIProviderType } from 'types/ai';
 import { computed, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { message, Form } from 'ant-design-vue';
+import { useProviderStore } from '@/stores/provider';
 import { asyncTo } from '@/utils/asyncTo';
 import { providerFormatOptions } from '../../constants';
-import { useProviderStore } from '@/stores/provider';
 
 interface CustomProviderForm {
   id: string;

@@ -108,6 +108,32 @@ export interface FileChangeEvent {
   content?: string;
 }
 
+export interface WebViewState {
+  url: string;          // 当前加载的 URL
+  title: string;         // 页面标题
+  isLoading: boolean;    // 是否正在加载
+  canGoBack: boolean;    // 是否可以后退
+  canGoForward: boolean; // 是否可以前进
+  loadProgress: number;  // 加载进度 0-1
+}
+
+export interface WebViewAPI {
+  create: (tabId: string, url: string) => Promise<void>; // 创建 WebContentsView
+  destroy: (tabId: string) => Promise<void>;              // 销毁 WebContentsView
+  navigate: (tabId: string, url: string) => Promise<void>; // 导航到 URL
+  goBack: (tabId: string) => Promise<void>;              // 后退
+  goForward: (tabId: string) => Promise<void>;           // 前进
+  reload: (tabId: string) => Promise<void>;             // 刷新
+  stop: (tabId: string) => Promise<void>;               // 停止加载
+  setBounds: (tabId: string, bounds: { x: number; y: number; width: number; height: number }) => Promise<void>; // 设置边界
+  show: (tabId: string) => Promise<void>;               // 显示
+  hide: (tabId: string) => Promise<void>;               // 隐藏
+  onStateChanged: (callback: (tabId: string, state: WebViewState) => void) => () => void;         // 加载状态变化
+  onTitleUpdated: (callback: (tabId: string, title: string) => void) => () => void;               // 标题更新
+  onNavigationStateChanged: (callback: (tabId: string, canGoBack: boolean, canGoForward: boolean) => void) => () => void; // 导航状态变化
+  onOpenInNewTab: (callback: (url: string) => void) => () => void; // 在新标签页打开
+}
+
 export interface PlatformRecentFile {
   id: string;
   name: string;
@@ -180,6 +206,9 @@ export interface ElectronAPI {
   onMenuAction: (callback: (action: string) => void) => () => void;
   updateMenuItem: (id: string, properties: { checked?: boolean }) => void;
   syncPlatformRecentFiles: (files: PlatformRecentFile[]) => Promise<void>;
+
+  // WebView 操作
+  webview: WebViewAPI;
 }
 
 declare global {

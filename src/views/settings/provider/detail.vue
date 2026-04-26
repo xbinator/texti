@@ -42,12 +42,12 @@ import { useRoute } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { message } from 'ant-design-vue';
 import { debounce } from 'lodash-es';
+import { useProviderStore } from '@/stores/provider';
 import { providerFormatLabels } from '../constants';
 import ApiConfig from './components/ApiConfig.vue';
 import ModelList from './components/ModelList.vue';
 import ProviderInfo from './components/ProviderInfo.vue';
 import ProviderModal from './components/ProviderModal.vue';
-import { useProviderStore } from '@/stores/provider';
 
 const route = useRoute();
 const providerStore = useProviderStore();

@@ -28,8 +28,8 @@ import { ref, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { message } from 'ant-design-vue';
-import ProviderCard from './components/ProviderCard.vue';
 import { useProviderStore } from '@/stores/provider';
+import ProviderCard from './components/ProviderCard.vue';
 
 const route = useRoute();
 const providerStore = useProviderStore();

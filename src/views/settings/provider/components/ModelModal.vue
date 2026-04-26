@@ -52,8 +52,8 @@ import type { Rule } from 'ant-design-vue/es/form';
 import type { AIProviderModel } from 'types/ai';
 import { computed, reactive, ref, watch } from 'vue';
 import { message, Form } from 'ant-design-vue';
-import { asyncTo } from '@/utils/asyncTo';
 import { useProviderStore } from '@/stores/provider';
+import { asyncTo } from '@/utils/asyncTo';
 
 interface Props {
   model?: AIProviderModel | null;

@@ -121,13 +121,13 @@ import { Icon } from '@iconify/vue';
 import BDropdown from '@/components/BDropdown/index.vue';
 import BDropdownMenu from '@/components/BDropdown/Menu.vue';
 import type { DropdownOptionItem } from '@/components/BDropdown/type';
+import { useProviderStore } from '@/stores/provider';
 import { useSettingStore } from '@/stores/setting';
 import { Modal } from '@/utils/modal';
 import ProviderModal from './components/ProviderModal.vue';
 import SidebarItem from './components/SidebarItem.vue';
 import SidebarSearch from './components/SidebarSearch.vue';
 import SidebarSection from './components/SidebarSection.vue';
-import { useProviderStore } from '@/stores/provider';
 
 const router = useRouter();
 const route = useRoute();

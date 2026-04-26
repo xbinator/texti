@@ -7,6 +7,7 @@
 import type { AIServiceError, AIStreamFinishChunk, AIStreamToolCallChunk } from 'types/ai';
 import type { ElectronAPI, FileChangeEvent } from 'types/electron-api';
 import { contextBridge, ipcRenderer } from 'electron';
+import webviewAPI from './webview.mjs';
 
 /**
  * 通过 contextBridge 暴露 Electron API 到渲染进程
@@ -246,7 +247,10 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.send('menu:update-item', id, properties);
   },
 
-  syncPlatformRecentFiles: (files) => ipcRenderer.invoke('platform-shortcuts:sync-recent-files', files)
+  syncPlatformRecentFiles: (files) => ipcRenderer.invoke('platform-shortcuts:sync-recent-files', files),
+
+  // WebView 操作
+  webview: webviewAPI
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

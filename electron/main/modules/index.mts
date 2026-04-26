@@ -7,6 +7,7 @@ import { registerMenuHandlers } from './menu/ipc.mjs';
 import { registerPlatformShortcutHandlers } from './platform-shortcuts/ipc.mjs';
 import { registerShellHandlers } from './shell/ipc.mjs';
 import { registerStoreHandlers } from './store/ipc.mjs';
+import { registerWebviewHandlers } from './webview/ipc.mjs';
 import { registerWindowHandlers } from './window/ipc.mjs';
 
 export function registerAllIpcHandlers() {
@@ -20,6 +21,7 @@ export function registerAllIpcHandlers() {
   registerLoggerHandlers();
   registerMenuHandlers();
   registerPlatformShortcutHandlers();
+  registerWebviewHandlers();
 }
 
 export {
@@ -31,7 +33,8 @@ export {
   registerShellHandlers,
   registerAIHandlers,
   registerLoggerHandlers,
-  registerPlatformShortcutHandlers
+  registerPlatformShortcutHandlers,
+  registerWebviewHandlers
 };
 
 export { aiService } from './ai/service.mjs';
