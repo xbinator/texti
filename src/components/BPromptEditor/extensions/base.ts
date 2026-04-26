@@ -3,25 +3,19 @@
  * @description BPromptEditor 基础扩展组件集合
  */
 
-import { Compartment } from '@codemirror/state'
-import { keymap, placeholder } from '@codemirror/view'
-import {
-  defaultKeymap,
-  history,
-  historyKeymap,
-  indentWithTab,
-  insertNewline,
-} from '@codemirror/commands'
-import type { Ref } from 'vue'
-import type { Extension } from '@codemirror/state'
-import type { BPromptEditorProps } from '../types'
+import type { BPromptEditorProps } from '../types';
+import type { Extension } from '@codemirror/state';
+import type { Ref } from 'vue';
+import { defaultKeymap, history, historyKeymap, indentWithTab, insertNewline } from '@codemirror/commands';
+import { Compartment } from '@codemirror/state';
+import { keymap, placeholder } from '@codemirror/view';
 
 /**
  * 可编辑状态 Compartments
  */
-export const editableCompartment = new Compartment()
-export const readOnlyCompartment = new Compartment()
-export const themeCompartment = new Compartment()
+export const editableCompartment = new Compartment();
+export const readOnlyCompartment = new Compartment();
+export const themeCompartment = new Compartment();
 
 /**
  * 创建基础扩展集合
@@ -30,16 +24,16 @@ export const themeCompartment = new Compartment()
  * @returns CodeMirror 扩展数组
  */
 export function createBaseExtensions(params: {
-  props: BPromptEditorProps
-  resolvedMaxHeight: Ref<string | number | undefined>
-  submitOnEnter: Ref<boolean>
-  emit: (event: 'submit') => void
-  modelSyncExtension: Extension
-  variableChipField: Extension
-  triggerStateField: Extension
-  triggerPlugin: Extension
+  props: BPromptEditorProps;
+  resolvedMaxHeight: Ref<string | number | undefined>;
+  submitOnEnter: Ref<boolean>;
+  emit: (event: 'submit') => void;
+  modelSyncExtension: Extension;
+  variableChipField: Extension;
+  triggerStateField: Extension;
+  triggerPlugin: Extension;
 }): Extension[] {
-  const { props, submitOnEnter, emit } = params
+  const { props, submitOnEnter, emit } = params;
 
   // 自定义 Enter 键处理器
   const submitKeymap = keymap.of([
@@ -47,18 +41,18 @@ export function createBaseExtensions(params: {
       key: 'Enter',
       run: () => {
         if (submitOnEnter.value) {
-          emit('submit')
-          return true
+          emit('submit');
+          return true;
         }
-        return false
-      },
+        return false;
+      }
     },
     {
       key: 'Shift-Enter',
-      run: insertNewline,
+      run: insertNewline
     },
-    indentWithTab,
-  ])
+    indentWithTab
+  ]);
 
   const extensions: Extension[] = [
     // 历史记录扩展
@@ -71,8 +65,8 @@ export function createBaseExtensions(params: {
     keymap.of([...defaultKeymap, ...historyKeymap]),
 
     // 占位符扩展
-    props.placeholder ? placeholder(props.placeholder) : [],
-  ]
+    props.placeholder ? placeholder(props.placeholder) : []
+  ];
 
-  return extensions
+  return extensions;
 }

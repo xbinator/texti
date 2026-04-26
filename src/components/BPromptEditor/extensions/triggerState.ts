@@ -3,8 +3,8 @@
  * @description 触发器状态扩展，管理自动补全菜单的显示状态
  */
 
-import { StateField, StateEffect, EditorState, Transaction } from '@codemirror/state';
 import type { Extension } from '@codemirror/state';
+import { StateField, StateEffect, EditorState, Transaction } from '@codemirror/state';
 
 /**
  * 设置触发器激活索引的效果
@@ -33,10 +33,7 @@ export interface TriggerState {
  * @param pos - 光标位置
  * @returns 触发器上下文或 null
  */
-function getTriggerContext(
-  state: EditorState,
-  pos: number
-): { from: number; to: number; query: string } | null {
+function getTriggerContext(state: EditorState, pos: number): { from: number; to: number; query: string } | null {
   // 取光标前最多 100 字符
   const text = state.sliceDoc(Math.max(0, pos - 100), pos);
 
@@ -58,7 +55,7 @@ function getTriggerContext(
   return {
     from: open,
     to: pos,
-    query: afterOpen,
+    query: afterOpen
   };
 }
 
@@ -103,9 +100,9 @@ export const triggerStateField: StateField<TriggerState | null> = StateField.def
       from: context.from,
       to: context.to,
       query: context.query,
-      activeIndex: 0,
+      activeIndex: 0
     };
-  },
+  }
 });
 
 /**

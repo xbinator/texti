@@ -26,16 +26,14 @@ import type { Variable, BPromptEditorProps } from './types';
 import type { VariableOptionGroup } from './types';
 import { computed, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue';
 import { EditorState, Annotation } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
-
+import { EditorView, keymap } from '@codemirror/view';
 import VariableSelect from './components/VariableSelect.vue';
-
-import { variableChipField } from './extensions/variableChip';
-import { triggerStateField, setTriggerActiveIndex, closeTrigger } from './extensions/triggerState';
-import { createTriggerPlugin } from './extensions/triggerPlugin';
-import { createPlaceholderExtension } from './extensions/placeholder';
-import { createPasteHandlerExtension } from './extensions/pasteHandler';
 import { editableCompartment, readOnlyCompartment, themeCompartment } from './extensions/base';
+import { createPasteHandlerExtension } from './extensions/pasteHandler';
+import { createPlaceholderExtension } from './extensions/placeholder';
+import { createTriggerPlugin } from './extensions/triggerPlugin';
+import { triggerStateField, setTriggerActiveIndex, closeTrigger } from './extensions/triggerState';
+import { variableChipField } from './extensions/variableChip';
 
 interface Props {
   placeholder?: string;
@@ -84,9 +82,7 @@ const allVariables = computed<Variable[]>(() => props.options.flatMap((group) =>
 const filteredVariables = computed<Variable[]>(() => {
   const query = triggerQuery.value.toLowerCase();
   if (!query) return allVariables.value;
-  return allVariables.value.filter(
-    (v) => v.label.toLowerCase().includes(query) || v.value.toLowerCase().includes(query)
-  );
+  return allVariables.value.filter((v) => v.label.toLowerCase().includes(query) || v.value.toLowerCase().includes(query));
 });
 
 // Resolved max height
@@ -156,7 +152,7 @@ const modelSyncExtension = EditorView.updateListener.of((update) => {
 function handleVariableSelect(variable: Variable): void {
   if (!view.value) return;
 
-  const state = view.value.state;
+  const { state } = view.value;
   const triggerState = state.field(triggerStateField, false);
 
   if (!triggerState) return;
@@ -226,7 +222,7 @@ function createExtensions(): import('@codemirror/state').Extension[] {
     themeCompartment.of(createThemeExtension(resolvedMaxHeight.value)),
 
     // Keymap for submit on Enter
-    EditorView.keymap.of([
+    keymap.of([
       {
         key: 'Enter',
         run: () => {
@@ -268,25 +264,19 @@ watch(
     if (!view.value) return;
 
     view.value.dispatch({
-      effects: [
-        editableCompartment.reconfigure(EditorView.editable.of(!disabled)),
-        readOnlyCompartment.reconfigure(EditorState.readOnly.of(disabled))
-      ]
+      effects: [editableCompartment.reconfigure(EditorView.editable.of(!disabled)), readOnlyCompartment.reconfigure(EditorState.readOnly.of(disabled))]
     });
   }
 );
 
 // Watch for maxHeight changes
-watch(
-  resolvedMaxHeight,
-  (maxHeight) => {
-    if (!view.value) return;
+watch(resolvedMaxHeight, (maxHeight) => {
+  if (!view.value) return;
 
-    view.value.dispatch({
-      effects: themeCompartment.reconfigure(createThemeExtension(maxHeight))
-    });
-  }
-);
+  view.value.dispatch({
+    effects: themeCompartment.reconfigure(createThemeExtension(maxHeight))
+  });
+});
 
 // onMounted: create EditorView
 onMounted(() => {
@@ -407,8 +397,8 @@ defineExpose({
   }
 
   .cm-content {
-    white-space: pre-wrap;
     word-break: break-all;
+    white-space: pre-wrap;
   }
 
   .cm-line {
@@ -416,8 +406,8 @@ defineExpose({
   }
 
   .cm-placeholder {
-    color: var(--text-placeholder);
     font-style: normal;
+    color: var(--text-placeholder);
   }
 
   .cm-selectionBackground {

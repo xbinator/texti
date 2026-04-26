@@ -3,8 +3,8 @@
  * @description Paste and drop handler extension for CodeMirror editor
  */
 
-import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
 
 /**
  * Creates a paste handler extension that:
@@ -18,11 +18,11 @@ export function createPasteHandlerExtension(): Extension {
     paste(event: Event, view: EditorView): boolean {
       if (event instanceof ClipboardEvent) {
         // Handle paste event
-        const clipboardData = event.clipboardData;
+        const { clipboardData } = event;
         if (!clipboardData) return false;
 
         // Prioritize files from clipboard
-        const files = clipboardData.files;
+        const { files } = clipboardData;
         if (files.length > 0) {
           event.preventDefault();
           const file = files[0];
@@ -43,11 +43,11 @@ export function createPasteHandlerExtension(): Extension {
     },
     drop(event: Event, view: EditorView): boolean {
       if (event instanceof DragEvent) {
-        const dataTransfer = event.dataTransfer;
+        const { dataTransfer } = event;
         if (!dataTransfer) return false;
 
         // Prioritize files from drag data
-        const files = dataTransfer.files;
+        const { files } = dataTransfer;
         if (files.length > 0) {
           event.preventDefault();
           const file = files[0];

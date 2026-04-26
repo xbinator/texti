@@ -10,7 +10,10 @@
       "Bash(git check-ignore:*)",
       "Bash(echo \"exit: $?\")",
       "Bash(git worktree:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(git show:*)",
+      "Bash(ls:*)",
+      "Bash(node:*)"
     ]
   }
 }

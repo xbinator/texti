@@ -3,8 +3,8 @@
  * @description 触发器视图插件，管理自动补全菜单的显示位置和状态
  */
 
-import { ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
+import { ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import { triggerStateField } from './triggerState';
 
 /**
@@ -35,9 +35,7 @@ export function createTriggerPlugin(params: TriggerPluginParams): Extension {
         }
 
         const coords = update.view.coordsAtPos(triggerState.to);
-        params.triggerPosition.value = coords
-          ? { top: coords.bottom, left: coords.left }
-          : { top: 0, left: 0 };
+        params.triggerPosition.value = coords ? { top: coords.bottom, left: coords.left } : { top: 0, left: 0 };
         params.triggerVisible.value = true;
         params.triggerActiveIndex.value = triggerState.activeIndex;
         params.triggerQuery.value = triggerState.query;

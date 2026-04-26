@@ -3,8 +3,8 @@
  * @description 占位符扩展，为 CodeMirror 编辑器提供占位符文本功能
  */
 
-import { placeholder as createPlaceholder } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
+import { placeholder as createPlaceholder } from '@codemirror/view';
 
 /**
  * 创建占位符扩展
