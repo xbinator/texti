@@ -34,8 +34,8 @@ import type { FrontMatterData } from '../hooks/useFrontMatter';
 import type { SelectionRange } from '../types';
 import type { Editor } from '@tiptap/vue-3';
 import { onBeforeUnmount, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { EditorContent } from '@tiptap/vue-3';
-import { native } from '@/shared/platform';
 import { clearAISelectionHighlight, setAISelectionHighlight } from '../extensions/AISelectionHighlight';
 import CurrentBlockMenu from './CurrentBlockMenu.vue';
 import FrontMatterCard from './FrontMatterCard.vue';
@@ -62,6 +62,8 @@ const props = withDefaults(defineProps<Props>(), {
   fileName: '',
   shouldShowFrontMatterCard: false
 });
+
+const router = useRouter();
 
 const frontMatterData = defineModel<FrontMatterData>('frontMatterData', { default: () => ({}) });
 
@@ -241,17 +243,13 @@ function handleFrontMatterFieldAdd(key: string, value: unknown): void {
 
 async function handleLinkClick(event: MouseEvent): Promise<void> {
   const { target } = event;
-  if (!(target instanceof Element)) {
-    return;
-  }
+  if (!(target instanceof Element)) return;
 
   const anchor = target.closest('a[href]');
-  if (!(anchor instanceof HTMLAnchorElement) || !anchor.href) {
-    return;
-  }
+  if (!(anchor instanceof HTMLAnchorElement) || !anchor.href) return;
 
   event.preventDefault();
-  await native.openExternal(anchor.href);
+  router.push({ name: 'webview', query: { url: encodeURIComponent(anchor.href) } });
 }
 
 onBeforeUnmount(() => {

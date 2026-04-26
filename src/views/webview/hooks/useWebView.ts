@@ -15,20 +15,17 @@ export function useWebView(tabId: Ref<string> | string) {
   const tabIdValue = typeof tabId === 'string' ? tabId : tabId.value;
 
   /** WebView 状态（响应式） */
-  const state = ref<WebViewState>({
-    url: '',
-    title: '',
-    isLoading: false,
-    canGoBack: false,
-    canGoForward: false,
-    loadProgress: 0
-  });
+  const state = ref<Partial<WebViewState>>({});
 
   /**
    * 创建 WebContentsView 实例
    * @param url - 初始加载 URL
    */
-  const create = (url: string) => window.electronAPI!.webview.create(tabIdValue, url);
+  const create = (url: string) => {
+    state.value.url = url;
+
+    window.electronAPI!.webview.create(tabIdValue, url);
+  };
 
   /** 销毁 WebContentsView 实例 */
   const destroy = () => window.electronAPI!.webview.destroy(tabIdValue);
@@ -37,7 +34,11 @@ export function useWebView(tabId: Ref<string> | string) {
    * 导航到指定 URL
    * @param url - 目标 URL
    */
-  const navigate = (url: string) => window.electronAPI!.webview.navigate(tabIdValue, url);
+  const navigate = (url: string) => {
+    state.value.url = url;
+
+    window.electronAPI!.webview.navigate(tabIdValue, url);
+  };
 
   /** 后退到上一页 */
   const goBack = () => window.electronAPI!.webview.goBack(tabIdValue);
@@ -78,26 +79,26 @@ export function useWebView(tabId: Ref<string> | string) {
   const setupListeners = () => {
     // 监听加载状态变化
     unsubState = window.electronAPI!.webview.onStateChanged((id, s) => {
-      if (id === tabIdValue) {
-        state.value.isLoading = s.isLoading;
-        state.value.loadProgress = s.loadProgress;
-        if (s.url) state.value.url = s.url;
-      }
+      if (id !== tabIdValue) return;
+
+      state.value.isLoading = s.isLoading;
+      state.value.loadProgress = s.loadProgress;
+      if (s.url) state.value.url = s.url;
     });
 
     // 监听页面标题更新
     unsubTitle = window.electronAPI!.webview.onTitleUpdated((id, title) => {
-      if (id === tabIdValue) {
-        state.value.title = title;
-      }
+      if (id !== tabIdValue) return;
+
+      state.value.title = title;
     });
 
     // 监听导航状态变化（是否可前进/后退）
     unsubNav = window.electronAPI!.webview.onNavigationStateChanged((id, canGoBack, canGoForward) => {
-      if (id === tabIdValue) {
-        state.value.canGoBack = canGoBack;
-        state.value.canGoForward = canGoForward;
-      }
+      if (id !== tabIdValue) return;
+
+      state.value.canGoBack = canGoBack;
+      state.value.canGoForward = canGoForward;
     });
   };
 
