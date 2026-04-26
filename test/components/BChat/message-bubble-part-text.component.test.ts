@@ -1,6 +1,6 @@
 /**
  * @file message-bubble-part-text.component.test.ts
- * @description MessageBubblePartText file-reference 渲染行为测试。
+ * @description BubblePartText file-reference 渲染行为测试。
  */
 /* @vitest-environment jsdom */
 
@@ -10,7 +10,7 @@ import { defineComponent } from 'vue';
 import { describe, expect, it } from 'vitest';
 import { mount, type VueWrapper } from '@vue/test-utils';
 import MessageBubble from '@/components/BChatSidebar/components/MessageBubble.vue';
-import MessageBubblePartText from '@/components/BChatSidebar/components/MessageBubblePartText.vue';
+import BubblePartText from '@/components/BChatSidebar/components/MessageBubble/BubblePartText.vue';
 
 /**
  * Markdown 消息占位组件，用于观察 assistant 文本是否仍按原路径渲染。
@@ -89,7 +89,7 @@ function mountTextPart(options: {
   enableFileReferenceChips?: boolean;
   references?: ChatMessageFileReference[];
 }): VueWrapper {
-  return mount(MessageBubblePartText, {
+  return mount(BubblePartText, {
     props: {
       loading: false,
       enableFileReferenceChips: false,
@@ -118,9 +118,9 @@ function mountBubble(message: Message): VueWrapper {
         BButton: ButtonStub,
         BMessage: MessageStub,
         Icon: IconStub,
-        MessageBubblePartThinking: true,
-        MessageBubblePartToolCall: true,
-        MessageBubblePartToolResult: true,
+        BubblePartThinking: true,
+        BubblePartToolCall: true,
+        BubblePartToolResult: true,
         AskUserChoiceCard: true,
         ConfirmationCard: true
       }
@@ -128,7 +128,7 @@ function mountBubble(message: Message): VueWrapper {
   });
 }
 
-describe('MessageBubblePartText file references', () => {
+describe('BubblePartText file references', () => {
   it('renders matched user file-reference placeholders as read-only chips', () => {
     const wrapper = mountTextPart({
       part: { type: 'text', text: '请查看 {{file-ref:ref_123}} 的实现' },

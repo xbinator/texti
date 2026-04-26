@@ -55,7 +55,7 @@ import { useRouter } from 'vue-router';
 import { message, Form } from 'ant-design-vue';
 import { asyncTo } from '@/utils/asyncTo';
 import { providerFormatOptions } from '../../constants';
-import { useProviders } from '../hooks/useProviders';
+import { useProviderStore } from '@/stores/provider';
 
 interface CustomProviderForm {
   id: string;
@@ -73,7 +73,8 @@ const emit = defineEmits<{ success: [provider: AIProvider] }>();
 const visible = defineModel<boolean>('open', { default: false });
 
 const router = useRouter();
-const { saveCustomProvider, providers } = useProviders();
+const providerStore = useProviderStore();
+const providers = computed(() => providerStore.providers);
 
 const saving = ref<boolean>(false);
 
@@ -131,7 +132,7 @@ async function handleSubmit(): Promise<void> {
 
   saving.value = true;
 
-  const provider = await saveCustomProvider({
+  const provider = await providerStore.saveCustomProvider({
     id,
     name: dataItem.name.trim(),
     description: '自定义服务商',

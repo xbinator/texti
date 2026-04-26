@@ -19,19 +19,19 @@ describe('MessageBubble part extraction', () => {
   test('renders thinking and tool parts through dedicated child components', () => {
     const source = readSource('src/components/BChat/components/MessageBubble.vue');
 
-    expect(source).toContain("import MessageBubblePartThinking from './MessageBubblePartThinking.vue';");
-    expect(source).toContain("import MessageBubblePartToolCall from './MessageBubblePartToolCall.vue';");
-    expect(source).toContain("import MessageBubblePartToolResult from './MessageBubblePartToolResult.vue';");
-    expect(source).toContain('<MessageBubblePartThinking');
-    expect(source).toContain('<MessageBubblePartToolCall');
-    expect(source).toContain('<MessageBubblePartToolResult');
+    expect(source).toContain("import BubblePartThinking from './MessageBubble/BubblePartThinking.vue';");
+    expect(source).toContain("import BubblePartToolCall from './MessageBubble/BubblePartToolCall.vue';");
+    expect(source).toContain("import BubblePartToolResult from './MessageBubble/BubblePartToolResult.vue';");
+    expect(source).toContain('<BubblePartThinking');
+    expect(source).toContain('<BubblePartToolCall');
+    expect(source).toContain('<BubblePartToolResult');
   });
 
   test('renders text parts through a dedicated child component while keeping attachments in MessageBubble', () => {
     const source = readSource('src/components/BChat/components/MessageBubble.vue');
 
-    expect(source).toContain("import MessageBubblePartText from './MessageBubblePartText.vue';");
-    expect(source).toContain('<MessageBubblePartText');
+    expect(source).toContain("import BubblePartText from './MessageBubble/BubblePartText.vue';");
+    expect(source).toContain('<BubblePartText');
     expect(source).not.toContain("import MessageBubbleHeaderAttachments from './MessageBubbleHeaderAttachments.vue';");
   });
 });

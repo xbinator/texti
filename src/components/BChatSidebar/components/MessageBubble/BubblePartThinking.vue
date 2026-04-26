@@ -1,16 +1,16 @@
 <template>
-  <MessageBubblePart type="thinking" :has-content="hasContent" :default-collapsed="false">
+  <BubblePart type="thinking" :has-content="hasContent" :default-collapsed="false">
     <template #title>深度思考</template>
     <BMessage :content="part.thinking" type="markdown" />
-  </MessageBubblePart>
+  </BubblePart>
 </template>
 
 <script setup lang="ts">
 import type { ChatMessageThinkingPart } from 'types/chat';
 import { computed } from 'vue';
-import MessageBubblePart from './MessageBubblePart.vue';
+import BubblePart from './BubblePart.vue';
 
-defineOptions({ name: 'MessageBubblePartThinking' });
+defineOptions({ name: 'BubblePartThinking' });
 
 interface Props {
   /** 思考片段 */

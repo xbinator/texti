@@ -4,14 +4,14 @@
 
 <script setup lang="ts">
 /**
- * @file MessageBubblePartCode.vue
+ * @file BubblePartCode.vue
  * @description 聊天消息代码片段组件，用于展示格式化的结构化数据。
  */
 import { computed } from 'vue';
 import { formatStructuredValue } from '@/components/BChatSidebar/utils/messagePart';
 import { createNamespace } from '@/utils/namespace';
 
-defineOptions({ name: 'MessageBubblePartCode' });
+defineOptions({ name: 'BubblePartCode' });
 
 interface Props {
   /** 要展示的结构化数据 */

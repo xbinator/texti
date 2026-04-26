@@ -46,7 +46,7 @@ import { message } from 'ant-design-vue';
 import BButton from '@/components/BButton/index.vue';
 import BModelIcon from '@/components/BModelIcon/index.vue';
 import { Modal } from '@/utils/modal';
-import { useProviders } from '../hooks/useProviders';
+import { useProviderStore } from '@/stores/provider';
 import ModelModal from './ModelModal.vue';
 
 interface Category {
@@ -82,7 +82,7 @@ const searchText = ref('');
 const activeCategory = ref('all');
 const modalVisible = ref(false);
 const currentModel = ref<AIProviderModel | null>(null);
-const { saveProviderModels } = useProviders();
+const providerStore = useProviderStore();
 
 const categoryOptions = computed(() => props.categories.map((category) => ({ label: category.label, value: category.key })));
 
@@ -118,7 +118,7 @@ function handleModelSuccess(): void {
 
 async function handleToggleModel(modelId: string, enabled: boolean): Promise<void> {
   const nextModels = props.models.map((item) => (item.id === modelId ? { ...item, isEnabled: enabled } : item));
-  const savedProvider = await saveProviderModels(props.providerId, nextModels);
+  const savedProvider = await providerStore.saveProviderModels(props.providerId, nextModels);
 
   if (!savedProvider) {
     message.error(enabled ? '启用模型失败' : '禁用模型失败');
@@ -135,7 +135,7 @@ async function handleDeleteModel(modelId: string): Promise<void> {
   if (cancelled) return;
 
   const nextModels = props.models.filter((item) => item.id !== modelId);
-  const savedProvider = await saveProviderModels(props.providerId, nextModels);
+  const savedProvider = await providerStore.saveProviderModels(props.providerId, nextModels);
 
   if (!savedProvider) {
     message.error('删除模型失败');

@@ -17,7 +17,7 @@
 
       <div :class="bem('parts')">
         <template v-for="(part, index) in message.parts" :key="`${part.type}-${index}`">
-          <MessageBubblePartText
+          <BubblePartText
             v-if="part.type === 'text'"
             :part="part"
             :loading="isLastPart(index) && !!message.loading"
@@ -25,9 +25,9 @@
             :references="message.references"
           />
 
-          <MessageBubblePartThinking v-else-if="part.type === 'thinking'" :part="part" />
+          <BubblePartThinking v-else-if="part.type === 'thinking'" :part="part" />
 
-          <MessageBubblePartToolCall v-else-if="part.type === 'tool-call'" :part="part" />
+          <BubblePartToolCall v-else-if="part.type === 'tool-call'" :part="part" />
 
           <ConfirmationCard
             v-else-if="part.type === 'confirmation'"
@@ -36,7 +36,7 @@
           />
 
           <AskUserChoiceCard v-else-if="isAwaitingUserChoicePart(part)" :question="part.result.data" @submit-choice="$emit('user-choice-submit', $event)" />
-          <MessageBubblePartToolResult v-else :part="part" />
+          <BubblePartToolResult v-else :part="part" />
         </template>
       </div>
 
@@ -67,10 +67,10 @@ import { useClipboard } from '@/hooks/useClipboard';
 import { createNamespace } from '@/utils/namespace';
 import AskUserChoiceCard from './AskUserChoiceCard.vue';
 import ConfirmationCard from './ConfirmationCard.vue';
-import MessageBubblePartText from './MessageBubblePartText.vue';
-import MessageBubblePartThinking from './MessageBubblePartThinking.vue';
-import MessageBubblePartToolCall from './MessageBubblePartToolCall.vue';
-import MessageBubblePartToolResult from './MessageBubblePartToolResult.vue';
+import BubblePartText from './MessageBubble/BubblePartText.vue';
+import BubblePartThinking from './MessageBubble/BubblePartThinking.vue';
+import BubblePartToolCall from './MessageBubble/BubblePartToolCall.vue';
+import BubblePartToolResult from './MessageBubble/BubblePartToolResult.vue';
 
 defineOptions({ name: 'MessageBubble' });
 

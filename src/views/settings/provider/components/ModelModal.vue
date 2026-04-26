@@ -53,7 +53,7 @@ import type { AIProviderModel } from 'types/ai';
 import { computed, reactive, ref, watch } from 'vue';
 import { message, Form } from 'ant-design-vue';
 import { asyncTo } from '@/utils/asyncTo';
-import { useProviders } from '../hooks/useProviders';
+import { useProviderStore } from '@/stores/provider';
 
 interface Props {
   model?: AIProviderModel | null;
@@ -72,7 +72,7 @@ const emit = defineEmits<{ success: [model: AIProviderModel] }>();
 const visible = defineModel<boolean>('open', { default: false });
 
 const saving = ref<boolean>(false);
-const { saveProviderModels } = useProviders();
+const providerStore = useProviderStore();
 
 const modelTypeOptions = [
   { label: '对话模型', value: 'chat' },
@@ -142,7 +142,7 @@ async function createModel(model: AIProviderModel): Promise<{ success: boolean; 
     return { success: false, message: '模型 ID 已存在，请更换' };
   }
   const nextModels = [...props.models, { ...model }];
-  const savedProvider = await saveProviderModels(props.providerId, nextModels);
+  const savedProvider = await providerStore.saveProviderModels(props.providerId, nextModels);
   if (!savedProvider) {
     return { success: false, message: '创建模型失败' };
   }
@@ -155,7 +155,7 @@ async function updateModel(model: AIProviderModel): Promise<{ success: boolean; 
   }
   const nextModels = props.models.map((item: AIProviderModel) => (item.id === model.id ? { ...item, ...model } : item));
 
-  const savedProvider = await saveProviderModels(props.providerId, nextModels);
+  const savedProvider = await providerStore.saveProviderModels(props.providerId, nextModels);
   if (!savedProvider) {
     return { success: false, message: '更新模型失败' };
   }

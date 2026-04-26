@@ -13,14 +13,14 @@
 
 <script setup lang="ts">
 /**
- * @file MessageBubblePart.vue
+ * @file BubblePart.vue
  * @description 聊天气泡片段共享组件，处理折叠逻辑和通用结构。
  */
 import { computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { createNamespace } from '@/utils/namespace';
 
-defineOptions({ name: 'MessageBubblePart' });
+defineOptions({ name: 'BubblePart' });
 
 interface Props {
   /** 片段类型 */

@@ -17,10 +17,10 @@ import { computed } from 'vue';
 import BMessage from '@/components/BMessage/index.vue';
 import { createNamespace } from '@/utils/namespace';
 
-defineOptions({ name: 'MessageBubblePartText' });
+defineOptions({ name: 'BubblePartText' });
 
 /**
- * @file MessageBubblePartText.vue
+ * @file BubblePartText.vue
  * @description Renders text segments in a message bubble, including file reference chips for user messages.
  */
 

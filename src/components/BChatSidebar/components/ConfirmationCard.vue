@@ -66,7 +66,7 @@ defineEmits<{
 
 const manuallyCollapsed = ref(false);
 const manuallyExpanded = ref(false);
-const [, bem] = createNamespace('confirmation-card');
+const [, bem] = createNamespace('', 'confirm-card');
 
 /**
  * 当前是否折叠。
