@@ -61,7 +61,7 @@ const router = useRouter();
  * @returns 是否与当前路由匹配
  */
 function isActiveTab(tab: Pick<Tab, 'path'>): boolean {
-  return tab.path === route.path;
+  return tab.path === route.fullPath;
 }
 
 /**
@@ -143,11 +143,7 @@ function getHeaderTabRects(): HeaderTabRect[] {
   return Array.from(scrollContainer.value.querySelectorAll<HTMLElement>('[data-tab-id]')).map((element) => {
     const { left, width } = element.getBoundingClientRect();
 
-    return {
-      id: element.dataset.tabId,
-      left,
-      width
-    };
+    return { id: element.dataset.tabId, left, width };
   });
 }
 

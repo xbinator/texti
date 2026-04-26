@@ -6,7 +6,7 @@
 import type { Component as VueComponent, PropType } from 'vue';
 import { defineComponent, h } from 'vue';
 import type { RouteLocationNormalizedLoaded } from 'vue-router';
-import { resolveRouteCacheKey, resolveRouteCacheName } from '@/router/cache';
+import { resolveRouteCacheName, resolveRouteTabInfo } from '@/router/cache';
 
 /**
  * 路由 KeepAlive 缓存工具。
@@ -64,7 +64,7 @@ export function useRouteKeepAliveCache(): RouteKeepAliveCache {
    * @returns 具备稳定名称的包装组件
    */
   function getRouteCacheComponent(route: RouteLocationNormalizedLoaded): VueComponent {
-    const cacheName = resolveRouteCacheName(resolveRouteCacheKey(route));
+    const cacheName = resolveRouteCacheName(resolveRouteTabInfo(route).cacheKey);
     const cachedComponent = routeCacheComponents.get(cacheName);
     if (cachedComponent) {
       return cachedComponent;
@@ -78,7 +78,7 @@ export function useRouteKeepAliveCache(): RouteKeepAliveCache {
   }
 
   return {
-    getRouteCacheKey: resolveRouteCacheKey,
+    getRouteCacheKey: (route: RouteLocationNormalizedLoaded) => resolveRouteTabInfo(route).cacheKey,
     getRouteCacheComponent
   };
 }
