@@ -3,7 +3,7 @@
  * @description 触发器状态扩展，管理自动补全菜单的显示状态
  */
 
-import { StateField, StateEffect, EditorState } from '@codemirror/state';
+import { StateField, StateEffect, EditorState, Transaction } from '@codemirror/state';
 import type { Extension } from '@codemirror/state';
 
 /**
@@ -70,31 +70,28 @@ export const triggerStateField: StateField<TriggerState | null> = StateField.def
     return null;
   },
 
-  update(state: TriggerState | null, tr: { effects: readonly { readonly effect: { uniq: unknown } }[]; selectionSet?: boolean; docChanged?: boolean; newState: EditorState }): TriggerState | null {
+  update(state: TriggerState | null, tr: Transaction): TriggerState | null {
     // 先遍历 tr.effects 处理 setTriggerActiveIndex 和 closeTrigger
     for (const effect of tr.effects) {
-      if (effect.effect === setTriggerActiveIndex) {
-        if (state) {
-          state.activeIndex = effect.value;
-        }
-      } else if (effect.effect === closeTrigger) {
+      if ((effect as StateEffect<unknown>).is(setTriggerActiveIndex) && state) {
+        state.activeIndex = (effect as StateEffect<number>).value;
+      } else if ((effect as StateEffect<unknown>).is(closeTrigger)) {
         return null;
       }
     }
 
-    // 如果选区未变化且文档未变化，直接返回原状态
-    if (!tr.selectionSet && !tr.docChanged) {
+    // 如果文档未变化，直接返回原状态
+    if (!tr.docChanged) {
       return state;
     }
 
-    const { selection } = tr.newState;
     // 非空选区不弹菜单
-    if (!selection.empty) {
+    if (!tr.selection?.main.empty) {
       return null;
     }
 
-    const pos = selection.main.head;
-    const context = getTriggerContext(tr.newState, pos);
+    const pos = tr.selection!.main.head;
+    const context = getTriggerContext(tr.state, pos);
 
     // 无法获取触发上下文，返回 null
     if (!context) {

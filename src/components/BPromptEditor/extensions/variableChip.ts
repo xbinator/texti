@@ -1,4 +1,4 @@
-import { StateField, EditorState } from '@codemirror/state';
+import { StateField, EditorState, type ChangeSet, type Range } from '@codemirror/state';
 import { Decoration, EditorView } from '@codemirror/view';
 import type { DecorationSet } from '@codemirror/view';
 
@@ -10,7 +10,6 @@ function buildDecorations(text: string): DecorationSet {
 
   VARIABLE_PATTERN.lastIndex = 0;
   while ((match = VARIABLE_PATTERN.exec(text)) !== null) {
-    const fullMatch = match[0];
     const body = match[1];
 
     let className = 'b-prompt-chip';
@@ -31,7 +30,7 @@ export const variableChipField: StateField<DecorationSet> = StateField.define<De
     return buildDecorations(state.doc.toString());
   },
 
-  update(deco: DecorationSet, tr: { docChanged: boolean; newDoc: EditorState['doc']; changes: EditorState['changeSet'] }) {
+  update(deco: DecorationSet, tr: { docChanged: boolean; newDoc: EditorState['doc']; changes: ChangeSet }) {
     if (tr.docChanged) {
       return buildDecorations(tr.newDoc.toString());
     }
@@ -40,5 +39,3 @@ export const variableChipField: StateField<DecorationSet> = StateField.define<De
 
   provide: (field) => EditorView.decorations.from(field),
 });
-
-type Range<T> = { from: number; to: number } & T;

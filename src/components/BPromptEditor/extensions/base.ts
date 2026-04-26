@@ -3,8 +3,8 @@
  * @description BPromptEditor 基础扩展组件集合
  */
 
-import { Compartment, EditorState } from '@codemirror/state'
-import { EditorView, keymap, placeholder } from '@codemirror/view'
+import { Compartment } from '@codemirror/state'
+import { keymap, placeholder } from '@codemirror/view'
 import {
   defaultKeymap,
   history,
@@ -22,17 +22,6 @@ import type { BPromptEditorProps } from '../types'
 export const editableCompartment = new Compartment()
 export const readOnlyCompartment = new Compartment()
 export const themeCompartment = new Compartment()
-
-/**
- * 添加 CSS 单位辅助函数
- * @param value - 数值或字符串值
- * @returns 带单位的字符串或 undefined
- */
-function addCssUnit(value: string | number | undefined): string | undefined {
-  if (value === undefined) return undefined
-  if (typeof value === 'number') return `${value}px`
-  return value
-}
 
 /**
  * 创建基础扩展集合
