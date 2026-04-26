@@ -4,34 +4,14 @@
       <div v-if="!disabled" v-show="editorIsEmpty" class="b-prompt-editor__placeholder">
         {{ placeholder }}
       </div>
-
-      <div
-        ref="editorRef"
-        :contenteditable="!disabled"
-        spellcheck="true"
-        aria-multiline="true"
-        :aria-disabled="disabled"
-        class="b-prompt-editor__textarea"
-        :style="editorStyle"
-        data-empty="true"
-        @paste="handlePaste"
-        @dragover="handleDragOver"
-        @drop="handleDrop"
-        @keydown="handleKeyDown"
-        @keyup="handleCaretChange"
-        @blur="handleBlur"
-        @input="handleInput"
-        @mouseup="handleCaretChange"
-      ></div>
-
+      <div ref="editorHostRef" class="b-prompt-editor__codemirror"></div>
       <VariableSelect
-        v-if="options.length"
-        :visible="trigger.visible.value"
-        :variables="trigger.filteredVariables.value"
-        :position="trigger.menuPosition.value"
-        :active-index="trigger.activeIndex.value"
-        @select="trigger.selectVariable"
-        @update:active-index="trigger.activeIndex.value = $event"
+        :visible="triggerVisible.value"
+        :variables="filteredVariables"
+        :position="triggerPosition.value"
+        :active-index="triggerActiveIndex.value"
+        @select="handleVariableSelect"
+        @update:active-index="handleActiveIndexChange"
       />
     </div>
   </div>
@@ -40,14 +20,30 @@
 <script setup lang="ts">
 /**
  * @file BPromptEditor/index.vue
- * @description Prompt editor input surface, variable insertion, and submit interactions.
+ * @description Prompt editor main component using CodeMirror 6
  */
-import type { FileReferenceChip } from './hooks/useVariableEncoder';
-import type { Variable, BPromptEditorProps as Props } from './types';
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { addCssUnit } from '@/utils/css';
+import type { Variable, BPromptEditorProps } from './types';
+import type { VariableOptionGroup } from './types';
+import { computed, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue';
+import { EditorState, Annotation } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
+
 import VariableSelect from './components/VariableSelect.vue';
-import { useEditorCore, useEditorKeyboard, useEditorPaste, useEditorTrigger } from './hooks';
+
+import { variableChipField } from './extensions/variableChip';
+import { triggerStateField, setTriggerActiveIndex, closeTrigger } from './extensions/triggerState';
+import { createTriggerPlugin } from './extensions/triggerPlugin';
+import { createPlaceholderExtension } from './extensions/placeholder';
+import { createPasteHandlerExtension } from './extensions/pasteHandler';
+import { editableCompartment, readOnlyCompartment, themeCompartment } from './extensions/base';
+
+interface Props {
+  placeholder?: string;
+  options?: VariableOptionGroup[];
+  disabled?: boolean;
+  maxHeight?: number | string;
+  submitOnEnter?: boolean;
+}
 
 const props = withDefaults(defineProps<Props>(), {
   placeholder: '请输入内容...',
@@ -62,215 +58,287 @@ const emit = defineEmits<{
   (e: 'submit'): void;
 }>();
 
-const inputValue = defineModel<string>('value', { default: '' });
+const modelValue = defineModel<string>('value', { default: '' });
 
+// Template refs
 const wrapperRef = ref<HTMLDivElement>();
-const editorRef = ref<HTMLDivElement>();
-const disabledRef = computed(() => props.disabled);
+const editorHostRef = ref<HTMLDivElement>();
 
-const variables = computed<Variable[]>(() => props.options.flatMap((group) => group.options));
+// Trigger refs (Vue refs, not computed)
+const triggerVisible = ref(false);
+const triggerPosition = ref({ top: 0, left: 0, bottom: 0 });
+const triggerActiveIndex = ref(0);
+const triggerQuery = ref('');
 
-const editorStyle = computed(() => {
-  const style: Record<string, string> = {};
-  if (props.maxHeight) {
-    style.maxHeight = addCssUnit(props.maxHeight);
-  }
-  return style;
+// Editor state
+const editorIsEmpty = ref(true);
+const lastSelection = ref<{ main: { head: number } } | null>(null);
+
+// Editor view reference
+const view = ref<EditorView | null>(null);
+
+// Computed variables from options
+const allVariables = computed<Variable[]>(() => props.options.flatMap((group) => group.options));
+
+// Filtered variables based on trigger query
+const filteredVariables = computed<Variable[]>(() => {
+  const query = triggerQuery.value.toLowerCase();
+  if (!query) return allVariables.value;
+  return allVariables.value.filter(
+    (v) => v.label.toLowerCase().includes(query) || v.value.toLowerCase().includes(query)
+  );
 });
 
-const { selectionHook, updateModelValue, normalizeInlineTokens, initializeEditor, cleanup, editorIsEmpty, undoHistory, redoHistory } = useEditorCore(
-  editorRef,
-  inputValue,
-  {
-    variables,
-    emitChange: (value) => emit('change', value)
+// Resolved max height
+const resolvedMaxHeight = computed<string | undefined>(() => {
+  if (props.maxHeight === undefined) return undefined;
+  if (typeof props.maxHeight === 'number') return `${props.maxHeight}px`;
+  return props.maxHeight;
+});
+
+// Theme extension with max height
+const createThemeExtension = (maxHeight: string | undefined) => {
+  return EditorView.theme({
+    '&': {
+      maxHeight: maxHeight ?? 'none',
+      overflow: 'auto'
+    },
+    '.cm-scroller': {
+      overflow: 'auto',
+      fontFamily: 'inherit',
+      fontSize: '14px',
+      lineHeight: '1.6'
+    },
+    '.cm-content': {
+      caretColor: 'var(--color-primary, #4080ff)',
+      padding: '0'
+    },
+    '.cm-line': {
+      padding: '0'
+    },
+    '.cm-placeholder': {
+      color: 'var(--text-placeholder)',
+      fontStyle: 'normal'
+    },
+    '.cm-selectionBackground': {
+      backgroundColor: 'rgb(var(--color-primary-value, 64, 128, 255), 0.15) !important'
+    },
+    '&.cm-focused .cm-selectionBackground': {
+      backgroundColor: 'rgb(var(--color-primary-value, 64, 128, 255), 0.2) !important'
+    },
+    '.cm-cursor': {
+      borderLeftColor: 'var(--color-primary, #4080ff)'
+    }
+  });
+};
+
+// External update annotation for avoiding circular updates
+const externalUpdate = Annotation.define<boolean>();
+
+// Model sync extension
+const modelSyncExtension = EditorView.updateListener.of((update) => {
+  // Skip if this update was triggered by external value change
+  if (update.transactions.some((tr) => tr.annotation(externalUpdate))) {
+    return;
+  }
+
+  const newValue = update.state.doc.toString();
+  if (modelValue.value !== newValue) {
+    modelValue.value = newValue;
+    emit('change', newValue);
+  }
+
+  // Update editorIsEmpty
+  editorIsEmpty.value = newValue.trim().length === 0;
+});
+
+// Handle variable selection
+function handleVariableSelect(variable: Variable): void {
+  if (!view.value) return;
+
+  const state = view.value.state;
+  const triggerState = state.field(triggerStateField, false);
+
+  if (!triggerState) return;
+
+  const variableText = `{{${variable.value}}}`;
+  view.value.dispatch({
+    changes: { from: triggerState.from, to: triggerState.to, insert: variableText },
+    effects: closeTrigger.of(null)
+  });
+
+  view.value.focus();
+}
+
+// Handle active index change
+function handleActiveIndexChange(index: number): void {
+  triggerActiveIndex.value = index;
+  if (view.value) {
+    view.value.dispatch({
+      effects: setTriggerActiveIndex.of(index)
+    });
+  }
+}
+
+// Handle container click
+function handleContainerClick(): void {
+  if (!props.disabled && view.value) {
+    view.value.focus();
+  }
+}
+
+// Create extensions array
+function createExtensions(): import('@codemirror/state').Extension[] {
+  const extensions: import('@codemirror/state').Extension[] = [
+    // Base extensions
+    EditorView.lineWrapping,
+
+    // Model sync
+    modelSyncExtension,
+
+    // Variable chip decorations
+    variableChipField,
+
+    // Trigger state
+    triggerStateField,
+
+    // Trigger plugin (view plugin)
+    createTriggerPlugin({
+      triggerVisible,
+      triggerPosition,
+      triggerActiveIndex,
+      triggerQuery
+    }),
+
+    // Placeholder
+    createPlaceholderExtension(props.placeholder),
+
+    // Paste handler
+    createPasteHandlerExtension(),
+
+    // Editable compartment
+    editableCompartment.of(EditorView.editable.of(!props.disabled)),
+
+    // Read-only compartment
+    readOnlyCompartment.of(EditorState.readOnly.of(props.disabled)),
+
+    // Theme compartment
+    themeCompartment.of(createThemeExtension(resolvedMaxHeight.value)),
+
+    // Keymap for submit on Enter
+    EditorView.keymap.of([
+      {
+        key: 'Enter',
+        run: () => {
+          if (props.submitOnEnter) {
+            emit('submit');
+            return true;
+          }
+          return false;
+        }
+      }
+    ])
+  ];
+
+  return extensions;
+}
+
+// Watch for external modelValue changes
+watch(
+  () => modelValue.value,
+  (value) => {
+    if (!view.value) return;
+
+    const currentDoc = view.value.state.doc.toString();
+    if (currentDoc === value) return;
+
+    view.value.dispatch({
+      changes: { from: 0, to: currentDoc.length, insert: value },
+      annotations: externalUpdate.of(true)
+    });
+
+    editorIsEmpty.value = value.trim().length === 0;
   }
 );
 
-const trigger = useEditorTrigger(editorRef, selectionHook, {
-  variables,
-  updateModelValue,
-  onHide: () => {
-    //
+// Watch for disabled changes
+watch(
+  () => props.disabled,
+  (disabled) => {
+    if (!view.value) return;
+
+    view.value.dispatch({
+      effects: [
+        editableCompartment.reconfigure(EditorView.editable.of(!disabled)),
+        readOnlyCompartment.reconfigure(EditorState.readOnly.of(disabled))
+      ]
+    });
   }
-});
+);
 
-const { handleKeyDown } = useEditorKeyboard({
-  disabled: disabledRef,
-  onDeleteVariable: trigger.deleteAdjacentVariable,
-  onEnter: () => {
-    selectionHook.insertTextAtCursor('\n');
-    updateModelValue();
-  },
-  onUndo: () => undoHistory(),
-  onRedo: () => redoHistory(),
-  onSubmit: () => emit('submit'),
-  submitOnEnter: computed(() => props.submitOnEnter),
-  onMenuKeydown: trigger.handleMenuKeydown,
-  isMenuVisible: trigger.visible,
-  hideMenu: trigger.hide
-});
+// Watch for maxHeight changes
+watch(
+  resolvedMaxHeight,
+  (maxHeight) => {
+    if (!view.value) return;
 
-const { handlePaste, handleDragOver, handleDrop } = useEditorPaste({
-  disabled: disabledRef,
-  insertTextAtCursor: selectionHook.insertTextAtCursor,
-  updateModelValue
-});
-
-/**
- * Keeps the editor model synchronized after direct typing or chip edits.
- */
-function handleInput(): void {
-  if (props.disabled) return;
-  updateModelValue();
-  normalizeInlineTokens();
-  // 输入完成后立即记录最新光标，避免失焦前缓存退化为根节点级 offset。
-  requestAnimationFrame(selectionHook.cacheCurrentRangeIfInsideEditor);
-  trigger.updateVisibility();
-}
-
-/**
- * Hides the suggestion menu shortly after the editor loses focus.
- */
-function handleBlur(): void {
-  if (props.disabled) return;
-  setTimeout(trigger.hide, 200);
-}
-
-/**
- * 在用户点击或键盘移动光标后，同步记录最近一次有效插入点。
- */
-function handleCaretChange(): void {
-  if (props.disabled) return;
-
-  requestAnimationFrame(selectionHook.cacheCurrentRangeIfInsideEditor);
-}
-
-/**
- * Focuses the editable surface when the wrapper is clicked.
- */
-function handleContainerClick(): void {
-  if (!props.disabled && editorRef.value) {
-    editorRef.value.focus();
-    selectionHook.restoreCachedRange();
+    view.value.dispatch({
+      effects: themeCompartment.reconfigure(createThemeExtension(maxHeight))
+    });
   }
-}
+);
 
-/**
- * Focuses the underlying contenteditable node for external callers.
- */
-function focus(): void {
-  editorRef.value?.focus();
-}
-
-/**
- * 显式记录当前光标位置，供外部在失焦后恢复插入点。
- */
-function captureCursorPosition(): void {
-  if (props.disabled) return;
-
-  selectionHook.cacheCurrentRangeIfInsideEditor();
-}
-
-/**
- * Inserts a file-reference chip into the editor.
- * @param reference - File reference metadata.
- */
-function insertFileReference(reference: FileReferenceChip): void {
-  if (props.disabled) return;
-
-  editorRef.value?.focus();
-  selectionHook.restoreCachedRange();
-  trigger.insertFileReference(reference);
-}
-
-/**
- * Recomputes the variable picker visibility when the selection changes.
- */
-function handleSelectionChange(): void {
-  if (props.disabled) {
-    if (trigger.visible.value) trigger.hide();
-    return;
-  }
-
-  if (!selectionHook.isSelectionInsideEditor()) {
-    if (trigger.visible.value) trigger.hide();
-    return;
-  }
-
-  trigger.updateVisibility();
-  trigger.updateMenuPosition();
-}
-
-/**
- * Closes the variable menu when clicks land outside the editor wrapper.
- * @param event - Mouse click event.
- */
-function handleClickOutside(event: MouseEvent): void {
-  if (trigger.visible.value && !wrapperRef.value?.contains(event.target as HTMLElement)) {
-    trigger.hide();
-  }
-}
-
-let rafId = 0;
-
-/**
- * Repositions the variable menu on viewport changes.
- */
-function handleViewportChange(): void {
-  cancelAnimationFrame(rafId);
-  rafId = requestAnimationFrame(trigger.updateMenuPosition);
-}
-
-watch(variables, () => {
-  trigger.updateFilteredVariables();
-});
-
-watch(trigger.filteredVariables, (vars) => {
-  if (trigger.activeIndex.value >= vars.length) trigger.activeIndex.value = 0;
-});
-
+// onMounted: create EditorView
 onMounted(() => {
-  initializeEditor();
-  document.addEventListener('click', handleClickOutside);
-  document.addEventListener('selectionchange', handleSelectionChange);
-  window.addEventListener('resize', handleViewportChange);
-  window.addEventListener('scroll', handleViewportChange, true);
+  if (!editorHostRef.value) return;
+
+  const state = EditorState.create({
+    doc: modelValue.value,
+    extensions: createExtensions()
+  });
+
+  view.value = new EditorView({
+    state,
+    parent: editorHostRef.value
+  });
+
+  editorIsEmpty.value = modelValue.value.trim().length === 0;
 });
 
-onUnmounted(() => {
-  cleanup();
-  document.removeEventListener('click', handleClickOutside);
-  document.removeEventListener('selectionchange', handleSelectionChange);
-  window.removeEventListener('resize', handleViewportChange);
-  window.removeEventListener('scroll', handleViewportChange, true);
+// onBeforeUnmount: destroy EditorView
+onBeforeUnmount(() => {
+  view.value?.destroy();
+  view.value = null;
 });
 
-defineExpose({ focus, captureCursorPosition, insertFileReference });
+// Expose methods
+defineExpose({
+  focus: () => {
+    view.value?.focus();
+  },
+  captureCursorPosition: () => {
+    if (view.value) {
+      lastSelection.value = view.value.state.selection;
+    }
+  },
+  insertFileReference: (reference: { referenceId: string; documentId: string; fileName: string; line: number | string }) => {
+    if (!view.value) return;
+
+    const selection = lastSelection.value ?? view.value.state.selection;
+    const pos = selection.main.head;
+    const fileRefText = `{{file-ref:${reference.referenceId}}}`;
+
+    view.value.dispatch({
+      changes: { from: pos, insert: fileRefText }
+    });
+
+    view.value.focus();
+  }
+});
 </script>
 
 <style lang="less">
 @import url('@/assets/styles/scrollbar.less');
-
-.b-prompt-editor-tag {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  height: 20px;
-  padding: 0 6px;
-  font-family: inherit;
-  font-size: 12px;
-  line-height: 20px;
-  color: var(--color-primary, #4080ff);
-  background-color: rgb(var(--color-primary-value, 64, 128, 255), 0.1);
-  border-radius: 4px;
-}
-
-.b-prompt-editor-tag--file-reference {
-  color: var(--text-primary);
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-}
 
 .b-prompt-editor {
   width: 100%;
@@ -292,7 +360,7 @@ defineExpose({ focus, captureCursorPosition, insertFileReference });
     border-color: var(--border-hover);
   }
 
-  &:focus {
+  &:focus-within {
     background: var(--input-bg);
     border-color: var(--input-focus-border);
     box-shadow: 0 0 0 2px var(--input-focus-shadow);
@@ -320,12 +388,61 @@ defineExpose({ focus, captureCursorPosition, insertFileReference });
   pointer-events: none;
 }
 
-.b-prompt-editor__textarea {
+.b-prompt-editor__codemirror {
   width: 100%;
-  height: 100%;
-  resize: none;
-  outline: none;
-  background: var(--input-bg);
-  border: none;
+  min-height: 80px;
+
+  .cm-editor {
+    outline: none;
+  }
+
+  .cm-focused {
+    outline: none;
+  }
+
+  .cm-scroller {
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+  }
+
+  .cm-content {
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .cm-line {
+    white-space: pre-wrap;
+  }
+
+  .cm-placeholder {
+    color: var(--text-placeholder);
+    font-style: normal;
+  }
+
+  .cm-selectionBackground {
+    background-color: rgb(var(--color-primary-value, 64, 128, 255), 0.15) !important;
+  }
+}
+
+// Variable chip decorations
+.b-prompt-chip {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--color-primary, #4080ff);
+  background-color: rgb(var(--color-primary-value, 64, 128, 255), 0.1);
+  border-radius: 4px;
+}
+
+.b-prompt-chip--file {
+  color: var(--text-primary);
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
 }
 </style>
