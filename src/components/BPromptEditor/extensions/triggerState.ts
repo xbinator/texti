@@ -69,29 +69,33 @@ export const triggerStateField: StateField<TriggerState | null> = StateField.def
   },
 
   update(state: TriggerState | null, tr: Transaction): TriggerState | null {
-    // 先遍历 tr.effects 处理 setTriggerActiveIndex 和 closeTrigger
+    // 处理外部 Effect，优先返回避免后续逻辑重置状态
     for (const effect of tr.effects) {
       if ((effect as StateEffect<unknown>).is(setTriggerActiveIndex) && state) {
-        state.activeIndex = (effect as StateEffect<number>).value;
-      } else if ((effect as StateEffect<unknown>).is(closeTrigger)) {
+        return { ...state, activeIndex: (effect as StateEffect<number>).value };
+      }
+      if ((effect as StateEffect<unknown>).is(closeTrigger)) {
         return null;
       }
     }
 
-    // 如果文档未变化，直接返回原状态
-    if (!tr.docChanged) {
+    // 文档和选区都未变化，直接返回原状态
+    if (!tr.selection && !tr.docChanged) {
       return state;
     }
 
+    // 使用 tr.selection 或回退到 state 当前选区
+    const selection = tr.selection || tr.state.selection;
+
     // 非空选区不弹菜单
-    if (!tr.selection?.main.empty) {
+    if (!selection.main.empty) {
       return null;
     }
 
-    const pos = tr.selection!.main.head;
+    const pos = selection.main.head;
     const context = getTriggerContext(tr.state, pos);
 
-    // 无法获取触发上下文，返回 null
+    // 无法获取触发上下文，关闭菜单
     if (!context) {
       return null;
     }

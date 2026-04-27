@@ -25,13 +25,14 @@ export function createPasteHandlerExtension(): Extension {
         const { files } = clipboardData;
         if (files.length > 0) {
           event.preventDefault();
-          const file = files[0];
-          const encodedName = encodeURIComponent(file.name);
-          const fileRef = `{{file-ref:${encodedName}|${encodedName}}}`;
+          const insert = Array.from(files)
+            .map((file) => `{{file-ref:${encodeURIComponent(file.name)}|${encodeURIComponent(file.name)}}} `)
+            .join('');
 
           const pos = view.state.selection.main.head;
           view.dispatch({
-            changes: { from: pos, insert: fileRef }
+            changes: { from: pos, insert },
+            selection: { anchor: pos + insert.length }
           });
           return true;
         }
@@ -50,15 +51,16 @@ export function createPasteHandlerExtension(): Extension {
         const { files } = dataTransfer;
         if (files.length > 0) {
           event.preventDefault();
-          const file = files[0];
-          const encodedName = encodeURIComponent(file.name);
-          const fileRef = `{{file-ref:${encodedName}|${encodedName}}}`;
+          const insert = Array.from(files)
+            .map((file) => `{{file-ref:${encodeURIComponent(file.name)}|${encodeURIComponent(file.name)}}} `)
+            .join('');
 
           // Position at drop location
           const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
           if (pos !== null) {
             view.dispatch({
-              changes: { from: pos, insert: fileRef }
+              changes: { from: pos, insert },
+              selection: { anchor: pos + insert.length }
             });
           }
           return true;

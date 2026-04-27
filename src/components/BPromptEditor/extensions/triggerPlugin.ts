@@ -12,7 +12,7 @@ import { triggerStateField } from './triggerState';
  */
 interface TriggerPluginParams {
   triggerVisible: { value: boolean };
-  triggerPosition: { value: { top: number; left: number } };
+  triggerPosition: { value: { top: number; left: number; bottom: number } };
   triggerActiveIndex: { value: number };
   triggerQuery: { value: string };
 }
@@ -41,9 +41,18 @@ export function createTriggerPlugin(params: TriggerPluginParams): Extension {
         // coordsAtPos reads DOM layout - not allowed during update, defer
         requestAnimationFrame(() => {
           const coords = update.view.coordsAtPos(triggerState.to);
-          params.triggerPosition.value = coords
-            ? { top: coords.bottom, left: coords.left }
-            : { top: 0, left: 0 };
+          if (coords) {
+            // coordsAtPos returns viewport-relative coords, but when the scroller has
+            // scrolled, we need to add scrollTop to get the correct absolute Y position
+            // for the position:fixed menu which is teleported to body
+            const { scrollDOM } = update.view;
+            const top = coords.top + scrollDOM.scrollTop;
+            const bottom = coords.bottom + scrollDOM.scrollTop;
+            const { left } = coords;
+            params.triggerPosition.value = { top, left, bottom };
+          } else {
+            params.triggerPosition.value = { top: 0, left: 0, bottom: 0 };
+          }
         });
       }
     }

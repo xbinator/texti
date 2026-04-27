@@ -12,6 +12,9 @@ function buildDecorations(text: string): DecorationSet {
 
     let className = 'b-prompt-chip';
     if (body.startsWith('file-ref:')) {
+      // 校验 file-ref:path|name 标准格式
+      const fileMatch = body.match(/^file-ref:([^|\n{}]+)\|([^{}\n]+)$/);
+      if (!fileMatch) continue;
       className = 'b-prompt-chip b-prompt-chip--file';
     }
 
@@ -35,3 +38,23 @@ export const variableChipField: StateField<DecorationSet> = StateField.define<De
 
   provide: (field) => EditorView.decorations.from(field)
 });
+
+/**
+ * 检查指定文档位置是否落在 Chip 范围内
+ * @param state - 编辑器状态
+ * @param pos - 文档位置
+ * @returns Chip 范围 { from, to } 或 null
+ */
+export function getChipAtPos(state: EditorState, pos: number): { from: number; to: number } | null {
+  const decorations = state.field(variableChipField, false);
+  if (!decorations) return null;
+
+  const iter = decorations.iter();
+  while (iter.value !== null) {
+    if (pos >= iter.from && pos < iter.to) {
+      return { from: iter.from, to: iter.to };
+    }
+    iter.next();
+  }
+  return null;
+}

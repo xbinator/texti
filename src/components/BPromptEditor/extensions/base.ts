@@ -1,72 +1,21 @@
 /**
  * @file base.ts
- * @description BPromptEditor 基础扩展组件集合
+ * @description BPromptEditor 可动态配置的 Compartment 实例
  */
 
-import type { BPromptEditorProps } from '../types';
-import type { Extension } from '@codemirror/state';
-import type { Ref } from 'vue';
-import { defaultKeymap, history, historyKeymap, indentWithTab, insertNewline } from '@codemirror/commands';
 import { Compartment } from '@codemirror/state';
-import { keymap, placeholder } from '@codemirror/view';
 
 /**
- * 可编辑状态 Compartments
+ * 编辑状态 Compartment（控制是否可编辑）
  */
 export const editableCompartment = new Compartment();
-export const readOnlyCompartment = new Compartment();
-export const themeCompartment = new Compartment();
 
 /**
- * 创建基础扩展集合
- * @description 包含历史记录、键映射、占位符等基础扩展
- * @param params - 扩展参数
- * @returns CodeMirror 扩展数组
+ * 只读状态 Compartment（控制是否只读）
  */
-export function createBaseExtensions(params: {
-  props: BPromptEditorProps;
-  resolvedMaxHeight: Ref<string | number | undefined>;
-  submitOnEnter: Ref<boolean>;
-  emit: (event: 'submit') => void;
-  modelSyncExtension: Extension;
-  variableChipField: Extension;
-  triggerStateField: Extension;
-  triggerPlugin: Extension;
-}): Extension[] {
-  const { props, submitOnEnter, emit } = params;
+export const readOnlyCompartment = new Compartment();
 
-  // 自定义 Enter 键处理器
-  const submitKeymap = keymap.of([
-    {
-      key: 'Enter',
-      run: () => {
-        if (submitOnEnter.value) {
-          emit('submit');
-          return true;
-        }
-        return false;
-      }
-    },
-    {
-      key: 'Shift-Enter',
-      run: insertNewline
-    },
-    indentWithTab
-  ]);
-
-  const extensions: Extension[] = [
-    // 历史记录扩展
-    history(),
-
-    // 自定义键映射（Enter 提交、Shift-Enter 换行、Tab 缩进）
-    submitKeymap,
-
-    // 默认键映射和历史键映射
-    keymap.of([...defaultKeymap, ...historyKeymap]),
-
-    // 占位符扩展
-    props.placeholder ? placeholder(props.placeholder) : []
-  ];
-
-  return extensions;
-}
+/**
+ * 主题 Compartment（动态 maxHeight 等样式配置）
+ */
+export const themeCompartment = new Compartment();
