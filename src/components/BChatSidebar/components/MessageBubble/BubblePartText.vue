@@ -4,7 +4,7 @@
   <div v-else :class="bem('part-text')">
     <template v-for="(segment, index) in segments" :key="`${segment.type}-${index}`">
       <span v-if="segment.type === 'text'">{{ segment.text }}</span>
-      <span v-else class="b-prompt-editor-tag b-prompt-editor-tag--file-reference" data-value="file-reference" contenteditable="false">
+      <span v-else class="message-bubble__part-text--tag" data-value="file-reference">
         {{ segment.label }}
       </span>
     </template>
@@ -21,43 +21,43 @@ defineOptions({ name: 'BubblePartText' });
 
 /**
  * @file BubblePartText.vue
- * @description Renders text segments in a message bubble, including file reference chips for user messages.
+ * @description 在消息气泡中渲染文本片段，包括用户消息的文件引用标签。
  */
 
 /**
- * Renderable text segment inside a user bubble.
+ * 用户气泡内的可渲染文本片段。
  */
 interface TextDisplaySegment {
-  /** Segment discriminator. */
+  /** 片段类型标识 */
   type: 'text';
-  /** Plain text content. */
+  /** 纯文本内容 */
   text: string;
 }
 
 /**
- * Renderable file-reference chip segment inside a user bubble.
+ * 用户气泡内的可渲染文件引用标签片段。
  */
 interface FileReferenceDisplaySegment {
-  /** Segment discriminator. */
+  /** 片段类型标识 */
   type: 'file-reference';
-  /** Chip label shown to the user. */
+  /** 展示给用户的标签文本 */
   label: string;
 }
 
 /**
- * Union of bubble text render segments.
+ * 气泡文本渲染片段的联合类型。
  */
 type MessageBubbleTextSegment = TextDisplaySegment | FileReferenceDisplaySegment;
 
 const props = withDefaults(
   defineProps<{
-    /** Text part to render. */
+    /** 要渲染的文本片段 */
     part: ChatMessageTextPart;
-    /** Whether the part still shows streaming loading state. */
+    /** 该片段是否仍处于流式加载状态 */
     loading: boolean;
-    /** Enables user-only file-reference chip rendering. */
+    /** 是否启用仅用户可见的文件引用标签渲染 */
     enableFileReferenceChips?: boolean;
-    /** File-reference metadata attached to the parent message. */
+    /** 父消息附加的文件引用元数据 */
     references?: ChatMessageFileReference[];
   }>(),
   {
@@ -71,7 +71,7 @@ const FILE_REFERENCE_TOKEN_PATTERN = /\{\{file-ref:([A-Za-z0-9_-]+)(?:\|[^}]*)?\
 const [, bem] = createNamespace('message-bubble');
 
 /**
- * Builds a quick lookup table from token string to reference metadata.
+ * 构建从引用标识到引用元数据的快速查找表。
  */
 const referenceMap = computed<Map<string, ChatMessageFileReference>>(() => {
   const map = new Map<string, ChatMessageFileReference>();
@@ -82,7 +82,7 @@ const referenceMap = computed<Map<string, ChatMessageFileReference>>(() => {
 });
 
 /**
- * Splits raw text into plain-text and file-reference chip segments.
+ * 将原始文本拆分为纯文本和文件引用标签片段。
  */
 const segments = computed<MessageBubbleTextSegment[]>(() => {
   const parts: MessageBubbleTextSegment[] = [];
@@ -120,5 +120,18 @@ const segments = computed<MessageBubbleTextSegment[]>(() => {
 .message-bubble__part-text {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.message-bubble__part-text--tag {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
 }
 </style>
