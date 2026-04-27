@@ -20,7 +20,7 @@
  * @description Prompt editor main component using CodeMirror 6
  */
 import type { Variable, BPromptEditorProps as Props } from './types';
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { defaultKeymap, history, historyKeymap, indentWithTab, insertNewline } from '@codemirror/commands';
 import { EditorState, Annotation } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
@@ -82,11 +82,8 @@ const resolvedMaxHeight = computed<string | undefined>(() => {
 // Theme extension with max height
 const createThemeExtension = (maxHeight: string | undefined) => {
   return EditorView.theme({
-    '&': {
-      maxHeight: maxHeight ?? 'none',
-      overflow: 'auto'
-    },
     '.cm-scroller': {
+      maxHeight: maxHeight ?? 'none',
       overflow: 'auto',
       fontFamily: 'inherit',
       fontSize: '14px',
@@ -110,7 +107,16 @@ const createThemeExtension = (maxHeight: string | undefined) => {
       backgroundColor: 'rgb(var(--color-primary-value, 64, 128, 255), 0.2) !important'
     },
     '.cm-cursor': {
-      borderLeftColor: 'var(--color-primary, #4080ff)'
+      borderLeft: '1.2px solid var(--color-primary, #4080ff)',
+      marginLeft: '-0.6px',
+      pointerEvents: 'none',
+      position: 'relative',
+      height: '1em'
+    },
+    // 修复 normalize.css 全局 div { border: none } 导致的 widgetBuffer 零宽问题
+    '.cm-widgetBuffer': {
+      display: 'inline-block',
+      width: '1px'
     }
   });
 };
@@ -387,6 +393,11 @@ onMounted(() => {
   view.value = new EditorView({
     state,
     parent: editorHostRef.value
+  });
+
+  // 首次创建后强制重新测量视口，确保空内容时光标层正确初始化
+  nextTick(() => {
+    view.value?.requestMeasure();
   });
 });
 
