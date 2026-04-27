@@ -1,8 +1,34 @@
 import type { DecorationSet } from '@codemirror/view';
 import { StateField, EditorState, type ChangeSet, type Range } from '@codemirror/state';
-import { Decoration, EditorView } from '@codemirror/view';
+import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 
 const VARIABLE_PATTERN = /\{\{([^{}\n]+)\}\}/g;
+
+/**
+ * 文件引用 Chip Widget，将底层 token 替换为展示文本
+ * - 有 line → 显示 `fileName:line`
+ * - 无 line → 显示 `fileName`
+ */
+class FileRefWidget extends WidgetType {
+  constructor(private fileName: string, private line: string) {
+    super();
+  }
+
+  eq(other: FileRefWidget): boolean {
+    return this.fileName === other.fileName && this.line === other.line;
+  }
+
+  toDOM(): HTMLElement {
+    const span = document.createElement('span');
+    span.className = 'b-prompt-chip b-prompt-chip--file';
+    span.textContent = this.line ? `${this.fileName}:${this.line}` : this.fileName;
+    return span;
+  }
+
+  ignoreEvent(): boolean {
+    return false;
+  }
+}
 
 function buildDecorations(text: string): DecorationSet {
   const decorations: Range<Decoration>[] = [];
@@ -10,15 +36,24 @@ function buildDecorations(text: string): DecorationSet {
   for (const match of text.matchAll(VARIABLE_PATTERN)) {
     const body = match[1];
 
-    let className = 'b-prompt-chip';
     if (body.startsWith('file-ref:')) {
-      // 校验 file-ref:path|name 标准格式
-      const fileMatch = body.match(/^file-ref:([^|\n{}]+)\|([^{}\n]+)$/);
-      if (!fileMatch) continue;
-      className = 'b-prompt-chip b-prompt-chip--file';
+      // 统一按 | 拆分: file-ref:id|fileName|line → widget 显示 fileName:line
+      const stripped = body.slice('file-ref:'.length);
+      if (!stripped) continue;
+
+      const parts = stripped.split('|');
+      const fileName = parts[1] || parts[0];
+      const line = parts[2] || '';
+
+      decorations.push(
+        Decoration.replace({
+          widget: new FileRefWidget(fileName, line)
+        }).range(match.index, match.index + match[0].length)
+      );
+      continue;
     }
 
-    decorations.push(Decoration.mark({ class: className }).range(match.index, match.index + match[0].length));
+    decorations.push(Decoration.mark({ class: 'b-prompt-chip' }).range(match.index, match.index + match[0].length));
   }
 
   return Decoration.set(decorations, true);

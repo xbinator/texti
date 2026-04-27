@@ -26,7 +26,7 @@ export function createPasteHandlerExtension(): Extension {
         if (files.length > 0) {
           event.preventDefault();
           const insert = Array.from(files)
-            .map((file) => `{{file-ref:${encodeURIComponent(file.name)}|${encodeURIComponent(file.name)}}} `)
+            .map((file) => `{{file-ref:${encodeURIComponent(file.name)}|${file.name}|}} `)
             .join('');
 
           const pos = view.state.selection.main.head;
@@ -52,7 +52,7 @@ export function createPasteHandlerExtension(): Extension {
         if (files.length > 0) {
           event.preventDefault();
           const insert = Array.from(files)
-            .map((file) => `{{file-ref:${encodeURIComponent(file.name)}|${encodeURIComponent(file.name)}}} `)
+            .map((file) => `{{file-ref:${encodeURIComponent(file.name)}|${file.name}|}} `)
             .join('');
 
           // Position at drop location

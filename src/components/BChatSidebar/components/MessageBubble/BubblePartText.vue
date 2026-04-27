@@ -66,7 +66,7 @@ const props = withDefaults(
   }
 );
 
-const FILE_REFERENCE_TOKEN_PATTERN = /\{\{file-ref:([A-Za-z0-9_-]+)\}\}/g;
+const FILE_REFERENCE_TOKEN_PATTERN = /\{\{file-ref:([A-Za-z0-9_-]+)(?:\|[^}]*)?\}\}/g;
 
 const [, bem] = createNamespace('message-bubble');
 

@@ -99,7 +99,7 @@ describe('BPromptEditor file reference chips', () => {
 
     expect(chip.getAttribute('data-reference-id')).toBe('ref_123');
     expect(chip.getAttribute('data-document-id')).toBe('doc_123');
-    expect(decodeVariables(`请看 ${chip.outerHTML}`)).toBe('请看 {{file-ref:ref_123}}');
+    expect(decodeVariables(`请看 ${chip.outerHTML}`)).toBe('请看 {{file-ref:ref_123|file.ts|123-145}}');
   });
 
   test('renders file reference placeholders as non-editable inline chips', () => {
@@ -146,7 +146,7 @@ describe('BPromptEditor file reference chips', () => {
     expect(chip?.getAttribute('data-reference-id')).toBe('ref_temp');
     expect(chip?.getAttribute('data-document-id')).toBe('doc_temp');
     expect(chip?.textContent).toBe('临时笔记:3');
-    expect(decodeVariables(encoded)).toBe('定位 {{file-ref:ref_temp}}');
+    expect(decodeVariables(encoded)).toBe('定位 {{file-ref:ref_temp|临时笔记|3}}');
   });
 
   test('keeps file reference chip support wired through the prompt editor insert API', () => {
@@ -171,14 +171,16 @@ describe('BPromptEditor variableChip extension', () => {
     return state.field(variableChipField);
   }
 
-  function iterMarks(deco: any): Array<{ from: number; to: number; class: string }> {
-    const results: Array<{ from: number; to: number; class: string }> = [];
+  function iterDeco(deco: any): Array<{ from: number; to: number; type: 'mark' | 'widget'; markClass?: string }> {
+    const results: Array<{ from: number; to: number; type: 'mark' | 'widget'; markClass?: string }> = [];
     if (!deco) return results;
     for (let iter = deco.iter(); iter.value; iter.next()) {
+      const spec = iter.value.spec;
       results.push({
         from: iter.from,
         to: iter.to,
-        class: iter.value.spec.class
+        type: spec.widget ? 'widget' : 'mark',
+        markClass: spec.class
       });
     }
     return results;
@@ -186,37 +188,40 @@ describe('BPromptEditor variableChip extension', () => {
 
   test('renders {{variable}} as b-prompt-chip mark', () => {
     const deco = getDecorations('hello {{USER}} world');
-    const marks = iterMarks(deco);
-    expect(marks).toHaveLength(1);
-    expect(marks[0].class).toBe('b-prompt-chip');
+    const items = iterDeco(deco);
+    expect(items).toHaveLength(1);
+    expect(items[0].type).toBe('mark');
+    expect(items[0].markClass).toBe('b-prompt-chip');
   });
 
-  test('renders {{file-ref:path|name}} as b-prompt-chip--file mark', () => {
+  test('renders {{file-ref:path|name}} as b-prompt-chip--file widget', () => {
     const deco = getDecorations('{{file-ref:src%2Ffoo%2Fbar.ts|bar.ts}}');
-    const marks = iterMarks(deco);
-    expect(marks).toHaveLength(1);
-    expect(marks[0].class).toBe('b-prompt-chip b-prompt-chip--file');
+    const items = iterDeco(deco);
+    expect(items).toHaveLength(1);
+    expect(items[0].type).toBe('widget');
   });
 
   test('does not render incomplete {{variable without }}', () => {
     const deco = getDecorations('hello {{incomplete');
-    const marks = iterMarks(deco);
-    expect(marks).toHaveLength(0);
+    const items = iterDeco(deco);
+    expect(items).toHaveLength(0);
   });
 
   test('renders multiple chips in one document', () => {
     const deco = getDecorations('{{var1}} and {{var2}} and {{file-ref:path|name}}');
-    const marks = iterMarks(deco);
-    expect(marks).toHaveLength(3);
-    expect(marks[0].class).toBe('b-prompt-chip');
-    expect(marks[1].class).toBe('b-prompt-chip');
-    expect(marks[2].class).toBe('b-prompt-chip b-prompt-chip--file');
+    const items = iterDeco(deco);
+    expect(items).toHaveLength(3);
+    expect(items[0].type).toBe('mark');
+    expect(items[0].markClass).toBe('b-prompt-chip');
+    expect(items[1].type).toBe('mark');
+    expect(items[1].markClass).toBe('b-prompt-chip');
+    expect(items[2].type).toBe('widget');
   });
 
   test('does not render chip with newline inside', () => {
     const deco = getDecorations('{{var\n}}');
-    const marks = iterMarks(deco);
-    expect(marks).toHaveLength(0);
+    const items = iterDeco(deco);
+    expect(items).toHaveLength(0);
   });
 });
 
