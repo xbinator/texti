@@ -1,6 +1,6 @@
 <template>
-  <BubbleMenu v-if="editor" :editor="editor" :options="bubbleMenuOptions" class="bubble-menu-wrapper">
-    <div class="selection-toolbar" :class="{ 'is-hidden': !visible }">
+  <BubbleMenu :editor="editor" :options="bubbleMenuOptions" class="bubble-menu-wrapper">
+    <div class="selection-toolbar">
       <template v-if="isModelAvailable">
         <div class="selection-toolbar__ai-btn" @mousedown.prevent="toggleAIInput">
           <Icon icon="lucide:sparkles" />
@@ -22,7 +22,7 @@
         :key="btn.command"
         type="button"
         class="selection-toolbar__btn"
-        :class="{ 'is-active': editor.isActive(btn.command) }"
+        :class="{ 'is-active': editor?.isActive(btn.command) }"
         @mousedown.prevent="btn.action"
       >
         <Icon :icon="btn.icon" />
@@ -55,13 +55,12 @@ interface SelectionRange {
  * 组件属性。
  */
 interface Props {
-  editor?: Editor | null;
+  editor: Editor;
   filePath?: string | null;
   fileName?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  editor: null,
   filePath: null,
   fileName: ''
 });
@@ -72,7 +71,6 @@ const emit = defineEmits<{
   (e: 'selection-reference-clear'): void;
 }>();
 
-const visible = ref(false);
 const isModelAvailable = ref(false);
 const serviceModelStore = useServiceModelStore();
 
@@ -101,11 +99,9 @@ const bubbleMenuOptions = computed(() => ({
   placement: 'top-start' as const,
   onShow: () => {
     checkModelAvailability();
-    visible.value = true;
     emit('ai-input-toggle', false);
   },
   onHide: () => {
-    visible.value = false;
     emit('ai-input-toggle', false);
     emit('selection-reference-clear');
   }
@@ -114,8 +110,6 @@ const bubbleMenuOptions = computed(() => ({
 // ---- AI Input ----
 
 function toggleAIInput(): void {
-  visible.value = false;
-
   const selection = props.editor?.state.selection;
   if (!selection || selection.from === selection.to) {
     emit('ai-input-toggle', true);
@@ -193,11 +187,6 @@ checkModelAvailability();
   border: 1px solid var(--border-primary);
   border-radius: 8px;
   box-shadow: var(--shadow-lg);
-
-  &.is-hidden {
-    visibility: hidden;
-    opacity: 0;
-  }
 }
 
 .selection-toolbar__ai-btn {

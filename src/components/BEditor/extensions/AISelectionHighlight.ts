@@ -47,30 +47,18 @@ export function setAISelectionHighlight(editor: Editor | null | undefined, range
   if (!editor) return;
 
   const currentRange = aiSelectionHighlightPluginKey.getState(editor.state)?.range ?? null;
-  if (isSameRange(currentRange, range)) {
-    return;
-  }
+  if (isSameRange(currentRange, range)) return;
 
-  editor.view.dispatch(
-    editor.state.tr.setMeta(aiSelectionHighlightPluginKey, {
-      range
-    })
-  );
+  editor.view.dispatch(editor.state.tr.setMeta(aiSelectionHighlightPluginKey, { range }));
 }
 
 export function clearAISelectionHighlight(editor: Editor | null | undefined): void {
   if (!editor) return;
 
   const currentRange = aiSelectionHighlightPluginKey.getState(editor.state)?.range ?? null;
-  if (!currentRange) {
-    return;
-  }
+  if (!currentRange) return;
 
-  editor.view.dispatch(
-    editor.state.tr.setMeta(aiSelectionHighlightPluginKey, {
-      range: null
-    })
-  );
+  editor.view.dispatch(editor.state.tr.setMeta(aiSelectionHighlightPluginKey, { range: null }));
 }
 
 export const AISelectionHighlight = Extension.create({
