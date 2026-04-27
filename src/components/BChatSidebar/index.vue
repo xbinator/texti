@@ -32,7 +32,6 @@
             v-model:value="inputValue"
             placeholder="输入消息..."
             :max-height="200"
-            variant="borderless"
             submit-on-enter
             @submit="handleChatSubmit"
           />
@@ -529,16 +528,16 @@ onUnmounted(() => {
   border-radius: 6px;
 
   .b-prompt-editor {
-    // flex: 1;
-    // min-width: 0;
-    // padding: 0;
-    // background-color: transparent;
-    // border: none;
-    // border-radius: 0;
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    background-color: transparent;
+    border: none;
+    border-radius: 0;
 
-    // &:focus-within {
-    //   box-shadow: none;
-    // }
+    &:focus-within {
+      box-shadow: none;
+    }
   }
 }
 </style>
