@@ -25,6 +25,12 @@ export interface EditorToolContextRegistry {
    * @returns 工具上下文或 undefined
    */
   getCurrentContext: () => AIToolContext | undefined;
+  /**
+   * 按文档 ID 查找编辑器上下文
+   * @param documentId - 文档 ID（注册时用作 Map key）
+   * @returns 工具上下文或 undefined
+   */
+  getContext: (documentId: string) => AIToolContext | undefined;
 }
 
 /**
@@ -52,6 +58,9 @@ export function createEditorToolContextRegistry(): EditorToolContextRegistry {
     },
     getCurrentContext(): AIToolContext | undefined {
       return activeEditorId ? contexts.get(activeEditorId) : undefined;
+    },
+    getContext(documentId: string): AIToolContext | undefined {
+      return contexts.get(documentId);
     }
   };
 }
