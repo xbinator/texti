@@ -352,7 +352,7 @@ function handleCaptureInputCursor(): void {
 }
 
 function handleChatInsertFileReference(reference: FileReferenceChip): void {
-  const token = `{{file-ref:${reference.referenceId}}}`;
+  const token = `{{file-ref:${reference.referenceId}|${reference.fileName}|${reference.line}}}`;
   draftReferences.value = [
     ...draftReferences.value.filter((item) => item.id !== reference.referenceId),
     {

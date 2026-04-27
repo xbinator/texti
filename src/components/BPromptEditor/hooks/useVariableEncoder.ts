@@ -171,7 +171,7 @@ function decodeContent(content: string, registry: Map<string, FileReferenceChip>
     }
 
     registry.set(reference.referenceId, reference);
-    element.replaceWith(document.createTextNode(`{{file-ref:${reference.referenceId}}}`));
+    element.replaceWith(document.createTextNode(`{{file-ref:${reference.referenceId}|${reference.fileName}|${reference.line}}}`));
   });
 
   temp.querySelectorAll('span[data-value="variable"][data-content]').forEach((element) => {
@@ -221,7 +221,7 @@ export function useVariableEncoder(options: VariableEncoderOptions) {
     encodeVariables: (content: string) => {
       if (!content) return '';
 
-      const fileReferencePattern = /\{\{file-ref:([A-Za-z0-9_-]+)\}\}/g;
+      const fileReferencePattern = /\{\{file-ref:([A-Za-z0-9_-]+)(?:\|[^}]*)?\}\}/g;
       const parts: string[] = [];
       let lastIndex = 0;
 

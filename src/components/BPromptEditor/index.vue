@@ -426,11 +426,10 @@ defineExpose({
 
     const selection = lastSelection.value ?? view.value.state.selection;
     const pos = selection.main.head;
-    const fileRefText = `{{file-ref:${reference.referenceId}}} `;
+    const fileRefText = `{{file-ref:${reference.referenceId}|${reference.fileName}|${reference.line}}} `;
 
-    view.value.dispatch({
-      changes: { from: pos, insert: fileRefText }
-    });
+    const insertEnd = pos + fileRefText.length;
+    view.value.dispatch({ changes: { from: pos, insert: fileRefText }, selection: { anchor: insertEnd } });
 
     view.value.focus();
   }
