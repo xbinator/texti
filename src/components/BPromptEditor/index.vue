@@ -415,6 +415,13 @@ onMounted(() => {
     parent: editorHostRef.value
   });
 
+  // 注入初始 chipResolver（watch 为 lazy 模式，首次不触发，需手动分派）
+  if (props.chipResolver) {
+    view.value.dispatch({
+      effects: chipResolverEffect.of(props.chipResolver)
+    });
+  }
+
   // 首次创建后强制重新测量视口，确保空内容时光标层正确初始化
   nextTick(() => {
     view.value?.requestMeasure();

@@ -34,7 +34,7 @@
     <BModal v-model:open="promptModalVisible" title="提示词" :width="600" :main-style="{ padding: '16px 24px 10px' }">
       <div class="prompt-modal">
         <div class="prompt-modal-desc" v-text="'输入内容，支持按此格式书写变量： {{ USER_NAME }}'"></div>
-        <BPromptEditor v-model:value="draftPrompt" :placeholder="placeholder" :options="options" :max-height="420" />
+        <BPromptEditor v-model:value="draftPrompt" :placeholder="placeholder" :options="options" :max-height="420" :chip-resolver="chipResolver" />
       </div>
 
       <template #footer>
@@ -52,6 +52,7 @@ import type { ModelServiceType } from 'types/model';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import BButton from '@/components/BButton/index.vue';
 import BModal from '@/components/BModal/index.vue';
+import type { ChipResult } from '@/components/BPromptEditor/extensions/variableChip';
 import BPromptEditor from '@/components/BPromptEditor/index.vue';
 import type { VariableOptionGroup } from '@/components/BPromptEditor/types';
 import BSelect from '@/components/BSelect/index.vue';
@@ -83,6 +84,19 @@ const props = withDefaults(defineProps<Props>(), {
   options: () => [],
   showPrompt: true
 });
+
+/**
+ * Chip 解析器，将 {{...}} 内部的 body 解析为渲染指令。
+ * options 中的变量值渲染为 chip（className），其他返回 null 作为纯文本。
+ * 函数定义在 setup 顶层，引用稳定，不会触发频繁 reconfigure。
+ */
+function chipResolver(body: string): ChipResult | null {
+  const allVars = props.options?.flatMap((g) => g.options) ?? [];
+  if (allVars.some((v) => v.value === body)) {
+    return { className: 'b-prompt-chip' };
+  }
+  return null;
+}
 
 const store = useProviderStore();
 const selectedModel = ref<string>();

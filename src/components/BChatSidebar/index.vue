@@ -53,6 +53,7 @@
 </template>
 
 <script setup lang="ts">
+import type { FileReferenceChip } from './types';
 import type { ChatMessageConfirmationAction, ChatMessageHistoryCursor, ChatMessageFileReference, ChatReferenceSnapshot, ChatSession } from 'types/chat';
 import { nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { WidgetType } from '@codemirror/view';
@@ -66,7 +67,6 @@ import { create, userChoice } from '@/components/BChatSidebar/utils/messageHelpe
 import type { Message } from '@/components/BChatSidebar/utils/types';
 import type { ChipResolver } from '@/components/BPromptEditor/extensions/variableChip';
 import BPromptEditor from '@/components/BPromptEditor/index.vue';
-import type { FileReferenceChip } from '@/components/BPromptEditor/types';
 import { onChatFileReferenceInsert, type ChatFileReferenceInsertPayload } from '@/shared/chat/fileReference';
 import { chatStorage, serviceModelsStorage } from '@/shared/storage';
 import { useChatStore } from '@/stores/chat';
