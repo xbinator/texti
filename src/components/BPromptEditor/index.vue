@@ -72,6 +72,9 @@ const filteredVariables = computed<Variable[]>(() => {
   return allVariables.value.filter((v) => v.label.toLowerCase().includes(query) || v.value.toLowerCase().includes(query));
 });
 
+// Whether there are variables available for triggering
+const hasVariables = computed<boolean>(() => allVariables.value.length > 0);
+
 // Resolved max height
 const resolvedMaxHeight = computed<string | undefined>(() => {
   if (props.maxHeight === undefined) return undefined;
@@ -196,7 +199,8 @@ function createExtensions(): import('@codemirror/state').Extension[] {
       triggerVisible,
       triggerPosition,
       triggerActiveIndex,
-      triggerQuery
+      triggerQuery,
+      hasVariables
     }),
 
     // Placeholder

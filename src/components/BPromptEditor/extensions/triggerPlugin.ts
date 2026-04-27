@@ -15,6 +15,7 @@ interface TriggerPluginParams {
   triggerPosition: { value: { top: number; left: number; bottom: number } };
   triggerActiveIndex: { value: number };
   triggerQuery: { value: string };
+  hasVariables: { value: boolean };
 }
 
 /**
@@ -29,7 +30,7 @@ export function createTriggerPlugin(params: TriggerPluginParams): Extension {
       update(update: ViewUpdate): void {
         const triggerState = update.state.field(triggerStateField, false);
 
-        if (!triggerState) {
+        if (!triggerState || !params.hasVariables.value) {
           params.triggerVisible.value = false;
           return;
         }
