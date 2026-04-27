@@ -15,7 +15,9 @@
       "Bash(ls:*)",
       "Bash(node:*)",
       "Bash(npm test:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(pnpm test:*)",
+      "Bash(npx vitest:*)"
     ]
   }
 }

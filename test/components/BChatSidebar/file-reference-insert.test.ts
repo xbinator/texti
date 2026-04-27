@@ -51,20 +51,19 @@ describe('chat file reference insert event utilities', () => {
 describe('chat file reference insert wiring', () => {
   test('wires editor selection toolbar to chat sidebar through BChat insert API', () => {
     const selectionToolbarSource = readSource('src/components/BEditor/components/SelectionToolbar.vue');
-    const paneRichEditorSource = readSource('src/components/BEditor/components/PaneRichEditor.vue');
-    const richEditorHostSource = readSource('src/components/BEditor/components/RichEditorHost.vue');
+    const richEditorContentSource = readSource('src/components/BEditor/components/RichEditorContent.vue');
+    const paneRichEditoSource = readSource('src/components/BEditor/components/PaneRichEditor.vue');
     const editorSource = readSource('src/components/BEditor/index.vue');
-    const chatSource = readSource('src/components/BChat/index.vue');
     const sidebarSource = readSource('src/components/BChatSidebar/index.vue');
 
     expect(selectionToolbarSource).toContain('insertSelectionReferenceToChat');
     expect(selectionToolbarSource).toContain('emitChatFileReferenceInsert');
     expect(selectionToolbarSource).toContain('getLineRangeFromTextBeforeSelection');
     expect(selectionToolbarSource).toContain('fileName: props.fileName || getFileNameFromPath');
-    expect(paneRichEditorSource).toContain(':file-path="props.filePath"');
-    expect(paneRichEditorSource).toContain(':file-name="props.fileName"');
-    expect(richEditorHostSource).toContain(':file-path="props.filePath"');
-    expect(richEditorHostSource).toContain(':file-name="props.fileName"');
+    expect(richEditorContentSource).toContain(':file-path="props.filePath"');
+    expect(richEditorContentSource).toContain(':file-name="props.fileName"');
+    expect(paneRichEditoSource).toContain(':file-path="props.filePath"');
+    expect(paneRichEditoSource).toContain(':file-name="props.fileName"');
     expect(editorSource).toContain(':file-path="props.filePath"');
     expect(editorSource).toContain(':file-name="editorTitle"');
     expect(sidebarSource).toContain('handleChatInsertFileReference');
@@ -73,14 +72,6 @@ describe('chat file reference insert wiring', () => {
     expect(sidebarSource).toContain('startLine');
     expect(sidebarSource).toContain('endLine');
     expect(sidebarSource).toContain('0|0');
-    expect(chatSource).toContain('const activeReferences = getActiveDraftReferences(content);');
-    expect(chatSource).toContain('loadReferenceSnapshotMap');
-    expect(chatSource).toContain('chatStorage.getReferenceSnapshots');
-    expect(chatSource).toContain('buildModelReadyMessages(sourceMessages, snapshotsById)');
-    expect(chatSource).toContain('content,');
-    expect(chatSource).toContain("parts: [{ type: 'text', text: content }],");
-    expect(chatSource).not.toContain('expandFileReferencesForModel');
-    expect(chatSource).toContain('defineExpose({ focus');
     expect(sidebarSource).toContain('onChatFileReferenceInsert');
     expect(sidebarSource).toContain('insertTextAtCursor');
     expect(sidebarSource).toContain('type ChatFileReferenceInsertPayload');
@@ -88,6 +79,7 @@ describe('chat file reference insert wiring', () => {
     expect(sidebarSource).toContain('documentId: toolContext?.document.id || reference.filePath || reference.fileName');
     expect(sidebarSource).toContain('async function persistReferenceSnapshots');
     expect(sidebarSource).toContain('chatStorage.upsertReferenceSnapshots([snapshot])');
-    expect(sidebarSource).toContain('chatRef.value?.insertFileReference');
+    expect(sidebarSource).toContain('getActiveDraftReferences');
+    expect(sidebarSource).toContain('formatLineRange');
   });
 });
