@@ -297,7 +297,6 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
 
     const transportTools = config.toolSupport.supported && Boolean(tools?.length) ? toTransportTools(tools ?? []) : undefined;
 
-    // eslint-disable-next-line no-use-before-define
     agent.stream({ messages: continuedMessages, modelId: config.modelId, providerId: config.providerId, tools: transportTools });
   }
 
