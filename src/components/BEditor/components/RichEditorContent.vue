@@ -12,20 +12,21 @@
     />
 
     <!-- 当前选中块菜单 -->
-    <CurrentBlockMenu :editor="props.editor" />
+    <CurrentBlockMenu :editor="editor" />
     <!-- 选择工具栏 -->
     <SelectionToolbar
-      :editor="props.editor"
-      :file-path="props.filePath"
-      :file-name="props.fileName"
+      v-if="editor"
+      :editor="editor"
+      :file-path="filePath"
+      :file-name="fileName"
       @ai-input-toggle="handleAIInputToggle"
       @selection-reference-insert="handleSelectionReferenceInsert"
       @selection-reference-clear="handleSelectionReferenceClear"
     />
     <!-- 选择 AI 输入框 -->
-    <SelectionAIInput v-model:visible="aiInputVisible" :editor="props.editor" :selection-range="selectionRange" />
+    <SelectionAIInput v-model:visible="aiInputVisible" :editor="editor" :selection-range="selectionRange" />
     <!-- 编辑器内容 -->
-    <EditorContent :key="editorId" :editor="props.editor ?? undefined" class="b-editor-content" />
+    <EditorContent :key="editorId" :editor="editor ?? undefined" class="b-editor-content" />
   </div>
 </template>
 
