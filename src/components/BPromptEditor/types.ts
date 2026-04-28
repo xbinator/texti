@@ -7,9 +7,19 @@ import type { ChipResolver } from './extensions/variableChip';
 /**
  * Slash command option metadata.
  */
+export type SlashCommandId = 'model' | 'usage' | 'new' | 'clear';
+
+/**
+ * Slash command kind.
+ */
+export type SlashCommandType = 'action' | 'prompt';
+
+/**
+ * Slash command option metadata used by the prompt editor and chat sidebar.
+ */
 export interface SlashCommandOption {
   /** Stable command identifier. */
-  id: string;
+  id: SlashCommandId;
   /** Slash trigger text shown to the user. */
   trigger: string;
   /** Human-readable command title. */
@@ -17,7 +27,7 @@ export interface SlashCommandOption {
   /** Command description shown in UI hints. */
   description: string;
   /** Command kind; action commands run immediately, prompt commands open prompt flows. */
-  type: 'action' | 'prompt';
+  type: SlashCommandType;
 }
 
 /**

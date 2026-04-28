@@ -7,7 +7,7 @@ import type { SlashCommandOption } from '@/components/BPromptEditor/types';
 /**
  * First-version chat slash commands exposed in trigger order.
  */
-export const chatSlashCommands: SlashCommandOption[] = [
+export const chatSlashCommands: readonly SlashCommandOption[] = [
   {
     id: 'model',
     trigger: '/model',
@@ -32,7 +32,7 @@ export const chatSlashCommands: SlashCommandOption[] = [
   {
     id: 'clear',
     trigger: '/clear',
-    title: 'Clear Chat',
+    title: 'Clear Draft',
     description: 'Clear the current chat input.',
     type: 'action'
   }
