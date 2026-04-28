@@ -84,8 +84,25 @@ const resolvedMaxHeight = computed<string | undefined>(() => {
   return props.maxHeight;
 });
 
-// Theme extension with max height
-const createThemeExtension = (maxHeight: string | undefined) => {
+/**
+ * 判断编辑器内容在去除空白后是否为空。
+ * @param content - 编辑器原始文本内容。
+ * @returns 内容是否为空。
+ */
+function isEditorContentEmpty(content: string): boolean {
+  return content.trim().length === 0;
+}
+
+// 当前编辑器内容是否为空
+const editorIsEmpty = ref<boolean>(isEditorContentEmpty(modelValue.value));
+
+/**
+ * 创建编辑器主题扩展。
+ * @param maxHeight - 编辑器滚动区域的最大高度。
+ * @param isEmpty - 当前编辑器内容是否为空。
+ * @returns CodeMirror 主题扩展。
+ */
+const createThemeExtension = (maxHeight: string | undefined, isEmpty: boolean): import('@codemirror/state').Extension => {
   return EditorView.theme({
     '.cm-scroller': {
       maxHeight: maxHeight ?? 'none',
@@ -121,7 +138,7 @@ const createThemeExtension = (maxHeight: string | undefined) => {
     // 修复 normalize.css 全局 div { border: none } 导致的 widgetBuffer 零宽问题
     '.cm-widgetBuffer': {
       display: 'inline-block',
-      width: '1px'
+      width: isEmpty ? '1px' : '0'
     }
   });
 };
@@ -131,12 +148,14 @@ const externalUpdate = Annotation.define<boolean>();
 
 // Model sync extension
 const modelSyncExtension = EditorView.updateListener.of((update) => {
+  const newValue = update.state.doc.toString();
+  editorIsEmpty.value = isEditorContentEmpty(newValue);
+
   // Skip if this update was triggered by external value change
   if (update.transactions.some((tr) => tr.annotation(externalUpdate))) {
     return;
   }
 
-  const newValue = update.state.doc.toString();
   if (modelValue.value !== newValue) {
     modelValue.value = newValue;
     emit('change', newValue);
@@ -252,7 +271,7 @@ function createExtensions(): import('@codemirror/state').Extension[] {
     readOnlyCompartment.of(EditorState.readOnly.of(props.disabled)),
 
     // Theme compartment
-    themeCompartment.of(createThemeExtension(resolvedMaxHeight.value)),
+    themeCompartment.of(createThemeExtension(resolvedMaxHeight.value, editorIsEmpty.value)),
 
     // 变量菜单键盘导航 + Chip 删除 + Enter 提交 + Shift-Enter 换行 + Tab 缩进
     keymap.of([
@@ -386,7 +405,16 @@ watch(resolvedMaxHeight, (maxHeight) => {
   if (!view.value) return;
 
   view.value.dispatch({
-    effects: themeCompartment.reconfigure(createThemeExtension(maxHeight))
+    effects: themeCompartment.reconfigure(createThemeExtension(maxHeight, editorIsEmpty.value))
+  });
+});
+
+// Watch for content empty state changes
+watch(editorIsEmpty, (isEmpty) => {
+  if (!view.value) return;
+
+  view.value.dispatch({
+    effects: themeCompartment.reconfigure(createThemeExtension(resolvedMaxHeight.value, isEmpty))
   });
 });
 
@@ -528,12 +556,6 @@ defineExpose({
     outline: none;
   }
 
-  .cm-scroller {
-    font-family: inherit;
-    font-size: inherit;
-    line-height: inherit;
-  }
-
   .cm-content {
     word-break: break-all;
     white-space: pre-wrap;
@@ -541,15 +563,6 @@ defineExpose({
 
   .cm-line {
     white-space: pre-wrap;
-  }
-
-  .cm-placeholder {
-    font-style: normal;
-    color: var(--text-placeholder);
-  }
-
-  .cm-selectionBackground {
-    background-color: rgb(var(--color-primary-value, 64, 128, 255), 0.15) !important;
   }
 }
 

@@ -76,6 +76,13 @@ describe('BPromptEditor placeholder state', () => {
     expect(indexSource).not.toContain('redoHistory');
     // useEditorCore.ts and useEditorKeyboard.ts no longer exist
   });
+
+  test('uses dynamic widgetBuffer width based on whether editor content is empty', () => {
+    const source = readSource('src/components/BPromptEditor/index.vue');
+
+    expect(source).toContain('function isEditorContentEmpty(content: string): boolean');
+    expect(source).toContain("width: isEmpty ? '1px' : '0'");
+  });
 });
 
 describe('BPromptEditor DOM safety regressions', () => {
@@ -95,9 +102,19 @@ describe('BPromptEditor variableChip extension', () => {
    * 简单的测试 Widget，用于验证 widget 类型装饰。
    */
   class TestWidget extends WidgetType {
-    toDOM() { const span = document.createElement('span'); span.className = 'test-widget'; return span; }
-    eq() { return true; }
-    ignoreEvent() { return false; }
+    toDOM() {
+      const span = document.createElement('span');
+      span.className = 'test-widget';
+      return span;
+    }
+
+    eq() {
+      return true;
+    }
+
+    ignoreEvent() {
+      return false;
+    }
   }
 
   /**
@@ -129,7 +146,7 @@ describe('BPromptEditor variableChip extension', () => {
     const results: Array<{ from: number; to: number; type: 'mark' | 'widget'; markClass?: string }> = [];
     if (!deco) return results;
     for (let iter = deco.iter(); iter.value; iter.next()) {
-      const spec = iter.value.spec;
+      const { spec } = iter.value;
       results.push({
         from: iter.from,
         to: iter.to,
@@ -186,7 +203,7 @@ describe('BPromptEditor variableChip extension', () => {
   });
 
   test('renders widget when resolver returns widget', () => {
-    const widgetResolver: ChipResolver = (body) => body ? { widget: new TestWidget() } : null;
+    const widgetResolver: ChipResolver = (body) => (body ? { widget: new TestWidget() } : null);
     const deco = getDecorations('hello {{FOO}} world', widgetResolver);
     const items = iterDeco(deco);
     expect(items).toHaveLength(1);
