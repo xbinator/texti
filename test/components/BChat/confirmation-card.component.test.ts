@@ -92,7 +92,7 @@ describe('ConfirmationCard', () => {
 
     expect(wrapper.text()).not.toContain('AI 请求在当前光标位置插入新内容。');
 
-    await wrapper.get('.b-confirmation-card__title').trigger('click');
+    await wrapper.get('.confirm-card__title').trigger('click');
 
     expect(wrapper.text()).toContain('AI 请求在当前光标位置插入新内容。');
     expect(wrapper.text()).toContain('已应用到文档。');
@@ -101,7 +101,7 @@ describe('ConfirmationCard', () => {
   it('collapses a pending confirmation after title click', async () => {
     const wrapper = mountConfirmationCard(createConfirmationPart());
 
-    await wrapper.get('.b-confirmation-card__title').trigger('click');
+    await wrapper.get('.confirm-card__title').trigger('click');
 
     expect(wrapper.text()).not.toContain('AI 请求在当前光标位置插入新内容。');
     expect(wrapper.findAll('button')).toHaveLength(0);

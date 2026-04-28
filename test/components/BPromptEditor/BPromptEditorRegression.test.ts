@@ -42,29 +42,31 @@ describe('BPromptEditor placeholder state', () => {
     expect(isPromptEditorContentEmpty('{{ USER_NAME }}')).toBe(false);
   });
 
-  test('uses v-show with editorIsEmpty ref for placeholder visibility', () => {
-    const source = readSource('src/components/BPromptEditor/index.vue');
+  test('uses CodeMirror placeholder extension instead of template v-show placeholder', () => {
+    const indexSource = readSource('src/components/BPromptEditor/index.vue');
+    const placeholderSource = readSource('src/components/BPromptEditor/extensions/placeholder.ts');
 
-    // CodeMirror 6 implementation uses v-show with editorIsEmpty ref
-    expect(source).toContain('v-show="editorIsEmpty"');
-    expect(source).toContain('const editorIsEmpty = ref(true)');
-    expect(source).not.toContain('data-empty="true"');
+    expect(indexSource).toContain("import { createPlaceholderExtension }");
+    expect(indexSource).toContain('createPlaceholderExtension(props.placeholder)');
+    expect(indexSource).not.toContain('v-show="editorIsEmpty"');
+    expect(indexSource).not.toContain('data-empty="true"');
+    expect(placeholderSource).toContain('return createPlaceholder(placeholderText);');
   });
 
-  test('renders placeholder as a separate overlay instead of editor pseudo content', () => {
+  test('styles CodeMirror placeholder instead of rendering a separate overlay node', () => {
     const source = readSource('src/components/BPromptEditor/index.vue');
 
-    expect(source).toContain('class="b-prompt-editor__placeholder"');
+    expect(source).toContain('.cm-placeholder');
+    expect(source).not.toContain('class="b-prompt-editor__placeholder"');
     expect(source).not.toContain("&[data-empty='true']::before");
   });
 
-  test('drives placeholder visibility from a reactive editor empty ref in index.vue', () => {
+  test('tracks empty state for theme recalculation with editorIsEmpty ref', () => {
     const indexSource = readSource('src/components/BPromptEditor/index.vue');
 
-    // editorIsEmpty is defined locally in index.vue for CodeMirror 6
-    expect(indexSource).toContain('const editorIsEmpty = ref(true)');
-    expect(indexSource).toContain('editorIsEmpty.value = newValue.trim().length === 0');
-    // useEditorCore.ts no longer exists in CodeMirror 6 migration
+    expect(indexSource).toContain('const editorIsEmpty = ref<boolean>(isEditorContentEmpty(modelValue.value));');
+    expect(indexSource).toContain('editorIsEmpty.value = isEditorContentEmpty(newValue);');
+    expect(indexSource).toContain('watch(editorIsEmpty, (isEmpty) => {');
   });
 
   test('uses CodeMirror built-in undo/redo without custom history hooks', () => {
@@ -231,8 +233,9 @@ describe('BPromptEditor triggerState extension', () => {
     expect(source).toContain("lastIndexOf('{{')");
     // Should reject if afterOpen includes }}
     expect(source).toContain("includes('}}')");
-    // Should reject if non-empty selection (using optional chaining)
-    expect(source).toContain('selection?.main.empty');
+    // Should reject if non-empty selection after resolving the active selection object
+    expect(source).toContain('const selection = tr.selection || tr.state.selection;');
+    expect(source).toContain('if (!selection.main.empty) {');
     // Should reject } and \n
     expect(source).toContain('[{}\\n]');
   });

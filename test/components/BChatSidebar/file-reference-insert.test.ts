@@ -60,8 +60,8 @@ describe('chat file reference insert wiring', () => {
     expect(selectionToolbarSource).toContain('emitChatFileReferenceInsert');
     expect(selectionToolbarSource).toContain('getLineRangeFromTextBeforeSelection');
     expect(selectionToolbarSource).toContain('fileName: props.fileName || getFileNameFromPath');
-    expect(richEditorContentSource).toContain(':file-path="props.filePath"');
-    expect(richEditorContentSource).toContain(':file-name="props.fileName"');
+    expect(richEditorContentSource).toContain(':file-path="filePath"');
+    expect(richEditorContentSource).toContain(':file-name="fileName"');
     expect(paneRichEditoSource).toContain(':file-path="props.filePath"');
     expect(paneRichEditoSource).toContain(':file-name="props.fileName"');
     expect(editorSource).toContain(':file-path="props.filePath"');
@@ -92,14 +92,16 @@ describe('chat file reference insert wiring', () => {
     expect(referenceSnapshotSource).toContain('disk|');
     expect(referenceSnapshotSource).toContain('editorToolContextRegistry.getContext');
     expect(referenceSnapshotSource).toContain('native.readFile');
-    expect(referenceSnapshotSource).toContain('console.warn(`[persistReferenceSnapshots]');
-    // 磁盘读取异常容错
-    expect(referenceSnapshotSource).toContain('读取文件失败，尝试从 SQLite 历史快照降级');
+    expect(referenceSnapshotSource).toContain('applySnapshotFromSqlite');
 
-    // 按来源分组的 groupKey 函数
-    expect(referenceSnapshotSource).toContain('function groupKey');
-    expect(referenceSnapshotSource).toContain(`return \`editor|`);
-    expect(referenceSnapshotSource).toContain(`return \`disk|`);
+    // 按来源分组并分阶段创建快照
+    expect(referenceSnapshotSource).toContain('function buildGroups');
+    expect(referenceSnapshotSource).toContain('key = `editor|${ref.documentId}`;');
+    expect(referenceSnapshotSource).toContain('key = `disk|${ref.path}`;');
+    expect(referenceSnapshotSource).toContain('key = `sqlite|${ref.documentId}`;');
+    expect(referenceSnapshotSource).toContain('function createEditorSnapshots');
+    expect(referenceSnapshotSource).toContain('async function createDiskSnapshots');
+    expect(referenceSnapshotSource).toContain('async function createSqliteSnapshots');
 
     // 并发限流使用 p-limit
     expect(referenceSnapshotSource).toContain("import pLimit from 'p-limit'");

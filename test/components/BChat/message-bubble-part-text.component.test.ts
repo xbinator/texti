@@ -136,10 +136,10 @@ describe('BubblePartText file references', () => {
       references: [createReference()]
     });
 
-    const chip = wrapper.get('.b-prompt-editor-tag--file-reference');
+    const chip = wrapper.get('.message-bubble__part-text--tag');
 
     expect(chip.text()).toBe('demo.ts:12-14');
-    expect(chip.attributes('contenteditable')).toBe('false');
+    expect(chip.attributes('data-value')).toBe('file-reference');
     expect(wrapper.find('.message-stub').exists()).toBe(false);
     expect(wrapper.text()).toContain('请查看');
     expect(wrapper.text()).toContain('的实现');
@@ -152,7 +152,7 @@ describe('BubblePartText file references', () => {
       references: [createReference()]
     });
 
-    expect(wrapper.find('.b-prompt-editor-tag--file-reference').exists()).toBe(false);
+    expect(wrapper.find('.message-bubble__part-text--tag').exists()).toBe(false);
     expect(wrapper.text()).toContain('{{file-ref:ref_missing}}');
   });
 
@@ -170,6 +170,6 @@ describe('BubblePartText file references', () => {
 
     expect(message.attributes('data-type')).toBe('markdown');
     expect(message.text()).toContain('{{file-ref:ref_123}}');
-    expect(wrapper.find('.b-prompt-editor-tag--file-reference').exists()).toBe(false);
+    expect(wrapper.find('.message-bubble__part-text--tag').exists()).toBe(false);
   });
 });

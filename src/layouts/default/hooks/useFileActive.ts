@@ -1,24 +1,63 @@
+/**
+ * @file useFileActive.ts
+ * @description 收口顶部文件菜单及全局文件事件的打开行为。
+ */
+
 import { computed, onUnmounted } from 'vue';
-import { useRouter } from 'vue-router';
-import { customAlphabet } from 'nanoid';
+import type { ComputedRef } from 'vue';
 import { useToolbarShortcuts } from '@/components/BToolbar/hooks/useToolbarShortcuts';
 import type { ToolbarOptions } from '@/components/BToolbar/types';
-import { native } from '@/shared/platform';
+import { useOpenFile } from '@/hooks/useOpenFile';
 import { isElectron } from '@/shared/platform/env';
 import { useFilesStore } from '@/stores/files';
 import { emitter } from '@/utils/emitter';
 import { EditorShortcuts } from '../../../constants/shortcuts';
 
-const nanoid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz_', 8);
-
 interface UseFileActiveOptions {
   visible: { searchRecent: boolean };
 }
 
-export function useFileActive(visible: UseFileActiveOptions['visible']) {
-  const router = useRouter();
+interface UseFileActiveResult {
+  toolbarFileOptions: ComputedRef<ToolbarOptions>;
+}
+
+/**
+ * 绑定文件菜单和全局事件。
+ * @param visible - 页面可见状态
+ * @returns 工具栏文件菜单配置
+ */
+export function useFileActive(visible: UseFileActiveOptions['visible']): UseFileActiveResult {
   const filesStore = useFilesStore();
   const { register: registerShortcuts } = useToolbarShortcuts();
+  const { createNewFile, openFileById, openNativeFile } = useOpenFile();
+
+  /**
+   * 创建并打开一个新文件。
+   */
+  async function handleCreateNewFile(): Promise<void> {
+    await createNewFile('new');
+  }
+
+  /**
+   * 通过原生文件选择器打开文件。
+   */
+  async function handleOpenNativeFile(): Promise<void> {
+    await openNativeFile('menu');
+  }
+
+  /**
+   * 打开最近文件；未命中时回退到最近文件搜索弹窗。
+   * @param id - 文件 ID
+   */
+  async function handleOpenRecentFile(id: string): Promise<void> {
+    const file = await filesStore.getFileById(id);
+    if (!file) {
+      visible.searchRecent = true;
+      return;
+    }
+
+    await openFileById(id, 'platform-recent');
+  }
 
   const toolbarFileOptions = computed<ToolbarOptions>(() => [
     {
@@ -26,7 +65,7 @@ export function useFileActive(visible: UseFileActiveOptions['visible']) {
       label: '新建',
       shortcut: EditorShortcuts.FILE_NEW,
       onClick: () => {
-        router.push({ name: 'editor', params: { id: nanoid() } });
+        handleCreateNewFile();
       }
     },
     { type: 'divider' },
@@ -35,19 +74,7 @@ export function useFileActive(visible: UseFileActiveOptions['visible']) {
       label: '打开',
       shortcut: EditorShortcuts.FILE_OPEN,
       onClick: async () => {
-        const file = await native.openFile();
-        if (!file.path) return;
-
-        let id = nanoid();
-        const existingFile = await filesStore.getFileByPath(file.path);
-
-        if (existingFile) {
-          id = existingFile.id;
-        } else {
-          await filesStore.addFile({ ...file, id });
-        }
-
-        router.push({ name: 'editor', params: { id } });
+        await handleOpenNativeFile();
       }
     },
     {
@@ -98,23 +125,11 @@ export function useFileActive(visible: UseFileActiveOptions['visible']) {
   const cleanup = registerShortcuts(toolbarFileOptions.value);
 
   const unregisterNew = emitter.on('file:new', () => {
-    router.push({ name: 'editor', params: { id: nanoid() } });
+    handleCreateNewFile();
   });
 
   const unregisterOpen = emitter.on('file:open', async () => {
-    const file = await native.openFile();
-    if (!file.path) return;
-
-    let id = nanoid();
-    const existingFile = await filesStore.getFileByPath(file.path);
-
-    if (existingFile) {
-      id = existingFile.id;
-    } else {
-      await filesStore.addFile({ ...file, id });
-    }
-
-    router.push({ name: 'editor', params: { id } });
+    await handleOpenNativeFile();
   });
 
   const unregisterRecent = emitter.on('file:recent', () => {
@@ -125,13 +140,7 @@ export function useFileActive(visible: UseFileActiveOptions['visible']) {
     const id = typeof payload === 'string' ? payload : '';
     if (!id) return;
 
-    const file = await filesStore.getFileById(id);
-    if (!file) {
-      visible.searchRecent = true;
-      return;
-    }
-
-    router.push({ name: 'editor', params: { id: file.id } });
+    await handleOpenRecentFile(id);
   });
 
   onUnmounted(() => {
