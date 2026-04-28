@@ -66,10 +66,20 @@ const inputRef = ref<HTMLElement | null>(null);
 
 const activeId = computed<string>(() => (route.name === 'editor' ? (route.params.id as string) || '' : ''));
 
+/**
+ * 转义用户输入，避免关键字中的正则字符影响匹配。
+ * @param value - 用户输入
+ * @returns 转义后的正则安全字符串
+ */
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * 为搜索关键字创建大小写不敏感的正则。
+ * @param input - 原始搜索关键字
+ * @returns 搜索正则
+ */
 function createSearchRegExp(input: string): RegExp {
   return new RegExp(escapeRegExp(input), 'i');
 }
@@ -93,6 +103,9 @@ const filteredFiles = computed<StoredFile[]>(() => {
   });
 });
 
+/**
+ * 聚焦搜索输入框。
+ */
 function focusInput(): void {
   nextTick(() => {
     const input = inputRef.value?.querySelector('input');
@@ -104,17 +117,28 @@ function focusInput(): void {
   });
 }
 
+/**
+ * 关闭搜索弹窗并清空关键字。
+ */
 function handleClose(): void {
   visible.value = false;
   keyword.value = '';
 }
 
+/**
+ * 选择最近文件后打开并更新 openedAt。
+ * @param file - 选中的文件记录
+ */
 async function handleSelect(file: StoredFile): Promise<void> {
   handleClose();
-  await openFile(file);
+  await openFile(file, 'search');
   emit('select', file);
 }
 
+/**
+ * 删除最近文件记录。
+ * @param id - 文件 ID
+ */
 async function handleRemove(id: string): Promise<void> {
   await filesStore.removeFile(id);
   tabsStore.removeTab(id);

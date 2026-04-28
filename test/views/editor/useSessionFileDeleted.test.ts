@@ -81,7 +81,14 @@ vi.mock('vue-router', () => ({
 }));
 
 vi.mock('@/router/cache', () => ({
-  resolveRouteCacheKey: () => 'editor:doc_1'
+  /**
+   * 模拟当前路由对应的标签页信息。
+   * @returns 固定的编辑器标签页信息
+   */
+  resolveRouteTabInfo: () => ({
+    tabId: 'doc_1',
+    cacheKey: 'editor:doc_1'
+  })
 }));
 
 vi.mock('@/shared/platform', () => ({

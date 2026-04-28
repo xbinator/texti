@@ -5,7 +5,7 @@
 
 import type { RouteLocationNormalizedLoaded } from 'vue-router';
 import { describe, expect, it } from 'vitest';
-import { resolveRouteCacheKey, resolveRouteCacheName, resolveRouteTabId } from '@/router/cache';
+import { resolveRouteCacheName, resolveRouteTabInfo } from '@/router/cache';
 
 /**
  * 创建测试用的路由对象。
@@ -31,22 +31,28 @@ describe('route cache helpers', () => {
   it('uses editor params as the editor cache key and tab id', () => {
     const route = createRoute({ path: '/editor/file_1', fullPath: '/editor/file_1', name: 'editor', params: { id: 'file_1' } });
 
-    expect(resolveRouteTabId(route)).toBe('file_1');
-    expect(resolveRouteCacheKey(route)).toBe('editor:file_1');
+    expect(resolveRouteTabInfo(route)).toEqual({
+      tabId: 'file_1',
+      cacheKey: 'editor:file_1'
+    });
   });
 
   it('groups settings routes into one tab and cache key', () => {
     const route = createRoute({ path: '/settings/provider/openai', fullPath: '/settings/provider/openai', name: 'provider-detail' });
 
-    expect(resolveRouteTabId(route)).toBe('settings');
-    expect(resolveRouteCacheKey(route)).toBe('settings');
+    expect(resolveRouteTabInfo(route)).toEqual({
+      tabId: 'settings',
+      cacheKey: 'settings'
+    });
   });
 
   it('falls back to fullPath for ordinary routes', () => {
     const route = createRoute({ path: '/welcome', fullPath: '/welcome?from=boot', name: 'welcome' });
 
-    expect(resolveRouteTabId(route)).toBe('/welcome?from=boot');
-    expect(resolveRouteCacheKey(route)).toBe('/welcome?from=boot');
+    expect(resolveRouteTabInfo(route)).toEqual({
+      tabId: '/welcome?from=boot',
+      cacheKey: '/welcome?from=boot'
+    });
   });
 
   it('creates stable component names from cache keys', () => {

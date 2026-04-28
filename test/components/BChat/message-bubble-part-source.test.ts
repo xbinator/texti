@@ -17,7 +17,7 @@ function readSource(relativePath: string): string {
 
 describe('MessageBubble part extraction', () => {
   test('renders thinking and tool parts through dedicated child components', () => {
-    const source = readSource('src/components/BChat/components/MessageBubble.vue');
+    const source = readSource('src/components/BChatSidebar/components/MessageBubble.vue');
 
     expect(source).toContain("import BubblePartThinking from './MessageBubble/BubblePartThinking.vue';");
     expect(source).toContain("import BubblePartToolCall from './MessageBubble/BubblePartToolCall.vue';");
@@ -28,7 +28,7 @@ describe('MessageBubble part extraction', () => {
   });
 
   test('renders text parts through a dedicated child component while keeping attachments in MessageBubble', () => {
-    const source = readSource('src/components/BChat/components/MessageBubble.vue');
+    const source = readSource('src/components/BChatSidebar/components/MessageBubble.vue');
 
     expect(source).toContain("import BubblePartText from './MessageBubble/BubblePartText.vue';");
     expect(source).toContain('<BubblePartText');

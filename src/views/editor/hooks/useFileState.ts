@@ -21,7 +21,7 @@ interface SessionPersistenceResult {
   hasSavedContentBaseline: Ref<boolean>;
   ensureStoredFile: () => Promise<void>;
   persistCurrentFile: () => Promise<void>;
-  markCurrentContentSaved: () => Promise<void>;
+  markCurrentContentSaved: (savedAt?: number) => Promise<void>;
   pauseDirtyTracking: () => void;
   resumeDirtyTracking: () => void;
   syncDirtyState: () => void;
@@ -30,7 +30,11 @@ interface SessionPersistenceResult {
   initializeFileState: (stored: StoredFile | undefined, currentFileId: string) => Promise<void>;
 }
 
-// 管理编辑器文件在“最近文件存储 / 标签脏状态 / 外部文件同步”之间的状态收口。
+/**
+ * 管理编辑器文件在“最近文件存储 / 标签脏状态 / 外部文件同步”之间的状态收口。
+ * @param options - 会话持久化依赖项
+ * @returns 编辑器文件状态持久化控制器
+ */
 export function useFileState(options: SessionPersistenceOptions): SessionPersistenceResult {
   const { fileId, fileState, switchWatchedFile, autoSave, finishReload } = options;
   const filesStore = useFilesStore();
@@ -40,6 +44,10 @@ export function useFileState(options: SessionPersistenceOptions): SessionPersist
   const hasSavedContentBaseline = ref(false);
   const isDirtyTrackingPaused = ref(false);
 
+  /**
+   * 生成当前编辑状态对应的存储记录。
+   * @returns 用于持久化的文件记录
+   */
   function toStoredFile(): StoredFile {
     return {
       ...fileState.value,
@@ -47,6 +55,9 @@ export function useFileState(options: SessionPersistenceOptions): SessionPersist
     };
   }
 
+  /**
+   * 根据当前内容与基线同步标签页脏状态。
+   */
   function syncDirtyState(): void {
     if (!hasSavedContentBaseline.value) {
       tabsStore.clearDirty(fileId.value);
@@ -111,29 +122,54 @@ export function useFileState(options: SessionPersistenceOptions): SessionPersist
   }
 
   // 显式保存成功后，统一更新“已保存”基线、dirty 状态和最近文件存储。
-  async function markCurrentContentSaved(): Promise<void> {
+  async function markCurrentContentSaved(savedAt = Date.now()): Promise<void> {
     savedContent.value = fileState.value.content;
     hasSavedContentBaseline.value = true;
     syncDirtyState();
-    await persistCurrentFile();
+
+    const current = toStoredFile();
+    const stored = await filesStore.getFileById(current.id);
+
+    if (stored) {
+      await filesStore.updateFile(current.id, {
+        ...current,
+        savedContent: current.content,
+        savedAt
+      });
+      return;
+    }
+
+    await filesStore.addFile({
+      ...current,
+      savedContent: current.content,
+      createdAt: savedAt,
+      savedAt
+    });
   }
 
+  /**
+   * 暂停 dirty 状态跟踪。
+   */
   function pauseDirtyTracking(): void {
     isDirtyTrackingPaused.value = true;
   }
 
+  /**
+   * 恢复 dirty 状态跟踪。
+   */
   function resumeDirtyTracking(): void {
     isDirtyTrackingPaused.value = false;
   }
 
   // 文件成功保存到磁盘后，同步路径、文件名和本地存储，并切换文件监听目标。
   async function finalizeSave(savedPath: string): Promise<void> {
+    const savedAt = Date.now();
     const { name, ext } = parseFileName(savedPath);
 
     fileState.value.path = savedPath;
     fileState.value.name = name || fileState.value.name;
     fileState.value.ext = ext || fileState.value.ext || 'md';
-    await markCurrentContentSaved();
+    await markCurrentContentSaved(savedAt);
     await switchWatchedFile(savedPath);
   }
 
