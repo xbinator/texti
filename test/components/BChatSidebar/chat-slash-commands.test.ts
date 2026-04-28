@@ -32,7 +32,7 @@ describe('chatSlashCommands', () => {
       {
         id: 'clear',
         trigger: '/clear',
-        title: 'Clear Chat',
+        title: 'Clear Draft',
         description: 'Clear the current chat input.',
         type: 'action'
       }
