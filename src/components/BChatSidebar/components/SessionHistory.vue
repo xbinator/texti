@@ -6,32 +6,30 @@
 
     <template #overlay>
       <div class="session-history" @click.stop>
-        <template v-if="sessions.length">
-          <div class="session-history__list" v-bind="containerProps">
-            <div class="session-history__list-inner" v-bind="wrapperProps">
-              <template v-for="{ data } in list" :key="data.key">
-                <div v-if="data.type === 'header'" class="session-history__group-title">
-                  {{ data.label }}
-                </div>
-                <div
-                  v-else
-                  class="session-history__item"
-                  :class="{ 'is-active': data.session?.id === props.activeSessionId }"
-                  @click="handleSwitchSession(data.session!.id)"
-                >
-                  <span class="session-history__content">
-                    <span class="session-history__item-title">{{ data.session?.title }}</span>
-                  </span>
-                  <span class="session-history__actions">
-                    <BButton type="text" square danger size="small" @click.stop="handleDeleteSession(data.session!.id)">
-                      <Icon icon="lucide:trash-2" width="14" height="14" />
-                    </BButton>
-                  </span>
-                </div>
-              </template>
-            </div>
+        <div v-if="sessions.length" class="session-history__list" v-bind="containerProps">
+          <div class="session-history__list-inner" v-bind="wrapperProps">
+            <template v-for="{ data } in list" :key="data.key">
+              <div v-if="data.type === 'header'" class="session-history__group-title">
+                {{ data.label }}
+              </div>
+              <div
+                v-else
+                class="session-history__item"
+                :class="{ 'is-active': data.session?.id === props.activeSessionId }"
+                @click="handleSwitchSession(data.session!.id)"
+              >
+                <span class="session-history__content">
+                  <span class="session-history__item-title">{{ data.session?.title }}</span>
+                </span>
+                <span class="session-history__actions">
+                  <BButton type="text" square danger size="small" @click.stop="handleDeleteSession(data.session!.id)">
+                    <Icon icon="lucide:trash-2" width="14" height="14" />
+                  </BButton>
+                </span>
+              </div>
+            </template>
           </div>
-        </template>
+        </div>
 
         <div v-else class="session-history__empty">暂无历史会话</div>
       </div>
