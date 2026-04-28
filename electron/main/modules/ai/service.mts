@@ -110,6 +110,8 @@ class AIService {
       // 根据是否有 messages 选择不同的调用方式
       const result = messages ? await generateText({ ...baseOptions, messages }) : await generateText({ ...baseOptions, prompt });
 
+      log.info(`[AIService] generateText result:`, result);
+
       const { inputTokens = 0, outputTokens = 0, totalTokens = 0 } = result.usage || {};
 
       return [undefined, { text: result.text, usage: { inputTokens, outputTokens, totalTokens } }];
