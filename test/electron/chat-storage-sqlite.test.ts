@@ -400,4 +400,64 @@ describe('chatStorage SQLite references', () => {
     ]);
     expect(loadedSnapshots).toEqual([snapshot]);
   }, 15000);
+
+  it('updates only the session title metadata when auto naming completes', async () => {
+    const { initDatabase, dbExecute, dbSelect } = await import('../../electron/main/modules/database/service.mts');
+
+    await initDatabase();
+
+    vi.doMock('@/shared/platform/electron-api', () => {
+      /**
+       * Creates the minimal Electron API backed by the real test SQLite database.
+       * @returns Electron API subset used by shared storage.
+       */
+      function createElectronApi(): ElectronAPI {
+        return {
+          dbExecute: async (sql: string, params?: unknown[]): Promise<DbExecuteResult> => {
+            const result = dbExecute(sql, params);
+
+            return {
+              changes: result.changes,
+              lastInsertRowid: Number(result.lastInsertRowid)
+            };
+          },
+          dbSelect: async <T>(sql: string, params?: unknown[]): Promise<T[]> => dbSelect<T>(sql, params)
+        } as ElectronAPI;
+      }
+
+      return {
+        hasElectronAPI: (): boolean => true,
+        getElectronAPI: (): ElectronAPI => createElectronApi()
+      };
+    });
+
+    const { chatStorage } = await import('@/shared/storage/chats');
+    const session = createSession();
+    const message = createMessage({
+      role: 'assistant',
+      usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 }
+    });
+
+    await chatStorage.createSession(session);
+    await chatStorage.addMessage(message);
+    await chatStorage.updateSessionLastMessageAt(session.id, message.createdAt);
+    await chatStorage.addSessionUsage(session.id, message.usage!);
+    await chatStorage.updateSessionTitle(session.id, '自动命名标题');
+
+    const rows = await dbSelect<{
+      title: string;
+      updated_at: string;
+      last_message_at: string;
+      usage_json: string | null;
+    }>(
+      'SELECT title, updated_at, last_message_at, usage_json FROM chat_sessions WHERE id = ?',
+      [session.id]
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.title).toBe('自动命名标题');
+    expect(rows[0]?.last_message_at).toBe(message.createdAt);
+    expect(rows[0]?.usage_json).toBe(JSON.stringify(message.usage));
+    expect(rows[0]?.updated_at).not.toBe(session.updatedAt);
+  }, 15000);
 });

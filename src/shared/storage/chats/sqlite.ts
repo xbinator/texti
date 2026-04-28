@@ -38,6 +38,11 @@ const UPDATE_SESSION_LAST_MESSAGE_AT_SQL = `
   SET last_message_at = ?
   WHERE id = ?
 `;
+const UPDATE_SESSION_TITLE_SQL = `
+  UPDATE chat_sessions
+  SET title = ?, updated_at = ?
+  WHERE id = ?
+`;
 const SELECT_SESSION_USAGE_SQL = 'SELECT usage_json FROM chat_sessions WHERE id = ?';
 const UPDATE_SESSION_USAGE_SQL = 'UPDATE chat_sessions SET usage_json = ? WHERE id = ?';
 
@@ -352,6 +357,25 @@ export const chatStorage = {
     }
 
     await dbExecute(UPDATE_SESSION_LAST_MESSAGE_AT_SQL, [lastMessageAt, sessionId]);
+  },
+
+  /**
+   * 仅更新会话标题与标题变更时间，避免覆盖排序和 usage 等会话元数据。
+   * @param sessionId - 目标会话 ID。
+   * @param title - 新的会话标题。
+   */
+  async updateSessionTitle(sessionId: string, title: string): Promise<void> {
+    if (!isDatabaseAvailable()) {
+      const sessions = loadFallbackSessions();
+      const index = sessions.findIndex((item) => item.id === sessionId);
+      if (index === -1) return;
+
+      sessions[index] = { ...sessions[index], title, updatedAt: new Date().toISOString() };
+      saveFallbackSessions(sortSessions(sessions));
+      return;
+    }
+
+    await dbExecute(UPDATE_SESSION_TITLE_SQL, [title, new Date().toISOString(), sessionId]);
   },
 
   async addSessionUsage(sessionId: string, usage: AIUsage): Promise<void> {

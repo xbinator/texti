@@ -36,3 +36,39 @@ export const POLISH_DEFAULT_PROMPT = `# Role
 {{USER_INPUT}} `;
 
 export const CHAT_SERVICE_CONFIG_OPTIONS: ServiceConfigOption[] = [];
+
+/**
+ * 自动命名服务的变量选项，用于提示首轮对话可引用的变量。
+ */
+export const AUTONAME_SERVICE_CONFIG_OPTIONS: ServiceConfigOption[] = [
+  {
+    type: 'variable',
+    options: [
+      { value: 'USER_MESSAGE', label: '用户首条消息' },
+      { value: 'AI_RESPONSE', label: 'AI回复' }
+    ]
+  }
+];
+
+/**
+ * 自动命名的默认 Prompt 模板。
+ */
+export const AUTONAME_DEFAULT_PROMPT = `# Role
+你是一个会话标题生成器。
+
+# Task
+根据用户与 AI 的对话内容，生成一个简洁准确的会话标题。
+
+# Rules
+1. 标题长度不超过 20 个汉字
+2. 标题应概括对话的核心主题，而非描述对话格式
+3. 只输出标题文本，不要包含引号、标点或任何额外说明
+4. 使用用户使用的语言（中文对话输出中文标题，英文对话输出英文标题）
+
+# Conversation
+用户: {{USER_MESSAGE}}
+
+AI: {{AI_RESPONSE}}
+
+# Title
+`;

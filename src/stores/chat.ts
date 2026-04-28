@@ -92,6 +92,15 @@ export const useChatStore = defineStore('chat', {
       await chatStorage.updateSessionUsage(sessionId, sumMessagesUsage(persistableMessages));
     },
 
+    /**
+     * 仅更新指定会话的标题。
+     * @param sessionId - 会话 ID。
+     * @param title - 新标题。
+     */
+    async updateSessionTitle(sessionId: string, title: string): Promise<void> {
+      await chatStorage.updateSessionTitle(sessionId, title);
+    },
+
     async deleteSession(sessionId: string): Promise<void> {
       await chatStorage.deleteSession(sessionId);
     }

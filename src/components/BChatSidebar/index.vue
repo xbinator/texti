@@ -79,6 +79,7 @@ import { useSettingStore } from '@/stores/setting';
 import ConversationView from './components/ConversationView.vue';
 import InputToolbar from './components/InputToolbar.vue';
 import SessionHistory from './components/SessionHistory.vue';
+import { useAutoName } from './hooks/useAutoName';
 import { useChatHistory } from './hooks/useChatHistory';
 import { useChatStream } from './hooks/useChatStream';
 import { createChatConfirmationController } from './utils/confirmationController';
@@ -111,6 +112,8 @@ const hasMoreHistory = ref(false);
 const promptEditorRef = ref<InstanceType<typeof BPromptEditor>>();
 /** 对话视图引用 */
 const conversationRef = ref<InstanceType<typeof ConversationView>>();
+/** 会话历史组件引用 */
+const sessionHistoryRef = ref<InstanceType<typeof SessionHistory>>();
 /** 草稿文件引用列表 */
 const draftReferences = ref<ChatMessageFileReference[]>([]);
 /** 当前选中的模型 */
@@ -122,6 +125,33 @@ const { getHistoryCursor, setLoadedMessages, fetchAllPriorHistory, messages } = 
 /** 确认控制器，管理工具调用的用户确认流程 */
 const confirmationController = createChatConfirmationController({
   getMessages: () => messages.value
+});
+
+/**
+ * 自动命名 Hook。
+ * 在首轮 assistant 完成时冻结快照，并在流式真正停稳后异步生成标题。
+ */
+const { captureSnapshot, scheduleAutoName } = useAutoName({
+  getCurrentSession: () => currentSession.value,
+  getFirstRoundContent: (message) => {
+    // 首轮如果仍在等待用户补充输入，则不应提前触发自动命名。
+    if (userChoice.findPending(messages.value)) {
+      return null;
+    }
+
+    // 仅在首轮恰好形成一问一答时才参与自动命名。
+    const userMessages = messages.value.filter((item) => item.role === 'user');
+    const assistantMessages = messages.value.filter((item) => item.role === 'assistant');
+    if (userMessages.length !== 1 || assistantMessages.length !== 1) return null;
+
+    return {
+      userMessage: userMessages[0].content,
+      aiResponse: message.content
+    };
+  },
+  onTitlePersisted: async () => {
+    await sessionHistoryRef.value?.refreshSessions();
+  }
 });
 
 let unregisterFileReferenceInsert: (() => void) | null = null;
@@ -213,7 +243,14 @@ async function handleBeforeSend(message: Message): Promise<void> {
  * @param message - 完成的消息
  */
 async function handleComplete(message: Message): Promise<void> {
-  await chatStore.addSessionMessage(settingStore.chatSidebarActiveSessionId, message);
+  const sessionId = settingStore.chatSidebarActiveSessionId;
+  const snapshot = captureSnapshot(message, sessionId);
+
+  await chatStore.addSessionMessage(sessionId, message);
+  if (!snapshot) return;
+
+  // eslint-disable-next-line no-use-before-define
+  scheduleAutoName(snapshot, () => chatStream.loading.value);
 }
 
 /**
