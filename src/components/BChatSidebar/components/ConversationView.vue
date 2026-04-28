@@ -153,10 +153,12 @@ defineExpose({ scrollToBottom });
   color: var(--text-secondary);
 }
 
+/* 使用悬浮指示器主题变量，保证亮暗主题下都有清晰层次。 */
 .to-bottom {
   position: absolute;
   bottom: 20px;
   left: 50%;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -167,12 +169,19 @@ defineExpose({ scrollToBottom });
   pointer-events: none;
   cursor: pointer;
   user-select: none;
-  background: var(--bg-primary);
+  background: var(--hover-indicator-bg);
+  border: 1px solid var(--hover-indicator-border);
   border-radius: 50%;
-  box-shadow: 0 0 4px 0 rgb(0 0 0 / 2%), 0 6px 10px 0 rgb(47 53 64 / 10%);
+  box-shadow: var(--shadow-md);
   opacity: 0;
+  backdrop-filter: blur(8px);
   transform: translateX(-50%);
-  transition: opacity 0.2s ease;
+  transition: opacity 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+
+  &:hover {
+    border-color: var(--hover-indicator-hover-border);
+    transform: translateX(-50%) translateY(-1px);
+  }
 }
 
 .to-bottom--visible {

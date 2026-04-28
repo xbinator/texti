@@ -214,7 +214,7 @@ function handleCopy(message: Message): void {
 
 .message-bubble__time {
   font-size: 11px;
-  color: var(--text-disabled);
+  color: var(--text-primary);
   user-select: none;
 }
 </style>
