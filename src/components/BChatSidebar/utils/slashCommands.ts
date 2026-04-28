@@ -9,23 +9,31 @@ import type { SlashCommandOption } from '@/components/BPromptEditor/types';
  */
 export const chatSlashCommands: SlashCommandOption[] = [
   {
+    id: 'model',
     trigger: '/model',
-    label: 'Model',
+    title: 'Model',
+    description: 'Switch the active model.',
     type: 'action'
   },
   {
+    id: 'usage',
     trigger: '/usage',
-    label: 'Usage',
+    title: 'Usage',
+    description: 'Show usage help for the chat sidebar.',
     type: 'action'
   },
   {
+    id: 'new',
     trigger: '/new',
-    label: 'New Chat',
+    title: 'New Chat',
+    description: 'Start a new chat session.',
     type: 'action'
   },
   {
+    id: 'clear',
     trigger: '/clear',
-    label: 'Clear Chat',
+    title: 'Clear Chat',
+    description: 'Clear the current chat input.',
     type: 'action'
   }
 ];

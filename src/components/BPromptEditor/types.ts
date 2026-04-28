@@ -8,14 +8,16 @@ import type { ChipResolver } from './extensions/variableChip';
  * Slash command option metadata.
  */
 export interface SlashCommandOption {
+  /** Stable command identifier. */
+  id: string;
   /** Slash trigger text shown to the user. */
   trigger: string;
-  /** Human-readable label for the command. */
-  label: string;
-  /** Optional command description. */
-  description?: string;
-  /** Command kind; task 1 only uses action commands. */
-  type: 'action';
+  /** Human-readable command title. */
+  title: string;
+  /** Command description shown in UI hints. */
+  description: string;
+  /** Command kind; action commands run immediately, prompt commands open prompt flows. */
+  type: 'action' | 'prompt';
 }
 
 /**

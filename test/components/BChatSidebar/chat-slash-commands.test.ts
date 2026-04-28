@@ -6,8 +6,36 @@ import { describe, expect, test } from 'vitest';
 import { chatSlashCommands } from '@/components/BChatSidebar/utils/slashCommands';
 
 describe('chatSlashCommands', () => {
-  test('exports first-version action commands in trigger order', () => {
-    expect(chatSlashCommands.map((command) => command.trigger)).toEqual(['/model', '/usage', '/new', '/clear']);
-    expect(chatSlashCommands.every((command) => command.type === 'action')).toBe(true);
+  test('exports first-version commands with the shared metadata contract', () => {
+    expect(chatSlashCommands).toEqual([
+      {
+        id: 'model',
+        trigger: '/model',
+        title: 'Model',
+        description: 'Switch the active model.',
+        type: 'action'
+      },
+      {
+        id: 'usage',
+        trigger: '/usage',
+        title: 'Usage',
+        description: 'Show usage help for the chat sidebar.',
+        type: 'action'
+      },
+      {
+        id: 'new',
+        trigger: '/new',
+        title: 'New Chat',
+        description: 'Start a new chat session.',
+        type: 'action'
+      },
+      {
+        id: 'clear',
+        trigger: '/clear',
+        title: 'Clear Chat',
+        description: 'Clear the current chat input.',
+        type: 'action'
+      }
+    ]);
   });
 });
