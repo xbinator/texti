@@ -99,8 +99,6 @@ const settingStore = useSettingStore();
 
 /** 聊天输入框内容 */
 const inputValue = ref('');
-/** 当前会话的消息列表 */
-const messages = ref<Message[]>([]);
 /** 当前会话信息 */
 const currentSession = ref<ChatSession | undefined>(undefined);
 /** 会话加载状态 */
@@ -117,13 +115,14 @@ const conversationRef = ref<InstanceType<typeof ConversationView>>();
 const draftReferences = ref<ChatMessageFileReference[]>([]);
 /** 当前选中的模型 */
 const selectedModel = ref<string>();
+
+/** 聊天历史加载状态和方法 */
+const { getHistoryCursor, setLoadedMessages, fetchAllPriorHistory, messages } = useChatHistory();
+
 /** 确认控制器，管理工具调用的用户确认流程 */
 const confirmationController = createChatConfirmationController({
   getMessages: () => messages.value
 });
-
-/** 聊天历史加载状态和方法 */
-const { getHistoryCursor, setLoadedMessages, loadPersistedMessagesBeforeVisible } = useChatHistory();
 
 let unregisterFileReferenceInsert: (() => void) | null = null;
 
@@ -184,7 +183,7 @@ async function handleBeforeRegenerate(nextMessages: Message[]): Promise<void> {
   const sessionId = settingStore.chatSidebarActiveSessionId;
   if (!sessionId) return;
 
-  const historyMessages = await loadPersistedMessagesBeforeVisible(sessionId);
+  const historyMessages = await fetchAllPriorHistory(sessionId);
   await chatStore.setSessionMessages(sessionId, [...historyMessages, ...nextMessages]);
 }
 

@@ -45,7 +45,7 @@ export function useChatHistory() {
    * @param sessionId - 会话 ID
    * @returns 当前可见消息之前的历史消息
    */
-  async function loadPersistedMessagesBeforeVisible(sessionId: string): Promise<Message[]> {
+  async function fetchAllPriorHistory(sessionId: string): Promise<Message[]> {
     const historyMessages: Message[] = [];
     let cursor = getHistoryCursor();
 
@@ -94,7 +94,7 @@ export function useChatHistory() {
     historyLoading,
     getHistoryCursor,
     setLoadedMessages,
-    loadPersistedMessagesBeforeVisible,
+    fetchAllPriorHistory,
     loadHistory
   };
 }

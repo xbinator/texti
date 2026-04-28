@@ -39,15 +39,19 @@
           <BubblePartToolResult v-else :part="part" />
         </template>
       </div>
-
-      <template v-if="message.finished && message.role === 'assistant'" #toolbar>
-        <div :class="bem('toolbar', { right: isUserMessage })">
-          <BButton type="text" size="small" square icon="lucide:copy" @click="handleCopy(message)" />
-          <BButton v-if="isUserMessage" square type="text" size="small" icon="lucide:edit-2" @click="$emit('edit', message)" />
-          <BButton v-if="isAssistantMessage" square type="text" size="small" icon="lucide:refresh-cw" @click="$emit('regenerate', message)" />
-        </div>
-      </template>
     </BBubble>
+
+    <!-- 助手消息工具栏 -->
+    <div v-if="message.finished && isAssistantMessage" :class="bem('toolbar')">
+      <BButton type="text" size="small" square icon="lucide:copy" @click="handleCopy(message)" />
+      <BButton v-if="isAssistantMessage" square type="text" size="small" icon="lucide:refresh-cw" @click="$emit('regenerate', message)" />
+    </div>
+
+    <!-- 用户消息底部：时间戳 + 复制按钮（hover 可见） -->
+    <div v-if="isUserMessage && message.finished" :class="bem('toolbar', { right: isUserMessage })">
+      <span :class="bem('time')">{{ formatMessageTime(message.createdAt) }}</span>
+      <BButton type="text" size="small" square icon="lucide:copy" @click="handleCopy(message)" />
+    </div>
   </div>
 </template>
 
@@ -65,6 +69,7 @@ import BBubble from '@/components/BBubble/index.vue';
 import BButton from '@/components/BButton/index.vue';
 import { useClipboard } from '@/hooks/useClipboard';
 import { createNamespace } from '@/utils/namespace';
+import { formatMessageTime } from '../utils/timeFormat';
 import AskUserChoiceCard from './AskUserChoiceCard.vue';
 import ConfirmationCard from './ConfirmationCard.vue';
 import BubblePartText from './MessageBubble/BubblePartText.vue';
@@ -132,6 +137,12 @@ function handleCopy(message: Message): void {
   display: flex;
   flex-direction: column;
   margin-bottom: 16px;
+
+  &:hover {
+    .message-bubble__toolbar {
+      opacity: 1;
+    }
+  }
 }
 
 .message-bubble:last-child {
@@ -182,18 +193,28 @@ function handleCopy(message: Message): void {
   white-space: nowrap;
 }
 
-.message-bubble__toolbar {
-  display: flex;
-  gap: 4px;
-}
-
-.message-bubble__toolbar--right {
-  justify-content: flex-end;
-}
-
 .message-bubble__parts {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.message-bubble__toolbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+
+  &.message-bubble__toolbar--right {
+    justify-content: flex-end;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+}
+
+.message-bubble__time {
+  font-size: 11px;
+  color: var(--text-disabled);
+  user-select: none;
 }
 </style>
