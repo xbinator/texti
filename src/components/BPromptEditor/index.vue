@@ -19,7 +19,7 @@
  * @file BPromptEditor/index.vue
  * @description Prompt editor main component using CodeMirror 6
  */
-import type { Variable, BPromptEditorProps as Props } from './types';
+import type { SlashCommandOption, Variable, BPromptEditorProps as Props } from './types';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { defaultKeymap, history, historyKeymap, indentWithTab, insertNewline } from '@codemirror/commands';
 import { EditorState, Annotation } from '@codemirror/state';
@@ -35,6 +35,7 @@ import { variableChipField, chipResolverEffect, getChipAtPos } from './extension
 const props = withDefaults(defineProps<Props>(), {
   placeholder: '请输入内容...',
   options: () => [],
+  slashCommands: () => [],
   disabled: false,
   maxHeight: undefined,
   submitOnEnter: false,
@@ -45,6 +46,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (e: 'change', value: string): void;
   (e: 'submit'): void;
+  (e: 'slash-command', command: SlashCommandOption): void;
 }>();
 
 const modelValue = defineModel<string>('value', { default: '' });
