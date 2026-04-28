@@ -16,50 +16,47 @@ function readSource(relativePath: string): string {
 }
 
 describe('BChat focus exposure', () => {
-  test('exposes a focusInput method that forwards focus to BPromptEditor', () => {
-    const source = readSource('src/components/BChat/index.vue');
+  test('keeps a focus helper that forwards focus to BPromptEditor', () => {
+    const source = readSource('src/components/BChatSidebar/index.vue');
 
-    expect(source).toContain('const promptEditorRef = ref');
-    expect(source).toContain('function focusInput(): void');
+    expect(source).toContain('const promptEditorRef = ref<InstanceType<typeof BPromptEditor>>();');
+    expect(source).toContain('function handleFocusInput(): void');
     expect(source).toContain('promptEditorRef.value?.focus();');
-    expect(source).toContain('defineExpose({ focusInput });');
   });
 });
 
 describe('BChat stream busy state', () => {
-  test('notifies busy state and disables sidebar session changes while streaming', () => {
-    const chatSource = readSource('src/components/BChat/index.vue');
+  test('disables sidebar session changes while streaming', () => {
     const sidebarSource = readSource('src/components/BChatSidebar/index.vue');
     const sessionHistorySource = readSource('src/components/BChatSidebar/components/SessionHistory.vue');
 
-    expect(chatSource).toContain("(e: 'busy-change', busy: boolean): void;");
-    expect(chatSource).toContain("emit('busy-change', value);");
-    expect(sidebarSource).toContain(':disabled="chatBusy"');
-    expect(sidebarSource).toContain('@busy-change="handleChatBusyChange"');
-    expect(sidebarSource).toContain('if (chatBusy.value) return;');
+    expect(sidebarSource).not.toContain(':disabled="chatBusy"');
+    expect(sidebarSource).toContain(':disabled="chatStream.loading.value"');
+    expect(sidebarSource).toContain('if (chatStream.loading.value) return;');
     expect(sessionHistorySource).toContain('disabled?: boolean;');
   });
 });
 
 describe('BChat user choice continuation', () => {
   test('resolves service config again when a restored pending choice is answered', () => {
-    const source = readSource('src/components/BChat/index.vue');
+    const source = readSource('src/components/BChatSidebar/hooks/useChatStream.ts');
 
-    expect(source).toContain('const config = lastServiceConfig ?? (await ensureServiceConfig());');
+    expect(source).toContain('const config = lastServiceConfig ?? (await resolveServiceConfig());');
     expect(source).not.toContain('if (loading.value || !lastServiceConfig)');
   });
 });
 
 describe('BChat history pagination', () => {
   test('emits history loading from the chat container and anchors prepended messages', () => {
-    const chatSource = readSource('src/components/BChat/index.vue');
-    const containerSource = readSource('src/components/BChat/components/Container.vue');
+    const chatSource = readSource('src/components/BChatSidebar/index.vue');
+    const conversationSource = readSource('src/components/BChatSidebar/components/ConversationView.vue');
+    const scrollSource = readSource('src/components/BChatSidebar/hooks/useChatScroll.ts');
 
-    expect(chatSource).toContain('@load-history="handleLoadHistory"');
+    expect(chatSource).toContain(':on-load-history="handleLoadHistory"');
     expect(chatSource).toContain('async function handleLoadHistory(): Promise<void>');
-    expect(chatSource).toContain('await containerRef.value?.withScrollAnchor(async () => {');
-    expect(containerSource).toContain('function withScrollAnchor(callback: () => Promise<void> | void): Promise<void>');
-    expect(containerSource).toContain("emit('load-history');");
+    expect(conversationSource).toContain('onLoadHistory?: () => Promise<void> | void;');
+    expect(scrollSource).toContain('async function withScrollAnchor(callback: () => Promise<void> | void): Promise<void>');
+    expect(scrollSource).toContain('onLoadHistory?.();');
   });
 });
 
@@ -67,9 +64,9 @@ describe('BChatSidebar new session focus', () => {
   test('focuses the chat input after resetting the current session', () => {
     const source = readSource('src/components/BChatSidebar/index.vue');
 
-    expect(source).toContain('const chatRef = ref');
+    expect(source).toContain('const promptEditorRef = ref<InstanceType<typeof BPromptEditor>>();');
     expect(source).toContain('await nextTick();');
-    expect(source).toContain('chatRef.value?.focusInput();');
+    expect(source).toContain('promptEditorRef.value?.focus();');
     expect(source).toContain('settingStore.setChatSidebarActiveSessionId(null);');
   });
 });

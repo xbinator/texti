@@ -17,7 +17,7 @@ function readSource(relativePath: string): string {
 
 describe('MessageBubble confirmation card extraction', () => {
   test('renders confirmations through a dedicated confirmation card component', () => {
-    const source = readSource('src/components/BChat/components/MessageBubble.vue');
+    const source = readSource('src/components/BChatSidebar/components/MessageBubble.vue');
 
     expect(source).toContain("import ConfirmationCard from './ConfirmationCard.vue';");
     expect(source).toContain('<ConfirmationCard');
@@ -25,9 +25,9 @@ describe('MessageBubble confirmation card extraction', () => {
   });
 
   test('keeps confirmation card class names on the shared namespace helper', () => {
-    const source = readSource('src/components/BChat/components/ConfirmationCard.vue');
+    const source = readSource('src/components/BChatSidebar/components/ConfirmationCard.vue');
 
     expect(source).toContain("import { createNamespace } from '@/utils/namespace';");
-    expect(source).toContain("createNamespace('confirmation-card')");
+    expect(source).toContain("createNamespace('', 'confirm-card')");
   });
 });

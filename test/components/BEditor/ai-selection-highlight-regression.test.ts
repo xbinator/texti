@@ -17,32 +17,34 @@ function readSource(relativePath: string): string {
 
 describe('PaneRichEditor AI selection highlight regression', () => {
   test('renders custom selection highlight while hiding native browser selection painting', () => {
-    const paneRichEditorSource = readSource('src/components/BEditor/components/PaneRichEditor.vue');
+    const richEditorContentSource = readSource('src/components/BEditor/components/RichEditorContent.vue');
 
-    expect(paneRichEditorSource).toContain('.ai-selection-highlight');
-    expect(paneRichEditorSource).toContain('background: var(--selection-bg);');
-    expect(paneRichEditorSource).not.toContain('.ai-selection-highlight {\n      color: var(--selection-color);');
-    expect(paneRichEditorSource).toContain('&::selection {');
-    expect(paneRichEditorSource).toContain('background: transparent;');
-    expect(paneRichEditorSource).not.toContain('&::selection {\n      color: transparent;');
-    expect(paneRichEditorSource).not.toContain('padding: 0.32em 0;');
-    expect(paneRichEditorSource).not.toContain('vertical-align: middle;');
+    expect(richEditorContentSource).toContain('.ai-selection-highlight');
+    expect(richEditorContentSource).toContain('color: var(--selection-color);');
+    expect(richEditorContentSource).toContain('background: var(--selection-bg);');
+    expect(richEditorContentSource).toContain('&::selection {');
+    expect(richEditorContentSource).toContain('*::selection {');
+    expect(richEditorContentSource).toContain('background: transparent;');
+    expect(richEditorContentSource).not.toMatch(/::selection\s*\{\s*color:\s*transparent;/);
+    expect(richEditorContentSource).not.toContain('padding: 0.32em 0;');
+    expect(richEditorContentSource).not.toContain('vertical-align: middle;');
   });
 
   test('binds editor selection lifecycle to custom highlight updates instead of relying on native selection paint', () => {
-    const paneRichEditorSource = readSource('src/components/BEditor/components/PaneRichEditor.vue');
+    const richEditorContentSource = readSource('src/components/BEditor/components/RichEditorContent.vue');
     const selectionHighlightSource = readSource('src/components/BEditor/extensions/AISelectionHighlight.ts');
 
-    expect(paneRichEditorSource).toContain("editor.on('selectionUpdate', syncSelectionHighlight);");
-    expect(paneRichEditorSource).toContain("editor.on('focus', syncSelectionHighlight);");
-    expect(paneRichEditorSource).toContain("editor.on('blur', syncSelectionHighlight);");
-    expect(paneRichEditorSource).toContain('function syncSelectionHighlight(): void {');
-    expect(paneRichEditorSource).not.toContain("editor.on('transaction', syncSelectionHighlight);");
-    expect(paneRichEditorSource).toContain('watch(aiInputVisible, (isVisible) => {');
-    expect(paneRichEditorSource).not.toContain('() => [aiInputVisible.value, selectionRange.value.from, selectionRange.value.to]');
+    expect(richEditorContentSource).toContain("editor.on('selectionUpdate', syncSelectionHighlight);");
+    expect(richEditorContentSource).toContain("editor.on('focus', syncSelectionHighlight);");
+    expect(richEditorContentSource).toContain("editor.on('blur', syncSelectionHighlight);");
+    expect(richEditorContentSource).toContain('function syncSelectionHighlight(): void {');
+    expect(richEditorContentSource).toContain('function bindSelectionHighlight(editor: Editor | null | undefined): (() => void) | undefined {');
+    expect(richEditorContentSource).not.toContain("editor.on('transaction', syncSelectionHighlight);");
+    expect(richEditorContentSource).toContain('watch(aiInputVisible, (isVisible) => {');
+    expect(richEditorContentSource).not.toContain('() => [aiInputVisible.value, selectionRange.value.from, selectionRange.value.to]');
     expect(selectionHighlightSource).toContain('function isSameRange(');
-    expect(selectionHighlightSource).toContain('if (isSameRange(currentRange, range)) {');
-    expect(selectionHighlightSource).toContain('if (!currentRange) {');
-    expect(paneRichEditorSource).not.toContain('requestAnimationFrame(() => {');
+    expect(selectionHighlightSource).toContain('if (isSameRange(currentRange, range)) return;');
+    expect(selectionHighlightSource).toContain('if (!currentRange) return;');
+    expect(richEditorContentSource).not.toContain('requestAnimationFrame(() => {');
   });
 });

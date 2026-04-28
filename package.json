@@ -15,7 +15,7 @@
     "electron:run": "wait-on dist-electron/main/index.mjs && node --watch-path=dist-electron --watch-preserve-output ./node_modules/electron/cli.js .",
     "electron:build": "pnpm run build && pnpm run electron:build-main && electron-builder",
     "postinstall": "electron-rebuild",
-    "test": "HOST=127.0.0.1 vitest run",
+    "test": "cross-env HOST=127.0.0.1 vitest run",
     "lint": "eslint src --ext .vue,.ts,.tsx,.js,.jsx --fix",
     "lint:style": "stylelint 'src/**/*.{vue,less,css}' --fix"
   },
@@ -106,6 +106,7 @@
     "@vue/eslint-config-typescript": "^11.0.3",
     "@vue/test-utils": "^2.4.6",
     "concurrently": "^9.1.2",
+    "cross-env": "^10.1.0",
     "electron": "^41.2.1",
     "electron-builder": "^26.8.1",
     "eslint": "^8.42.0",

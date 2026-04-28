@@ -57,7 +57,6 @@ import { Icon } from '@iconify/vue';
 import { customAlphabet } from 'nanoid';
 import BSearchRecent from '@/components/BSearchRecent/index.vue';
 import { useOpenFile } from '@/hooks/useOpenFile';
-import { native } from '@/shared/platform';
 import type { StoredFile } from '@/shared/storage/files/types';
 import { useFilesStore } from '@/stores/files';
 import { getRecentFileLabel } from '@/utils/recentFile';
@@ -66,7 +65,7 @@ const router = useRouter();
 const nanoid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz_', 8);
 
 const filesStore = useFilesStore();
-const { openFileById, openNativeFile } = useOpenFile();
+const { createNewFile, openFileById, openNativeFile } = useOpenFile();
 const isDragging = ref(false);
 const visibleSearchRecent = ref(false);
 
@@ -74,37 +73,64 @@ const topRecentFiles = computed(() => filesStore.recentFiles?.slice(0, 3) ?? [])
 
 onMounted(() => filesStore.ensureLoaded());
 
+/**
+ * 创建新的未保存文件。
+ */
 function handleNewFile(): void {
-  router.push({ name: 'editor', params: { id: nanoid() } });
+  createNewFile('new');
 }
 
+/**
+ * 通过欢迎页入口打开原生文件。
+ */
 async function handleOpenFile(): Promise<void> {
-  await openNativeFile();
+  await openNativeFile('welcome');
 }
 
+/**
+ * 打开最近文件并更新 openedAt。
+ * @param id - 文件 ID
+ */
 async function handleOpenRecentFile(id: string): Promise<void> {
-  await openFileById(id);
+  await openFileById(id, 'welcome');
 }
 
+/**
+ * 获取最近文件展示标签。
+ * @param file - 文件记录
+ * @returns 页面展示名称
+ */
 function getFileLabel(file: Pick<StoredFile, 'name' | 'content'>): string {
   return getRecentFileLabel(file);
 }
 
+/**
+ * 打开最近文件搜索弹窗。
+ */
 function handleShowShortcuts(): void {
   visibleSearchRecent.value = true;
 }
 
 let dragCounter = 0;
 
+/**
+ * 处理拖拽进入。
+ */
 function handleDragEnter(): void {
   dragCounter++;
   isDragging.value = true;
 }
 
+/**
+ * 处理拖拽悬停。
+ */
 function handleDragOver(): void {
   isDragging.value = true;
 }
 
+/**
+ * 处理拖拽离开。
+ */
 function handleDragLeave(): void {
   dragCounter = Math.max(0, dragCounter - 1);
   if (dragCounter === 0) {
@@ -112,6 +138,10 @@ function handleDragLeave(): void {
   }
 }
 
+/**
+ * 处理拖拽打开文件。
+ * @param e - 拖拽事件
+ */
 async function handleDrop(e: DragEvent): Promise<void> {
   dragCounter = 0;
   isDragging.value = false;
@@ -129,22 +159,34 @@ async function handleDrop(e: DragEvent): Promise<void> {
   }
 
   let filePath = (file as unknown as { path?: string }).path;
-  let content = '';
 
   try {
+    let openedId = '';
+
     if (filePath) {
-      const result = await native.readFile(filePath);
-      content = result.content;
+      const openedFile = await filesStore.openOrCreateByPath(filePath, 'drop');
+      if (!openedFile) return;
+
+      openedId = openedFile.id;
     } else {
-      content = await file.text();
-      filePath = undefined;
+      const content = await file.text();
+      const name = file.name.split('.').slice(0, -1).join('.') || file.name;
+      const createdFile = await filesStore.createAndOpen(
+        {
+          id: nanoid(),
+          path: null,
+          name,
+          ext,
+          content,
+          savedContent: content
+        },
+        'drop'
+      );
+
+      openedId = createdFile.id;
     }
 
-    const id = nanoid();
-    const name = file.name.split('.').slice(0, -1).join('.') || file.name;
-
-    await filesStore.addFile({ id, path: filePath || null, name, ext, content, savedContent: content });
-    router.push({ name: 'editor', params: { id } });
+    await router.push({ name: 'editor', params: { id: openedId } });
   } catch (error) {
     console.error('Failed to drop file:', error);
   }
