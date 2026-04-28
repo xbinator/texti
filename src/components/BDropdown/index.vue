@@ -1,5 +1,5 @@
 <template>
-  <Dropdown overlay-class-name="b-dropdown-overlay" :disabled="disabled">
+  <ADropdown overlay-class-name="b-dropdown-overlay" :disabled="disabled" :placement="placement" :align="align">
     <slot></slot>
 
     <template #overlay>
@@ -7,18 +7,22 @@
         <slot name="overlay"></slot>
       </div>
     </template>
-  </Dropdown>
+  </ADropdown>
 </template>
 
 <script lang="ts" setup>
-import { Dropdown } from 'ant-design-vue';
+import { DropdownProps } from 'ant-design-vue';
 
 interface Props {
   disabled?: boolean;
+  placement?: DropdownProps['placement'];
+  align?: DropdownProps['align'];
 }
 
 withDefaults(defineProps<Props>(), {
-  disabled: false
+  disabled: false,
+  placement: 'bottomLeft',
+  align: undefined
 });
 </script>
 

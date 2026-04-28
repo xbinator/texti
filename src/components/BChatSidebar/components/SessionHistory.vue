@@ -1,5 +1,5 @@
 <template>
-  <BDropdown v-model:open="open" :disabled="isDisabled">
+  <BDropdown v-model:open="open" :disabled="isDisabled" :align="{ offset: [-45, 0] }">
     <BButton square size="small" type="text" :disabled="isDisabled">
       <Icon icon="lucide:history" width="16" height="16" />
     </BButton>
@@ -255,15 +255,14 @@ async function handleDeleteSession(sessionId: string) {
 }
 
 .session-history__actions {
-  display: flex;
+  display: none;
   flex-shrink: 0;
   gap: 4px;
-  opacity: 0;
   transition: opacity 0.2s ease;
 }
 
 .session-history__item:hover .session-history__actions {
-  opacity: 1;
+  display: flex;
 }
 
 .session-history__empty {
