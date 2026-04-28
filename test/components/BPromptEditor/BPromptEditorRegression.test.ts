@@ -8,11 +8,51 @@ import { resolve } from 'node:path';
 import { EditorState } from '@codemirror/state';
 import { Decoration, WidgetType } from '@codemirror/view';
 import { describe, expect, test, vi } from 'vitest';
+import { nextTick } from 'vue';
+import { mount, type VueWrapper } from '@vue/test-utils';
+import BPromptEditor from '@/components/BPromptEditor/index.vue';
 import { editableCompartment, readOnlyCompartment, themeCompartment } from '@/components/BPromptEditor/extensions/base';
 import { createPasteHandlerExtension } from '@/components/BPromptEditor/extensions/pasteHandler';
 import { createPlaceholderExtension } from '@/components/BPromptEditor/extensions/placeholder';
 import { triggerStateField, setTriggerActiveIndex, closeTrigger } from '@/components/BPromptEditor/extensions/triggerState';
 import { variableChipField, chipResolverEffect, type ChipResolver } from '@/components/BPromptEditor/extensions/variableChip';
+import { chatSlashCommands } from '@/components/BChatSidebar/utils/slashCommands';
+
+/**
+ * BPromptEditor 挂载实例类型。
+ */
+type PromptEditorInstance = InstanceType<typeof BPromptEditor>;
+
+/**
+ * 挂载编辑器并保留斜杠命令配置。
+ * @param options - 编辑器挂载选项
+ * @returns 编辑器包装器
+ */
+function mountPromptEditor(options: { submitOnEnter?: boolean } = {}): VueWrapper<PromptEditorInstance> {
+  return mount(BPromptEditor, {
+    props: {
+      value: '',
+      slashCommands: chatSlashCommands,
+      submitOnEnter: options.submitOnEnter ?? false
+    },
+    global: {
+      stubs: {
+        VariableSelect: true
+      }
+    }
+  }) as VueWrapper<PromptEditorInstance>;
+}
+
+/**
+ * 更新编辑器内容并等待内部状态同步。
+ * @param wrapper - 编辑器包装器
+ * @param value - 目标正文
+ */
+async function setEditorValue(wrapper: VueWrapper<PromptEditorInstance>, value: string): Promise<void> {
+  await wrapper.setProps({ value });
+  await nextTick();
+  await nextTick();
+}
 
 /**
  * 判断编辑器内容在去除占位符和零宽空格后是否为空。
@@ -393,5 +433,19 @@ describe('BPromptEditor index.vue integration', () => {
     const source = readSource('src/components/BPromptEditor/index.vue');
     expect(source).toContain('.b-prompt-chip');
     expect(source).toContain('.b-prompt-chip--file');
+  });
+});
+
+describe('BPromptEditor slash command regression', () => {
+  test('prefers slash selection over submit when the slash menu is open', async () => {
+    const wrapper = mountPromptEditor({
+      submitOnEnter: true
+    });
+
+    await setEditorValue(wrapper, '/');
+    await wrapper.get('.cm-content').trigger('keydown', { key: 'Enter' });
+
+    expect(wrapper.emitted('slash-command')).toBeDefined();
+    expect(wrapper.emitted('submit')).toBeUndefined();
   });
 });
