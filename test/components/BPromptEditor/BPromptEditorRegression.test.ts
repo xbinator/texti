@@ -44,12 +44,12 @@ function mountPromptEditor(options: { submitOnEnter?: boolean } = {}): VueWrappe
 }
 
 /**
- * 更新编辑器内容并等待内部状态同步。
+ * 使用编辑器自身的插入 API 模拟输入并等待内部状态同步。
  * @param wrapper - 编辑器包装器
- * @param value - 目标正文
+ * @param value - 要插入的正文
  */
-async function setEditorValue(wrapper: VueWrapper<PromptEditorInstance>, value: string): Promise<void> {
-  await wrapper.setProps({ value });
+async function insertEditorText(wrapper: VueWrapper<PromptEditorInstance>, value: string): Promise<void> {
+  wrapper.vm.insertTextAtCursor(value);
   await nextTick();
   await nextTick();
 }
@@ -442,7 +442,8 @@ describe('BPromptEditor slash command regression', () => {
       submitOnEnter: true
     });
 
-    await setEditorValue(wrapper, '/');
+    await insertEditorText(wrapper, '/us');
+    expect(wrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(true);
     await wrapper.get('.cm-content').trigger('keydown', { key: 'Enter' });
 
     expect(wrapper.emitted('slash-command')).toBeDefined();

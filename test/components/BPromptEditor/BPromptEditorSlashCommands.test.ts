@@ -49,12 +49,12 @@ function mountPromptEditor(options: PromptEditorMountOptions = {}): VueWrapper<P
 }
 
 /**
- * 更新编辑器正文并等待 CodeMirror 状态同步。
+ * 使用编辑器自身的插入 API 模拟输入并等待 CodeMirror 状态同步。
  * @param wrapper - 编辑器包装器
- * @param value - 目标正文
+ * @param value - 要插入的文本
  */
-async function setEditorValue(wrapper: VueWrapper<PromptEditorInstance>, value: string): Promise<void> {
-  await wrapper.setProps({ value });
+async function insertEditorText(wrapper: VueWrapper<PromptEditorInstance>, value: string): Promise<void> {
+  wrapper.vm.insertTextAtCursor(value);
   await nextTick();
   await nextTick();
 }
@@ -69,23 +69,61 @@ describe('BPromptEditor slash commands', () => {
       slashCommands: chatSlashCommands
     });
 
-    await setEditorValue(wrapper, '/');
+    await insertEditorText(wrapper, 'hello\n');
+    await insertEditorText(wrapper, '/');
 
     expect(wrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(true);
 
-    await setEditorValue(wrapper, 'hello /');
-
-    expect(wrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(false);
-  });
-
-  test('keeps slash as plain text when no commands are provided', async () => {
-    const wrapper = mountPromptEditor({
-      slashCommands: []
+    const nonLineStartWrapper = mountPromptEditor({
+      slashCommands: chatSlashCommands
     });
 
-    await setEditorValue(wrapper, '/');
+    await insertEditorText(nonLineStartWrapper, 'hello ');
+    await insertEditorText(nonLineStartWrapper, '/');
 
-    expect(wrapper.vm.getText()).toBe('/');
+    expect(nonLineStartWrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(false);
+  });
+
+  test('filters slash commands by trigger prefix', async () => {
+    const wrapper = mountPromptEditor({
+      slashCommands: chatSlashCommands
+    });
+
+    await insertEditorText(wrapper, '/us');
+
+    expect(wrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(true);
+    expect(wrapper.findAll('[data-testid="slash-command-item"]')).toHaveLength(1);
+    expect(wrapper.text()).toContain('Usage');
+    expect(wrapper.text()).not.toContain('Model');
+    expect(wrapper.text()).not.toContain('New Chat');
+    expect(wrapper.text()).not.toContain('Clear Draft');
+  });
+
+  test('emits the selected slash command and removes the active slash text', async () => {
+    const wrapper = mountPromptEditor({
+      slashCommands: chatSlashCommands
+    });
+
+    await insertEditorText(wrapper, '/us');
+
+    await wrapper.find('[data-testid="slash-command-item"]').trigger('click');
+
+    expect(wrapper.emitted('slash-command')).toEqual([[chatSlashCommands[1]]]);
+    expect(wrapper.vm.getText()).toBe('');
+  });
+
+  test('keeps slash text plain and still submits the draft when no commands are provided', async () => {
+    const wrapper = mountPromptEditor({
+      slashCommands: [],
+      submitOnEnter: true
+    });
+
+    await insertEditorText(wrapper, '/us');
+    await wrapper.get('.cm-content').trigger('keydown', { key: 'Enter' });
+
+    expect(wrapper.vm.getText()).toBe('/us');
+    expect(wrapper.emitted('submit')).toBeDefined();
+    expect(wrapper.emitted('slash-command')).toBeUndefined();
     expect(wrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(false);
   });
 });

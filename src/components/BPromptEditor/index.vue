@@ -2,6 +2,14 @@
   <div class="b-prompt-editor" @click="handleContainerClick">
     <div class="b-prompt-editor__container">
       <div ref="editorHostRef" class="b-prompt-editor__codemirror"></div>
+      <SlashCommandSelect
+        :visible="slashVisible"
+        :commands="filteredSlashCommands"
+        :position="slashPosition"
+        :active-index="slashActiveIndex"
+        @select="handleSlashCommandSelect"
+        @update:active-index="handleSlashActiveIndexChange"
+      />
       <VariableSelect
         :visible="triggerVisible"
         :variables="filteredVariables"
@@ -24,6 +32,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { defaultKeymap, history, historyKeymap, indentWithTab, insertNewline } from '@codemirror/commands';
 import { EditorState, Annotation } from '@codemirror/state';
 import { EditorView, Decoration, keymap } from '@codemirror/view';
+import SlashCommandSelect from './components/SlashCommandSelect.vue';
 import VariableSelect from './components/VariableSelect.vue';
 import { editableCompartment, readOnlyCompartment, themeCompartment } from './extensions/base';
 import { createPasteHandlerExtension } from './extensions/pasteHandler';
@@ -60,6 +69,13 @@ const triggerPosition = ref({ top: 0, left: 0, bottom: 0 });
 const triggerActiveIndex = ref(0);
 const triggerQuery = ref('');
 
+// Slash command refs
+const slashVisible = ref(false);
+const slashPosition = ref({ top: 0, left: 0, bottom: 0 });
+const slashActiveIndex = ref(0);
+const slashQuery = ref('');
+const slashRange = ref<{ from: number; to: number } | null>(null);
+
 // Editor state
 const lastSelection = ref<{ main: { head: number } } | null>(null);
 
@@ -68,6 +84,16 @@ const view = ref<EditorView | null>(null);
 
 // Computed variables from options
 const allVariables = computed<Variable[]>(() => props.options.flatMap((group) => group.options));
+
+// Computed slash command list
+const allSlashCommands = computed<readonly SlashCommandOption[]>(() => props.slashCommands ?? []);
+
+// Filtered slash commands based on trigger prefix
+const filteredSlashCommands = computed<readonly SlashCommandOption[]>(() => {
+  const query = slashQuery.value.toLowerCase();
+  if (!query) return allSlashCommands.value;
+  return allSlashCommands.value.filter((command) => command.trigger.toLowerCase().startsWith(`/${query}`));
+});
 
 // Filtered variables based on trigger query
 const filteredVariables = computed<Variable[]>(() => {
@@ -145,6 +171,101 @@ const createThemeExtension = (maxHeight: string | undefined, isEmpty: boolean): 
   });
 };
 
+/**
+ * 判断斜杠命令是否匹配当前输入前缀。
+ * @param command - 斜杠命令
+ * @param query - 当前斜杠查询内容
+ * @returns 是否匹配
+ */
+function isSlashCommandMatch(command: SlashCommandOption, query: string): boolean {
+  return command.trigger.toLowerCase().startsWith(`/${query.toLowerCase()}`);
+}
+
+/**
+ * 获取当前光标所在的斜杠命令上下文。
+ * @param state - 编辑器状态
+ * @returns 斜杠上下文，不匹配时返回 null
+ */
+function getSlashCommandContext(state: EditorState): { from: number; to: number; query: string } | null {
+  if (allSlashCommands.value.length === 0) {
+    return null;
+  }
+
+  const selection = state.selection.main;
+  if (!selection.empty) {
+    return null;
+  }
+
+  const pos = selection.head;
+  const line = state.doc.lineAt(pos);
+  const text = state.sliceDoc(line.from, pos);
+
+  if (!text.startsWith('/')) {
+    return null;
+  }
+
+  const query = text.slice(1);
+  const matches = allSlashCommands.value.filter((command) => isSlashCommandMatch(command, query));
+
+  if (matches.length === 0) {
+    return null;
+  }
+
+  return {
+    from: line.from,
+    to: pos,
+    query
+  };
+}
+
+/**
+ * 隐藏斜杠菜单并清理活跃范围。
+ */
+function closeSlashCommandMenu(): void {
+  slashVisible.value = false;
+  slashQuery.value = '';
+  slashRange.value = null;
+}
+
+/**
+ * 同步斜杠菜单状态。
+ * @param state - 编辑器状态
+ * @param editorView - 编辑器视图
+ */
+function syncSlashCommandState(state: EditorState, editorView: EditorView): void {
+  const context = getSlashCommandContext(state);
+  if (!context) {
+    closeSlashCommandMenu();
+    return;
+  }
+
+  slashVisible.value = true;
+  slashQuery.value = context.query;
+  slashRange.value = { from: context.from, to: context.to };
+  slashActiveIndex.value = 0;
+
+  requestAnimationFrame(() => {
+    let coords: { top: number; left: number; bottom: number } | null = null;
+    try {
+      coords = editorView.coordsAtPos(context.to);
+    } catch {
+      coords = null;
+    }
+
+    if (!coords) {
+      slashPosition.value = { top: 0, left: 0, bottom: 0 };
+      return;
+    }
+
+    const { scrollDOM } = editorView;
+    slashPosition.value = {
+      top: coords.top + scrollDOM.scrollTop,
+      left: coords.left,
+      bottom: coords.bottom + scrollDOM.scrollTop
+    };
+  });
+}
+
 // External update annotation for avoiding circular updates
 const externalUpdate = Annotation.define<boolean>();
 
@@ -152,9 +273,12 @@ const externalUpdate = Annotation.define<boolean>();
 const modelSyncExtension = EditorView.updateListener.of((update) => {
   const newValue = update.state.doc.toString();
   editorIsEmpty.value = isEditorContentEmpty(newValue);
+  const isExternalValueChange = update.transactions.some((tr) => tr.annotation(externalUpdate));
+
+  syncSlashCommandState(update.state, update.view);
 
   // Skip if this update was triggered by external value change
-  if (update.transactions.some((tr) => tr.annotation(externalUpdate))) {
+  if (isExternalValueChange) {
     return;
   }
 
@@ -190,6 +314,74 @@ function handleActiveIndexChange(index: number): void {
       effects: setTriggerActiveIndex.of(index)
     });
   }
+}
+
+/**
+ * 处理斜杠命令高亮索引变化。
+ * @param index - 新的斜杠命令高亮索引
+ */
+function handleSlashActiveIndexChange(index: number): void {
+  slashActiveIndex.value = index;
+}
+
+/**
+ * 应用斜杠命令并清除当前活动斜杠输入。
+ * @param command - 被选择的斜杠命令
+ */
+function handleSlashCommandSelect(command: SlashCommandOption): void {
+  if (!view.value || !slashRange.value) return;
+
+  const { from, to } = slashRange.value;
+  view.value.dispatch({
+    changes: { from, to, insert: '' },
+    selection: { anchor: from }
+  });
+
+  emit('slash-command', command);
+  closeSlashCommandMenu();
+  view.value.focus();
+}
+
+/**
+ * 选择当前高亮的斜杠命令。
+ * @returns 是否已处理
+ */
+function handleSlashCommandEnter(): boolean {
+  const command = filteredSlashCommands.value[slashActiveIndex.value];
+  if (!command) {
+    return false;
+  }
+
+  handleSlashCommandSelect(command);
+  return true;
+}
+
+/**
+ * 处理斜杠菜单向上移动。
+ * @returns 是否已处理
+ */
+function handleSlashCommandArrowUp(): boolean {
+  const list = filteredSlashCommands.value;
+  if (!slashVisible.value) return false;
+  if (list.length === 0) return true;
+
+  const newIndex = (slashActiveIndex.value - 1 + list.length) % list.length;
+  handleSlashActiveIndexChange(newIndex);
+  return true;
+}
+
+/**
+ * 处理斜杠菜单向下移动。
+ * @returns 是否已处理
+ */
+function handleSlashCommandArrowDown(): boolean {
+  const list = filteredSlashCommands.value;
+  if (!slashVisible.value) return false;
+  if (list.length === 0) return true;
+
+  const newIndex = (slashActiveIndex.value + 1) % list.length;
+  handleSlashActiveIndexChange(newIndex);
+  return true;
 }
 
 // Handle container click
@@ -315,6 +507,9 @@ function createExtensions(): import('@codemirror/state').Extension[] {
       {
         key: 'ArrowUp',
         run: () => {
+          if (slashVisible.value) {
+            return handleSlashCommandArrowUp();
+          }
           if (!triggerVisible.value) return false;
           const list = filteredVariables.value;
           if (list.length === 0) return true;
@@ -326,6 +521,9 @@ function createExtensions(): import('@codemirror/state').Extension[] {
       {
         key: 'ArrowDown',
         run: () => {
+          if (slashVisible.value) {
+            return handleSlashCommandArrowDown();
+          }
           if (!triggerVisible.value) return false;
           const list = filteredVariables.value;
           if (list.length === 0) return true;
@@ -337,6 +535,10 @@ function createExtensions(): import('@codemirror/state').Extension[] {
       {
         key: 'Escape',
         run: (editorView) => {
+          if (slashVisible.value) {
+            closeSlashCommandMenu();
+            return true;
+          }
           if (triggerVisible.value) {
             editorView.dispatch({ effects: closeTrigger.of() });
             return true;
@@ -351,6 +553,9 @@ function createExtensions(): import('@codemirror/state').Extension[] {
       {
         key: 'Enter',
         run: () => {
+          if (slashVisible.value && filteredSlashCommands.value.length > 0) {
+            return handleSlashCommandEnter();
+          }
           if (triggerVisible.value && filteredVariables.value.length > 0) {
             const variable = filteredVariables.value[triggerActiveIndex.value];
             if (variable) {
@@ -444,6 +649,8 @@ onMounted(() => {
     state,
     parent: editorHostRef.value
   });
+
+  syncSlashCommandState(view.value.state, view.value);
 
   // 注入初始 chipResolver（watch 为 lazy 模式，首次不触发，需手动分派）
   if (props.chipResolver) {
