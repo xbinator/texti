@@ -32,7 +32,7 @@ The first release exposes four action commands:
 | `/model` | `action` | Open the existing model selector UI. |
 | `/usage` | `action` | Show current session token usage. |
 | `/new` | `action` | Create a new session by reusing the existing new-session flow. |
-| `/clear` | `action` | Clear the current editor content and draft file references only. |
+| `/clear` | `action` | Clear the current editor content and draft file references only, without affecting session messages. |
 
 ## User Experience
 
@@ -57,8 +57,9 @@ The first release exposes four action commands:
 ### Execution Semantics
 
 - Selecting an action command removes the active slash text from the editor before executing the command.
+- In multi-line input, only the active slash range on the current line is removed.
 - Action commands do not create a chat message.
-- `/clear` clears only the current draft input state.
+- `/clear` clears only `inputValue` and `draftReferences`.
 - `/new` follows the same loading guards as the existing new-session button.
 - `/model` opens the same model-selection surface that is already reachable from the toolbar.
 - `/usage` opens a lightweight usage display scoped to the current session.
@@ -92,6 +93,8 @@ The registry should be a plain data module so it can be reused by:
 - sidebar command execution
 - future tests
 
+The registry should remain metadata-only in v1. Execution logic stays in `BChatSidebar`, but command dispatch should use a stable mapping object keyed by command id instead of a long `switch` chain so the sidebar does not become harder to extend over time.
+
 ### Editor Responsibility
 
 `BPromptEditor` should own:
@@ -104,6 +107,8 @@ The registry should be a plain data module so it can be reused by:
 - emitting a selected command event
 
 The editor should not know how chat actions are implemented. It only reports which command the user chose and removes the temporary slash text from the document when appropriate.
+
+The slash menu should render above the input by default. This matches the bottom-anchored chat layout and reduces the chance that the menu extends beyond the viewport on narrow or short windows.
 
 ### Sidebar Responsibility
 
@@ -141,6 +146,8 @@ Add:
 
 The component should continue to own loading guards and session side effects.
 
+The sidebar should provide the chat sidebar command registry to `BPromptEditor` rather than relying on the editor to ship built-in chat commands. This keeps `BPromptEditor` reusable for non-chat contexts while still letting chat surfaces share a default registry module.
+
 ### Usage Display
 
 `/usage` needs a visible session-scoped output. The preferred v1 behavior is a lightweight popover or modal opened from the chat sidebar. The content should show:
@@ -149,7 +156,24 @@ The component should continue to own loading guards and session side effects.
 - output tokens
 - total tokens
 
-If the current session has no recorded usage yet, show an empty-state message instead of failing silently.
+Data should come from the persisted current session usage record rather than recomputing from only the currently loaded message slice in memory. If the current session has no recorded usage yet, show an empty-state message instead of failing silently.
+
+If reading usage requires an async storage call, the UI should show:
+
+- a lightweight loading state while usage is being read
+- a stable empty state when no session is active or no usage has been recorded
+- a non-destructive failure state if the read fails
+
+### Model Selector Open Behavior
+
+`/model` requires programmatic access to the existing model selection surface. The current model selector should therefore gain an externally callable open pathway rather than forcing the slash command flow to duplicate model selection UI.
+
+Possible implementations include:
+
+- exposing an `open()` method from `ModelSelector`
+- lifting the dropdown open state so the sidebar can control it
+
+The implementation choice can be made in planning, but the spec requires a single shared model selection surface rather than two parallel UIs.
 
 ## Data Flow
 
@@ -194,6 +218,7 @@ Cover:
 - arrow key navigation works
 - enter emits the selected command
 - selecting a command removes the slash token
+- when the slash menu is open, `Enter` confirms the active command instead of submitting the message
 - existing submit behavior still works when the slash menu is closed
 
 ### Sidebar Tests
@@ -201,11 +226,12 @@ Cover:
 Cover:
 
 - `/new` reuses existing new-session flow
+- `/new` no-ops while streaming
 - `/clear` resets input value and draft references only
 - `/usage` resolves current session usage correctly
 - `/model` triggers the model-selection open flow
 
-## Open Implementation Decisions
+## Resolved Design Decisions
 
 These decisions are intentionally resolved for v1 to avoid ambiguity:
 
@@ -217,7 +243,8 @@ These decisions are intentionally resolved for v1 to avoid ambiguity:
 ## Recommended Implementation Order
 
 1. Add the shared slash command registry.
-2. Extend `BPromptEditor` with slash trigger state and selection emit.
+2. Add the slash command menu UI and trigger state to `BPromptEditor`.
 3. Handle command execution in `BChatSidebar`.
-4. Add a lightweight usage display.
-5. Add regression tests for editor and sidebar behaviors.
+4. Add programmatic open support for the shared model selector surface.
+5. Add a lightweight usage display.
+6. Add regression tests for editor and sidebar behaviors.

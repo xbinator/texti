@@ -15,6 +15,7 @@
 | 失败降级 | 静默降级为当前行为（用户首条消息作为标题） |
 | 模型配置 | 独立的服务配置（与 chat/polish 模式一致） |
 | 手动入口 | 暂不需要 |
+| 排除场景 | `awaiting_user_input`、非首轮、无活跃会话 |
 | 重复生成 | 每个会话仅生成一次 |
 
 ---
@@ -57,7 +58,7 @@
 - **完全异步**：生成过程不阻塞用户输入、不影响对话流、不导致 UI 冻结
 - **静默降级**：任何环节失败（模型未配置、API 报错、返回为空）均不影响正常对话流程
 - **竞态安全**：按 sessionId 维护独立的 `pendingTasks` 与 `namedSessionIds`；不同会话的防抖定时器和命名标记完全隔离，跨会话操作不互相吞掉任务
-- **精确触发时机**：handleComplete 触发时用 `captureSnapshot()` 冻结当前上下文；通过 debounce（300ms）+ loading 门禁，确保在首轮流式真正完成后才基于最终快照执行
+- **精确触发时机**：handleComplete 触发时先在任何异步持久化之前冻结 `sessionId` 与首轮对话快照；再通过 debounce（300ms）+ loading 门禁，确保在首轮流式真正完成后才基于最终快照执行
 - **持久化与 UI 解耦**：标题始终写到快照 sessionId（用户切走后旧会话依然被命名）；`currentSession.title` 仅当用户仍在查看该会话时才同步更新
 - **最小化持久化**：标题更新使用 `UPDATE chat_sessions SET title = ?, updated_at = ? WHERE id = ?`，不覆盖 `lastMessageAt`/`usage` 等业务元数据
 - **遵循现有模式**：复用了现有的服务配置体系（serviceModelsStorage / ServiceConfig / ModelServiceType）
@@ -241,18 +242,21 @@ interface PendingAutoNameTask {
  */
 interface AutoNameOptions {
   /**
-   * 获取当前激活的会话 ID（持久化锚点，必须来自 store）
-   * 不能用 currentSession（UI 镜像），因为新会话首轮快速完成时 currentSession 可能尚未由 SessionHistory 异步回填。
-   * 值来源：settingStore.chatSidebarActiveSessionId
-   */
-  getCurrentSessionId: () => string | undefined
+ * 获取当前激活的会话 ID（持久化锚点，必须来自 store）
+ * 不能用 currentSession（UI 镜像），因为新会话首轮快速完成时 currentSession 可能尚未由 SessionHistory 异步回填。
+ * 值来源：settingStore.chatSidebarActiveSessionId
+ */
+  getCurrentSessionId: () => string | null | undefined
   /**
    * 获取当前激活的会话对象（响应式）
    * 仅用于 UI 同步判断——是否仍在查看该会话、是否更新 currentSession.title。
    */
   getCurrentSession: () => { id: string; title: string } | undefined
-  /** 获取首轮对话内容，仅在 handleComplete 触发时调用来构建快照 */
-  getFirstRoundContent: () => { userMessage: string; aiResponse: string } | null
+  /**
+   * 获取首轮对话内容，仅在 handleComplete 触发时调用来构建快照
+   * 需要显式排除 awaiting_user_input 等“首轮尚未真正完成”的中间态。
+   */
+  getFirstRoundContent: (message: { content: string }) => { userMessage: string; aiResponse: string } | null
   /**
    * 标题持久化成功后回调
    * 用于触发会话历史列表刷新，使侧边栏中后台命名的会话标题立即可见。
@@ -281,10 +285,9 @@ export function useAutoName(options: AutoNameOptions) {
    * sessionId 来自 store（stable），不依赖 currentSession（UI 镜像）。
    * @returns 快照对象，若非首轮或无活跃会话则返回 null
    */
-  function captureSnapshot(): AutoNameSnapshot | null {
-    const content = options.getFirstRoundContent();
+  function captureSnapshot(message: { content: string }, sessionId: string | null | undefined): AutoNameSnapshot | null {
+    const content = options.getFirstRoundContent(message);
     if (!content) return null;
-    const sessionId = options.getCurrentSessionId();
     if (!sessionId) return null;
     return {
       sessionId,
@@ -395,7 +398,7 @@ export function useAutoName(options: AutoNameOptions) {
 
 **关键设计决策**：
 - **按 sessionId 独立任务**：`pendingTasks` 是 `Map<string, PendingAutoNameTask>`，每个会话独立维护自己的快照和定时器。会话 A 的定时器不会被会话 B 的 `clearTimeout` 影响，跨会话操作不会吞掉任务。
-- **快照冻结**：`captureSnapshot()` 在 `handleComplete` 触发时冻结当前上下文，返回纯数据而非写入全局 state。后续 `doAutoName` 只读快照，不受实时上下文影响。
+- **快照冻结**：`captureSnapshot()` 在 `handleComplete` 触发时、且早于任何 `await` 执行，冻结当前 `sessionId` 与首轮内容，返回纯数据而非写入全局 state。后续 `doAutoName` 只读快照，不受实时上下文影响。
 - **持久化锚点与 UI 镜像分离**：`sessionId` 来自 `settingStore.chatSidebarActiveSessionId`（store，稳定）；`currentSession`（UI 镜像）仅用于 UI 同步。避免新会话首轮快速完成时 `currentSession` 尚未由 SessionHistory 异步回填而导致漏触发。
 - **后台命名刷新列表**：通过 `onTitlePersisted` 回调在持久化成功后触发 `SessionHistory.refreshSessions()`，使侧边栏列表中后台命名的会话标题立即可见；该回调失败时只静默忽略，不影响已完成的持久化和当前会话 UI 同步。
 - **竞态安全**：`namedSessionIds` 是 `Set<string>`，按 sessionId 标记；旧会话请求 resolve 不会影响新会话。
@@ -423,14 +426,19 @@ const { captureSnapshot, scheduleAutoName } = useAutoName({
   getCurrentSessionId: () => settingStore.chatSidebarActiveSessionId,
   // 仅用于 UI 同步判断——是否仍在查看该会话
   getCurrentSession: () => currentSession.value,
-  getFirstRoundContent: () => {
+  getFirstRoundContent: (message) => {
+    // 待用户答题时，首轮尚未真正完成，此时不触发自动命名
+    if (userChoice.findPending(messages.value)) {
+      return null;
+    }
+
     // 首轮：恰好有 1 条 user + 1 条 assistant 消息（thinking/确认消息不算独立消息）
     const userMsgs = messages.value.filter(m => m.role === 'user');
     const assistantMsgs = messages.value.filter(m => m.role === 'assistant');
     if (userMsgs.length === 1 && assistantMsgs.length === 1) {
       return {
         userMessage: userMsgs[0].content,
-        aiResponse: assistantMsgs[0].content
+        aiResponse: message.content
       };
     }
     return null;
@@ -458,11 +466,16 @@ async function handleComplete(message: Message): Promise<void> {
 修改为：
 ```typescript
 async function handleComplete(message: Message): Promise<void> {
+  // 1. 在任何 await 之前先冻结当前会话锚点与首轮快照，避免用户切会话带来竞态
+  const sessionId = settingStore.chatSidebarActiveSessionId;
+  const snap = captureSnapshot(message, sessionId);
+
   await chatStore.addSessionMessage(settingStore.chatSidebarActiveSessionId, message);
-  // 1. 以当前实时上下文构建快照（非首轮时返回 null，直接跳过）
-  const snap = captureSnapshot();
+
+  // 2. 非首轮、待用户补充输入或无活跃会话时直接跳过
   if (!snap) return;
-  // 2. 按 sessionId 排入独立防抖任务。工具续轮的中间态完成会反复刷新该会话的定时器，
+
+  // 3. 按 sessionId 排入独立防抖任务。工具续轮的中间态完成会反复刷新该会话的定时器，
   //    流式真正停稳 300ms 后才执行；不同会话的任务互不覆盖。
   scheduleAutoName(snap, () => chatStream.loading.value);
 }
@@ -484,6 +497,7 @@ async function handleComplete(message: Message): Promise<void> {
 | 服务已配置但模型不可用（provider 离线等） | `getAvailableServiceConfig` 返回 null，同上 |
 | API 调用出错（网络/超时/Key 失效） | catch 静默处理，标题不变 |
 | LLM 返回空文本或纯空格 | 保留现有标题 |
+| 首轮进入 `awaiting_user_input` | 不触发自动命名，待用户完成补充并使首轮真正结束后再评估 |
 | LLM 返回超长文本 | Prompt 中已约束 20 字以内；即使超长，清理后设置不超过 50 字符可考虑截断（或不处理，交给 UI 层处理 overflow） |
 | 用户快速切换会话 | 各会话独立 `pendingTasks` entry，互不覆盖；旧会话定时器到期后正常落库到其快照 sessionId |
 | 会话列表刷新失败（`onTitlePersisted` 抛错） | 静默忽略，不影响标题已落库，也不影响当前会话标题同步 |
@@ -496,15 +510,16 @@ async function handleComplete(message: Message): Promise<void> {
 
 1. 有完整首轮快照 + 有效配置 → `doAutoName` 生成标题并持久化到快照 sessionId
 2. 无 autoname 配置 → `namedSessionIds` 加入该 sessionId，不发起 AI 调用
-3. 快照为 null（非首轮或 `getCurrentSessionId` 为空）→ `captureSnapshot` 返回 null，集成层直接 return
+3. 快照为 null（非首轮、`awaiting_user_input`、或 `getCurrentSessionId` 为空）→ `captureSnapshot` 返回 null，集成层直接 return
 4. `namedSessionIds` 已含该 sessionId → `doAutoName` 直接跳过
 5. AI 调用返回 error → catch 静默，`namedSessionIds` 仍加入该 session
 6. 不同 session 的快照分别调用 `doAutoName` → 各自独立标记，互不干扰
-7. **活跃会话 ID 存在但 currentSession 未就绪**：新会话创建后 `settingStore.chatSidebarActiveSessionId` 已有值，但 `currentSession` 尚未由 SessionHistory 异步回填 → `captureSnapshot()` 通过 `getCurrentSessionId()` 正常获取 sessionId 并返回有效快照
+7. **活跃会话 ID 存在但 currentSession 未就绪**：新会话创建后 `settingStore.chatSidebarActiveSessionId` 已有值，但 `currentSession` 尚未由 SessionHistory 异步回填 → `captureSnapshot(message, sessionId)` 通过预先冻结的 sessionId 正常返回有效快照
 8. **持久化与 UI 解耦**：LLM 返回后始终写到快照 `sessionId` 并触发 `onTitlePersisted`；`session.title` 仅在当前会话匹配时才同步
 9. **工具续轮防抖**：同一会话的工具续轮中间态 → `scheduleAutoName` 反复刷新该会话的快照和定时器 → 最终停稳 300ms 后以最新内容执行
 10. **后台命名刷新列表**：用户停留在会话 B 时，会话 A 命名成功 → `onTitlePersisted` 被调用 → 列表刷新，会话 A 标题更新
 11. **列表刷新失败不影响主流程**：`chatStore.updateSessionTitle` 成功、`onTitlePersisted` 抛错 → 当前会话标题仍已同步，且不会回滚已持久化的数据
+12. **切会话竞态隔离**：`handleComplete` 触发后、`addSessionMessage` 完成前用户切到其他会话 → 仍使用 await 之前冻结的 `sessionId` 与快照执行，不会误命名新会话
 
 ### 集成测试（BChatSidebar）
 
@@ -515,6 +530,7 @@ async function handleComplete(message: Message): Promise<void> {
 5. **跨会话独立性**：会话 A 首轮完成 → 300ms 内切到会话 B 并完成首轮 → 两个会话各自独立定时器到期后都被命名
 6. **同一会话的 debounce**：首轮含工具续轮 → 中间态 `handleComplete` 多次触发 → 每次刷新同一 sessionId 的快照和定时器 → 最终停稳后基于最终内容命名
 7. **列表刷新异常隔离**：模拟 `SessionHistory.refreshSessions()` 抛错 → 当前会话标题仍更新，数据库标题仍已写入
+8. **待用户输入不提前触发**：首轮触发 `ask_user_choice` → assistant 追问落库后不命名；待用户回答并首轮真正结束后再命名
 
 ### 手动验证
 

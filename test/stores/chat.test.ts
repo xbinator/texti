@@ -13,6 +13,7 @@ type SetSessionMessagesMock = (sessionId: string, messages: ChatMessageRecord[])
 type UpdateSessionLastMessageAtMock = (sessionId: string, lastMessageAt: string) => Promise<void>;
 type AddSessionUsageMock = (sessionId: string, usage: NonNullable<Message['usage']>) => Promise<void>;
 type UpdateSessionUsageMock = (sessionId: string, usage: NonNullable<Message['usage']> | undefined) => Promise<void>;
+type UpdateSessionTitleMock = (sessionId: string, title: string) => Promise<void>;
 
 /**
  * 模拟消息写入存储层的行为。
@@ -44,6 +45,11 @@ const addSessionUsageMock = vi.fn<AddSessionUsageMock>();
  */
 const updateSessionUsageMock = vi.fn<UpdateSessionUsageMock>();
 
+/**
+ * 模拟会话标题更新行为。
+ */
+const updateSessionTitleMock = vi.fn<UpdateSessionTitleMock>();
+
 vi.mock('@/shared/storage', () => ({
   chatStorage: {
     getMessages: getMessagesMock,
@@ -51,7 +57,8 @@ vi.mock('@/shared/storage', () => ({
     setSessionMessages: setSessionMessagesMock,
     updateSessionLastMessageAt: updateSessionLastMessageAtMock,
     addSessionUsage: addSessionUsageMock,
-    updateSessionUsage: updateSessionUsageMock
+    updateSessionUsage: updateSessionUsageMock,
+    updateSessionTitle: updateSessionTitleMock
   }
 }));
 
@@ -64,6 +71,7 @@ describe('useChatStore', () => {
     updateSessionLastMessageAtMock.mockReset();
     addSessionUsageMock.mockReset();
     updateSessionUsageMock.mockReset();
+    updateSessionTitleMock.mockReset();
     setActivePinia(createPinia());
   });
 
@@ -240,5 +248,14 @@ describe('useChatStore', () => {
     await chatStore.setSessionMessages('session-1', messages);
 
     expect(updateSessionUsageMock).toHaveBeenCalledWith('session-1', { inputTokens: 5, outputTokens: 9, totalTokens: 14 });
+  });
+
+  it('updates a session title without rewriting the whole session', async () => {
+    const { useChatStore } = await import('@/stores/chat');
+    const chatStore = useChatStore();
+
+    await chatStore.updateSessionTitle('session-1', '自动生成标题');
+
+    expect(updateSessionTitleMock).toHaveBeenCalledWith('session-1', '自动生成标题');
   });
 });
