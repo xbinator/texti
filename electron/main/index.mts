@@ -5,6 +5,7 @@ import {
   closeDatabase,
   initStore,
   initLogger,
+  initMainErrorCollector,
   cleanOldLogs,
   startLogMaintenanceTimer,
   setupAppMenu,
@@ -63,6 +64,8 @@ function handleWindowAllClosed(): void {
 async function bootstrap(): Promise<void> {
   // 初始化日志 (仅控制台)
   initLogger();
+  // 初始化主进程错误收集
+  initMainErrorCollector();
   // 清理过期日志文件
   cleanOldLogs();
   // 启动日志维护定时器（每小时检查一次过期文件）

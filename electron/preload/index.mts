@@ -22,6 +22,41 @@ async function writeScopedLog(scope: 'renderer' | 'preload', level: 'ERROR' | 'W
   });
 }
 
+// ============================================================
+// Preload 层错误收集
+// ============================================================
+
+/**
+ * 初始化 Preload 层错误收集
+ * 在 contextBridge 暴露之前调用，捕获 preload 自身错误
+ */
+function initPreloadErrorCollector(): void {
+  const formatError = (err: Error, ctx?: Record<string, unknown>): string => {
+    const base = `Error: ${err.name}: ${err.message}\nStack: ${err.stack || 'N/A'}`;
+    return ctx ? `${base}\nContext: ${JSON.stringify(ctx)}` : base;
+  };
+
+  window.onerror = (message, source, lineno, colno, error) => {
+    const errorObj = error || new Error(String(message));
+    const context = {
+      source: source ? source.replace(/.*\//, '') : 'N/A',
+      lineno,
+      colno,
+      type: 'preload.onerror'
+    };
+    writeScopedLog('preload', 'ERROR', formatError(errorObj, context));
+    return false;
+  };
+
+  window.onunhandledrejection = (event) => {
+    const error = event.reason instanceof Error ? event.reason : new Error(String(event.reason));
+    writeScopedLog('preload', 'ERROR', formatError(error, { type: 'unhandledrejection' }));
+  };
+}
+
+// 初始化 Preload 错误收集
+initPreloadErrorCollector();
+
 /**
  * 通过 contextBridge 暴露 Electron API 到渲染进程
  * 所有 IPC 调用都通过这里进行，确保安全隔离
