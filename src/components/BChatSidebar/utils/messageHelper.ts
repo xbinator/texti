@@ -195,7 +195,7 @@ export const create = {
   },
   // 创建错误消息
   errorMessage(content: string): Message {
-    return createBase({ role: 'error', content, parts: [{ type: 'text', text: content }], finished: true });
+    return createBase({ role: 'assistant', content, parts: [{ type: 'error', text: content }], finished: true });
   },
   // 创建用户消息
   userMessage(content: string, references?: Message['references']): Message {

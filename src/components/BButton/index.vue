@@ -1,24 +1,13 @@
 <template>
   <button
-    class="b-button"
-    :class="[
-      `b-button--${type}`,
-      `b-button--${size}`,
-      { 'b-button--disabled': disabled },
-      { 'b-button--loading': loading },
-      { 'b-button--icon': $slots.icon || icon },
-      { 'b-button--block': block },
-      { 'b-button--rounded': rounded },
-      { 'b-button--square': square },
-      { 'b-button--danger': danger }
-    ]"
+    :class="bem([type, size, { disabled, loading, icon: $slots.icon || icon, block, rounded, square, danger }])"
     :disabled="disabled || loading"
     @click="handleClick"
   >
-    <div v-if="loading" class="b-button__loading">
-      <div class="b-button__loading-spinner"></div>
+    <div v-if="loading" :class="bem('loading')">
+      <div :class="bem('loading-spinner')"></div>
     </div>
-    <Icon v-if="icon" class="b-button__icon" :icon="icon" />
+    <Icon v-if="icon" :class="bem('icon')" :icon="icon" />
     <slot></slot>
   </button>
 </template>
@@ -26,6 +15,9 @@
 <script setup lang="ts">
 import type { BButtonProps as Props } from './types';
 import { Icon } from '@iconify/vue';
+import { createNamespace } from '@/utils/namespace';
+
+const [, bem] = createNamespace('button');
 
 const props = withDefaults(defineProps<Props>(), {
   type: 'primary',
@@ -53,7 +45,7 @@ function handleClick(event: MouseEvent) {
 .b-button {
   position: relative;
   display: inline-flex;
-  gap: 2px;
+  gap: 6px;
   align-items: center;
   justify-content: center;
   padding: 0 16px;
@@ -253,11 +245,6 @@ function handleClick(event: MouseEvent) {
   }
 
   // 图标
-  &--icon {
-    .b-button__text {
-      margin-left: 4px;
-    }
-  }
 
   &__icon {
     flex-shrink: 0;

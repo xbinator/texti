@@ -1,5 +1,5 @@
 <template>
-  <div :class="bem({ error: isErrorMessage })">
+  <div :class="name">
     <BBubble :placement="bubblePlacement" :loading="message.loading" :size="message.role === 'user' ? 'auto' : 'fill'">
       <template v-if="showHeader" #header>
         <div :class="bem('header')">
@@ -16,35 +16,34 @@
       </template>
 
       <div :class="bem('parts')">
-        <template v-for="(part, index) in message.parts" :key="`${part.type}-${index}`">
+        <template v-for="(item, index) in message.parts" :key="`${item.type}-${index}`">
           <BubblePartText
-            v-if="part.type === 'text'"
-            :part="part"
-            :loading="isLastPart(index) && !!message.loading"
+            v-if="item.type === 'text' || item.type === 'error'"
+            :part="item"
             :enable-file-reference-chips="isUserMessage"
             :references="message.references"
           />
 
-          <BubblePartThinking v-else-if="part.type === 'thinking'" :part="part" />
+          <BubblePartThinking v-else-if="item.type === 'thinking'" :part="item" />
 
-          <BubblePartToolCall v-else-if="part.type === 'tool-call'" :part="part" />
+          <BubblePartToolCall v-else-if="item.type === 'tool-call'" :part="item" />
 
           <ConfirmationCard
-            v-else-if="part.type === 'confirmation'"
-            :part="part"
+            v-else-if="item.type === 'confirmation'"
+            :part="item"
             @confirmation-action="$emit('confirmation-action', $event.confirmationId, $event.action)"
           />
 
-          <AskUserChoiceCard v-else-if="isAwaitingUserChoicePart(part)" :question="part.result.data" @submit-choice="$emit('user-choice-submit', $event)" />
-          <BubblePartToolResult v-else :part="part" />
+          <AskUserChoiceCard v-else-if="isAwaitingUserChoicePart(item)" :question="item.result.data" @submit-choice="$emit('user-choice-submit', $event)" />
+          <BubblePartToolResult v-else :part="item" />
         </template>
       </div>
     </BBubble>
 
     <!-- 助手消息工具栏 -->
-    <div v-if="message.finished && isAssistantMessage" :class="bem('toolbar')">
+    <div v-if="message.finished && !isUserMessage" :class="bem('toolbar')">
       <BButton type="text" size="small" square icon="lucide:copy" @click="handleCopy(message)" />
-      <BButton v-if="isAssistantMessage" square type="text" size="small" icon="lucide:refresh-cw" @click="$emit('regenerate', message)" />
+      <BButton square type="text" size="small" icon="lucide:refresh-cw" @click="$emit('regenerate', message)" />
     </div>
 
     <!-- 用户消息底部：时间戳 + 复制按钮（hover 可见） -->
@@ -81,7 +80,7 @@ defineOptions({ name: 'MessageBubble' });
 
 const { clipboard } = useClipboard();
 
-const [, bem] = createNamespace('', 'message-bubble');
+const [name, bem] = createNamespace('', 'message-bubble');
 
 const props = defineProps<{ message: Message }>();
 
@@ -100,20 +99,10 @@ const otherFiles = computed(() => props.message.files?.filter((file) => file.typ
 const isUserMessage = computed(() => props.message.role === 'user');
 /** 是否为助手消息 */
 const isAssistantMessage = computed(() => props.message.role === 'assistant');
-/** 是否为错误消息 */
-const isErrorMessage = computed(() => props.message.role === 'error');
 /** 气泡位置：助手和错误消息靠左，用户消息靠右 */
-const bubblePlacement = computed(() => (isAssistantMessage.value || isErrorMessage.value ? 'left' : 'right'));
+const bubblePlacement = computed(() => (isAssistantMessage.value ? 'left' : 'right'));
 /** 是否显示头部（用户消息且有文件时显示） */
 const showHeader = computed(() => isUserMessage.value && (imageFiles.value.length || otherFiles.value.length));
-
-/**
- * 判断消息片段是否为最后一个片段。
- * @param index - 片段索引
- */
-function isLastPart(index: number): boolean {
-  return index === props.message.parts.length - 1;
-}
 
 /**
  * 判断片段是否为等待用户选择的工具结果。

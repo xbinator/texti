@@ -1,18 +1,20 @@
 <template>
-  <BMessage v-if="!props.enableFileReferenceChips" :content="part.text" type="markdown" :loading="loading" />
+  <div :class="bem({ 'part-error': isErrorMessage })">
+    <div v-if="enableFileReferenceChips" :class="bem('part-text')">
+      <template v-for="(segment, index) in segments" :key="`${segment.type}-${index}`">
+        <span v-if="segment.type === 'text'">{{ segment.text }}</span>
+        <span v-else :class="bem('part-tag')" data-value="file-reference">
+          {{ segment.label }}
+        </span>
+      </template>
+    </div>
 
-  <div v-else :class="bem('part-text')">
-    <template v-for="(segment, index) in segments" :key="`${segment.type}-${index}`">
-      <span v-if="segment.type === 'text'">{{ segment.text }}</span>
-      <span v-else class="message-bubble__part-text--tag" data-value="file-reference">
-        {{ segment.label }}
-      </span>
-    </template>
+    <BMessage v-else :content="part.text" type="markdown" />
   </div>
 </template>
 
 <script setup lang="ts">
-import type { ChatMessageFileReference, ChatMessageTextPart } from 'types/chat';
+import type { ChatMessageFileReference, ChatMessageTextPart, ChatMessageErrorPart } from 'types/chat';
 import { computed } from 'vue';
 import BMessage from '@/components/BMessage/index.vue';
 import { createNamespace } from '@/utils/namespace';
@@ -49,26 +51,25 @@ interface FileReferenceDisplaySegment {
  */
 type MessageBubbleTextSegment = TextDisplaySegment | FileReferenceDisplaySegment;
 
-const props = withDefaults(
-  defineProps<{
-    /** 要渲染的文本片段 */
-    part: ChatMessageTextPart;
-    /** 该片段是否仍处于流式加载状态 */
-    loading: boolean;
-    /** 是否启用仅用户可见的文件引用标签渲染 */
-    enableFileReferenceChips?: boolean;
-    /** 父消息附加的文件引用元数据 */
-    references?: ChatMessageFileReference[];
-  }>(),
-  {
-    enableFileReferenceChips: false,
-    references: () => []
-  }
-);
+interface Props {
+  /** 要渲染的文本片段 */
+  part: ChatMessageTextPart | ChatMessageErrorPart;
+  /** 是否启用仅用户可见的文件引用标签渲染 */
+  enableFileReferenceChips?: boolean;
+  /** 父消息附加的文件引用元数据 */
+  references?: ChatMessageFileReference[];
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  enableFileReferenceChips: false,
+  references: () => []
+});
 
 const FILE_REFERENCE_TOKEN_PATTERN = /\{\{file-ref:([A-Za-z0-9_-]+)(?:\|[^}]*)?\}\}/g;
 
-const [, bem] = createNamespace('message-bubble');
+const [, bem] = createNamespace('', 'message-bubble');
+
+const isErrorMessage = computed(() => props.part.type === 'error');
 
 /**
  * 构建从引用标识到引用元数据的快速查找表。
@@ -117,12 +118,12 @@ const segments = computed<MessageBubbleTextSegment[]>(() => {
 </script>
 
 <style scoped lang="less">
-.message-bubble__part-text {
+.message-bubble--part-text {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
-.message-bubble__part-text--tag {
+.message-bubble--part-tag {
   display: inline-flex;
   gap: 4px;
   align-items: center;
@@ -133,5 +134,14 @@ const segments = computed<MessageBubbleTextSegment[]>(() => {
   color: var(--text-primary);
   border: 1px solid var(--border-secondary);
   border-radius: 4px;
+}
+
+.message-bubble--part-error {
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--color-error);
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error);
+  border-radius: 8px;
 }
 </style>

@@ -87,7 +87,6 @@ const shouldShowCollapseButton = computed(() => props.placement === 'left' && co
 }
 
 .b-bubble--left .b-bubble__container {
-  background: var(--bg-primary);
   border-radius: 2px 12px 12px;
 }
 

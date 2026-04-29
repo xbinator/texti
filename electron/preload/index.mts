@@ -10,6 +10,54 @@ import { contextBridge, ipcRenderer } from 'electron';
 import webviewAPI from './webview.mjs';
 
 /**
+ * 发送带来源标识的日志到主进程
+ * IPC 失败时静默处理，与主进程写入失败策略保持一致
+ * @param scope - 进程来源标识
+ * @param level - 日志级别
+ * @param message - 日志消息
+ */
+async function writeScopedLog(scope: 'renderer' | 'preload', level: 'ERROR' | 'WARN' | 'INFO', message: string) {
+  return ipcRenderer.invoke('logger:write', { scope, level, message }).catch(() => {
+    // 静默处理，避免未捕获的 Promise rejection 污染控制台
+  });
+}
+
+// ============================================================
+// Preload 层错误收集
+// ============================================================
+
+/**
+ * 初始化 Preload 层错误收集
+ * 在 contextBridge 暴露之前调用，捕获 preload 自身错误
+ */
+function initPreloadErrorCollector(): void {
+  const formatError = (err: Error, ctx?: Record<string, unknown>): string => {
+    const base = `Error: ${err.name}: ${err.message}\nStack: ${err.stack || 'N/A'}`;
+    return ctx ? `${base}\nContext: ${JSON.stringify(ctx)}` : base;
+  };
+
+  window.onerror = (message, source, lineno, colno, error) => {
+    const errorObj = error || new Error(String(message));
+    const context = {
+      source: source ? source.replace(/.*\//, '') : 'N/A',
+      lineno,
+      colno,
+      type: 'preload.onerror'
+    };
+    writeScopedLog('preload', 'ERROR', formatError(errorObj, context));
+    return false;
+  };
+
+  window.onunhandledrejection = (event) => {
+    const error = event.reason instanceof Error ? event.reason : new Error(String(event.reason));
+    writeScopedLog('preload', 'ERROR', formatError(error, { type: 'unhandledrejection' }));
+  };
+}
+
+// 初始化 Preload 错误收集
+initPreloadErrorCollector();
+
+/**
  * 通过 contextBridge 暴露 Electron API 到渲染进程
  * 所有 IPC 调用都通过这里进行，确保安全隔离
  */
@@ -227,11 +275,25 @@ const electronAPI: ElectronAPI = {
   },
 
   // ==================== 日志操作 ====================
-  logger: {
+  // 控制台日志（保留原有实现，不删除）
+  consoleLogger: {
     debug: (...args) => ipcRenderer.send('logger:debug', ...args),
     info: (...args) => ipcRenderer.send('logger:info', ...args),
     warn: (...args) => ipcRenderer.send('logger:warn', ...args),
     error: (...args) => ipcRenderer.send('logger:error', ...args)
+  },
+
+  // 文件日志收集（新增）
+  logger: {
+    error: (message: string) => writeScopedLog('renderer', 'ERROR', message),
+    warn: (message: string) => writeScopedLog('renderer', 'WARN', message),
+    info: (message: string) => writeScopedLog('renderer', 'INFO', message),
+
+    getLogs: (options: Parameters<ElectronAPI['logger']['getLogs']>[0]) => ipcRenderer.invoke('logger:getLogs', options),
+
+    getLogFiles: () => ipcRenderer.invoke('logger:getFiles'),
+
+    openLogFolder: () => ipcRenderer.invoke('logger:openFolder')
   },
 
   // ==================== 菜单操作 ====================

@@ -202,10 +202,23 @@ export interface ChatMessageConfirmationPart {
   executionError?: string;
 }
 
+export interface ChatMessageErrorPart {
+  /** 片段类型 */
+  type: 'error';
+  /** 错误内容 */
+  text: string;
+}
+
 /**
  * 聊天消息结构化片段
  */
-export type ChatMessagePart = ChatMessageTextPart | ChatMessageThinkingPart | ChatMessageToolCallPart | ChatMessageToolResultPart | ChatMessageConfirmationPart;
+export type ChatMessagePart =
+  | ChatMessageTextPart
+  | ChatMessageErrorPart
+  | ChatMessageThinkingPart
+  | ChatMessageToolCallPart
+  | ChatMessageToolResultPart
+  | ChatMessageConfirmationPart;
 
 /**
  * 聊天会话

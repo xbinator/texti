@@ -4,102 +4,100 @@
       <SidebarSearch v-model="searchKeyword" :collapsed="sidebarCollapsed" @toggle="toggleSidebarCollapsed" />
 
       <div class="sidebar-inner">
-        <BScrollbar inset="auto">
-          <template v-if="searchKeyword">
-            <SidebarSection :collapsed="sidebarCollapsed">
-              <div v-if="filteredAllProviders.length === 0" class="empty-state">
-                <Icon icon="lucide:search-x" width="24" height="24" />
-                <span>无匹配结果</span>
-              </div>
-              <SidebarItem
-                v-for="provider in filteredAllProviders"
-                :key="provider.value"
-                :active="activeProvider === provider.value && activeCategory === 'all'"
-                :collapsed="sidebarCollapsed"
-                :is-custom="provider.isCustom"
-                :label="provider.label"
-                :logo="providerLogos[provider.value]"
-                :provider="provider.value"
-                @click="handleProviderClick(provider.value)"
-              />
-            </SidebarSection>
-          </template>
-
-          <template v-else>
-            <SidebarSection :collapsed="sidebarCollapsed">
-              <template #title>分类</template>
-              <SidebarItem
-                v-for="category in categories"
-                :key="category.key"
-                :active="activeCategory === category.key && activeProvider === 'all'"
-                :collapsed="sidebarCollapsed"
-                :count="categoryCountMap[category.key]"
-                :icon="category.icon"
-                :label="category.label"
-                :title="sidebarCollapsed ? category.label : ''"
-                @click="handleCategoryClick(category.key)"
-              />
-            </SidebarSection>
-
-            <SidebarSection
-              v-model:section-collapsed="customCollapsed"
-              action-icon="lucide:plus"
-              action-title="添加服务商"
+        <template v-if="searchKeyword">
+          <SidebarSection :collapsed="sidebarCollapsed">
+            <div v-if="filteredAllProviders.length === 0" class="empty-state">
+              <Icon icon="lucide:search-x" width="24" height="24" />
+              <span>无匹配结果</span>
+            </div>
+            <SidebarItem
+              v-for="provider in filteredAllProviders"
+              :key="provider.value"
+              :active="activeProvider === provider.value && activeCategory === 'all'"
               :collapsed="sidebarCollapsed"
-              collapsible
-              title="自定义服务商"
-              @action="handleAddProvider"
-            >
-              <div v-if="!customProviders.length" class="empty-state">
-                <Icon icon="lucide:inbox" width="24" height="24" />
-                <span class="item-label">暂无自定义服务商</span>
-              </div>
-              <SidebarItem
-                v-for="provider in customProviders"
-                :key="provider.value"
-                :active="activeProvider === provider.value && activeCategory === 'all'"
-                :collapsed="sidebarCollapsed"
-                :is-custom="provider.isCustom"
-                :label="provider.label"
-                :logo="providerLogos[provider.value]"
-                :title="sidebarCollapsed ? provider.label : ''"
-                @click="handleProviderClick(provider.value)"
-              >
-                <template #extra>
-                  <BDropdown>
-                    <button type="button" class="edit-btn" title="更多">
-                      <Icon icon="lucide:more-vertical" width="12" height="12" />
-                    </button>
-                    <template #overlay>
-                      <BDropdownMenu :options="providerDropdownOptionsMap.get(provider.value) || []">
-                        <template #menu="{ record }">
-                          <div class="dropdown-menu-item" :class="{ danger: record.danger }">
-                            <Icon :icon="record.icon" />
-                            <span>{{ record.label }}</span>
-                          </div>
-                        </template>
-                      </BDropdownMenu>
-                    </template>
-                  </BDropdown>
-                </template>
-              </SidebarItem>
-            </SidebarSection>
+              :is-custom="provider.isCustom"
+              :label="provider.label"
+              :logo="providerLogos[provider.value]"
+              :provider="provider.value"
+              @click="handleProviderClick(provider.value)"
+            />
+          </SidebarSection>
+        </template>
 
-            <SidebarSection v-model:section-collapsed="defaultCollapsed" :collapsed="sidebarCollapsed" collapsible title="服务商">
-              <SidebarItem
-                v-for="provider in defaultProviders"
-                :key="provider.value"
-                :active="activeProvider === provider.value && activeCategory === 'all'"
-                :collapsed="sidebarCollapsed"
-                :label="provider.label"
-                :logo="providerLogos[provider.value]"
-                :provider="provider.value"
-                :title="sidebarCollapsed ? provider.label : ''"
-                @click="handleProviderClick(provider.value)"
-              />
-            </SidebarSection>
-          </template>
-        </BScrollbar>
+        <template v-else>
+          <SidebarSection :collapsed="sidebarCollapsed">
+            <template #title>分类</template>
+            <SidebarItem
+              v-for="category in categories"
+              :key="category.key"
+              :active="activeCategory === category.key && activeProvider === 'all'"
+              :collapsed="sidebarCollapsed"
+              :count="categoryCountMap[category.key]"
+              :icon="category.icon"
+              :label="category.label"
+              :title="sidebarCollapsed ? category.label : ''"
+              @click="handleCategoryClick(category.key)"
+            />
+          </SidebarSection>
+
+          <SidebarSection
+            v-model:section-collapsed="customCollapsed"
+            action-icon="lucide:plus"
+            action-title="添加服务商"
+            :collapsed="sidebarCollapsed"
+            collapsible
+            title="自定义服务商"
+            @action="handleAddProvider"
+          >
+            <div v-if="!customProviders.length" class="empty-state">
+              <Icon icon="lucide:inbox" width="24" height="24" />
+              <span class="item-label">暂无自定义服务商</span>
+            </div>
+            <SidebarItem
+              v-for="provider in customProviders"
+              :key="provider.value"
+              :active="activeProvider === provider.value && activeCategory === 'all'"
+              :collapsed="sidebarCollapsed"
+              :is-custom="provider.isCustom"
+              :label="provider.label"
+              :logo="providerLogos[provider.value]"
+              :title="sidebarCollapsed ? provider.label : ''"
+              @click="handleProviderClick(provider.value)"
+            >
+              <template #extra>
+                <BDropdown>
+                  <button type="button" class="edit-btn" title="更多">
+                    <Icon icon="lucide:more-vertical" width="12" height="12" />
+                  </button>
+                  <template #overlay>
+                    <BDropdownMenu :options="providerDropdownOptionsMap.get(provider.value) || []">
+                      <template #menu="{ record }">
+                        <div class="dropdown-menu-item" :class="{ danger: record.danger }">
+                          <Icon :icon="record.icon" />
+                          <span>{{ record.label }}</span>
+                        </div>
+                      </template>
+                    </BDropdownMenu>
+                  </template>
+                </BDropdown>
+              </template>
+            </SidebarItem>
+          </SidebarSection>
+
+          <SidebarSection v-model:section-collapsed="defaultCollapsed" :collapsed="sidebarCollapsed" collapsible title="服务商">
+            <SidebarItem
+              v-for="provider in defaultProviders"
+              :key="provider.value"
+              :active="activeProvider === provider.value && activeCategory === 'all'"
+              :collapsed="sidebarCollapsed"
+              :label="provider.label"
+              :logo="providerLogos[provider.value]"
+              :provider="provider.value"
+              :title="sidebarCollapsed ? provider.label : ''"
+              @click="handleProviderClick(provider.value)"
+            />
+          </SidebarSection>
+        </template>
       </div>
     </div>
 
@@ -299,7 +297,7 @@ const providerDropdownOptionsMap = computed<Map<string, DropdownOptionItem[]>>((
 .sidebar-inner {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .provider-layout.sidebar-collapsed {

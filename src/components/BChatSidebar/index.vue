@@ -296,24 +296,24 @@ async function handleChatSubmit(): Promise<void> {
   await chatStream.streamMessages(messages.value, config);
 }
 
-function handleChatEdit(message: Message): void {
+function handleChatEdit(message: Message) {
   inputValue.value = message.content;
   draftReferences.value = [...(message.references ?? [])];
 }
 
-async function handleChatRegenerate(message: Message): Promise<void> {
+async function handleChatRegenerate(message: Message) {
   await chatStream.regenerate(message);
 }
 
-async function handleChatUserChoiceSubmit(answer: import('types/chat').AIUserChoiceAnswerData): Promise<void> {
+async function handleChatUserChoiceSubmit(answer: import('types/chat').AIUserChoiceAnswerData) {
   await chatStream.submitUserChoice(answer);
 }
 
-function handleFocusInput(): void {
+function handleFocusInput() {
   promptEditorRef.value?.focus();
 }
 
-function handleCaptureInputCursor(): void {
+function handleCaptureInputCursor() {
   promptEditorRef.value?.saveCursorPosition();
 }
 
@@ -330,7 +330,7 @@ function formatLineRange(startLine: number, endLine: number): string {
   return startLine === endLine ? String(startLine) : `${startLine}-${endLine}`;
 }
 
-function handleChatInsertFileReference(reference: FileReferenceChip): void {
+function handleChatInsertFileReference(reference: FileReferenceChip) {
   const token = `{{file-ref:${reference.referenceId}|${reference.fileName}|${reference.startLine}|${reference.endLine}}} `;
   draftReferences.value = [
     ...draftReferences.value.filter((item) => item.id !== reference.referenceId),
@@ -367,7 +367,7 @@ async function handleFileReferenceInsert(reference: ChatFileReferenceInsertPaylo
   handleFocusInput();
 }
 
-function handleModelChange(value: string): void {
+function handleModelChange(value: string) {
   selectedModel.value = value;
 }
 

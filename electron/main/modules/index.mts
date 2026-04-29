@@ -2,7 +2,7 @@ import { registerAIHandlers } from './ai/ipc.mjs';
 import { registerDatabaseHandlers } from './database/ipc.mjs';
 import { registerDialogHandlers } from './dialog/ipc.mjs';
 import { registerFileHandlers } from './file/ipc.mjs';
-import { registerLoggerHandlers } from './logger/ipc.mjs';
+import { registerLoggerHandlers, registerLogFileHandlers } from './logger/ipc.mjs';
 import { registerMenuHandlers } from './menu/ipc.mjs';
 import { registerPlatformShortcutHandlers } from './platform-shortcuts/ipc.mjs';
 import { registerShellHandlers } from './shell/ipc.mjs';
@@ -19,6 +19,7 @@ export function registerAllIpcHandlers() {
   registerShellHandlers();
   registerAIHandlers();
   registerLoggerHandlers();
+  registerLogFileHandlers();
   registerMenuHandlers();
   registerPlatformShortcutHandlers();
   registerWebviewHandlers();
@@ -34,12 +35,13 @@ export {
   registerAIHandlers,
   registerLoggerHandlers,
   registerPlatformShortcutHandlers,
-  registerWebviewHandlers
+  registerWebviewHandlers,
+  registerLogFileHandlers
 };
 
 export { aiService } from './ai/service.mjs';
 
-export { initLogger, log } from './logger/service.mjs';
+export { initLogger, initMainErrorCollector, log, cleanOldLogs, startLogMaintenanceTimer } from './logger/service.mjs';
 
 export { initDatabase, closeDatabase, dbExecute, dbSelect, getDbPath } from './database/service.mjs';
 

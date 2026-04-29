@@ -1,5 +1,5 @@
 <template>
-  <div class="rich-editor-pane" @click="handleLinkClick">
+  <div class="rich-editor-pane" @click="navigate.onLink">
     <!-- Front Matter 卡片 -->
     <FrontMatterCard
       v-if="shouldShowFrontMatterCard"
@@ -35,8 +35,8 @@ import type { FrontMatterData } from '../hooks/useFrontMatter';
 import type { SelectionRange } from '../types';
 import type { Editor } from '@tiptap/vue-3';
 import { onBeforeUnmount, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
 import { EditorContent } from '@tiptap/vue-3';
+import { useNavigate } from '@/hooks/useNavigate';
 import { clearAISelectionHighlight, setAISelectionHighlight } from '../extensions/AISelectionHighlight';
 import CurrentBlockMenu from './CurrentBlockMenu.vue';
 import FrontMatterCard from './FrontMatterCard.vue';
@@ -64,7 +64,7 @@ const props = withDefaults(defineProps<Props>(), {
   shouldShowFrontMatterCard: false
 });
 
-const router = useRouter();
+const navigate = useNavigate();
 
 const frontMatterData = defineModel<FrontMatterData>('frontMatterData', { default: () => ({}) });
 
@@ -240,17 +240,6 @@ function handleFrontMatterFieldRemove(key: string): void {
 function handleFrontMatterFieldAdd(key: string, value: unknown): void {
   if (key in frontMatterData.value) return;
   frontMatterData.value = { ...frontMatterData.value, [key]: value };
-}
-
-async function handleLinkClick(event: MouseEvent): Promise<void> {
-  const { target } = event;
-  if (!(target instanceof Element)) return;
-
-  const anchor = target.closest('a[href]');
-  if (!(anchor instanceof HTMLAnchorElement) || !anchor.href) return;
-
-  event.preventDefault();
-  router.push({ name: 'webview', query: { url: encodeURIComponent(anchor.href) } });
 }
 
 onBeforeUnmount(() => {

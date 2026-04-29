@@ -39,6 +39,12 @@ const routes: AppRouteRecordRaw[] = [
         name: 'service-model',
         component: () => import('@/views/settings/service-model/index.vue'),
         meta: { title: '服务模型' }
+      },
+      {
+        path: 'logger',
+        name: 'logger',
+        component: () => import('@/views/settings/logger/index.vue'),
+        meta: { title: '运行日志' }
       }
     ]
   }

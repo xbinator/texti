@@ -78,12 +78,7 @@ function sortRecentFiles(files: StoredFile[]): StoredFile[] {
       createdAt: normalizeTime(file.createdAt)
     }))
     .sort((a, b) => {
-      return (
-        b.openedAt - a.openedAt ||
-        b.modifiedAt - a.modifiedAt ||
-        b.createdAt - a.createdAt ||
-        a.index - b.index
-      );
+      return b.openedAt - a.openedAt || b.modifiedAt - a.modifiedAt || b.createdAt - a.createdAt || a.index - b.index;
     })
     .map((item) => item.file);
 }
@@ -176,7 +171,10 @@ async function writeRecentFiles(files: StoredFile[]): Promise<void> {
  */
 function enqueueWrite<T>(fn: () => Promise<T>): Promise<T> {
   const result = writeQueue.then(fn);
-  writeQueue = result.then(() => undefined, () => undefined);
+  writeQueue = result.then(
+    () => undefined,
+    () => undefined
+  );
   return result;
 }
 
@@ -238,9 +236,8 @@ export const recentFilesStorage = {
         throw new Error('File not found');
       }
 
-      const openedAt = typeof updates.openedAt === 'number' && Number.isFinite(updates.openedAt) && updates.openedAt > 0
-        ? updates.openedAt
-        : files[index].openedAt;
+      const openedAt =
+        typeof updates.openedAt === 'number' && Number.isFinite(updates.openedAt) && updates.openedAt > 0 ? updates.openedAt : files[index].openedAt;
 
       const nextFile = normalizeStoredFile({
         ...files[index],

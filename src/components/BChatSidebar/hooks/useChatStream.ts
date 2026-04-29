@@ -368,9 +368,19 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     resetToolLoopState();
     removeTrailingEmptyAssistantMessage();
 
-    const message = create.errorMessage(error.message);
-    messages.value.push(message);
-    onComplete?.(message);
+    const _message = create.errorMessage(error.message);
+
+    const lastMessage = messages.value[messages.value.length - 1];
+
+    if (lastMessage?.role !== 'user') {
+      lastMessage.parts.push(..._message.parts);
+      lastMessage.loading = false;
+      lastMessage.finished = true;
+    } else {
+      messages.value.push(_message);
+    }
+
+    onComplete?.(_message);
   }
 
   /**
