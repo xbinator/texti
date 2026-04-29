@@ -109,27 +109,27 @@ export interface FileChangeEvent {
 }
 
 export interface WebViewState {
-  url: string;          // 当前加载的 URL
-  title: string;         // 页面标题
-  isLoading: boolean;    // 是否正在加载
-  canGoBack: boolean;    // 是否可以后退
+  url: string; // 当前加载的 URL
+  title: string; // 页面标题
+  isLoading: boolean; // 是否正在加载
+  canGoBack: boolean; // 是否可以后退
   canGoForward: boolean; // 是否可以前进
-  loadProgress: number;  // 加载进度 0-1
+  loadProgress: number; // 加载进度 0-1
 }
 
 export interface WebViewAPI {
   create: (tabId: string, url: string) => Promise<void>; // 创建 WebContentsView
-  destroy: (tabId: string) => Promise<void>;              // 销毁 WebContentsView
+  destroy: (tabId: string) => Promise<void>; // 销毁 WebContentsView
   navigate: (tabId: string, url: string) => Promise<void>; // 导航到 URL
-  goBack: (tabId: string) => Promise<void>;              // 后退
-  goForward: (tabId: string) => Promise<void>;           // 前进
-  reload: (tabId: string) => Promise<void>;             // 刷新
-  stop: (tabId: string) => Promise<void>;               // 停止加载
+  goBack: (tabId: string) => Promise<void>; // 后退
+  goForward: (tabId: string) => Promise<void>; // 前进
+  reload: (tabId: string) => Promise<void>; // 刷新
+  stop: (tabId: string) => Promise<void>; // 停止加载
   setBounds: (tabId: string, bounds: { x: number; y: number; width: number; height: number }) => Promise<void>; // 设置边界
-  show: (tabId: string) => Promise<void>;               // 显示
-  hide: (tabId: string) => Promise<void>;               // 隐藏
-  onStateChanged: (callback: (tabId: string, state: WebViewState) => void) => () => void;         // 加载状态变化
-  onTitleUpdated: (callback: (tabId: string, title: string) => void) => () => void;               // 标题更新
+  show: (tabId: string) => Promise<void>; // 显示
+  hide: (tabId: string) => Promise<void>; // 隐藏
+  onStateChanged: (callback: (tabId: string, state: WebViewState) => void) => () => void; // 加载状态变化
+  onTitleUpdated: (callback: (tabId: string, title: string) => void) => () => void; // 标题更新
   onNavigationStateChanged: (callback: (tabId: string, canGoBack: boolean, canGoForward: boolean) => void) => () => void; // 导航状态变化
   onOpenInNewTab: (callback: (url: string) => void) => () => void; // 在新标签页打开
 }
@@ -194,12 +194,48 @@ export interface ElectronAPI {
   onAiStreamFinish: (callback: (payload: AIStreamFinishChunk) => void) => () => void;
   onAiStreamToolCall: (callback: (payload: AIStreamToolCallChunk) => void) => () => void;
 
-  // 日志操作
-  logger: {
+  // 控制台日志（保留原有，与文件日志分离）
+  consoleLogger: {
     debug: (...args: unknown[]) => void;
     info: (...args: unknown[]) => void;
     warn: (...args: unknown[]) => void;
     error: (...args: unknown[]) => void;
+  };
+
+  // Logger — 文件日志收集
+  logger: {
+    /** 写入 ERROR 级别日志文件 */
+    error: (message: string) => Promise<void>;
+    /** 写入 WARN 级别日志文件 */
+    warn: (message: string) => Promise<void>;
+    /** 写入 INFO 级别日志文件 */
+    info: (message: string) => Promise<void>;
+    /** 读取日志文件内容 */
+    getLogs: (options: {
+      level?: 'ERROR' | 'WARN' | 'INFO';
+      scope?: 'main' | 'renderer' | 'preload';
+      keyword?: string;
+      date?: string;
+      limit?: number;
+      offset?: number;
+    }) => Promise<
+      {
+        level: 'ERROR' | 'WARN' | 'INFO';
+        message: string;
+        scope: 'main' | 'renderer' | 'preload';
+        timestamp: string;
+      }[]
+    >;
+    /** 获取日志文件列表 */
+    getLogFiles: () => Promise<
+      {
+        name: string;
+        size: number;
+        createdAt: string;
+      }[]
+    >;
+    /** 在系统文件管理器中打开日志文件夹 */
+    openLogFolder: () => Promise<void>;
   };
 
   // 菜单操作
