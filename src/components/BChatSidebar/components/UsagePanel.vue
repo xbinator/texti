@@ -1,43 +1,46 @@
 <!--
   @file UsagePanel.vue
-  @description Persistent session usage summary panel for the chat sidebar.
+  @description 聊天侧边栏的持久化会话用量摘要面板。
 -->
 <template>
   <section class="usage-panel">
     <div class="usage-panel__header">
-      <div class="usage-panel__title">Session Usage</div>
-      <div class="usage-panel__subtitle">Persisted token totals for the active session</div>
+      <div class="usage-panel__header-text">
+        <div class="usage-panel__title">会话用量</div>
+        <div class="usage-panel__subtitle">当前会话的持久化 Token 统计</div>
+      </div>
+      <BButton type="text" size="small" @click="onClose"> 关闭 </BButton>
     </div>
 
     <div class="usage-panel__body">
       <div v-if="loading" data-testid="usage-panel-loading" class="usage-panel__state usage-panel__state--loading">
         <div class="usage-panel__spinner" aria-hidden="true"></div>
-        <div class="usage-panel__state-text">Loading usage...</div>
+        <div class="usage-panel__state-text">加载用量中...</div>
       </div>
 
       <div v-else-if="error" data-testid="usage-panel-error" class="usage-panel__state usage-panel__state--error">
-        <div class="usage-panel__state-text">Failed to load usage</div>
+        <div class="usage-panel__state-text">加载用量失败</div>
         <div class="usage-panel__detail">{{ error }}</div>
       </div>
 
       <div v-else-if="usage" data-testid="usage-panel-data" class="usage-panel__stats">
         <div class="usage-panel__stat">
-          <span class="usage-panel__label">Input</span>
+          <span class="usage-panel__label">输入</span>
           <strong class="usage-panel__value">{{ formatTokens(usage.inputTokens) }}</strong>
         </div>
         <div class="usage-panel__stat">
-          <span class="usage-panel__label">Output</span>
+          <span class="usage-panel__label">输出</span>
           <strong class="usage-panel__value">{{ formatTokens(usage.outputTokens) }}</strong>
         </div>
         <div class="usage-panel__stat">
-          <span class="usage-panel__label">Total</span>
+          <span class="usage-panel__label">总计</span>
           <strong class="usage-panel__value">{{ formatTokens(usage.totalTokens) }}</strong>
         </div>
       </div>
 
       <div v-else data-testid="usage-panel-empty" class="usage-panel__state usage-panel__state--empty">
-        <div class="usage-panel__state-text">No persisted usage yet</div>
-        <div class="usage-panel__detail">Send a message first, then open /usage again.</div>
+        <div class="usage-panel__state-text">暂无持久化用量</div>
+        <div class="usage-panel__detail">请先发送消息，然后再次打开 /usage。</div>
       </div>
     </div>
   </section>
@@ -47,15 +50,17 @@
 import type { AIUsage } from 'types/ai';
 
 /**
- * Usage panel props.
+ * 用量面板属性。
  */
 interface UsagePanelProps {
-  /** Whether the sidebar is currently loading usage from storage. */
+  /** 侧边栏是否正在从存储中加载用量数据。 */
   loading: boolean;
-  /** Persisted session usage totals. */
+  /** 持久化的会话用量统计。 */
   usage?: AIUsage;
-  /** Inline error message shown when the lookup fails. */
+  /** 查询失败时显示的内联错误消息。 */
   error?: string;
+  /** 关闭面板的回调函数。 */
+  onClose: () => void;
 }
 
 defineOptions({ name: 'UsagePanel' });
@@ -66,9 +71,9 @@ withDefaults(defineProps<UsagePanelProps>(), {
 });
 
 /**
- * Format a numeric token count for display.
- * @param value - Token count.
- * @returns Locale-aware formatted token count.
+ * 格式化 Token 数量用于显示。
+ * @param value - Token 数量。
+ * @returns 本地化格式的 Token 数量字符串。
  */
 function formatTokens(value: number): string {
   return value.toLocaleString();
@@ -79,8 +84,8 @@ function formatTokens(value: number): string {
 .usage-panel {
   flex: 0 0 auto;
   min-height: 132px;
-  margin: 0 12px 12px;
   padding: 12px 14px;
+  margin: 0 12px 12px;
   background: linear-gradient(180deg, var(--bg-elevated), var(--bg-secondary));
   border: 1px solid var(--border-primary);
   border-radius: 8px;
@@ -89,9 +94,16 @@ function formatTokens(value: number): string {
 
 .usage-panel__header {
   display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.usage-panel__header-text {
+  display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-bottom: 12px;
 }
 
 .usage-panel__title {

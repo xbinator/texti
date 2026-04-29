@@ -5,10 +5,10 @@
 /* @vitest-environment jsdom */
 
 import { nextTick } from 'vue';
-import { beforeEach, describe, expect, test } from 'vitest';
 import { mount, type VueWrapper } from '@vue/test-utils';
-import BPromptEditor from '@/components/BPromptEditor/index.vue';
+import { beforeEach, describe, expect, test } from 'vitest';
 import { chatSlashCommands } from '@/components/BChatSidebar/utils/slashCommands';
+import BPromptEditor from '@/components/BPromptEditor/index.vue';
 import type { SlashCommandOption } from '@/components/BPromptEditor/types';
 
 /**
@@ -152,7 +152,7 @@ describe('BPromptEditor slash commands', () => {
     expect(wrapper.vm.getText()).toBe('/us');
   });
 
-  test('blur closes the slash menu', async () => {
+  test('blur closes the slash menu and does not reopen it on the next ticks', async () => {
     const wrapper = mountPromptEditor({
       slashCommands: chatSlashCommands
     });
@@ -161,6 +161,37 @@ describe('BPromptEditor slash commands', () => {
     expect(wrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(true);
 
     await wrapper.get('.cm-content').trigger('blur');
+    await nextTick();
+    await nextTick();
+
+    expect(wrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(false);
+  });
+
+  test('focus leaving the editor shell closes the slash menu', async () => {
+    const wrapper = mountPromptEditor({
+      slashCommands: chatSlashCommands
+    });
+
+    await insertEditorText(wrapper, '/us');
+    expect(wrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(true);
+
+    await wrapper.get('.b-prompt-editor-shell').trigger('focusout', {
+      relatedTarget: document.body
+    });
+
+    expect(wrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(false);
+  });
+
+  test('clicking outside the editor closes the slash menu', async () => {
+    const wrapper = mountPromptEditor({
+      slashCommands: chatSlashCommands
+    });
+
+    await insertEditorText(wrapper, '/us');
+    expect(wrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(true);
+
+    document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    await nextTick();
 
     expect(wrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(false);
   });
