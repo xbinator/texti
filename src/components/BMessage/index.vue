@@ -4,7 +4,7 @@
 
     <div class="b-message__container">
       <!-- Markdown 渲染 -->
-      <div v-if="type === 'markdown'" class="b-message__markdown" @click="handleMarkdownClick" v-html="renderedMarkdown"></div>
+      <div v-if="type === 'markdown'" class="b-message__markdown" @click="navigate.onLink" v-html="renderedMarkdown"></div>
 
       <!-- 纯文本渲染 -->
       <div v-else class="b-message__text">{{ content }}<span v-if="loading" class="b-message__cursor" aria-hidden="true"></span></div>
@@ -15,13 +15,13 @@
 <script setup lang="ts">
 import type { BMessageProps as Props } from './types';
 import { computed } from 'vue';
-import { useRouter } from 'vue-router';
 import { marked } from 'marked';
+import { useNavigate } from '@/hooks/useNavigate';
 import { addCssUnit } from '@/utils/css';
 
 defineOptions({ name: 'BMessage' });
 
-const router = useRouter();
+const navigate = useNavigate();
 
 const props = withDefaults(defineProps<Props>(), {
   type: 'markdown',
@@ -60,19 +60,6 @@ const renderedMarkdown = computed<string>(() => {
 
   return html;
 });
-
-// 处理 Markdown 内容中的链接点击
-const handleMarkdownClick = (event: MouseEvent) => {
-  const target = event.target as HTMLElement;
-  // 查找被点击的 a 标签
-  const anchor = target.closest('a');
-  if (anchor) {
-    event.preventDefault();
-    const url = anchor.getAttribute('href');
-
-    url && router.push({ name: 'webview', query: { url: encodeURIComponent(url) } });
-  }
-};
 </script>
 
 <style lang="less">
