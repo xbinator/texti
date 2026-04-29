@@ -20,14 +20,7 @@ export interface FilesState {
 /**
  * 打开文件来源标记。
  */
-export type OpenSource =
-  | 'welcome'
-  | 'search'
-  | 'menu'
-  | 'platform-recent'
-  | 'native-open'
-  | 'drop'
-  | 'new';
+export type OpenSource = 'welcome' | 'search' | 'menu' | 'platform-recent' | 'native-open' | 'drop' | 'new';
 
 const createFileId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz_', 8);
 const inflightPaths = new Set<string>();
@@ -40,7 +33,10 @@ let writeQueue: Promise<void> = Promise.resolve();
  */
 function enqueueWrite<T>(fn: () => Promise<T>): Promise<T> {
   const result = writeQueue.then(fn);
-  writeQueue = result.then(() => undefined, () => undefined);
+  writeQueue = result.then(
+    () => undefined,
+    () => undefined
+  );
   return result;
 }
 
