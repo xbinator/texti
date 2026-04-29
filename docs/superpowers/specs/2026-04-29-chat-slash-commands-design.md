@@ -110,6 +110,8 @@ The editor should not know how chat actions are implemented. It only reports whi
 
 The slash menu should render above the input by default. This matches the bottom-anchored chat layout and reduces the chance that the menu extends beyond the viewport on narrow or short windows.
 
+If no slash command options are provided, `BPromptEditor` should disable slash-trigger behavior entirely. In that case, `/` is treated as normal text input and no command menu should be rendered.
+
 ### Sidebar Responsibility
 
 `BChatSidebar` should own:
@@ -164,6 +166,8 @@ If reading usage requires an async storage call, the UI should show:
 - a stable empty state when no session is active or no usage has been recorded
 - a non-destructive failure state if the read fails
 
+The usage panel should open immediately when `/usage` is executed, then transition its content through `loading`, `data`, `empty`, or `error` states. Failure should render as an inline error state inside the usage panel rather than as a toast or as a silent fallback to the empty state.
+
 ### Model Selector Open Behavior
 
 `/model` requires programmatic access to the existing model selection surface. The current model selector should therefore gain an externally callable open pathway rather than forcing the slash command flow to duplicate model selection UI.
@@ -173,7 +177,9 @@ Possible implementations include:
 - exposing an `open()` method from `ModelSelector`
 - lifting the dropdown open state so the sidebar can control it
 
-The implementation choice can be made in planning, but the spec requires a single shared model selection surface rather than two parallel UIs.
+The recommended v1 implementation is to expose an `open()` method from `ModelSelector`. This keeps dropdown state encapsulated inside the selector, minimizes changes to the current component boundary, and lets slash-command execution reuse the existing selector UI without introducing a new parent-controlled dropdown contract.
+
+The spec requires a single shared model selection surface rather than two parallel UIs.
 
 ## Data Flow
 
@@ -229,6 +235,8 @@ Cover:
 - `/new` no-ops while streaming
 - `/clear` resets input value and draft references only
 - `/usage` resolves current session usage correctly
+- `/usage` shows a loading state while async usage data is being read
+- `/usage` shows an inline error state when the usage read fails
 - `/model` triggers the model-selection open flow
 
 ## Resolved Design Decisions
