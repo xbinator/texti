@@ -5,6 +5,8 @@ import {
   closeDatabase,
   initStore,
   initLogger,
+  cleanOldLogs,
+  startLogMaintenanceTimer,
   setupAppMenu,
   sendMenuAction,
   getShortcutActionFromArgv,
@@ -18,6 +20,9 @@ app.setName('Tibis');
 
 const startupShortcutAction = getShortcutActionFromArgv(process.argv);
 let shouldContinueStartup = true;
+
+/** 日志维护定时器句柄，用于 before-quit 时清理 */
+let logMaintenanceTimer: ReturnType<typeof startLogMaintenanceTimer> | null = null;
 
 if (process.platform === 'win32') {
   const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -58,6 +63,10 @@ function handleWindowAllClosed(): void {
 async function bootstrap(): Promise<void> {
   // 初始化日志 (仅控制台)
   initLogger();
+  // 清理过期日志文件
+  cleanOldLogs();
+  // 启动日志维护定时器（每小时检查一次过期文件）
+  logMaintenanceTimer = startLogMaintenanceTimer();
   setPlatformShortcutActionSender(sendMenuAction);
 
   // 初始化存储
@@ -77,6 +86,16 @@ async function bootstrap(): Promise<void> {
   app.on('activate', handleActivate);
 }
 
+/**
+ * 应用退出前清理日志维护定时器
+ */
+function cleanupLogMaintenance(): void {
+  if (logMaintenanceTimer !== null) {
+    clearInterval(logMaintenanceTimer);
+    logMaintenanceTimer = null;
+  }
+}
+
 app.on('second-instance', (_event, commandLine) => {
   handlePlatformShortcutAction(getShortcutActionFromArgv(commandLine));
 });
@@ -84,4 +103,5 @@ app.on('second-instance', (_event, commandLine) => {
 if (shouldContinueStartup) {
   app.whenReady().then(bootstrap);
   app.on('window-all-closed', handleWindowAllClosed);
+  app.on('before-quit', cleanupLogMaintenance);
 }
