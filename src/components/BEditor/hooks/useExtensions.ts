@@ -50,6 +50,45 @@ interface UseExtensionsOptions {
   onSearchMatchFocus?: (context: SearchScrollContext) => void;
 }
 
+/**
+ * Markdown 表格单元格的水平对齐方式。
+ */
+type MarkdownTableAlignment = 'left' | 'right' | 'center' | null;
+
+/**
+ * Markdown 表格解析 token 中的单元格结构。
+ */
+interface MarkdownTableTokenCell {
+  /** 解析器提取出的纯文本内容 */
+  text?: string;
+  /** 单元格内联 token 列表 */
+  tokens?: MarkdownToken[];
+}
+
+/**
+ * Markdown 表格 token 的最小结构。
+ */
+interface MarkdownTableTokenData extends MarkdownToken {
+  /** 表头单元格列表 */
+  header?: MarkdownTableTokenCell[];
+  /** 表体行列表 */
+  rows?: MarkdownTableTokenCell[][];
+  /** 每列对齐方式 */
+  align?: Array<string | null | undefined>;
+}
+
+/**
+ * 表格节点中用于判断“内容是否未变化”的快照结构。
+ */
+interface MarkdownTableSignatureCell {
+  /** 单元格类型 */
+  type: 'tableCell' | 'tableHeader';
+  /** 单元格对齐方式 */
+  align: MarkdownTableAlignment;
+  /** 单元格 Markdown 内容 */
+  text: string;
+}
+
 function createParagraphNode(content: JSONContent[] = []): JSONContent {
   return {
     type: 'paragraph',
@@ -90,6 +129,226 @@ function parseInlineOrText(tokens: MarkdownToken[] | undefined, text: string | u
   }
 
   return text ? [helpers.createTextNode(text)] : [];
+}
+
+/**
+ * 判断段落是否仅承载一条原始 HTML 注释文本。
+ * @param node - 当前待序列化的段落节点
+ * @returns 命中时返回原始注释文本，否则返回 null
+ */
+function getRawHtmlCommentFromParagraph(node: JSONContent): string | null {
+  const content = Array.isArray(node.content) ? node.content : [];
+
+  if (content.length !== 1) {
+    return null;
+  }
+
+  const [textNode] = content;
+
+  if (textNode.type !== 'text' || (Array.isArray(textNode.marks) && textNode.marks.length > 0) || typeof textNode.text !== 'string') {
+    return null;
+  }
+
+  return /^<!--[\s\S]*?-->$/.test(textNode.text.trim()) ? textNode.text : null;
+}
+
+/**
+ * 规范化表格单元格对齐方式，过滤掉无效值。
+ * @param value - 待规范化的对齐值
+ * @returns 合法对齐方式，不合法时返回 null
+ */
+function normalizeMarkdownTableAlignment(value: string | null | undefined): MarkdownTableAlignment {
+  if (value === 'left' || value === 'right' || value === 'center') {
+    return value;
+  }
+
+  return null;
+}
+
+/**
+ * 计算 Markdown 文本在等宽字体下的近似显示宽度。
+ * @param text - 单元格文本
+ * @returns 近似宽度，中文等宽字符按 2 处理
+ */
+function getMarkdownDisplayWidth(text: string): number {
+  return Array.from(text).reduce(
+    (width, char) => width + (/[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe10-\ufe19\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6]/.test(char) ? 2 : 1),
+    0
+  );
+}
+
+/**
+ * 压平表格单元格中的块级内容，便于生成稳定签名和回退 Markdown。
+ * @param value - 单元格文本
+ * @returns 去掉多余换行后的单行 Markdown 文本
+ */
+function normalizeMarkdownTableCellText(value: string): string {
+  return value.replace(/\r\n/g, '\n').replace(/\n+/g, ' ').trim();
+}
+
+/**
+ * 递归提取 JSONContent 中的纯文本内容，用于构建结构签名。
+ * @param content - 待提取的 JSONContent 列表
+ * @returns 拼接后的纯文本
+ */
+function getTextFromJsonContent(content: JSONContent[]): string {
+  return content
+    .map((item) => {
+      if (typeof item.text === 'string') {
+        return item.text;
+      }
+
+      const childContent = Array.isArray(item.content) ? item.content : [];
+      return getTextFromJsonContent(childContent);
+    })
+    .join('');
+}
+
+/**
+ * 提取表格单元格的 Markdown 文本。
+ * @param cellNode - 当前表格单元格节点
+ * @param helpers - Markdown 渲染辅助函数
+ * @returns 单元格对应的 Markdown 文本
+ */
+function renderMarkdownTableCellText(cellNode: JSONContent, helpers: { renderChildren: (content: JSONContent | JSONContent[]) => string }): string {
+  const content = Array.isArray(cellNode.content) ? cellNode.content : [];
+
+  if (content.length === 0) {
+    return '';
+  }
+
+  return normalizeMarkdownTableCellText(content.map((childNode) => helpers.renderChildren(childNode)).join('<br>'));
+}
+
+/**
+ * 基于解析 token 构建表格签名，用于判断表格是否仍保持导入时原样。
+ * @param token - Markdown 表格 token
+ * @param helpers - Markdown 解析辅助函数
+ * @returns 可持久化的签名字符串
+ */
+function buildMarkdownTableSignatureFromToken(token: MarkdownTableTokenData, helpers: MarkdownParseHelpers): string {
+  const signatureRows: MarkdownTableSignatureCell[][] = [];
+  const alignments = Array.isArray(token.align) ? token.align : [];
+
+  if (token.header) {
+    signatureRows.push(
+      token.header.map((cell, index) => ({
+        type: 'tableHeader',
+        align: normalizeMarkdownTableAlignment(alignments[index]),
+        text: normalizeMarkdownTableCellText(getTextFromJsonContent(parseInlineOrText(cell.tokens, cell.text, helpers)))
+      }))
+    );
+  }
+
+  token.rows?.forEach((row) => {
+    signatureRows.push(
+      row.map((cell, index) => ({
+        type: 'tableCell',
+        align: normalizeMarkdownTableAlignment(alignments[index]),
+        text: normalizeMarkdownTableCellText(getTextFromJsonContent(parseInlineOrText(cell.tokens, cell.text, helpers)))
+      }))
+    );
+  });
+
+  return JSON.stringify(signatureRows);
+}
+
+/**
+ * 基于当前表格节点构建签名，用于和导入时签名比对。
+ * @param node - 表格节点
+ * @param helpers - Markdown 渲染辅助函数
+ * @returns 当前表格的签名字符串
+ */
+function buildMarkdownTableSignatureFromNode(node: JSONContent, helpers: { renderChildren: (content: JSONContent | JSONContent[]) => string }): string {
+  const rows = Array.isArray(node.content) ? node.content : [];
+
+  return JSON.stringify(
+    rows.map((rowNode) => {
+      const cells = Array.isArray(rowNode.content) ? rowNode.content : [];
+
+      return cells.map((cellNode) => ({
+        type: cellNode.type === 'tableHeader' ? 'tableHeader' : 'tableCell',
+        align: normalizeMarkdownTableAlignment(typeof cellNode.attrs?.align === 'string' ? cellNode.attrs.align : null),
+        text: normalizeMarkdownTableCellText(getTextFromJsonContent(Array.isArray(cellNode.content) ? cellNode.content : []))
+      }));
+    })
+  );
+}
+
+/**
+ * 转义表格单元格中的保留字符，避免生成非法 Markdown。
+ * @param value - 原始单元格文本
+ * @returns 可安全写回表格的 Markdown 文本
+ */
+function escapeMarkdownTableCell(value: string): string {
+  return value.replace(/\|/g, '\\|');
+}
+
+/**
+ * 生成紧凑格式的 Markdown 分隔行单元格。
+ * @param width - 列内容宽度
+ * @param align - 列对齐方式
+ * @returns 分隔行单元格文本
+ */
+function createMarkdownTableDividerCell(width: number, align: MarkdownTableAlignment): string {
+  const dashCount = Math.max(3, width + 2);
+
+  if (align === 'left') {
+    return `:${'-'.repeat(Math.max(2, dashCount - 1))}`;
+  }
+
+  if (align === 'right') {
+    return `${'-'.repeat(Math.max(2, dashCount - 1))}:`;
+  }
+
+  if (align === 'center') {
+    return `:${'-'.repeat(Math.max(1, dashCount - 2))}:`;
+  }
+
+  return '-'.repeat(dashCount);
+}
+
+/**
+ * 在表格内容变化后生成稳定的紧凑 Markdown 表格文本。
+ * @param node - 表格节点
+ * @param helpers - Markdown 渲染辅助函数
+ * @returns 渲染后的 Markdown 表格
+ */
+function renderMarkdownTableFallback(node: JSONContent, helpers: { renderChildren: (content: JSONContent | JSONContent[]) => string }): string {
+  const rows = Array.isArray(node.content) ? node.content : [];
+
+  if (rows.length === 0) {
+    return '';
+  }
+
+  const normalizedRows = rows.map((rowNode) => {
+    const cells = Array.isArray(rowNode.content) ? rowNode.content : [];
+
+    return cells.map((cellNode) => ({
+      text: escapeMarkdownTableCell(renderMarkdownTableCellText(cellNode, helpers)),
+      align: normalizeMarkdownTableAlignment(typeof cellNode.attrs?.align === 'string' ? cellNode.attrs.align : null)
+    }));
+  });
+
+  const columnCount = normalizedRows.reduce((maxCount, currentRow) => Math.max(maxCount, currentRow.length), 0);
+
+  if (columnCount === 0) {
+    return '';
+  }
+
+  const headerRow = normalizedRows[0] ?? [];
+  const headerTexts = Array.from({ length: columnCount }, (_value, index) => headerRow[index]?.text ?? '');
+  const dividerWidths = headerTexts.map((text) => getMarkdownDisplayWidth(text));
+  const alignments = Array.from({ length: columnCount }, (_value, index) => normalizedRows.find((row) => row[index]?.align)?.[index]?.align ?? null);
+
+  const dividerRow = alignments.map((align, index) => createMarkdownTableDividerCell(dividerWidths[index] ?? 0, align));
+  const bodyRows = normalizedRows.slice(1);
+
+  return [
+    `| ${headerTexts.join(' | ')} |`,
+    `|${dividerRow.join('|')}|`,
+    ...bodyRows.map((row) => `| ${Array.from({ length: columnCount }, (_value, index) => row[index]?.text ?? '').join(' | ')} |`)
+  ].join('\n');
 }
 
 export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensionsOptions = {}): UseBEditorExtensionsResult {
@@ -190,6 +449,22 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
       const text = typeof token.text === 'string' ? token.text : '';
 
       return helpers.createNode('paragraph', undefined, text ? [helpers.createTextNode(text)] : []);
+    },
+    renderMarkdown: (node: JSONContent, helpers, context): string => {
+      const rawHtmlComment = getRawHtmlCommentFromParagraph(node);
+
+      if (rawHtmlComment) {
+        return rawHtmlComment;
+      }
+
+      const content = Array.isArray(node.content) ? node.content : [];
+
+      if (content.length === 0) {
+        const previousContent = Array.isArray(context?.previousNode?.content) ? context.previousNode.content : [];
+        return context?.previousNode?.type === 'paragraph' && previousContent.length === 0 ? '&nbsp;' : '';
+      }
+
+      return helpers.renderChildren(content);
     }
   });
 
@@ -232,18 +507,30 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
   });
 
   const MarkdownTable = Table.extend({
-    parseMarkdown: (
-      token: MarkdownToken & {
-        header?: Array<{ text?: string; tokens?: MarkdownToken[] }>;
-        rows?: Array<Array<{ text?: string; tokens?: MarkdownToken[] }>>;
-      },
-      helpers: MarkdownParseHelpers
-    ): MarkdownParseResult => {
+    addAttributes() {
+      return {
+        ...this.parent?.(),
+        markdownRaw: {
+          default: null,
+          renderHTML: () => ({})
+        },
+        markdownSignature: {
+          default: null,
+          renderHTML: () => ({})
+        }
+      };
+    },
+    parseMarkdown: (token: MarkdownTableTokenData, helpers: MarkdownParseHelpers): MarkdownParseResult => {
       const rows: JSONContent[] = [];
+      const alignments = Array.isArray(token.align) ? token.align : [];
 
       if (token.header) {
-        const headerCells = token.header.map((cell) =>
-          helpers.createNode('tableHeader', {}, [helpers.createNode('paragraph', {}, parseInlineOrText(cell.tokens, cell.text, helpers))])
+        const headerCells = token.header.map((cell, index) =>
+          helpers.createNode(
+            'tableHeader',
+            normalizeMarkdownTableAlignment(alignments[index]) ? { align: normalizeMarkdownTableAlignment(alignments[index]) } : {},
+            [helpers.createNode('paragraph', {}, parseInlineOrText(cell.tokens, cell.text, helpers))]
+          )
         );
 
         rows.push(helpers.createNode('tableRow', {}, headerCells));
@@ -251,15 +538,36 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
 
       if (token.rows) {
         token.rows.forEach((row) => {
-          const bodyCells = row.map((cell) =>
-            helpers.createNode('tableCell', {}, [helpers.createNode('paragraph', {}, parseInlineOrText(cell.tokens, cell.text, helpers))])
+          const bodyCells = row.map((cell, index) =>
+            helpers.createNode(
+              'tableCell',
+              normalizeMarkdownTableAlignment(alignments[index]) ? { align: normalizeMarkdownTableAlignment(alignments[index]) } : {},
+              [helpers.createNode('paragraph', {}, parseInlineOrText(cell.tokens, cell.text, helpers))]
+            )
           );
 
           rows.push(helpers.createNode('tableRow', {}, bodyCells));
         });
       }
 
-      return helpers.createNode('table', undefined, rows);
+      return helpers.createNode(
+        'table',
+        {
+          markdownRaw: typeof token.raw === 'string' ? token.raw.replace(/\r\n/g, '\n').replace(/\n+$/, '') : null,
+          markdownSignature: buildMarkdownTableSignatureFromToken(token, helpers)
+        },
+        rows
+      );
+    },
+    renderMarkdown: (node: JSONContent, helpers): string => {
+      const rawMarkdown = typeof node.attrs?.markdownRaw === 'string' ? node.attrs.markdownRaw : null;
+      const importedSignature = typeof node.attrs?.markdownSignature === 'string' ? node.attrs.markdownSignature : null;
+
+      if (rawMarkdown && importedSignature === buildMarkdownTableSignatureFromNode(node, helpers)) {
+        return rawMarkdown.trimEnd();
+      }
+
+      return renderMarkdownTableFallback(node, helpers);
     }
   });
 
@@ -286,6 +594,9 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
       link: false,
       listItem: false,
       paragraph: false,
+      trailingNode: {
+        notAfter: ['table']
+      },
       strike: false,
       underline: false,
       // 禁用拖拽光标（拖拽时的蓝色插入线）
