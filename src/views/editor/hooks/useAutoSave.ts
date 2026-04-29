@@ -39,18 +39,11 @@ export function useAutoSave(fileState: Ref<EditorFile>, options: AutoSaveOptions
     const modifiedAt = Date.now();
 
     if (stored) {
-      await filesStore.updateFile(id, {
-        ...fileState.value,
-        modifiedAt
-      });
+      await filesStore.updateFile(id, { ...fileState.value, modifiedAt });
       return;
     }
 
-    await filesStore.addFile({
-      ...fileState.value,
-      createdAt: modifiedAt,
-      modifiedAt
-    });
+    await filesStore.addFile({ ...fileState.value, createdAt: modifiedAt, modifiedAt });
   }
 
   const debouncedSave = debounce(saveToStorage, delay);
