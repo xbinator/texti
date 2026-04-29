@@ -112,6 +112,59 @@ describe('BPromptEditor slash commands', () => {
     expect(wrapper.vm.getText()).toBe('');
   });
 
+  test('ArrowDown and Enter select the currently highlighted non-first slash command', async () => {
+    const wrapper = mountPromptEditor({
+      slashCommands: chatSlashCommands
+    });
+
+    await insertEditorText(wrapper, '/');
+    await wrapper.get('.cm-content').trigger('keydown', { key: 'ArrowDown' });
+    await wrapper.get('.cm-content').trigger('keydown', { key: 'Enter' });
+
+    expect(wrapper.emitted('slash-command')).toEqual([[chatSlashCommands[1]]]);
+    expect(wrapper.vm.getText()).toBe('');
+  });
+
+  test('ArrowUp wraps to the last slash command item', async () => {
+    const wrapper = mountPromptEditor({
+      slashCommands: chatSlashCommands
+    });
+
+    await insertEditorText(wrapper, '/');
+    await wrapper.get('.cm-content').trigger('keydown', { key: 'ArrowUp' });
+    await wrapper.get('.cm-content').trigger('keydown', { key: 'Enter' });
+
+    expect(wrapper.emitted('slash-command')).toEqual([[chatSlashCommands[3]]]);
+    expect(wrapper.vm.getText()).toBe('');
+  });
+
+  test('Escape closes the slash menu', async () => {
+    const wrapper = mountPromptEditor({
+      slashCommands: chatSlashCommands
+    });
+
+    await insertEditorText(wrapper, '/us');
+    expect(wrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(true);
+
+    await wrapper.get('.cm-content').trigger('keydown', { key: 'Escape' });
+
+    expect(wrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(false);
+    expect(wrapper.vm.getText()).toBe('/us');
+  });
+
+  test('blur closes the slash menu', async () => {
+    const wrapper = mountPromptEditor({
+      slashCommands: chatSlashCommands
+    });
+
+    await insertEditorText(wrapper, '/us');
+    expect(wrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(true);
+
+    await wrapper.get('.cm-content').trigger('blur');
+
+    expect(wrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(false);
+  });
+
   test('keeps slash text plain and still submits the draft when no commands are provided', async () => {
     const wrapper = mountPromptEditor({
       slashCommands: [],

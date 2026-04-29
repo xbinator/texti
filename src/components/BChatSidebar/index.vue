@@ -1,3 +1,7 @@
+﻿<!--
+  @file index.vue
+  @description Chat sidebar with conversation, prompt input, and model selection wiring.
+-->
 <template>
   <div class="b-chat-sidebar">
     <div class="b-chat-sidebar__header">
@@ -30,6 +34,13 @@
         @user-choice-submit="handleChatUserChoiceSubmit"
       />
 
+      <UsagePanel
+        v-if="usagePanelOpen"
+        :loading="usagePanelLoading"
+        :usage="usagePanelUsage"
+        :error="usagePanelError"
+      />
+
       <div class="b-chat-sidebar__input">
         <div class="b-chat-sidebar__input-container">
           <BPromptEditor
@@ -39,11 +50,14 @@
             :max-height="200"
             :chip-resolver="chipResolver"
             :on-paste-files="onPasteFiles"
+            :slash-commands="chatSlashCommands"
             submit-on-enter
+            @slash-command="handleSlashCommand"
             @submit="handleChatSubmit"
           />
 
           <InputToolbar
+            ref="modelSelectorRef"
             :loading="chatStream.loading.value"
             :input-value="inputValue"
             :selected-model="selectedModel"
@@ -59,6 +73,7 @@
 
 <script setup lang="ts">
 import type { FileReferenceChip } from './types';
+import type { AIUsage } from 'types/ai';
 import type { ChatMessageConfirmationAction, ChatMessageFileReference, ChatSession } from 'types/chat';
 import { nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { Icon } from '@iconify/vue';
@@ -67,17 +82,20 @@ import { createBuiltinTools } from '@/ai/tools/builtin';
 import { editorToolContextRegistry } from '@/ai/tools/editor-context';
 import { getDefaultChatToolNames } from '@/ai/tools/policy';
 import BButton from '@/components/BButton/index.vue';
+import { chatSlashCommands } from '@/components/BChatSidebar/utils/slashCommands';
 import { chipResolver } from '@/components/BChatSidebar/utils/chipResolver';
 import { create, userChoice } from '@/components/BChatSidebar/utils/messageHelper';
 import { persistReferenceSnapshots } from '@/components/BChatSidebar/utils/referenceSnapshot';
 import type { Message } from '@/components/BChatSidebar/utils/types';
 import BPromptEditor from '@/components/BPromptEditor/index.vue';
+import type { SlashCommandOption } from '@/components/BPromptEditor/types';
 import { onChatFileReferenceInsert, type ChatFileReferenceInsertPayload } from '@/shared/chat/fileReference';
 import { serviceModelsStorage } from '@/shared/storage';
 import { useChatStore } from '@/stores/chat';
 import { useSettingStore } from '@/stores/setting';
 import ConversationView from './components/ConversationView.vue';
 import InputToolbar from './components/InputToolbar.vue';
+import UsagePanel from './components/UsagePanel.vue';
 import SessionHistory from './components/SessionHistory.vue';
 import { useAutoName } from './hooks/useAutoName';
 import { useChatHistory } from './hooks/useChatHistory';
@@ -85,7 +103,7 @@ import { useChatStream } from './hooks/useChatStream';
 import { createChatConfirmationController } from './utils/confirmationController';
 
 /**
- * 文件粘贴/拖拽回调，将文件列表转换为 file-ref token（无选区，startLine/endLine 均为 0）。
+ * 鏂囦欢绮樿创/鎷栨嫿鍥炶皟锛屽皢鏂囦欢鍒楄〃杞崲涓?file-ref token锛堟棤閫夊尯锛宻tartLine/endLine 鍧囦负 0锛夈€?
  */
 const onPasteFiles = (files: File[]): string => {
   return Array.from(files)
@@ -93,53 +111,63 @@ const onPasteFiles = (files: File[]): string => {
     .join('');
 };
 
-/** 聊天数据存储 */
+/** 鑱婂ぉ鏁版嵁瀛樺偍 */
 const chatStore = useChatStore();
-/** 应用设置存储 */
+/** 搴旂敤璁剧疆瀛樺偍 */
 const settingStore = useSettingStore();
 
-/** 聊天输入框内容 */
+/** 鑱婂ぉ杈撳叆妗嗗唴瀹?*/
 const inputValue = ref('');
-/** 当前会话信息 */
+/** 褰撳墠浼氳瘽淇℃伅 */
 const currentSession = ref<ChatSession | undefined>(undefined);
-/** 会话加载状态 */
+/** 浼氳瘽鍔犺浇鐘舵€?*/
 const loading = ref(false);
-/** 历史消息加载状态 */
+/** 鍘嗗彶娑堟伅鍔犺浇鐘舵€?*/
 const historyLoading = ref(false);
-/** 是否还有更多历史消息可加载 */
+/** 鏄惁杩樻湁鏇村鍘嗗彶娑堟伅鍙姞杞?*/
 const hasMoreHistory = ref(false);
-/** 输入框编辑器引用 */
+/** 杈撳叆妗嗙紪杈戝櫒寮曠敤 */
 const promptEditorRef = ref<InstanceType<typeof BPromptEditor>>();
-/** 对话视图引用 */
+/** 模型选择器程序化打开入口。 */
+const modelSelectorRef = ref<InstanceType<typeof InputToolbar>>();
+/** 瀵硅瘽瑙嗗浘寮曠敤 */
 const conversationRef = ref<InstanceType<typeof ConversationView>>();
-/** 会话历史组件引用 */
+/** 浼氳瘽鍘嗗彶缁勪欢寮曠敤 */
 const sessionHistoryRef = ref<InstanceType<typeof SessionHistory>>();
-/** 草稿文件引用列表 */
+/** 鑽夌鏂囦欢寮曠敤鍒楄〃 */
 const draftReferences = ref<ChatMessageFileReference[]>([]);
-/** 当前选中的模型 */
+/** 褰撳墠閫変腑鐨勬ā鍨?*/
 const selectedModel = ref<string>();
+/** 用量面板是否已展开。 */
+const usagePanelOpen = ref(false);
+/** 用量面板加载状态。 */
+const usagePanelLoading = ref(false);
+/** 持久化会话用量。 */
+const usagePanelUsage = ref<AIUsage | undefined>(undefined);
+/** 用量面板错误信息。 */
+const usagePanelError = ref<string | undefined>(undefined);
 
-/** 聊天历史加载状态和方法 */
+/** 鑱婂ぉ鍘嗗彶鍔犺浇鐘舵€佸拰鏂规硶 */
 const { getHistoryCursor, setLoadedMessages, fetchAllPriorHistory, messages } = useChatHistory();
 
-/** 确认控制器，管理工具调用的用户确认流程 */
+/** 纭鎺у埗鍣紝绠＄悊宸ュ叿璋冪敤鐨勭敤鎴风‘璁ゆ祦绋?*/
 const confirmationController = createChatConfirmationController({
   getMessages: () => messages.value
 });
 
 /**
- * 自动命名 Hook。
- * 在首轮 assistant 完成时冻结快照，并在流式真正停稳后异步生成标题。
+ * 鑷姩鍛藉悕 Hook銆?
+ * 鍦ㄩ杞?assistant 瀹屾垚鏃跺喕缁撳揩鐓э紝骞跺湪娴佸紡鐪熸鍋滅ǔ鍚庡紓姝ョ敓鎴愭爣棰樸€?
  */
 const { captureSnapshot, scheduleAutoName } = useAutoName({
   getCurrentSession: () => currentSession.value,
   getFirstRoundContent: (message) => {
-    // 首轮如果仍在等待用户补充输入，则不应提前触发自动命名。
+    // 棣栬疆濡傛灉浠嶅湪绛夊緟鐢ㄦ埛琛ュ厖杈撳叆锛屽垯涓嶅簲鎻愬墠瑙﹀彂鑷姩鍛藉悕銆?
     if (userChoice.findPending(messages.value)) {
       return null;
     }
 
-    // 仅在首轮恰好形成一问一答时才参与自动命名。
+    // 浠呭湪棣栬疆鎭板ソ褰㈡垚涓€闂竴绛旀椂鎵嶅弬涓庤嚜鍔ㄥ懡鍚嶃€?
     const userMessages = messages.value.filter((item) => item.role === 'user');
     const assistantMessages = messages.value.filter((item) => item.role === 'assistant');
     if (userMessages.length !== 1 || assistantMessages.length !== 1) return null;
@@ -157,7 +185,7 @@ const { captureSnapshot, scheduleAutoName } = useAutoName({
 let unregisterFileReferenceInsert: (() => void) | null = null;
 
 /**
- * 加载当前选中的模型配置
+ * 鍔犺浇褰撳墠閫変腑鐨勬ā鍨嬮厤缃?
  */
 async function loadSelectedModel(): Promise<void> {
   const config = await serviceModelsStorage.getConfig('chat');
@@ -165,8 +193,8 @@ async function loadSelectedModel(): Promise<void> {
 }
 
 /**
- * 聊天工具列表
- * 创建内置工具并过滤出默认允许的低风险工具，避免暴露替换类操作
+ * 鑱婂ぉ宸ュ叿鍒楄〃
+ * 鍒涘缓鍐呯疆宸ュ叿骞惰繃婊ゅ嚭榛樿鍏佽鐨勪綆椋庨櫓宸ュ叿锛岄伩鍏嶆毚闇叉浛鎹㈢被鎿嶄綔
  */
 const tools = createBuiltinTools({
   confirm: confirmationController.createAdapter(),
@@ -180,14 +208,14 @@ const tools = createBuiltinTools({
     };
   }
 }).filter((tool) => {
-  // MVP 阶段聊天侧边栏只开放低风险工具，避免默认暴露替换类操作
+  // MVP 闃舵鑱婂ぉ渚ц竟鏍忓彧寮€鏀句綆椋庨櫓宸ュ叿锛岄伩鍏嶉粯璁ゆ毚闇叉浛鎹㈢被鎿嶄綔
   return getDefaultChatToolNames().includes(tool.definition.name);
 });
 
 /**
- * 处理聊天流中的确认卡片操作。
- * @param confirmationId - 确认项 ID
- * @param action - 用户操作
+ * 澶勭悊鑱婂ぉ娴佷腑鐨勭‘璁ゅ崱鐗囨搷浣溿€?
+ * @param confirmationId - 纭椤?ID
+ * @param action - 鐢ㄦ埛鎿嶄綔
  */
 async function handleConfirmationAction(confirmationId: string, action: ChatMessageConfirmationAction): Promise<void> {
   if (action === 'approve') {
@@ -202,11 +230,11 @@ async function handleConfirmationAction(confirmationId: string, action: ChatMess
 }
 
 /**
- * 消息重新生成前的处理函数
- * 1. 清理待处理的确认状态
- * 2. 加载当前可见消息之前的所有持久化历史
- * 3. 合并历史消息和新的消息列表并持久化
- * @param nextMessages - 重新生成后的消息列表
+ * 娑堟伅閲嶆柊鐢熸垚鍓嶇殑澶勭悊鍑芥暟
+ * 1. 娓呯悊寰呭鐞嗙殑纭鐘舵€?
+ * 2. 鍔犺浇褰撳墠鍙娑堟伅涔嬪墠鐨勬墍鏈夋寔涔呭寲鍘嗗彶
+ * 3. 鍚堝苟鍘嗗彶娑堟伅鍜屾柊鐨勬秷鎭垪琛ㄥ苟鎸佷箙鍖?
+ * @param nextMessages - 閲嶆柊鐢熸垚鍚庣殑娑堟伅鍒楄〃
  */
 async function handleBeforeRegenerate(nextMessages: Message[]): Promise<void> {
   confirmationController.expirePendingConfirmation();
@@ -218,11 +246,11 @@ async function handleBeforeRegenerate(nextMessages: Message[]): Promise<void> {
 }
 
 /**
- * 消息发送前的处理函数
- * 1. 清理待处理的确认状态
- * 2. 如果没有激活会话则创建新会话
- * 3. 将消息持久化到存储
- * @param message - 待发送的消息
+ * 娑堟伅鍙戦€佸墠鐨勫鐞嗗嚱鏁?
+ * 1. 娓呯悊寰呭鐞嗙殑纭鐘舵€?
+ * 2. 濡傛灉娌℃湁婵€娲讳細璇濆垯鍒涘缓鏂颁細璇?
+ * 3. 灏嗘秷鎭寔涔呭寲鍒板瓨鍌?
+ * @param message - 寰呭彂閫佺殑娑堟伅
  */
 async function handleBeforeSend(message: Message): Promise<void> {
   confirmationController.expirePendingConfirmation();
@@ -238,15 +266,18 @@ async function handleBeforeSend(message: Message): Promise<void> {
 }
 
 /**
- * 消息完成后的处理函数
- * 将 AI 回复的消息持久化到存储
- * @param message - 完成的消息
+ * 娑堟伅瀹屾垚鍚庣殑澶勭悊鍑芥暟
+ * 灏?AI 鍥炲鐨勬秷鎭寔涔呭寲鍒板瓨鍌?
+ * @param message - 瀹屾垚鐨勬秷鎭?
  */
 async function handleComplete(message: Message): Promise<void> {
   const sessionId = settingStore.chatSidebarActiveSessionId;
   const snapshot = captureSnapshot(message, sessionId);
 
   await chatStore.addSessionMessage(sessionId, message);
+  if (sessionId) {
+    await refreshUsagePanel(sessionId);
+  }
   if (!snapshot) return;
 
   // eslint-disable-next-line no-use-before-define
@@ -254,7 +285,7 @@ async function handleComplete(message: Message): Promise<void> {
 }
 
 /**
- * 聊天流式处理 hook
+ * 鑱婂ぉ娴佸紡澶勭悊 hook
  */
 const chatStream = useChatStream({
   messages,
@@ -266,9 +297,9 @@ const chatStream = useChatStream({
 });
 
 /**
- * 获取内容中活跃的草稿文件引用
- * @param content - 输入内容
- * @returns 活跃的引用列表
+ * 鑾峰彇鍐呭涓椿璺冪殑鑽夌鏂囦欢寮曠敤
+ * @param content - 杈撳叆鍐呭
+ * @returns 娲昏穬鐨勫紩鐢ㄥ垪琛?
  */
 function getActiveDraftReferences(content: string) {
   const references = draftReferences.value.filter((reference) => content.includes(reference.token));
@@ -318,9 +349,9 @@ function handleCaptureInputCursor(): void {
 }
 
 /**
- * 将 startLine/endLine 转换为 ChatMessageFileReference.line 字符串格式。
- * @param startLine - 起始行号
- * @param endLine - 结束行号
+ * 灏?startLine/endLine 杞崲涓?ChatMessageFileReference.line 瀛楃涓叉牸寮忋€?
+ * @param startLine - 璧峰琛屽彿
+ * @param endLine - 缁撴潫琛屽彿
  */
 function formatLineRange(startLine: number, endLine: number): string {
   if (startLine <= 0) {
@@ -358,7 +389,7 @@ async function handleFileReferenceInsert(reference: ChatFileReferenceInsertPaylo
     endLine: reference.endLine
   };
 
-  // 先锁定聊天输入框最近一次有效插入位置，再处理侧边栏聚焦与引用插入。
+  // 鍏堥攣瀹氳亰澶╄緭鍏ユ鏈€杩戜竴娆℃湁鏁堟彃鍏ヤ綅缃紝鍐嶅鐞嗕晶杈规爮鑱氱劍涓庡紩鐢ㄦ彃鍏ャ€?
   handleCaptureInputCursor();
   settingStore.setSidebarVisible(true);
 
@@ -372,32 +403,128 @@ function handleModelChange(value: string): void {
 }
 
 /**
- * 创建新会话
- * 1. 检查是否正在输出，是则中断
- * 2. 清理确认控制器状态
- * 3. 重置会话相关状态
- * 4. 自动聚焦输入框
+ * 处理斜杠命令。
+ * 支持 /model、/usage、/new 和 /clear。
+ * @param command - 斜杠命令项
+ */
+function handleSlashCommand(command: SlashCommandOption): void {
+  if (command.id === 'model') {
+    modelSelectorRef.value?.open();
+    return;
+  }
+
+  if (command.id === 'usage') {
+    void handleUsagePanelOpen();
+    return;
+  }
+
+  if (command.id === 'new') {
+    void handleNewSession();
+    return;
+  }
+
+  if (command.id === 'clear') {
+    handleClearDraft();
+  }
+}
+
+/**
+ * Reset the usage panel state so a later command can reload fresh data.
+ */
+function resetUsagePanel(): void {
+  usagePanelOpen.value = false;
+  usagePanelLoading.value = false;
+  usagePanelUsage.value = undefined;
+  usagePanelError.value = undefined;
+}
+
+/**
+ * Clear the current draft input and file references without affecting the conversation.
+ */
+function handleClearDraft(): void {
+  inputValue.value = '';
+  draftReferences.value = [];
+  promptEditorRef.value?.focus();
+}
+
+/**
+ * Open the usage panel immediately and read the persisted session usage.
+ */
+async function handleUsagePanelOpen(): Promise<void> {
+  const sessionId = settingStore.chatSidebarActiveSessionId ?? currentSession.value?.id;
+  usagePanelOpen.value = true;
+  usagePanelError.value = undefined;
+  usagePanelUsage.value = undefined;
+
+  if (!sessionId) {
+    usagePanelLoading.value = false;
+    return;
+  }
+
+  usagePanelLoading.value = true;
+
+  await refreshUsagePanel(sessionId);
+}
+
+/**
+ * Reload the visible usage totals for the active session while keeping panel state stable.
+ * @param sessionId - Session whose persisted usage should be displayed.
+ */
+async function refreshUsagePanel(sessionId: string): Promise<void> {
+  const activeSessionId = settingStore.chatSidebarActiveSessionId ?? currentSession.value?.id;
+  if (!usagePanelOpen.value || activeSessionId !== sessionId) {
+    return;
+  }
+
+  try {
+    const usage = await chatStore.getSessionUsage(sessionId);
+    if ((settingStore.chatSidebarActiveSessionId ?? currentSession.value?.id) !== sessionId) {
+      return;
+    }
+
+    usagePanelUsage.value = usage;
+  } catch (error: unknown) {
+    if ((settingStore.chatSidebarActiveSessionId ?? currentSession.value?.id) !== sessionId) {
+      return;
+    }
+
+    usagePanelError.value = error instanceof Error ? error.message : '加载会话用量失败';
+  } finally {
+    if ((settingStore.chatSidebarActiveSessionId ?? currentSession.value?.id) === sessionId) {
+      usagePanelLoading.value = false;
+    }
+  }
+}
+
+/**
+ * 鍒涘缓鏂颁細璇?
+ * 1. 妫€鏌ユ槸鍚︽鍦ㄨ緭鍑猴紝鏄垯涓柇
+ * 2. 娓呯悊纭鎺у埗鍣ㄧ姸鎬?
+ * 3. 閲嶇疆浼氳瘽鐩稿叧鐘舵€?
+ * 4. 鑷姩鑱氱劍杈撳叆妗?
  */
 async function handleNewSession(): Promise<void> {
   if (chatStream.loading.value) return;
 
   confirmationController.dispose();
   settingStore.setChatSidebarActiveSessionId(null);
+  currentSession.value = undefined;
+  resetUsagePanel();
   messages.value = [];
   hasMoreHistory.value = false;
   historyLoading.value = false;
-  // 新会话创建后自动聚焦输入框，提升用户体验
+  // 鏂颁細璇濆垱寤哄悗鑷姩鑱氱劍杈撳叆妗嗭紝鎻愬崌鐢ㄦ埛浣撻獙
   await nextTick();
   promptEditorRef.value?.focus();
 }
 
 /**
- * 切换会话
- * 1. 检查是否正在输出或加载中，是则中断
- * 2. 清理确认控制器状态
- * 3. 更新激活会话 ID
- * 4. 加载新会话的消息列表
- * @param sessionId - 目标会话 ID
+ * 鍒囨崲浼氳瘽
+ * 1. 妫€鏌ユ槸鍚︽鍦ㄨ緭鍑烘垨鍔犺浇涓紝鏄垯涓柇
+ * 2. 娓呯悊纭鎺у埗鍣ㄧ姸鎬?
+ * 3. 鏇存柊婵€娲讳細璇?ID
+ * 4. 鍔犺浇鏂颁細璇濈殑娑堟伅鍒楄〃
+ * @param sessionId - 鐩爣浼氳瘽 ID
  */
 async function handleSwitchSession(sessionId: string): Promise<void> {
   if (chatStream.loading.value) return;
@@ -406,6 +533,7 @@ async function handleSwitchSession(sessionId: string): Promise<void> {
   loading.value = true;
   confirmationController.dispose();
   settingStore.setChatSidebarActiveSessionId(sessionId);
+  resetUsagePanel();
   hasMoreHistory.value = false;
 
   try {
@@ -416,7 +544,7 @@ async function handleSwitchSession(sessionId: string): Promise<void> {
 }
 
 /**
- * 加载当前会话中更早的一段历史消息。
+ * 鍔犺浇褰撳墠浼氳瘽涓洿鏃╃殑涓€娈靛巻鍙叉秷鎭€?
  */
 async function handleLoadHistory(): Promise<void> {
   if (historyLoading.value || !hasMoreHistory.value) return;
@@ -449,7 +577,7 @@ onMounted(async () => {
   });
 });
 
-/** 组件卸载时清理确认控制器 */
+/** 缁勪欢鍗歌浇鏃舵竻鐞嗙‘璁ゆ帶鍒跺櫒 */
 onUnmounted(() => {
   unregisterFileReferenceInsert?.();
   unregisterFileReferenceInsert = null;
@@ -457,7 +585,7 @@ onUnmounted(() => {
 });
 </script>
 
-<style lang="less">
+<style>
 .b-chat-sidebar {
   display: flex;
   flex-shrink: 0;
@@ -513,17 +641,19 @@ onUnmounted(() => {
   border: 1px solid var(--border-primary);
   border-radius: 6px;
 
-  .b-prompt-editor {
-    flex: 1;
-    min-width: 0;
-    padding: 0;
-    background-color: transparent;
-    border: none;
-    border-radius: 0;
+}
 
-    &:focus-within {
-      box-shadow: none;
-    }
-  }
+.b-chat-sidebar__input-container .b-prompt-editor {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background-color: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.b-chat-sidebar__input-container .b-prompt-editor:focus-within {
+  box-shadow: none;
 }
 </style>
+

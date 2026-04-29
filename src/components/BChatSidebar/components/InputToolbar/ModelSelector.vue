@@ -1,3 +1,7 @@
+<!--
+  @file ModelSelector.vue
+  @description Chat model selector dropdown with programmatic open support.
+-->
 <template>
   <BDropdown v-model:open="open">
     <BButton size="small" type="text">
@@ -39,24 +43,45 @@ import { serviceModelsStorage } from '@/shared/storage';
 import { dispatchServiceModelUpdated } from '@/shared/storage/service-models/events';
 import { useProviderStore } from '@/stores/provider';
 
+/**
+ * 渲染到下拉菜单中的单个模型项。
+ */
 interface ModelItem {
+  /** 组合后的选择器值。 */
   value: string;
+  /** 模型 ID。 */
   modelId: string;
+  /** 模型显示名称。 */
   modelName: string;
 }
 
+/**
+ * 按提供方分组后的模型集合。
+ */
 interface ModelGroup {
+  /** 提供方 ID。 */
   providerId: string;
+  /** 提供方显示名称。 */
   providerName: string;
+  /** 当前提供方下可选模型。 */
   models: ModelItem[];
 }
 
+/**
+ * 组件属性。
+ */
 interface Props {
+  /** 当前选中的模型值，格式为 providerId:modelId。 */
   model?: string;
 }
 
+/**
+ * 解析后的模型标识。
+ */
 interface ParsedModel {
+  /** 提供方 ID。 */
   providerId: string;
+  /** 模型 ID。 */
   modelId: string;
 }
 
@@ -134,6 +159,15 @@ watch(
 
 onMounted(async () => {
   await Promise.all([store.loadProviders(), loadSavedConfig()]);
+});
+
+/**
+ * 暴露给父组件的程序化打开入口。
+ */
+defineExpose({
+  open: (): void => {
+    open.value = true;
+  }
 });
 </script>
 

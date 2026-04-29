@@ -60,6 +60,54 @@ const menuRef = ref<HTMLElement>();
 const menuStyle = ref<CSSProperties>({});
 
 /**
+ * Resolve the menu placement and clamp it into the larger visible viewport region.
+ * @param top - Cursor top coordinate.
+ * @param bottom - Cursor bottom coordinate.
+ * @param dropdownHeight - Measured menu height.
+ * @param viewportHeight - Current viewport height.
+ * @param gap - Viewport padding gap.
+ * @returns Clamped top offset and usable height for the chosen direction.
+ */
+function resolveVerticalPlacement(
+  top: number,
+  bottom: number,
+  dropdownHeight: number,
+  viewportHeight: number,
+  gap: number
+): { top: number; availableHeight: number } {
+  const availableAbove = Math.max(0, top - gap);
+  const availableBelow = Math.max(0, viewportHeight - bottom - gap);
+  const fitsAbove = dropdownHeight <= availableAbove;
+  const fitsBelow = dropdownHeight <= availableBelow;
+
+  if (fitsAbove) {
+    return {
+      top: Math.max(gap, top - dropdownHeight - gap),
+      availableHeight: availableAbove
+    };
+  }
+
+  if (fitsBelow) {
+    return {
+      top: bottom + gap,
+      availableHeight: availableBelow
+    };
+  }
+
+  if (availableAbove >= availableBelow) {
+    return {
+      top: gap,
+      availableHeight: availableAbove
+    };
+  }
+
+  return {
+    top: Math.max(gap, bottom + gap),
+    availableHeight: availableBelow
+  };
+}
+
+/**
  * 重新计算菜单位置，默认优先显示在输入框上方。
  */
 watch(
@@ -81,9 +129,9 @@ watch(
     const dropdownWidth = menuRef.value?.clientWidth || 320;
     const gap = 8;
     const { top, left, bottom } = props.position;
+    const { top: clampedTop, availableHeight } = resolveVerticalPlacement(top, bottom, dropdownHeight, viewportHeight, gap);
 
-    const enoughRoomAbove = top - dropdownHeight - gap >= gap;
-    styles.top = `${enoughRoomAbove ? Math.max(gap, top - dropdownHeight - gap) : bottom + gap}px`;
+    styles.top = `${clampedTop}px`;
 
     if (left + dropdownWidth > viewportWidth) {
       styles.left = `${Math.max(gap, viewportWidth - dropdownWidth - gap)}px`;
@@ -91,8 +139,8 @@ watch(
       styles.left = `${Math.max(gap, left)}px`;
     }
 
-    if (dropdownHeight > viewportHeight) {
-      styles.maxHeight = `${Math.max(160, viewportHeight - gap * 2)}px`;
+    if (dropdownHeight > availableHeight) {
+      styles.maxHeight = `${Math.max(160, availableHeight)}px`;
     }
 
     menuStyle.value = styles;
@@ -117,7 +165,7 @@ function handleMouseEnter(index: number): void {
 }
 </script>
 
-<style scoped lang="less">
+<style scoped>
 .slash-command-menu {
   position: fixed;
   min-width: 280px;
@@ -147,11 +195,11 @@ function handleMouseEnter(index: number): void {
   padding: 8px 12px;
   cursor: pointer;
   transition: background-color 0.2s;
+}
 
-  &:hover,
-  &.active {
-    background: var(--bg-secondary);
-  }
+.slash-command-menu__item:hover,
+.slash-command-menu__item.active {
+  background: var(--bg-secondary);
 }
 
 .slash-command-menu__item-main {

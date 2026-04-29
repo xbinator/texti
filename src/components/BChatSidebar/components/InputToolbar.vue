@@ -1,6 +1,10 @@
+<!--
+  @file InputToolbar.vue
+  @description Chat sidebar input toolbar with model selector and submit actions.
+-->
 <template>
   <div class="chat-input-toolbar">
-    <ModelSelector :model="selectedModel" @update:model="handleModelChange" />
+    <ModelSelector ref="modelSelectorRef" :model="selectedModel" @update:model="handleModelChange" />
     <div class="action-buttons">
       <BButton v-if="loading" size="small" square @click="$emit('abort')">
         <svg class="loading-icon" color="currentColor" viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg">
@@ -18,15 +22,19 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue';
 import BButton from '@/components/BButton/index.vue';
 import ModelSelector from './InputToolbar/ModelSelector.vue';
 
+/**
+ * 输入工具栏属性。
+ */
 interface Props {
-  /** 是否正在加载 */
+  /** 是否正在加载。 */
   loading: boolean;
-  /** 输入框内容 */
+  /** 输入框内容。 */
   inputValue: string;
-  /** 当前选中的模型 (providerId:modelId) */
+  /** 当前选中的模型（providerId:modelId）。 */
   selectedModel?: string;
 }
 
@@ -40,9 +48,32 @@ const emit = defineEmits<{
   (e: 'model-change', value: string): void;
 }>();
 
+/**
+ * 模型选择器实例引用。
+ */
+const modelSelectorRef = ref<InstanceType<typeof ModelSelector>>();
+
+/**
+ * 将打开请求转发到内部模型选择器。
+ */
+function open(): void {
+  modelSelectorRef.value?.open();
+}
+
+/**
+ * 转发模型选择事件。
+ * @param value - 新的模型值。
+ */
 function handleModelChange(value: string): void {
   emit('model-change', value);
 }
+
+/**
+ * 暴露给父组件的程序化打开入口。
+ */
+defineExpose({
+  open
+});
 </script>
 
 <style scoped lang="less">

@@ -9,6 +9,7 @@ import type { Message } from '@/components/BChatSidebar/utils/types';
 
 type AddMessageMock = (message: ChatMessageRecord) => Promise<void>;
 type GetMessagesMock = (sessionId: string, cursor?: ChatMessageHistoryCursor) => Promise<ChatMessageRecord[]>;
+type GetSessionUsageMock = (sessionId: string) => Promise<NonNullable<Message['usage']> | undefined>;
 type SetSessionMessagesMock = (sessionId: string, messages: ChatMessageRecord[]) => Promise<void>;
 type UpdateSessionLastMessageAtMock = (sessionId: string, lastMessageAt: string) => Promise<void>;
 type AddSessionUsageMock = (sessionId: string, usage: NonNullable<Message['usage']>) => Promise<void>;
@@ -24,6 +25,11 @@ const addMessageMock = vi.fn<AddMessageMock>();
  * 模拟按游标读取会话消息的行为。
  */
 const getMessagesMock = vi.fn<GetMessagesMock>();
+
+/**
+ * 妯℃嫙浼氳瘽 usage 璇诲彇琛屼负銆?
+ */
+const getSessionUsageMock = vi.fn<GetSessionUsageMock>();
 
 /**
  * 模拟会话消息整体替换行为。
@@ -53,6 +59,7 @@ const updateSessionTitleMock = vi.fn<UpdateSessionTitleMock>();
 vi.mock('@/shared/storage', () => ({
   chatStorage: {
     getMessages: getMessagesMock,
+    getSessionUsage: getSessionUsageMock,
     addMessage: addMessageMock,
     setSessionMessages: setSessionMessagesMock,
     updateSessionLastMessageAt: updateSessionLastMessageAtMock,
@@ -67,6 +74,7 @@ describe('useChatStore', () => {
     vi.resetModules();
     addMessageMock.mockReset();
     getMessagesMock.mockReset();
+    getSessionUsageMock.mockReset();
     setSessionMessagesMock.mockReset();
     updateSessionLastMessageAtMock.mockReset();
     addSessionUsageMock.mockReset();
@@ -105,6 +113,18 @@ describe('useChatStore', () => {
         finished: true
       }
     ]);
+  });
+
+  it('reads persisted session usage without recomputing from messages', async () => {
+    const { useChatStore } = await import('@/stores/chat');
+    const chatStore = useChatStore();
+
+    getSessionUsageMock.mockResolvedValue({ inputTokens: 4, outputTokens: 6, totalTokens: 10 });
+
+    const usage = await chatStore.getSessionUsage('session-1');
+
+    expect(getSessionUsageMock).toHaveBeenCalledWith('session-1');
+    expect(usage).toEqual({ inputTokens: 4, outputTokens: 6, totalTokens: 10 });
   });
 
   it('persists assistant thinking content with chat messages', async () => {

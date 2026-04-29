@@ -1,6 +1,6 @@
 /**
  * @file chat.ts
- * @description 聊天会话与消息状态管理
+ * @description Chat session and message persistence store.
  */
 import type { AIUsage } from 'types/ai';
 import type { ChatMessageHistoryCursor, ChatMessageRecord, ChatSession, ChatSessionType } from 'types/chat';
@@ -11,10 +11,10 @@ import type { Message } from '@/components/BChatSidebar/utils/types';
 import { chatStorage } from '@/shared/storage';
 
 /**
- * 将组件消息转换为聊天记录
- * @param sessionId - 会话 ID
- * @param message - 可持久化的组件消息
- * @returns 可写入存储层的聊天消息记录
+ * Convert a persistable sidebar message into a storage record.
+ * @param sessionId - Target chat session id.
+ * @param message - Persistable message payload.
+ * @returns Storage-ready chat message record.
  */
 function toRecordMessage(sessionId: string, message: PersistableMessage): ChatMessageRecord {
   const { id, role, content, parts, references, thinking, files, usage, createdAt = new Date().toISOString() } = message;
@@ -23,9 +23,9 @@ function toRecordMessage(sessionId: string, message: PersistableMessage): ChatMe
 }
 
 /**
- * 累加消息列表中的 Token 使用统计
- * @param messages - 当前会话保留的消息列表
- * @returns 累计后的 Token 使用统计，没有 usage 时返回 undefined
+ * Sum usage values from a list of persistable messages.
+ * @param messages - Persisted messages to aggregate.
+ * @returns Aggregated usage totals, or undefined if no usage exists.
  */
 function sumMessagesUsage(messages: PersistableMessage[]): AIUsage | undefined {
   const usageList = messages.map((message) => message.usage).filter((usage): usage is AIUsage => usage !== undefined);
@@ -45,10 +45,10 @@ function sumMessagesUsage(messages: PersistableMessage[]): AIUsage | undefined {
 export const useChatStore = defineStore('chat', {
   actions: {
     /**
-     * 读取会话消息，未传游标时返回最新一段，传游标时返回更早历史。
-     * @param sessionId - 会话 ID
-     * @param cursor - 历史加载游标
-     * @returns 已补齐完成状态的组件消息
+     * Load chat messages for a session, optionally using a history cursor.
+     * @param sessionId - Session id to load.
+     * @param cursor - Optional history cursor.
+     * @returns Finished chat messages ready for the UI.
      */
     async getSessionMessages(sessionId: string, cursor?: ChatMessageHistoryCursor): Promise<Message[]> {
       const messages = await chatStorage.getMessages(sessionId, cursor);
@@ -56,11 +56,31 @@ export const useChatStore = defineStore('chat', {
       return messages.map((message) => ({ ...message, finished: true }));
     },
 
+    /**
+     * Load sessions by type for history navigation.
+     * @param type - Session type filter.
+     * @returns Matching chat sessions.
+     */
     getSessions(type: ChatSessionType): Promise<ChatSession[]> {
       return chatStorage.getSessionsByType(type);
     },
 
-    async createSession(type: ChatSessionType, { title = '新对话' }: { title?: string } = {}): Promise<ChatSession> {
+    /**
+     * Read the persisted usage for a single session.
+     * @param sessionId - Session id to inspect.
+     * @returns Persisted usage totals, or undefined if the session has none.
+     */
+    getSessionUsage(sessionId: string): Promise<AIUsage | undefined> {
+      return chatStorage.getSessionUsage(sessionId);
+    },
+
+    /**
+     * Create a new chat session and persist it immediately.
+     * @param type - Session type to create.
+     * @param options - Optional session metadata.
+     * @returns Created session record.
+     */
+    async createSession(type: ChatSessionType, { title = '新会话' }: { title?: string } = {}): Promise<ChatSession> {
       const now = new Date().toISOString();
       const session: ChatSession = { id: nanoid(), type, title, createdAt: now, updatedAt: now, lastMessageAt: now };
 
@@ -69,6 +89,11 @@ export const useChatStore = defineStore('chat', {
       return session;
     },
 
+    /**
+     * Persist a single message and its usage metadata when available.
+     * @param sessionId - Session id to update.
+     * @param message - Message to persist.
+     */
     async addSessionMessage(sessionId: string | null, message: Message): Promise<void> {
       if (!sessionId) return;
       if (!is.persistableMessage(message)) return;
@@ -82,6 +107,11 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
+    /**
+     * Replace all persisted messages for a session and recalculate aggregate usage.
+     * @param sessionId - Session id to update.
+     * @param messages - Complete message list to persist.
+     */
     async setSessionMessages(sessionId: string | null, messages: Message[]): Promise<void> {
       if (!sessionId) return;
 
@@ -93,14 +123,18 @@ export const useChatStore = defineStore('chat', {
     },
 
     /**
-     * 仅更新指定会话的标题。
-     * @param sessionId - 会话 ID。
-     * @param title - 新标题。
+     * Update only a session title so ordering and usage metadata stay intact.
+     * @param sessionId - Session id to update.
+     * @param title - New session title.
      */
     async updateSessionTitle(sessionId: string, title: string): Promise<void> {
       await chatStorage.updateSessionTitle(sessionId, title);
     },
 
+    /**
+     * Delete a session and its persisted messages.
+     * @param sessionId - Session id to delete.
+     */
     async deleteSession(sessionId: string): Promise<void> {
       await chatStorage.deleteSession(sessionId);
     }

@@ -395,6 +395,20 @@ export const chatStorage = {
     await dbExecute(UPDATE_SESSION_USAGE_SQL, [stringifyJson(addUsage(currentUsage, usage)), sessionId]);
   },
 
+  /**
+   * 读取会话累计用量，供侧边栏用量面板直接消费持久化结果。
+   * @param sessionId - 目标会话 ID。
+   * @returns 会话累计 Token 用量，不存在时返回 undefined。
+   */
+  async getSessionUsage(sessionId: string): Promise<AIUsage | undefined> {
+    if (!isDatabaseAvailable()) {
+      return loadFallbackSessions().find((item) => item.id === sessionId)?.usage;
+    }
+
+    const rows = await dbSelect<ChatSessionUsageRow>(SELECT_SESSION_USAGE_SQL, [sessionId]);
+    return parseJson<AIUsage>(rows[0]?.usage_json ?? null);
+  },
+
   async updateSessionUsage(sessionId: string, usage: AIUsage | undefined): Promise<void> {
     if (!isDatabaseAvailable()) {
       const sessions = loadFallbackSessions();

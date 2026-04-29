@@ -257,11 +257,10 @@ function syncSlashCommandState(state: EditorState, editorView: EditorView): void
       return;
     }
 
-    const { scrollDOM } = editorView;
     slashPosition.value = {
-      top: coords.top + scrollDOM.scrollTop,
+      top: coords.top,
       left: coords.left,
-      bottom: coords.bottom + scrollDOM.scrollTop
+      bottom: coords.bottom
     };
   });
 }
@@ -427,6 +426,9 @@ function createExtensions(): import('@codemirror/state').Extension[] {
     // 失焦时隐藏变量菜单
     EditorView.domEventHandlers({
       blur: (_event, editorView) => {
+        if (slashVisible.value) {
+          closeSlashCommandMenu();
+        }
         if (triggerVisible.value) {
           editorView.dispatch({ effects: closeTrigger.of() });
         }
