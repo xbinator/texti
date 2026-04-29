@@ -41,7 +41,7 @@ export {
 
 export { aiService } from './ai/service.mjs';
 
-export { initLogger, log, cleanOldLogs, startLogMaintenanceTimer } from './logger/service.mjs';
+export { initLogger, initMainErrorCollector, log, cleanOldLogs, startLogMaintenanceTimer } from './logger/service.mjs';
 
 export { initDatabase, closeDatabase, dbExecute, dbSelect, getDbPath } from './database/service.mjs';
 
