@@ -253,16 +253,12 @@ function handleClick(event: MouseEvent) {
   }
 
   // 图标
-  &--icon {
-    .b-button__text {
-      margin-left: 4px;
-    }
-  }
 
   &__icon {
     flex-shrink: 0;
     width: 16px;
     height: 16px;
+    margin-right: 6px;
   }
 
   &__text {

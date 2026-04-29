@@ -69,6 +69,9 @@ const { createNewFile, openFileById, openNativeFile } = useOpenFile();
 const isDragging = ref(false);
 const visibleSearchRecent = ref(false);
 
+/** 支持的文本文件扩展名列表 */
+const SUPPORTED_TEXT_EXTENSIONS = ['md', 'markdown', 'txt', 'text', 'js', 'ts', 'html', 'css', 'json'];
+
 const topRecentFiles = computed(() => filesStore.recentFiles?.slice(0, 3) ?? []);
 
 onMounted(() => filesStore.ensureLoaded());
@@ -153,12 +156,11 @@ async function handleDrop(e: DragEvent): Promise<void> {
 
   // 检查文件类型，只处理文本文件
   const ext = file.name.split('.').pop()?.toLowerCase();
-  if (!ext || !['md', 'markdown', 'txt', 'text', 'js', 'ts', 'html', 'css', 'json'].includes(ext)) {
-    console.warn('Unsupported file type:', ext);
+  if (!ext || !SUPPORTED_TEXT_EXTENSIONS.includes(ext)) {
     return;
   }
 
-  let filePath = (file as unknown as { path?: string }).path;
+  const filePath = (file as unknown as { path?: string }).path;
 
   try {
     let openedId = '';
@@ -171,17 +173,7 @@ async function handleDrop(e: DragEvent): Promise<void> {
     } else {
       const content = await file.text();
       const name = file.name.split('.').slice(0, -1).join('.') || file.name;
-      const createdFile = await filesStore.createAndOpen(
-        {
-          id: nanoid(),
-          path: null,
-          name,
-          ext,
-          content,
-          savedContent: content
-        },
-        'drop'
-      );
+      const createdFile = await filesStore.createAndOpen({ id: nanoid(), path: null, name, ext, content, savedContent: content }, 'drop');
 
       openedId = createdFile.id;
     }
