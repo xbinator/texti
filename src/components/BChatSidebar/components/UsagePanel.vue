@@ -116,7 +116,7 @@ function formatTokens(value: number): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border-secondary);
 }
 
@@ -186,11 +186,11 @@ function formatTokens(value: number): string {
 }
 
 .usage-panel__progress-bar--input {
-  background: var(--color-purple);
+  background: var(--usage-input);
 }
 
 .usage-panel__progress-bar--output {
-  background: var(--color-success);
+  background: var(--usage-output);
 }
 
 .usage-panel__stats {
@@ -214,11 +214,11 @@ function formatTokens(value: number): string {
 }
 
 .usage-panel__dot--input {
-  background: var(--color-purple);
+  background: var(--usage-input);
 }
 
 .usage-panel__dot--output {
-  background: var(--color-success);
+  background: var(--usage-output);
 }
 
 .usage-panel__stat-label {
