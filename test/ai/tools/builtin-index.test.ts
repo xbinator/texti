@@ -1,8 +1,9 @@
 import type { AIToolContext } from 'types/ai';
 import { describe, expect, it } from 'vitest';
+import { createBuiltinTools } from '@/ai/tools/builtin';
+import { QUERY_LOGS_TOOL_NAME } from '@/ai/tools/builtin/logs';
 import { READ_DIRECTORY_TOOL_NAME } from '@/ai/tools/builtin/read-file';
 import { GET_SETTINGS_TOOL_NAME, UPDATE_SETTINGS_TOOL_NAME } from '@/ai/tools/builtin/settings';
-import { createBuiltinTools } from '@/ai/tools/builtin';
 
 /**
  * 创建工具执行上下文。
@@ -51,7 +52,8 @@ describe('createBuiltinTools', () => {
       'ask_user_choice',
       'read_file',
       READ_DIRECTORY_TOOL_NAME,
-      GET_SETTINGS_TOOL_NAME
+      GET_SETTINGS_TOOL_NAME,
+      QUERY_LOGS_TOOL_NAME
     ]);
   });
 
@@ -64,6 +66,7 @@ describe('createBuiltinTools', () => {
       'read_file',
       READ_DIRECTORY_TOOL_NAME,
       GET_SETTINGS_TOOL_NAME,
+      QUERY_LOGS_TOOL_NAME,
       'insert_at_cursor',
       UPDATE_SETTINGS_TOOL_NAME
     ]);
@@ -86,6 +89,7 @@ describe('createBuiltinTools', () => {
       'read_file',
       READ_DIRECTORY_TOOL_NAME,
       GET_SETTINGS_TOOL_NAME,
+      QUERY_LOGS_TOOL_NAME,
       'insert_at_cursor',
       UPDATE_SETTINGS_TOOL_NAME,
       'replace_selection',

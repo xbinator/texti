@@ -19,15 +19,23 @@
       <div class="log-timeline__card">
         <div class="log-timeline__card-header">
           <ATag :color="getLogLevelColor(entry.level)">{{ getLogLevelLabel(entry.level) }}</ATag>
+
+          <BButton type="text" size="small" @click="toggleExpanded">
+            {{ isExpanded ? '收起' : '展开' }}
+          </BButton>
         </div>
-        <div class="log-timeline__message">{{ entry.message }}</div>
+        <div class="log-timeline__message">
+          <div :class="{ 'log-timeline__message--collapsed': !isExpanded }">
+            {{ entry.message }}
+          </div>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { LogEntry } from '@/shared/logger/types';
 import { getLogLevelColor, getLogLevelLabel, getLogScopeLabel } from '@/views/settings/logger/constant';
 
@@ -45,7 +53,12 @@ interface Props {
   isOnly?: boolean;
 }
 
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), {
+  isFirst: false,
+  isLast: false,
+  isOnly: false
+});
+const isExpanded = ref(false);
 
 /**
  * 计算时间轴项的样式类
@@ -64,6 +77,13 @@ const itemClasses = computed(() => ({
 function formatDisplayTime(timestamp: string): string {
   const match = timestamp.match(/\d{2}:\d{2}:\d{2}/);
   return match ? match[0] : timestamp;
+}
+
+/**
+ * 切换日志消息的展开状态。
+ */
+function toggleExpanded(): void {
+  isExpanded.value = !isExpanded.value;
 }
 </script>
 
@@ -175,8 +195,8 @@ function formatDisplayTime(timestamp: string): string {
 
 .log-timeline__card {
   display: flex;
+  flex-direction: column;
   gap: 12px;
-  align-items: flex-start;
   padding: 18px 20px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-primary);
@@ -184,17 +204,24 @@ function formatDisplayTime(timestamp: string): string {
 }
 
 .log-timeline__card-header {
-  flex-shrink: 0;
-  padding-top: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .log-timeline__message {
-  min-width: 0;
+  padding: 8px 12px;
   font-family: 'SF Mono', Menlo, monospace;
   font-size: 14px;
   line-height: 1.6;
   color: var(--text-primary);
   word-break: break-all;
   white-space: pre-wrap;
+  background-color: var(--bg-secondary);
+  border-radius: 4px;
+}
+
+.log-timeline__message--collapsed {
+  .multi-ellipsis(2);
 }
 </style>

@@ -4,6 +4,7 @@
  */
 import { ASK_USER_CHOICE_TOOL_NAME } from './ask-user-choice';
 import { GET_CURRENT_TIME_TOOL_NAME } from './environment';
+import { QUERY_LOGS_TOOL_NAME } from './logs';
 import { READ_CURRENT_DOCUMENT_TOOL_NAME, SEARCH_CURRENT_DOCUMENT_TOOL_NAME } from './read';
 import { READ_DIRECTORY_TOOL_NAME, READ_FILE_TOOL_NAME } from './read-file';
 import { GET_SETTINGS_TOOL_NAME, UPDATE_SETTINGS_TOOL_NAME } from './settings';
@@ -19,7 +20,8 @@ export const DEFAULT_BUILTIN_READONLY_TOOL_NAMES = [
   ASK_USER_CHOICE_TOOL_NAME,
   READ_FILE_TOOL_NAME,
   READ_DIRECTORY_TOOL_NAME,
-  GET_SETTINGS_TOOL_NAME
+  GET_SETTINGS_TOOL_NAME,
+  QUERY_LOGS_TOOL_NAME
 ] as const;
 
 /**

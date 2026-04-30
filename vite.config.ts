@@ -3,6 +3,7 @@
  * @description Vite 构建、开发服务器和前端依赖拆包配置
  */
 import { fileURLToPath, URL } from 'node:url';
+import { resolve } from 'path';
 import vue from '@vitejs/plugin-vue';
 import vueJsx from '@vitejs/plugin-vue-jsx';
 import UnoCSS from 'unocss/vite';
@@ -118,6 +119,15 @@ export default defineConfig(({ mode }) => {
       host: env.DEV_SERVER_HOST || '127.0.0.1',
       port: parseInt(env.DEV_SERVER_PORT || '1420', 10),
       strictPort: true
+    },
+
+    css: {
+      preprocessorOptions: {
+        less: {
+          modifyVars: { hack: `true; @import "${resolve('src/assets/styles/global.less')}";` },
+          javascriptEnabled: true
+        }
+      }
     },
 
     build: {

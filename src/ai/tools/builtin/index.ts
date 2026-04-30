@@ -8,6 +8,7 @@ import { nanoid } from 'nanoid';
 import { createAskUserChoiceTool, type PendingQuestionSnapshot } from './ask-user-choice';
 import { isDefaultBuiltinReadonlyToolName, isDefaultBuiltinWritableToolName } from './catalog';
 import { createBuiltinEnvironmentTools } from './environment';
+import { createBuiltinLogTools } from './logs';
 import { createBuiltinReadTools } from './read';
 import { createBuiltinReadDirectoryTool, createBuiltinReadFileTool } from './read-file';
 import { createBuiltinSettingsTools } from './settings';
@@ -41,6 +42,8 @@ export function createBuiltinTools(options: CreateBuiltinToolsOptions = {}): AIT
   const readTools = createBuiltinReadTools();
   // 创建环境只读工具
   const environmentTools = createBuiltinEnvironmentTools();
+  // 创建日志只读工具
+  const logTools = createBuiltinLogTools();
   // 先汇总全部只读工具，再通过共享清单筛选默认暴露项。
   const allReadonlyTools: AIToolExecutor[] = [
     readTools.readCurrentDocument,
@@ -58,7 +61,8 @@ export function createBuiltinTools(options: CreateBuiltinToolsOptions = {}): AIT
       confirm: options.confirm,
       getWorkspaceRoot: options.getWorkspaceRoot
     }),
-    createBuiltinSettingsTools(options.confirm ?? { confirm: async () => false }).getSettings
+    createBuiltinSettingsTools(options.confirm ?? { confirm: async () => false }).getSettings,
+    logTools.queryLogs
   ];
   const readonlyTools = allReadonlyTools.filter((tool) => isDefaultBuiltinReadonlyToolName(tool.definition.name));
 
