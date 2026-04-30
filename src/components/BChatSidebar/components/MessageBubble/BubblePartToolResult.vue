@@ -34,11 +34,11 @@ const [, bem] = createNamespace('', 'message-bubble-tool-result');
 </script>
 
 <style scoped lang="less">
-.message-bubble-tool-result__part-name {
+.message-bubble-tool-result__name {
   flex: 1;
 }
 
-.message-bubble-tool-result__part-status--failure {
+.message-bubble-tool-result__status--failure {
   margin-left: 8px;
   color: var(--color-error);
 }

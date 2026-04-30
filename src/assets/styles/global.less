@@ -1,0 +1,13 @@
+.flex-center() {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.multi-ellipsis(@row) {
+  display: -webkit-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  -webkit-line-clamp: @row;
+  -webkit-box-orient: vertical;
+}

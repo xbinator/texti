@@ -80,19 +80,7 @@ function toggleCollapse(): void {
   user-select: none;
 }
 
-.message-bubble-part-status {
-  padding: 1px 6px;
-  font-size: 11px;
-  line-height: 1.4;
-  border-radius: 999px;
-}
-
-.message-bubble-part-status--failure {
-  color: var(--color-error);
-  background: var(--color-error-bg);
-}
-
-.message-bubble__part-content {
+.message-bubble-part__content {
   margin-top: 8px;
 }
 </style>
