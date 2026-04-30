@@ -12,28 +12,28 @@ export const chatSlashCommands: SlashCommandOption[] = [
     id: 'model',
     trigger: '/model',
     title: '模型',
-    description: '切换当前使用的模型',
+    description: '切换当前使用的模型。',
     type: 'action'
   },
   {
     id: 'usage',
     trigger: '/usage',
     title: '使用情况',
-    description: '显示当前会话的 token 使用情况',
+    description: '显示当前会话的 token 使用情况。',
     type: 'action'
   },
   {
     id: 'new',
     trigger: '/new',
     title: '新建聊天',
-    description: '开始一个新的聊天会话',
+    description: '开始一个新的聊天会话。',
     type: 'action'
   },
   {
     id: 'clear',
     trigger: '/clear',
     title: '清空输入',
-    description: '清除当前聊天输入内容',
+    description: '清除当前聊天输入内容。',
     type: 'action'
   }
 ];

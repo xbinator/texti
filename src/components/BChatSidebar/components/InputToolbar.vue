@@ -1,11 +1,15 @@
 <!--
   @file InputToolbar.vue
-  @description Chat sidebar input toolbar with model selector and submit actions.
+  @description Chat sidebar input toolbar with model selector, image upload, and submit actions.
 -->
 <template>
   <div class="chat-input-toolbar">
     <ModelSelector ref="modelSelectorRef" :model="selectedModel" @update:model="handleModelChange" />
     <div class="action-buttons">
+      <input ref="imageInputRef" class="image-input" type="file" accept="image/*" multiple @change="handleImageInputChange" />
+      <BButton v-if="supportsVision" size="small" square @click="openImagePicker">
+        <Icon icon="lucide:image-plus" width="16" height="16" />
+      </BButton>
       <BButton v-if="loading" size="small" square @click="$emit('abort')">
         <svg class="loading-icon" color="currentColor" viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg">
           <title>Stop Loading</title>
@@ -16,13 +20,14 @@
           </circle>
         </svg>
       </BButton>
-      <BButton v-else size="small" square :disabled="!inputValue" icon="lucide:arrow-up" @click="$emit('submit')" />
+      <BButton v-else size="small" square :disabled="!canSubmit" icon="lucide:arrow-up" @click="$emit('submit')" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue';
+import { Icon } from '@iconify/vue';
 import BButton from '@/components/BButton/index.vue';
 import ModelSelector from './InputToolbar/ModelSelector.vue';
 
@@ -36,22 +41,33 @@ interface Props {
   inputValue: string;
   /** 当前选中的模型（providerId:modelId）。 */
   selectedModel?: string;
+  /** 当前模型是否支持视觉识别。 */
+  supportsVision: boolean;
+  /** 当前是否允许提交。 */
+  canSubmit: boolean;
 }
 
 withDefaults(defineProps<Props>(), {
-  selectedModel: undefined
+  selectedModel: undefined,
+  supportsVision: false,
+  canSubmit: false
 });
 
 const emit = defineEmits<{
   (e: 'submit'): void;
   (e: 'abort'): void;
   (e: 'model-change', value: string): void;
+  (e: 'image-select', files: File[]): void;
 }>();
 
 /**
  * 模型选择器实例引用。
  */
 const modelSelectorRef = ref<InstanceType<typeof ModelSelector>>();
+/**
+ * 图片选择输入框引用。
+ */
+const imageInputRef = ref<HTMLInputElement>();
 
 /**
  * 将打开请求转发到内部模型选择器。
@@ -66,6 +82,28 @@ function open(): void {
  */
 function handleModelChange(value: string): void {
   emit('model-change', value);
+}
+
+/**
+ * 打开图片选择器。
+ */
+function openImagePicker(): void {
+  imageInputRef.value?.click();
+}
+
+/**
+ * 处理图片输入框 change 事件。
+ * @param event - 原生 change 事件
+ */
+function handleImageInputChange(event: Event): void {
+  const { target } = event;
+  if (!(target instanceof HTMLInputElement)) return;
+
+  const files = Array.from(target.files ?? []);
+  if (files.length > 0) {
+    emit('image-select', files);
+  }
+  target.value = '';
 }
 
 /**
@@ -87,6 +125,10 @@ defineExpose({
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.image-input {
+  display: none;
 }
 
 .loading-icon {

@@ -5,6 +5,20 @@
 import type { ChipResolver } from './extensions/variableChip';
 
 /**
+ * 图片粘贴/拖拽接管上下文。
+ */
+export interface PasteImageContext {
+  /** 纯文本内容 */
+  text?: string;
+  /** HTML 内容 */
+  html?: string;
+  /** 图片文件列表 */
+  imageFiles: File[];
+  /** 其他文件列表 */
+  otherFiles: File[];
+}
+
+/**
  * 斜杠命令选项元数据
  */
 export type SlashCommandId = 'model' | 'usage' | 'new' | 'clear';
@@ -70,6 +84,10 @@ export interface BPromptEditorProps {
   submitOnEnter?: boolean;
   /** Chip 解析器，由消费者提供 */
   chipResolver?: ChipResolver;
-  /** 文件粘贴回调（当前仅支持同步） */
+  /** 文件粘贴回调 */
   onPasteFiles?: (files: File[]) => Promise<string | null> | string | null;
+  /** 图片粘贴/拖拽接管回调 */
+  onPasteImages?: (context: PasteImageContext) => Promise<void> | void;
+  /** 当前是否允许接收图片 */
+  canAcceptImages?: () => boolean;
 }

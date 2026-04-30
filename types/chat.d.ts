@@ -77,6 +77,8 @@ export interface ChatMessageFile {
   path?: string;
   /** 远程地址 */
   url?: string;
+  /** 内容哈希 */
+  contentHash?: string;
   /** 图片宽度 */
   width?: number;
   /** 图片高度 */

@@ -50,7 +50,9 @@ const props = withDefaults(defineProps<Props>(), {
   maxHeight: undefined,
   submitOnEnter: false,
   chipResolver: undefined,
-  onPasteFiles: undefined
+  onPasteFiles: undefined,
+  onPasteImages: undefined,
+  canAcceptImages: undefined
 });
 
 const emit = defineEmits<{
@@ -440,7 +442,7 @@ function createExtensions(): import('@codemirror/state').Extension[] {
       hasVariables
     }),
     createPlaceholderExtension(props.placeholder),
-    createPasteHandlerExtension(props.onPasteFiles),
+    createPasteHandlerExtension(props.onPasteFiles, props.onPasteImages, props.canAcceptImages),
     EditorView.domEventHandlers({
       blur: (_event, editorView) => {
         if (slashVisible.value) {

@@ -5,18 +5,18 @@
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { EditorState } from '@codemirror/state';
-import { Decoration, WidgetType } from '@codemirror/view';
-import { describe, expect, test, vi } from 'vitest';
 import { nextTick } from 'vue';
+import { EditorState } from '@codemirror/state';
+import { EditorView, WidgetType } from '@codemirror/view';
 import { mount, type VueWrapper } from '@vue/test-utils';
-import BPromptEditor from '@/components/BPromptEditor/index.vue';
+import { describe, expect, test, vi } from 'vitest';
+import { chatSlashCommands } from '@/components/BChatSidebar/utils/slashCommands';
 import { editableCompartment, readOnlyCompartment, themeCompartment } from '@/components/BPromptEditor/extensions/base';
 import { createPasteHandlerExtension } from '@/components/BPromptEditor/extensions/pasteHandler';
 import { createPlaceholderExtension } from '@/components/BPromptEditor/extensions/placeholder';
 import { triggerStateField, setTriggerActiveIndex, closeTrigger } from '@/components/BPromptEditor/extensions/triggerState';
 import { variableChipField, chipResolverEffect, type ChipResolver } from '@/components/BPromptEditor/extensions/variableChip';
-import { chatSlashCommands } from '@/components/BChatSidebar/utils/slashCommands';
+import BPromptEditor from '@/components/BPromptEditor/index.vue';
 
 /**
  * BPromptEditor 挂载实例类型。
@@ -59,7 +59,12 @@ async function insertEditorText(wrapper: VueWrapper<PromptEditorInstance>, value
  * 原 useVariableEncoder 中的遗留工具函数。
  */
 function isPromptEditorContentEmpty(content: string): boolean {
-  return content.replace(new RegExp('\u00A0', 'g'), '').replace(new RegExp('\u200B', 'g'), '').trim().length === 0;
+  return (
+    content
+      .replace(/\u00A0/g, '')
+      .replace(/\u200B/g, '')
+      .trim().length === 0
+  );
 }
 
 /**
@@ -86,7 +91,7 @@ describe('BPromptEditor placeholder state', () => {
     const indexSource = readSource('src/components/BPromptEditor/index.vue');
     const placeholderSource = readSource('src/components/BPromptEditor/extensions/placeholder.ts');
 
-    expect(indexSource).toContain("import { createPlaceholderExtension }");
+    expect(indexSource).toContain('import { createPlaceholderExtension }');
     expect(indexSource).toContain('createPlaceholderExtension(props.placeholder)');
     expect(indexSource).not.toContain('v-show="editorIsEmpty"');
     expect(indexSource).not.toContain('data-empty="true"');
@@ -319,6 +324,101 @@ describe('BPromptEditor pasteHandler extension', () => {
     expect(ext).toBeDefined();
     expect(typeof ext).toBe('object');
   });
+
+  test('preserves text and non-image files when image paste is blocked', () => {
+    type DataTransferLike = {
+      files: File[];
+      getData: (format: string) => string;
+    };
+
+    const originalClipboardEvent = globalThis.ClipboardEvent;
+    globalThis.ClipboardEvent = Event as unknown as typeof ClipboardEvent;
+
+    const imageFile = new File(['img'], 'image.png', { type: 'image/png' });
+    const textFile = new File(['doc'], 'notes.txt', { type: 'text/plain' });
+    const onPasteFiles = vi.fn(() => '{{file-ref}}');
+    const onPasteImages = vi.fn();
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+
+    try {
+      const view = new EditorView({
+        parent,
+        state: EditorState.create({
+          doc: '',
+          extensions: [createPasteHandlerExtension(onPasteFiles, onPasteImages, () => false)]
+        })
+      });
+
+      const event = new Event('paste', { bubbles: true, cancelable: true }) as Event & { clipboardData?: DataTransferLike };
+      event.clipboardData = {
+        files: [imageFile, textFile],
+        getData: (format: string) => (format === 'text/plain' ? 'pasted text' : '')
+      };
+
+      view.contentDOM.dispatchEvent(event);
+
+      expect(view.state.doc.toString()).toBe('pasted text{{file-ref}}');
+      expect(onPasteImages).not.toHaveBeenCalled();
+      expect(onPasteFiles).toHaveBeenCalledWith([textFile]);
+
+      view.destroy();
+    } finally {
+      parent.remove();
+      globalThis.ClipboardEvent = originalClipboardEvent;
+    }
+  });
+
+  test('preserves non-image files when image drop is blocked', () => {
+    type DataTransferDropLike = {
+      files: File[];
+      types: string[];
+    };
+
+    const originalDragEvent = globalThis.DragEvent;
+    globalThis.DragEvent = Event as unknown as typeof DragEvent;
+
+    const imageFile = new File(['img'], 'image.png', { type: 'image/png' });
+    const textFile = new File(['doc'], 'notes.txt', { type: 'text/plain' });
+    const onPasteFiles = vi.fn(() => '{{file-ref}}');
+    const onPasteImages = vi.fn();
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+
+    try {
+      const view = new EditorView({
+        parent,
+        state: EditorState.create({
+          doc: '',
+          extensions: [createPasteHandlerExtension(onPasteFiles, onPasteImages, () => false)]
+        })
+      });
+
+      vi.spyOn(view, 'posAtCoords').mockReturnValue(0);
+      const event = new Event('drop', { bubbles: true, cancelable: true }) as Event & {
+        dataTransfer?: DataTransferDropLike;
+        clientX: number;
+        clientY: number;
+      };
+      event.dataTransfer = {
+        files: [imageFile, textFile],
+        types: ['Files']
+      };
+      event.clientX = 10;
+      event.clientY = 10;
+
+      view.contentDOM.dispatchEvent(event);
+
+      expect(view.state.doc.toString()).toBe('{{file-ref}}');
+      expect(onPasteImages).not.toHaveBeenCalled();
+      expect(onPasteFiles).toHaveBeenCalledWith([textFile]);
+
+      view.destroy();
+    } finally {
+      parent.remove();
+      globalThis.DragEvent = originalDragEvent;
+    }
+  });
 });
 
 describe('BPromptEditor index.vue integration', () => {
@@ -416,7 +516,7 @@ describe('BPromptEditor index.vue integration', () => {
     const source = readSource('src/components/BPromptEditor/index.vue');
     expect(source).toContain('triggerState.from');
     expect(source).toContain('triggerState.to');
-    expect(source).toContain('{{${variable.value}}');
+    expect(source).toMatch(/\{\{\$\{variable\.value\}\}/);
   });
 
   test('closeTrigger effect is dispatched on variable select', () => {

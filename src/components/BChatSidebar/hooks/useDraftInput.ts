@@ -3,7 +3,7 @@
  * @description 草稿输入状态管理 hook
  */
 import type { Message } from '../utils/types';
-import type { ChatMessageFileReference } from 'types/chat';
+import type { ChatMessageFile, ChatMessageFileReference } from 'types/chat';
 import { ref } from 'vue';
 
 /**
@@ -24,6 +24,8 @@ export function useDraftInput(options: DraftInputOptions) {
   const inputValue = ref('');
   /** 草稿文件引用列表 */
   const draftReferences = ref<ChatMessageFileReference[]>([]);
+  /** 草稿图片附件列表 */
+  const draftImages = ref<ChatMessageFile[]>([]);
 
   /**
    * 清空当前草稿输入和文件引用，不影响对话内容
@@ -31,6 +33,7 @@ export function useDraftInput(options: DraftInputOptions) {
   function clear(): void {
     inputValue.value = '';
     draftReferences.value = [];
+    draftImages.value = [];
     options.focusInput();
   }
 
@@ -53,12 +56,29 @@ export function useDraftInput(options: DraftInputOptions) {
   }
 
   /**
+   * 追加草稿图片附件
+   * @param files - 图片附件列表
+   */
+  function addImages(files: ChatMessageFile[]): void {
+    draftImages.value.push(...files);
+  }
+
+  /**
+   * 删除指定草稿图片
+   * @param imageId - 图片 ID
+   */
+  function removeImage(imageId: string): void {
+    draftImages.value = draftImages.value.filter((image) => image.id !== imageId);
+  }
+
+  /**
    * 从消息恢复草稿（用于编辑消息）
    * @param message - 要编辑的消息
    */
   function restoreFromMessage(message: Message): void {
     inputValue.value = message.content;
     draftReferences.value = [...(message.references ?? [])];
+    draftImages.value = [...(message.files?.filter((file) => file.type === 'image') ?? [])];
   }
 
   /**
@@ -80,14 +100,26 @@ export function useDraftInput(options: DraftInputOptions) {
     return inputValue.value.trim().length === 0;
   }
 
+  /**
+   * 检查是否存在草稿图片
+   * @returns 是否存在草稿图片
+   */
+  function hasImages(): boolean {
+    return draftImages.value.length > 0;
+  }
+
   return {
     inputValue,
     draftReferences,
+    draftImages,
     clear,
     setContent,
     setReferences,
+    addImages,
+    removeImage,
     restoreFromMessage,
     getActiveReferences,
-    isEmpty
+    isEmpty,
+    hasImages
   };
 }

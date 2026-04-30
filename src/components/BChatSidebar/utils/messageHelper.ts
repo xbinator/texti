@@ -319,7 +319,18 @@ function toAssistantModelMessages(parts: ChatMessagePart[]): ModelMessage[] {
 
 /** 生成参与模型转换的消息签名，用于判断缓存是否还能复用 */
 function createModelMessageSignature(message: Message): string {
-  return JSON.stringify({ role: message.role, content: message.content, parts: message.parts });
+  return JSON.stringify({
+    role: message.role,
+    content: message.content,
+    parts: message.parts,
+    files: message.files?.map((file) => ({
+      id: file.id,
+      type: file.type,
+      mimeType: file.mimeType,
+      size: file.size,
+      contentHash: file.contentHash
+    }))
+  });
 }
 
 /** 判断单条消息是否可以直接复用已有缓存条目 */
@@ -330,7 +341,24 @@ function canReuseCachedEntry(entry: CachedModelMessageEntry, message: Message): 
 /** 将单条组件消息转换为 AI SDK 的 ModelMessage 列表 */
 function toModelMessagesForMessage(message: Message): ModelMessage[] {
   if (!is.modelMessage(message)) return [];
-  if (message.role === 'user') return [{ role: 'user', content: message.content }];
+  if (message.role === 'user') {
+    const imageFiles = message.files?.filter((file) => file.type === 'image' && file.url) ?? [];
+    if (!imageFiles.length) return [{ role: 'user', content: message.content }];
+
+    return [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: message.content },
+          ...imageFiles.map((file) => ({
+            type: 'image' as const,
+            image: file.url!,
+            mediaType: file.mimeType
+          }))
+        ]
+      }
+    ];
+  }
   return toAssistantModelMessages(message.parts);
 }
 
