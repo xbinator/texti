@@ -37,7 +37,7 @@ function mountPromptEditor(options: PromptEditorMountOptions = {}): VueWrapper<P
   return mount(BPromptEditor, {
     props: {
       value: options.value ?? '',
-      slashCommands: options.slashCommands,
+      slashCommands: options.slashCommands ? [...options.slashCommands] : undefined,
       submitOnEnter: options.submitOnEnter
     },
     global: {
@@ -178,6 +178,27 @@ describe('BPromptEditor slash commands', () => {
     await wrapper.get('.b-prompt-editor-shell').trigger('focusout', {
       relatedTarget: document.body
     });
+
+    expect(wrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(false);
+  });
+
+  test('editor reconfiguration does not reopen the slash menu after blur', async () => {
+    const wrapper = mountPromptEditor({
+      slashCommands: chatSlashCommands
+    });
+
+    await insertEditorText(wrapper, '/us');
+    expect(wrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(true);
+
+    await wrapper.get('.cm-content').trigger('blur');
+    await nextTick();
+    expect(wrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(false);
+
+    await wrapper.setProps({
+      disabled: true
+    });
+    await nextTick();
+    await nextTick();
 
     expect(wrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(false);
   });

@@ -78,6 +78,7 @@ const slashVisible = ref(false);
 const slashActiveIndex = ref(0);
 const slashQuery = ref('');
 const slashRange = ref<{ from: number; to: number } | null>(null);
+const suppressSlashSync = ref(false);
 
 // 编辑器状态
 const lastSelection = ref<{ main: { head: number } } | null>(null);
@@ -223,8 +224,12 @@ function getSlashCommandContext(state: EditorState): { from: number; to: number;
 
 /**
  * 隐藏斜杠命令菜单并清除其活动范围
+ * @param suppressSync - 是否在关闭后抑制失焦引起的后续同步重开
  */
-function closeSlashCommandMenu(): void {
+function closeSlashCommandMenu(suppressSync = false): void {
+  if (suppressSync) {
+    suppressSlashSync.value = true;
+  }
   slashVisible.value = false;
   slashQuery.value = '';
   slashRange.value = null;
@@ -237,6 +242,11 @@ function closeSlashCommandMenu(): void {
  */
 function syncSlashCommandState(state: EditorState, editorView: EditorView | null): void {
   if (!editorView) {
+    closeSlashCommandMenu();
+    return;
+  }
+
+  if (suppressSlashSync.value) {
     closeSlashCommandMenu();
     return;
   }
@@ -381,6 +391,7 @@ function handleSlashCommandArrowDown(): boolean {
  */
 function handleContainerClick(): void {
   if (!props.disabled && view.value) {
+    suppressSlashSync.value = false;
     view.value.focus();
   }
 }
@@ -398,7 +409,7 @@ function handleDocumentMouseDown(event: MouseEvent): void {
   }
 
   if (slashVisible.value) {
-    closeSlashCommandMenu();
+    closeSlashCommandMenu(true);
   }
 }
 
@@ -419,7 +430,7 @@ function handleEditorShellFocusOut(event: FocusEvent): void {
   }
 
   if (slashVisible.value) {
-    closeSlashCommandMenu();
+    closeSlashCommandMenu(true);
   }
 }
 
@@ -444,9 +455,13 @@ function createExtensions(): import('@codemirror/state').Extension[] {
     createPlaceholderExtension(props.placeholder),
     createPasteHandlerExtension(props.onPasteFiles, props.onPasteImages, props.canAcceptImages),
     EditorView.domEventHandlers({
+      focus: () => {
+        suppressSlashSync.value = false;
+        return false;
+      },
       blur: (_event, editorView) => {
         if (slashVisible.value) {
-          closeSlashCommandMenu();
+          closeSlashCommandMenu(true);
         }
         if (triggerVisible.value) {
           editorView.dispatch({ effects: closeTrigger.of() });
