@@ -1,32 +1,32 @@
 /**
  * @file types.ts
- * @description BPromptEditor shared type definitions.
+ * @description BPromptEditor 共享类型定义
  */
 import type { ChipResolver } from './extensions/variableChip';
 
 /**
- * Slash command option metadata.
+ * 斜杠命令选项元数据
  */
 export type SlashCommandId = 'model' | 'usage' | 'new' | 'clear';
 
 /**
- * Slash command kind.
+ * 斜杠命令类型
  */
 export type SlashCommandType = 'action' | 'prompt';
 
 /**
- * Slash command option metadata used by the prompt editor and chat sidebar.
+ * 斜杠命令选项元数据，供提示词编辑器和聊天侧边栏使用
  */
 export interface SlashCommandOption {
-  /** Stable command identifier. */
+  /** 稳定的命令标识符 */
   id: SlashCommandId;
-  /** Slash trigger text shown to the user. */
+  /** 展示给用户的斜杠触发文本 */
   trigger: string;
-  /** Human-readable command title. */
+  /** 人类可读的命令标题 */
   title: string;
-  /** Command description shown in UI hints. */
+  /** 在 UI 提示中显示的命令描述 */
   description: string;
-  /** Command kind; action commands run immediately, prompt commands open prompt flows. */
+  /** 命令类型；action 命令立即执行，prompt 命令打开提示词流程 */
   type: SlashCommandType;
 }
 
@@ -60,7 +60,7 @@ export interface BPromptEditorProps {
   placeholder?: string;
   /** 变量选项 */
   options?: VariableOptionGroup[];
-  /** Slash command metadata exposed to the editor. */
+  /** 暴露给编辑器的斜杠命令元数据 */
   slashCommands?: SlashCommandOption[];
   /** 是否禁用 */
   disabled?: boolean;

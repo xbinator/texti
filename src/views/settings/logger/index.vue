@@ -5,12 +5,12 @@
 -->
 <template>
   <div class="logger-view">
-    <LogFilterBar v-model:value="dataItem" :count="entries.length" @change="handleFilterChange" />
+    <LogFilterBar v-model:value="dataItem" :count="entries.length" :available-dates="availableDates" @change="handleFilterChange" />
     <div class="logger-view__content">
       <BScrollbar inset="auto" @scroll="handleScroll">
         <div v-if="entries.length === 0 && !loading" class="log-empty">
           <div class="log-empty__text">暂无日志数据</div>
-          <div class="log-empty__subtext">可能没有产生日志，或者被当前的过滤条件拦截</div>
+          <div class="log-empty__subtext">{{ emptyStateSubtext }}</div>
         </div>
 
         <div v-else class="log-timeline">
@@ -33,10 +33,11 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
+import dayjs from 'dayjs';
 import { pickBy } from 'lodash-es';
 import { logger } from '@/shared/logger';
-import type { LogEntry, LogQueryOptions } from '@/shared/logger/types';
+import type { LogEntry, LogFileInfo, LogQueryOptions } from '@/shared/logger/types';
 import LogFilterBar, { type LogFilterBarDataItem } from './components/LogFilterBar.vue';
 import LogTimeline from './components/LogTimeline.vue';
 
@@ -46,12 +47,58 @@ const PAGE_SIZE = 100;
 const entries = ref<LogEntry[]>([]);
 /** 是否正在加载。 */
 const loading = ref(false);
+
+/**
+ * 获取今天对应的日志筛选日期字符串。
+ * @returns `YYYY-MM-DD` 格式的今天日期。
+ */
+function getTodayDate(): string {
+  return dayjs().format('YYYY-MM-DD');
+}
+
 /** 当前筛选栏数据对象。 */
-const dataItem = ref<LogFilterBarDataItem>({ level: '', keyword: '', date: '' });
+const dataItem = ref<LogFilterBarDataItem>({ level: '', keyword: '', date: getTodayDate() });
+/** 当前存在日志数据的日期集合。 */
+const availableDates = ref<string[]>([]);
 /** 当前分页偏移量。 */
 const offset = ref(0);
 /** 是否还有更多日志。 */
 const hasMore = ref(true);
+/** 当前选中日期是否存在日志文件。 */
+const hasLogsForSelectedDate = computed<boolean>(() => availableDates.value.includes(dataItem.value.date));
+/** 当前是否存在除日期外的筛选条件。 */
+const hasAdditionalFilters = computed<boolean>(() => Boolean(dataItem.value.level || dataItem.value.keyword));
+/** 空状态副文案。 */
+const emptyStateSubtext = computed<string>(() => {
+  if (!hasLogsForSelectedDate.value) {
+    return `${dataItem.value.date} 暂无日志数据`;
+  }
+
+  if (hasAdditionalFilters.value) {
+    return '该日期下没有符合当前筛选条件的日志';
+  }
+
+  return `${dataItem.value.date} 暂无日志数据`;
+});
+
+/**
+ * 从日志文件列表中提取存在数据的日期集合。
+ * 支持 `tibis-YYYY-MM-DD.log` 与 `tibis-YYYY-MM-DD-序号.log` 两种命名。
+ * @param files - 日志文件列表。
+ * @returns 排序后的日期字符串数组。
+ */
+function extractAvailableDates(files: LogFileInfo[]): string[] {
+  const availableDateValues = new Set<string>();
+
+  for (const file of files) {
+    const matchedDate = file.name.match(/^tibis-(\d{4}-\d{2}-\d{2})(?:-\d+)?\.log$/);
+    if (matchedDate?.[1]) {
+      availableDateValues.add(matchedDate[1]);
+    }
+  }
+
+  return Array.from(availableDateValues).sort();
+}
 
 /**
  * 构建当前日志查询参数。
@@ -95,6 +142,18 @@ async function loadLogs(reset = false): Promise<void> {
 }
 
 /**
+ * 加载存在日志数据的日期集合。
+ */
+async function loadAvailableDates(): Promise<void> {
+  try {
+    availableDates.value = extractAvailableDates(await logger.getLogFiles());
+  } catch {
+    // 加载失败时保留空日期集合。
+    availableDates.value = [];
+  }
+}
+
+/**
  * 触底时尝试加载更多日志。
  */
 function onLoadMore() {
@@ -127,6 +186,7 @@ function handleScroll(event: Event) {
 }
 
 onMounted(() => {
+  loadAvailableDates();
   loadLogs(true);
 });
 </script>
