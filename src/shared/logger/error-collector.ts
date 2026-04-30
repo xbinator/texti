@@ -12,6 +12,7 @@ const WINDOW_MS = 10000;
 const MAX_REPORTS = 10;
 const DEDUP_MS = 5 * 60 * 1000;
 const MAX_DEDUP_ENTRIES = 100;
+const IGNORED_ERROR_MESSAGE_PATTERNS = ['ResizeObserver loop completed with undelivered notifications', 'ResizeObserver loop limit exceeded'] as const;
 
 // 简单状态变量
 let reportCount = 0;
@@ -127,10 +128,20 @@ function formatErrorMessage(error: Error, context?: Record<string, unknown>): st
 }
 
 /**
+ * 判断当前错误是否属于需要忽略的浏览器噪音。
+ * @param error - 待检查错误。
+ * @returns 是否应忽略该错误。
+ */
+function shouldIgnoreError(error: Error): boolean {
+  return IGNORED_ERROR_MESSAGE_PATTERNS.some((pattern) => error.message.includes(pattern));
+}
+
+/**
  * 上报错误到日志系统
  */
 async function reportError(error: Error, context: Record<string, unknown> | undefined, scope: LogScope): Promise<void> {
   if (!ENABLED) return;
+  if (shouldIgnoreError(error)) return;
   if (!shouldReport()) return;
 
   const hash = hashError(error);
