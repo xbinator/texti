@@ -12,7 +12,7 @@ const WINDOW_MS = 10000;
 const MAX_REPORTS = 10;
 const DEDUP_MS = 5 * 60 * 1000;
 const MAX_DEDUP_ENTRIES = 100;
-const IGNORED_ERROR_MESSAGE_PATTERNS = ['ResizeObserver loop completed with undelivered notifications', 'ResizeObserver loop limit exceeded'] as const;
+const IGNORED_ERROR_MESSAGE_PATTERNS = ['ResizeObserver'] as const;
 
 // 简单状态变量
 let reportCount = 0;
