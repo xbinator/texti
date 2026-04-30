@@ -5,10 +5,8 @@
 <template>
   <section class="usage-panel">
     <div class="usage-panel__header">
-      <div class="usage-panel__header-text">
-        <div class="usage-panel__title">会话 Token 用量</div>
-      </div>
-      <BButton type="text" size="small" @click="onClose"> 关闭 </BButton>
+      <span class="usage-panel__title">TOKEN 用量</span>
+      <BButton type="text" size="small" class="usage-panel__close" @click="onClose"> 关闭 </BButton>
     </div>
 
     <div class="usage-panel__body">
@@ -22,18 +20,30 @@
         <div class="usage-panel__detail">{{ error }}</div>
       </div>
 
-      <div v-else-if="usage" data-testid="usage-panel-data" class="usage-panel__stats">
-        <div class="usage-panel__stat">
-          <span class="usage-panel__label">输入</span>
-          <strong class="usage-panel__value">{{ formatTokens(usage.inputTokens) }}</strong>
+      <div v-else-if="usage" data-testid="usage-panel-data" class="usage-panel__content">
+        <div class="usage-panel__summary">
+          <div class="usage-panel__total">
+            <div class="usage-panel__total-value">{{ formatTokens(usage.totalTokens) }}</div>
+            <div class="usage-panel__total-label">本次会话合计</div>
+          </div>
+
+          <div class="usage-panel__stats">
+            <div class="usage-panel__stat">
+              <span class="usage-panel__dot usage-panel__dot--input"></span>
+              <span class="usage-panel__stat-label">输入</span>
+              <span class="usage-panel__stat-value">{{ formatTokens(usage.inputTokens) }}</span>
+            </div>
+            <div class="usage-panel__stat">
+              <span class="usage-panel__dot usage-panel__dot--output"></span>
+              <span class="usage-panel__stat-label">输出</span>
+              <span class="usage-panel__stat-value">{{ formatTokens(usage.outputTokens) }}</span>
+            </div>
+          </div>
         </div>
-        <div class="usage-panel__stat">
-          <span class="usage-panel__label">输出</span>
-          <strong class="usage-panel__value">{{ formatTokens(usage.outputTokens) }}</strong>
-        </div>
-        <div class="usage-panel__stat">
-          <span class="usage-panel__label">总计</span>
-          <strong class="usage-panel__value">{{ formatTokens(usage.totalTokens) }}</strong>
+
+        <div class="usage-panel__progress">
+          <div class="usage-panel__progress-bar usage-panel__progress-bar--input" :style="{ width: inputPercent + '%' }"></div>
+          <div class="usage-panel__progress-bar usage-panel__progress-bar--output" :style="{ width: outputPercent + '%' }"></div>
         </div>
       </div>
 
@@ -47,6 +57,7 @@
 
 <script setup lang="ts">
 import type { AIUsage } from 'types/ai';
+import { computed } from 'vue';
 
 /**
  * 用量面板属性。
@@ -64,9 +75,19 @@ interface UsagePanelProps {
 
 defineOptions({ name: 'UsagePanel' });
 
-withDefaults(defineProps<UsagePanelProps>(), {
+const props = withDefaults(defineProps<UsagePanelProps>(), {
   usage: undefined,
   error: undefined
+});
+
+const inputPercent = computed(() => {
+  if (!props.usage || props.usage.totalTokens === 0) return 0;
+  return (props.usage.inputTokens / props.usage.totalTokens) * 100;
+});
+
+const outputPercent = computed(() => {
+  if (!props.usage || props.usage.totalTokens === 0) return 0;
+  return (props.usage.outputTokens / props.usage.totalTokens) * 100;
 });
 
 /**
@@ -81,38 +102,139 @@ function formatTokens(value: number): string {
 
 <style scoped>
 .usage-panel {
+  display: flex;
   flex: 0 0 auto;
-  min-height: 132px;
-  padding: 12px 14px;
+  flex-direction: column;
   margin: 0 12px 12px;
-  background: linear-gradient(180deg, var(--bg-elevated), var(--bg-secondary));
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
-  box-shadow: 0 10px 22px rgb(47 53 64 / 6%);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
 }
 
 .usage-panel__header {
   display: flex;
-  gap: 8px;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-.usage-panel__header-text {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-secondary);
 }
 
 .usage-panel__title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  letter-spacing: 0.05em;
+}
+
+.usage-panel__close {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.usage-panel__close:hover {
   color: var(--text-primary);
 }
 
 .usage-panel__body {
   min-height: 72px;
+  padding: 16px;
+}
+
+.usage-panel__content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.usage-panel__summary {
+  display: flex;
+  flex-direction: row;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.usage-panel__total {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.usage-panel__total-value {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--text-primary);
+}
+
+.usage-panel__total-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.usage-panel__progress {
+  display: flex;
+  height: 6px;
+  overflow: hidden;
+  background: var(--bg-disabled);
+  border-radius: 3px;
+}
+
+.usage-panel__progress-bar {
+  height: 100%;
+}
+
+.usage-panel__progress-bar--input {
+  background: var(--color-purple);
+}
+
+.usage-panel__progress-bar--output {
+  background: var(--color-success);
+}
+
+.usage-panel__stats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.usage-panel__stat {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+}
+
+.usage-panel__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.usage-panel__dot--input {
+  background: var(--color-purple);
+}
+
+.usage-panel__dot--output {
+  background: var(--color-success);
+}
+
+.usage-panel__stat-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.usage-panel__stat-value {
+  margin-left: auto;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.usage-panel__divider {
+  display: none;
 }
 
 .usage-panel__state {
@@ -154,36 +276,6 @@ function formatTokens(value: number): string {
   border-top-color: var(--color-primary);
   border-radius: 999px;
   animation: usage-panel-spin 0.9s linear infinite;
-}
-
-.usage-panel__stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.usage-panel__stat {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-secondary);
-  border-radius: 6px;
-}
-
-.usage-panel__label {
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-.usage-panel__value {
-  font-size: 18px;
-  line-height: 1.2;
-  color: var(--text-primary);
 }
 
 @keyframes usage-panel-spin {
