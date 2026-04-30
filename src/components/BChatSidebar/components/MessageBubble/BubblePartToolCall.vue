@@ -4,7 +4,7 @@
       <Icon icon="lucide:wrench" width="14" height="14" />
       <span>调用工具：{{ part.toolName }}</span>
     </template>
-    <BubblePartCode :value="part.input" />
+    <BubblePartToolCode :value="part.input" />
   </BubblePart>
 </template>
 
@@ -16,9 +16,9 @@
 import type { ChatMessageToolCallPart } from 'types/chat';
 import { computed } from 'vue';
 import { Icon } from '@iconify/vue';
-import { hasStructuredValueContent } from '@/components/BChatSidebar/utils/messagePart';
+import { hasStructuredValueContent } from '../../utils/messagePart';
 import BubblePart from './BubblePart.vue';
-import BubblePartCode from './BubblePartCode.vue';
+import BubblePartToolCode from './BubblePartToolCode.vue';
 
 defineOptions({ name: 'BubblePartToolCall' });
 

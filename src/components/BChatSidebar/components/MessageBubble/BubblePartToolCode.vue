@@ -1,5 +1,5 @@
 <template>
-  <pre :class="bem('part-code')">{{ formattedContent }}</pre>
+  <pre :class="name">{{ formattedContent }}</pre>
 </template>
 
 <script setup lang="ts">
@@ -20,14 +20,14 @@ interface Props {
 
 const props = defineProps<Props>();
 
-const [, bem] = createNamespace('', 'message-bubble');
+const [name] = createNamespace('', 'message-bubble-tool-code');
 
 /** 格式化后的内容 */
 const formattedContent = computed(() => formatStructuredValue(props.value));
 </script>
 
 <style scoped lang="less">
-.message-bubble__part-code {
+.message-bubble-tool-code {
   max-height: 180px;
   padding: 8px;
   margin: 0;

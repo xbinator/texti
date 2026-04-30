@@ -2,11 +2,11 @@
   <BubblePart type="tool-result" has-content>
     <template #title>
       <Icon :icon="part.result.status === 'success' ? 'lucide:check-circle-2' : 'lucide:circle-alert'" width="14" height="14" />
-      <span :class="bem('part-name')">工具结果：{{ part.toolName }}</span>
-      <span v-if="part.result.status === 'failure'" :class="bem('part-status', { failure: true })">失败</span>
+      <span :class="bem('name')">工具结果：{{ part.toolName }}</span>
+      <span v-if="part.result.status === 'failure'" :class="bem('status', { failure: true })">失败</span>
     </template>
 
-    <BubblePartCode :value="part.result" />
+    <BubblePartToolCode :value="part.result" />
   </BubblePart>
 </template>
 
@@ -19,7 +19,7 @@ import type { ChatMessageToolResultPart } from 'types/chat';
 import { Icon } from '@iconify/vue';
 import { createNamespace } from '@/utils/namespace';
 import BubblePart from './BubblePart.vue';
-import BubblePartCode from './BubblePartCode.vue';
+import BubblePartToolCode from './BubblePartToolCode.vue';
 
 defineOptions({ name: 'BubblePartToolResult' });
 
@@ -30,15 +30,15 @@ interface Props {
 
 withDefaults(defineProps<Props>(), {});
 
-const [, bem] = createNamespace('', 'message-bubble');
+const [, bem] = createNamespace('', 'message-bubble-tool-result');
 </script>
 
 <style scoped lang="less">
-.message-bubble__part-name {
+.message-bubble-tool-result__part-name {
   flex: 1;
 }
 
-.message-bubble__part-status--failure {
+.message-bubble-tool-result__part-status--failure {
   margin-left: 8px;
   color: var(--color-error);
 }

@@ -1,9 +1,9 @@
 <template>
-  <div :class="bem({ 'part-error': isErrorMessage })">
-    <div v-if="enableFileReferenceChips" :class="bem('part-text')">
+  <div :class="bem({ error: isErrorMessage })">
+    <div v-if="enableFileReferenceChips" :class="bem('text')">
       <template v-for="(segment, index) in segments" :key="`${segment.type}-${index}`">
         <span v-if="segment.type === 'text'">{{ segment.text }}</span>
-        <span v-else :class="bem('part-tag')" data-value="file-reference">
+        <span v-else :class="bem('tag')" data-value="file-reference">
           {{ segment.label }}
         </span>
       </template>
@@ -67,7 +67,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const FILE_REFERENCE_TOKEN_PATTERN = /\{\{file-ref:([A-Za-z0-9_-]+)(?:\|[^}]*)?\}\}/g;
 
-const [, bem] = createNamespace('', 'message-bubble');
+const [, bem] = createNamespace('', 'message-bubble-text');
 
 const isErrorMessage = computed(() => props.part.type === 'error');
 
@@ -118,12 +118,16 @@ const segments = computed<MessageBubbleTextSegment[]>(() => {
 </script>
 
 <style scoped lang="less">
-.message-bubble--part-text {
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
+.message-bubble-text--error {
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--color-error);
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error);
+  border-radius: 8px;
 }
 
-.message-bubble--part-tag {
+.message-bubble-text--tag {
   display: inline-flex;
   gap: 4px;
   align-items: center;
@@ -134,14 +138,5 @@ const segments = computed<MessageBubbleTextSegment[]>(() => {
   color: var(--text-primary);
   border: 1px solid var(--border-secondary);
   border-radius: 4px;
-}
-
-.message-bubble--part-error {
-  padding: 10px 14px;
-  font-size: 12px;
-  color: var(--color-error);
-  background: var(--color-error-bg);
-  border: 1px solid var(--color-error);
-  border-radius: 8px;
 }
 </style>

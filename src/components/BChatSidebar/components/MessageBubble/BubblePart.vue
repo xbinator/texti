@@ -1,11 +1,11 @@
 <template>
-  <div :class="bem('part', { [type]: true })">
-    <div :class="bem('part-title', { clickable: hasContent })" @click="hasContent && toggleCollapse()">
+  <div :class="bem({ [type]: true })">
+    <div :class="bem('title', { clickable: hasContent })" @click="hasContent && toggleCollapse()">
       <Icon v-if="hasContent" :icon="collapsed ? 'lucide:chevron-down' : 'lucide:chevron-up'" width="14" height="14" />
       <slot name="title"></slot>
     </div>
 
-    <div v-show="hasContent && !collapsed" :class="bem('part-content')">
+    <div v-show="hasContent && !collapsed" :class="bem('content')">
       <slot></slot>
     </div>
   </div>
@@ -35,7 +35,7 @@ const props = withDefaults(defineProps<Props>(), {
   defaultCollapsed: true
 });
 
-const [, bem] = createNamespace('', 'message-bubble');
+const [, bem] = createNamespace('', 'message-bubble-part');
 const collapsed = ref(props.defaultCollapsed);
 
 const hasContent = computed(() => props.hasContent !== false);
@@ -49,7 +49,7 @@ function toggleCollapse(): void {
 </script>
 
 <style scoped lang="less">
-.message-bubble__part {
+.message-bubble-part {
   padding: 10px 12px;
   font-size: 12px;
   color: var(--text-secondary);
@@ -58,16 +58,16 @@ function toggleCollapse(): void {
   border-radius: 8px;
 }
 
-.message-bubble__part--thinking {
+.message-bubble-part--thinking {
   background: var(--bg-tertiary);
 }
 
-.message-bubble__part--tool-call,
-.message-bubble__part--tool-result {
+.message-bubble-part--tool-call,
+.message-bubble-part--tool-result {
   border-style: dashed;
 }
 
-.message-bubble__part-title {
+.message-bubble-part__title {
   display: flex;
   gap: 6px;
   align-items: center;
@@ -75,23 +75,19 @@ function toggleCollapse(): void {
   color: var(--text-primary);
 }
 
-.message-bubble__part-title--clickable {
+.message-bubble-part__title--clickable {
   cursor: pointer;
   user-select: none;
 }
 
-.message-bubble__part-title--tool-result {
-  width: 100%;
-}
-
-.message-bubble__part-status {
+.message-bubble-part-status {
   padding: 1px 6px;
   font-size: 11px;
   line-height: 1.4;
   border-radius: 999px;
 }
 
-.message-bubble__part-status--failure {
+.message-bubble-part-status--failure {
   color: var(--color-error);
   background: var(--color-error-bg);
 }

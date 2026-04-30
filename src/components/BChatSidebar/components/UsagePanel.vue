@@ -6,8 +6,7 @@
   <section class="usage-panel">
     <div class="usage-panel__header">
       <div class="usage-panel__header-text">
-        <div class="usage-panel__title">会话用量</div>
-        <div class="usage-panel__subtitle">当前会话的持久化 Token 统计</div>
+        <div class="usage-panel__title">会话 Token 用量</div>
       </div>
       <BButton type="text" size="small" @click="onClose"> 关闭 </BButton>
     </div>
@@ -95,7 +94,7 @@ function formatTokens(value: number): string {
 .usage-panel__header {
   display: flex;
   gap: 8px;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
 }
@@ -110,12 +109,6 @@ function formatTokens(value: number): string {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
-}
-
-.usage-panel__subtitle {
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-secondary);
 }
 
 .usage-panel__body {
