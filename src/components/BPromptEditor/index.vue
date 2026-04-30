@@ -26,7 +26,7 @@
 <script setup lang="ts">
 /**
  * @file BPromptEditor/index.vue
- * @description Prompt editor main component using CodeMirror 6
+ * @description Prompt 编辑器主组件，基于 CodeMirror 6 实现
  */
 import type { SlashCommandOption, Variable, BPromptEditorProps as Props } from './types';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -43,7 +43,7 @@ import { closeTrigger, setTriggerActiveIndex, triggerStateField } from './extens
 import { chipResolverEffect, getChipAtPos, variableChipField } from './extensions/variableChip';
 
 const props = withDefaults(defineProps<Props>(), {
-  placeholder: '璇疯緭鍏ュ唴瀹?..',
+  placeholder: '请输入内容...',
   options: () => [],
   slashCommands: () => [],
   disabled: false,
@@ -61,52 +61,52 @@ const emit = defineEmits<{
 
 const modelValue = defineModel<string>('value', { default: '' });
 
-// Template refs
+// 模板 ref
 const editorRootRef = ref<HTMLDivElement>();
 const editorHostRef = ref<HTMLDivElement>();
 
-// Trigger refs (Vue refs, not computed)
+// 触发器 ref（Vue ref，非 computed）
 const triggerVisible = ref(false);
 const triggerPosition = ref({ top: 0, left: 0, bottom: 0 });
 const triggerActiveIndex = ref(0);
 const triggerQuery = ref('');
 
-// Slash command refs
+// 斜杠命令 ref
 const slashVisible = ref(false);
 const slashActiveIndex = ref(0);
 const slashQuery = ref('');
 const slashRange = ref<{ from: number; to: number } | null>(null);
 
-// Editor state
+// 编辑器状态
 const lastSelection = ref<{ main: { head: number } } | null>(null);
 
 // Editor view reference
 const view = ref<EditorView | null>(null);
 
-// Computed variables from options
+// 从 options 计算得到的变量列表
 const allVariables = computed<Variable[]>(() => props.options.flatMap((group) => group.options));
 
-// Computed slash command list
+// 计算后的斜杠命令列表
 const allSlashCommands = computed<readonly SlashCommandOption[]>(() => props.slashCommands ?? []);
 
-// Filtered slash commands based on trigger prefix
+// 根据触发前缀过滤后的斜杠命令
 const filteredSlashCommands = computed<readonly SlashCommandOption[]>(() => {
   const query = slashQuery.value.toLowerCase();
   if (!query) return allSlashCommands.value;
   return allSlashCommands.value.filter((command) => command.trigger.toLowerCase().startsWith(`/${query}`));
 });
 
-// Filtered variables based on trigger query
+// 根据触发查询过滤后的变量
 const filteredVariables = computed<Variable[]>(() => {
   const query = triggerQuery.value.toLowerCase();
   if (!query) return allVariables.value;
   return allVariables.value.filter((v) => v.label.toLowerCase().includes(query) || v.value.toLowerCase().includes(query));
 });
 
-// Whether there are variables available for triggering
+// 是否有可用于触发的变量
 const hasVariables = computed<boolean>(() => allVariables.value.length > 0);
 
-// Resolved max height
+// 解析后的最大高度
 const resolvedMaxHeight = computed<string | undefined>(() => {
   if (props.maxHeight === undefined) return undefined;
   if (typeof props.maxHeight === 'number') return `${props.maxHeight}px`;
@@ -114,22 +114,22 @@ const resolvedMaxHeight = computed<string | undefined>(() => {
 });
 
 /**
- * Determine whether the editor content is empty after trimming whitespace.
- * @param content - Raw editor content.
- * @returns Whether the content should be treated as empty.
+ * 判断编辑器内容在去除空白后是否为空
+ * @param content - 原始编辑器内容
+ * @returns 内容是否应被视为空
  */
 function isEditorContentEmpty(content: string): boolean {
   return content.trim().length === 0;
 }
 
-// Whether the editor currently contains visible content.
+// 编辑器当前是否包含可见内容
 const editorIsEmpty = ref<boolean>(isEditorContentEmpty(modelValue.value));
 
 /**
- * Create the CodeMirror theme extension.
- * @param maxHeight - Maximum height for the editor scroller.
- * @param isEmpty - Whether the editor is currently empty.
- * @returns CodeMirror theme extension.
+ * 创建 CodeMirror 主题扩展
+ * @param maxHeight - 编辑器滚动区域的最大高度
+ * @param isEmpty - 编辑器当前是否为空
+ * @returns CodeMirror 主题扩展
  */
 const createThemeExtension = (maxHeight: string | undefined, isEmpty: boolean): import('@codemirror/state').Extension => {
   return EditorView.theme({
@@ -164,7 +164,7 @@ const createThemeExtension = (maxHeight: string | undefined, isEmpty: boolean): 
       position: 'relative',
       height: '1em'
     },
-    // Prevent normalize.css div border reset from collapsing widget buffer width.
+    // 防止 normalize.css 的 div border 重置导致 widget buffer 宽度塌陷
     '.cm-widgetBuffer': {
       display: 'inline-block',
       width: isEmpty ? '1px' : '0'
@@ -173,19 +173,19 @@ const createThemeExtension = (maxHeight: string | undefined, isEmpty: boolean): 
 };
 
 /**
- * Determine whether a slash command matches the current query prefix.
- * @param command - Slash command candidate.
- * @param query - Current slash query content.
- * @returns Whether the command matches.
+ * 判断斜杠命令是否匹配当前查询前缀
+ * @param command - 斜杠命令候选
+ * @param query - 当前斜杠查询内容
+ * @returns 命令是否匹配
  */
 function isSlashCommandMatch(command: SlashCommandOption, query: string): boolean {
   return command.trigger.toLowerCase().startsWith(`/${query.toLowerCase()}`);
 }
 
 /**
- * Get the current slash command context at the caret.
- * @param state - Editor state.
- * @returns Slash context or null when unavailable.
+ * 获取光标位置处的当前斜杠命令上下文
+ * @param state - 编辑器状态
+ * @returns 斜杠上下文，不可用时返回 null
  */
 function getSlashCommandContext(state: EditorState): { from: number; to: number; query: string } | null {
   if (allSlashCommands.value.length === 0) {
@@ -220,7 +220,7 @@ function getSlashCommandContext(state: EditorState): { from: number; to: number;
 }
 
 /**
- * Hide the slash command menu and clear its active range.
+ * 隐藏斜杠命令菜单并清除其活动范围
  */
 function closeSlashCommandMenu(): void {
   slashVisible.value = false;
@@ -229,12 +229,12 @@ function closeSlashCommandMenu(): void {
 }
 
 /**
- * Sync slash command menu state from the editor content.
- * @param state - Editor state.
- * @param editorView - Editor view, used to ensure the editor still has focus.
+ * 从编辑器内容同步斜杠命令菜单状态
+ * @param state - 编辑器状态
+ * @param editorView - 编辑器视图，用于确保编辑器仍有焦点
  */
 function syncSlashCommandState(state: EditorState, editorView: EditorView | null): void {
-  if (!editorView?.hasFocus) {
+  if (!editorView) {
     closeSlashCommandMenu();
     return;
   }
@@ -251,10 +251,10 @@ function syncSlashCommandState(state: EditorState, editorView: EditorView | null
   slashActiveIndex.value = 0;
 }
 
-// External update annotation for avoiding circular updates
+// 外部更新标记，用于避免循环更新
 const externalUpdate = Annotation.define<boolean>();
 
-// Model sync extension
+// 模型同步扩展
 const modelSyncExtension = EditorView.updateListener.of((update) => {
   const newValue = update.state.doc.toString();
   editorIsEmpty.value = isEditorContentEmpty(newValue);
@@ -273,8 +273,8 @@ const modelSyncExtension = EditorView.updateListener.of((update) => {
 });
 
 /**
- * Insert the selected variable into the active trigger range.
- * @param variable - Selected variable metadata.
+ * 将选中的变量插入到活动触发范围
+ * @param variable - 选中的变量元数据
  */
 function handleVariableSelect(variable: Variable): void {
   if (!view.value) return;
@@ -294,8 +294,8 @@ function handleVariableSelect(variable: Variable): void {
 }
 
 /**
- * Update the highlighted variable index.
- * @param index - New highlighted index.
+ * 更新高亮变量的索引
+ * @param index - 新的高亮索引
  */
 function handleActiveIndexChange(index: number): void {
   triggerActiveIndex.value = index;
@@ -307,16 +307,16 @@ function handleActiveIndexChange(index: number): void {
 }
 
 /**
- * Update the highlighted slash command index.
- * @param index - New highlighted index.
+ * 更新高亮斜杠命令的索引
+ * @param index - 新的高亮索引
  */
 function handleSlashActiveIndexChange(index: number): void {
   slashActiveIndex.value = index;
 }
 
 /**
- * Apply the selected slash command and clear the active slash text.
- * @param command - Selected slash command metadata.
+ * 应用选中的斜杠命令并清除活动斜杠文本
+ * @param command - 选中的斜杠命令元数据
  */
 function handleSlashCommandSelect(command: SlashCommandOption): void {
   if (!view.value || !slashRange.value) return;
@@ -333,8 +333,8 @@ function handleSlashCommandSelect(command: SlashCommandOption): void {
 }
 
 /**
- * Select the currently highlighted slash command.
- * @returns Whether the command was handled.
+ * 选择当前高亮的斜杠命令
+ * @returns 命令是否被处理
  */
 function handleSlashCommandEnter(): boolean {
   const command = filteredSlashCommands.value[slashActiveIndex.value];
@@ -347,8 +347,8 @@ function handleSlashCommandEnter(): boolean {
 }
 
 /**
- * Move slash command highlight upward.
- * @returns Whether the key was handled.
+ * 向上移动斜杠命令高亮
+ * @returns 按键是否被处理
  */
 function handleSlashCommandArrowUp(): boolean {
   const list = filteredSlashCommands.value;
@@ -361,8 +361,8 @@ function handleSlashCommandArrowUp(): boolean {
 }
 
 /**
- * Move slash command highlight downward.
- * @returns Whether the key was handled.
+ * 向下移动斜杠命令高亮
+ * @returns 按键是否被处理
  */
 function handleSlashCommandArrowDown(): boolean {
   const list = filteredSlashCommands.value;
@@ -375,7 +375,7 @@ function handleSlashCommandArrowDown(): boolean {
 }
 
 /**
- * Focus the editor when the shell is clicked.
+ * 点击编辑器外壳时聚焦编辑器
  */
 function handleContainerClick(): void {
   if (!props.disabled && view.value) {
@@ -384,8 +384,8 @@ function handleContainerClick(): void {
 }
 
 /**
- * Handle document clicks outside the editor shell.
- * @param event - Document mousedown event.
+ * 处理编辑器外壳外部的文档点击事件
+ * @param event - 文档 mousedown 事件
  */
 function handleDocumentMouseDown(event: MouseEvent): void {
   const root = editorRootRef.value;
@@ -401,8 +401,8 @@ function handleDocumentMouseDown(event: MouseEvent): void {
 }
 
 /**
- * Close the slash menu when focus leaves the editor shell.
- * @param event - Shell focusout event.
+ * 焦点离开编辑器外壳时关闭斜杠菜单
+ * @param event - 外壳 focusout 事件
  */
 function handleEditorShellFocusOut(event: FocusEvent): void {
   const root = editorRootRef.value;
@@ -422,8 +422,8 @@ function handleEditorShellFocusOut(event: FocusEvent): void {
 }
 
 /**
- * Build the CodeMirror extension list.
- * @returns Editor extension array.
+ * 构建 CodeMirror 扩展列表
+ * @returns 编辑器扩展数组
  */
 function createExtensions(): import('@codemirror/state').Extension[] {
   const extensions: import('@codemirror/state').Extension[] = [
@@ -668,7 +668,7 @@ defineExpose({
     view.value?.focus();
   },
   /**
-   * Save the current selection for delayed external insertions.
+   * 保存当前选区，用于延迟的外部插入操作
    */
   saveCursorPosition: () => {
     if (view.value) {
@@ -676,12 +676,13 @@ defineExpose({
     }
   },
   /**
-   * Insert text at the saved selection or current caret position.
-   * @param text - Text to insert.
+   * 在保存的选区或当前光标位置插入文本
+   * @param text - 要插入的文本
    */
   insertTextAtCursor: (text: string) => {
     if (!view.value) return;
 
+    view.value.focus();
     const selection = lastSelection.value ?? view.value.state.selection;
     const pos = selection.main.head;
     const insertEnd = pos + text.length;
@@ -692,10 +693,9 @@ defineExpose({
     });
 
     lastSelection.value = null;
-    view.value.focus();
   },
   /**
-   * Get the raw editor text, including {{...}} tokens.
+   * 获取编辑器原始文本，包括 {{...}} 标记
    */
   getText: () => {
     return view.value?.state.doc.toString() ?? '';

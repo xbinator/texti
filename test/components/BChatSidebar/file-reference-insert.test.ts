@@ -20,6 +20,16 @@ function readSource(relativePath: string): string {
   return readFileSync(resolve(process.cwd(), relativePath), 'utf-8');
 }
 
+/**
+ * 构造源码中的模板字面量片段，避免测试字面量触发 no-template-curly-in-string。
+ * @param pathExpression - 模板中的表达式内容
+ * @returns 源码字符串片段
+ */
+function createTemplateKeySource(prefix: string, pathExpression: string): string {
+  const interpolationStart = '${';
+  return `key = \`${prefix}|${interpolationStart}${pathExpression}}\`;`;
+}
+
 describe('chat file reference insert event utilities', () => {
   test('normalizes file names across slash styles', () => {
     expect(getFileNameFromPath('src/foo/file.ts')).toBe('file.ts');
@@ -55,6 +65,7 @@ describe('chat file reference insert wiring', () => {
     const paneRichEditoSource = readSource('src/components/BEditor/components/PaneRichEditor.vue');
     const editorSource = readSource('src/components/BEditor/index.vue');
     const sidebarSource = readSource('src/components/BChatSidebar/index.vue');
+    const fileReferenceHookSource = readSource('src/components/BChatSidebar/hooks/useFileReference.ts');
 
     expect(selectionToolbarSource).toContain('insertSelectionReferenceToChat');
     expect(selectionToolbarSource).toContain('emitChatFileReferenceInsert');
@@ -66,20 +77,16 @@ describe('chat file reference insert wiring', () => {
     expect(paneRichEditoSource).toContain(':file-name="props.fileName"');
     expect(editorSource).toContain(':file-path="props.filePath"');
     expect(editorSource).toContain(':file-name="editorTitle"');
-    expect(sidebarSource).toContain('handleChatInsertFileReference');
-    expect(sidebarSource).toContain('handleFileReferenceInsert');
     expect(sidebarSource).toContain('insertTextAtCursor');
-    expect(sidebarSource).toContain('startLine');
-    expect(sidebarSource).toContain('endLine');
-    expect(sidebarSource).toContain('0|0');
-    expect(sidebarSource).toContain('onChatFileReferenceInsert');
-    expect(sidebarSource).toContain('insertTextAtCursor');
-    expect(sidebarSource).toContain('type ChatFileReferenceInsertPayload');
-    expect(sidebarSource).toContain('referenceId: nanoid()');
-    expect(sidebarSource).toContain('documentId: toolContext?.document.id || reference.filePath || reference.fileName');
-    expect(sidebarSource).toContain("import { persistReferenceSnapshots }");
-    expect(sidebarSource).toContain('getActiveDraftReferences');
-    expect(sidebarSource).toContain('formatLineRange');
+    expect(sidebarSource).toContain('useFileReference');
+    expect(fileReferenceHookSource).toContain('handleFileReferenceInsert');
+    expect(fileReferenceHookSource).toContain('onChatFileReferenceInsert');
+    expect(fileReferenceHookSource).toContain('type ChatFileReferenceInsertPayload');
+    expect(fileReferenceHookSource).toContain('referenceId: nanoid()');
+    expect(fileReferenceHookSource).toContain('documentId: toolContext?.document.id || reference.filePath || reference.fileName');
+    expect(sidebarSource).toContain('import { persistReferenceSnapshots }');
+    expect(fileReferenceHookSource).toContain('getActiveReferences');
+    expect(fileReferenceHookSource).toContain('formatLineRange');
   });
 
   test('persistReferenceSnapshots uses bidirectional strategy with editor context and disk fallback', () => {
@@ -96,9 +103,9 @@ describe('chat file reference insert wiring', () => {
 
     // 按来源分组并分阶段创建快照
     expect(referenceSnapshotSource).toContain('function buildGroups');
-    expect(referenceSnapshotSource).toContain('key = `editor|${ref.documentId}`;');
-    expect(referenceSnapshotSource).toContain('key = `disk|${ref.path}`;');
-    expect(referenceSnapshotSource).toContain('key = `sqlite|${ref.documentId}`;');
+    expect(referenceSnapshotSource).toContain(createTemplateKeySource('editor', 'ref.documentId'));
+    expect(referenceSnapshotSource).toContain(createTemplateKeySource('disk', 'ref.path'));
+    expect(referenceSnapshotSource).toContain(createTemplateKeySource('sqlite', 'ref.documentId'));
     expect(referenceSnapshotSource).toContain('function createEditorSnapshots');
     expect(referenceSnapshotSource).toContain('async function createDiskSnapshots');
     expect(referenceSnapshotSource).toContain('async function createSqliteSnapshots');
@@ -116,6 +123,6 @@ describe('chat file reference insert wiring', () => {
 
     // persistReferenceSnapshots 从 index.vue 移除，移到独立模块
     expect(sidebarSource).not.toContain('async function persistReferenceSnapshots');
-    expect(sidebarSource).toContain("import { persistReferenceSnapshots }");
+    expect(sidebarSource).toContain('import { persistReferenceSnapshots }');
   });
 });

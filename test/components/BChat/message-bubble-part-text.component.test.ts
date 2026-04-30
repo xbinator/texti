@@ -4,13 +4,13 @@
  */
 /* @vitest-environment jsdom */
 
-import type { Message } from '@/components/BChatSidebar/utils/types';
 import type { ChatMessageFileReference, ChatMessageTextPart } from 'types/chat';
 import { defineComponent } from 'vue';
-import { describe, expect, it } from 'vitest';
 import { mount, type VueWrapper } from '@vue/test-utils';
-import MessageBubble from '@/components/BChatSidebar/components/MessageBubble.vue';
+import { describe, expect, it } from 'vitest';
 import BubblePartText from '@/components/BChatSidebar/components/MessageBubble/BubblePartText.vue';
+import MessageBubble from '@/components/BChatSidebar/components/MessageBubble.vue';
+import type { Message } from '@/components/BChatSidebar/utils/types';
 
 /**
  * Markdown 消息占位组件，用于观察 assistant 文本是否仍按原路径渲染。
@@ -136,7 +136,7 @@ describe('BubblePartText file references', () => {
       references: [createReference()]
     });
 
-    const chip = wrapper.get('.message-bubble__part-text--tag');
+    const chip = wrapper.get('.message-bubble__part-tag');
 
     expect(chip.text()).toBe('demo.ts:12-14');
     expect(chip.attributes('data-value')).toBe('file-reference');
@@ -152,7 +152,7 @@ describe('BubblePartText file references', () => {
       references: [createReference()]
     });
 
-    expect(wrapper.find('.message-bubble__part-text--tag').exists()).toBe(false);
+    expect(wrapper.find('.message-bubble__part-tag').exists()).toBe(false);
     expect(wrapper.text()).toContain('{{file-ref:ref_missing}}');
   });
 
@@ -170,6 +170,6 @@ describe('BubblePartText file references', () => {
 
     expect(message.attributes('data-type')).toBe('markdown');
     expect(message.text()).toContain('{{file-ref:ref_123}}');
-    expect(wrapper.find('.message-bubble__part-text--tag').exists()).toBe(false);
+    expect(wrapper.find('.message-bubble__part-tag').exists()).toBe(false);
   });
 });

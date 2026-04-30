@@ -6,7 +6,7 @@
 
 import { defineComponent } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount, VueWrapper } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import BEditor from '@/components/BEditor/index.vue';
 import { useSettingStore } from '@/stores/setting';
@@ -40,7 +40,7 @@ const ScrollbarStub = defineComponent({
  * 挂载编辑器组件。
  * @returns BEditor 挂载结果
  */
-function mountEditor() {
+function mountEditor(): VueWrapper {
   return mount(BEditor, {
     props: {
       value: '# Title',
@@ -58,6 +58,16 @@ function mountEditor() {
   });
 }
 
+/**
+ * 挂载编辑器并等待异步子组件完成收敛，避免测试环境销毁时仍有动态导入悬挂。
+ * @returns 已稳定的编辑器挂载结果
+ */
+async function mountSettledEditor(): Promise<VueWrapper> {
+  const wrapper = mountEditor();
+  await flushPromises();
+  return wrapper;
+}
+
 describe('BEditor page width', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -65,27 +75,27 @@ describe('BEditor page width', () => {
     setActivePinia(createPinia());
   });
 
-  it('uses 900px max width in default mode', () => {
-    const wrapper = mountEditor();
-
+  it('uses 900px max width in default mode', async () => {
+    const wrapper = await mountSettledEditor();
     expect(wrapper.find('.b-editor-container').attributes('style')).toContain('--editor-page-max-width: 900px;');
+    wrapper.unmount();
   });
 
-  it('uses 1200px max width in wide mode', () => {
+  it('uses 1200px max width in wide mode', async () => {
     const settingStore = useSettingStore();
     settingStore.setEditorPageWidth('wide');
 
-    const wrapper = mountEditor();
-
+    const wrapper = await mountSettledEditor();
     expect(wrapper.find('.b-editor-container').attributes('style')).toContain('--editor-page-max-width: 1200px;');
+    wrapper.unmount();
   });
 
-  it('uses none max width in full mode', () => {
+  it('uses none max width in full mode', async () => {
     const settingStore = useSettingStore();
     settingStore.setEditorPageWidth('full');
 
-    const wrapper = mountEditor();
-
+    const wrapper = await mountSettledEditor();
     expect(wrapper.find('.b-editor-container').attributes('style')).toContain('--editor-page-max-width: none;');
+    wrapper.unmount();
   });
 });

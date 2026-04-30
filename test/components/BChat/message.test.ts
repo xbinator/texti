@@ -31,9 +31,9 @@ describe('BChat message helpers', () => {
   it('creates a finished error message for visible stream failures', () => {
     const message = create.errorMessage('服务连接失败');
 
-    expect(message.role).toBe('error');
+    expect(message.role).toBe('assistant');
     expect(message.content).toBe('服务连接失败');
-    expect(message.parts).toEqual([{ type: 'text', text: '服务连接失败' }]);
+    expect(message.parts).toEqual([{ type: 'error', text: '服务连接失败' }]);
     expect(message.loading).toBe(false);
     expect(message.finished).toBe(true);
     expect(message.createdAt).toEqual(expect.any(String));

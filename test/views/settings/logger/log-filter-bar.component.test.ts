@@ -1,27 +1,13 @@
 /**
  * @file log-filter-bar.component.test.ts
- * @description 验证日志过滤栏在不同宽度下的“更多筛选”折叠行为。
+ * @description 验证日志过滤栏的基础筛选布局与绑定。
  */
 /* @vitest-environment jsdom */
-
-import { ref } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { mount, type VueWrapper } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import LogFilterBar from '@/views/settings/logger/components/LogFilterBar.vue';
 import { useLogViewerStore } from '@/views/settings/logger/stores/logViewer';
-
-/**
- * 响应式窗口宽度桩，用于驱动折叠断点测试。
- */
-const windowWidth = ref(1440);
-
-vi.mock('@vueuse/core', () => ({
-  useWindowSize: () => ({
-    width: windowWidth,
-    height: ref(900)
-  })
-}));
 
 vi.mock('@/shared/logger', () => ({
   logger: {
@@ -47,7 +33,7 @@ function mountFilterBar(): VueWrapper {
         BSelect: {
           inheritAttrs: false,
           props: ['value', 'placeholder', 'allowClear'],
-          template: '<div class="b-select-stub" v-bind="$attrs"><slot /></div>'
+          template: '<div class="b-select-stub" :data-value="value" v-bind="$attrs"><slot /></div>'
         },
         ASelectOption: {
           template: '<div><slot /></div>'
@@ -55,72 +41,51 @@ function mountFilterBar(): VueWrapper {
         ADatePicker: {
           inheritAttrs: false,
           props: ['value', 'placeholder'],
-          template: '<div class="date-picker-stub" v-bind="$attrs"></div>'
+          template: '<div class="date-picker-stub" :data-value="value" v-bind="$attrs"></div>'
         },
-        AInputSearch: {
+        AInput: {
           inheritAttrs: false,
           props: ['value', 'placeholder', 'allowClear'],
-          template: '<div class="input-search-stub" v-bind="$attrs"></div>'
-        },
-        ARadioGroup: {
-          template: '<div class="radio-group-stub"><slot /></div>'
-        },
-        ARadioButton: {
-          props: ['value'],
-          template: '<button type="button"><slot /></button>'
-        },
-        APopover: {
-          props: {
-            open: {
-              type: Boolean,
-              required: false,
-              default: false
-            }
-          },
-          template: `
-            <div class="popover-stub" :data-open="String(open)">
-              <slot />
-              <div class="popover-stub__content"><slot name="content" /></div>
-            </div>
-          `
+          template: '<div class="input-stub" :data-value="value" v-bind="$attrs"></div>'
         }
       }
     }
   });
 }
 
-describe('LogFilterBar responsive collapse', () => {
+describe('LogFilterBar layout', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
-    windowWidth.value = 1440;
   });
 
-  it('keeps scope and date inline on wide layouts', () => {
+  it('renders level, keyword and date filters in a single toolbar row', () => {
     const wrapper = mountFilterBar();
 
-    expect(wrapper.find('.log-filter-bar__inline-advanced').exists()).toBe(true);
-    expect(wrapper.find('.log-filter-bar__more-trigger').exists()).toBe(false);
-    expect(wrapper.find('.log-filter-bar__popover-content').exists()).toBe(false);
+    expect(wrapper.find('.b-select-stub').exists()).toBe(true);
+    expect(wrapper.find('.input-stub').exists()).toBe(true);
+    expect(wrapper.find('.date-picker-stub').exists()).toBe(true);
+    expect(wrapper.find('.log-filter-bar__input').exists()).toBe(true);
+    expect(wrapper.find('.log-filter-bar__date').exists()).toBe(true);
   });
 
-  it('shows more-filters trigger and moves advanced filters into popover content on compact width', () => {
-    windowWidth.value = 960;
-
+  it('shows the header title, count and open-folder action', () => {
     const wrapper = mountFilterBar();
 
-    expect(wrapper.find('.log-filter-bar__more-trigger').exists()).toBe(true);
-    expect(wrapper.find('.log-filter-bar__inline-advanced').exists()).toBe(false);
-    expect(wrapper.find('.log-filter-bar__popover-content').exists()).toBe(true);
+    expect(wrapper.text()).toContain('运行日志');
+    expect(wrapper.text()).toContain('共 0 条记录');
+    expect(wrapper.text()).toContain('打开目录');
   });
 
-  it('marks more-filters trigger as active when collapsed filters have values', () => {
-    windowWidth.value = 960;
-
+  it('binds current store filter values to the filter controls', () => {
     const store = useLogViewerStore();
-    store.filterScope = 'renderer';
+    store.filterLevel = 'ERROR';
+    store.keyword = 'timeout';
+    store.selectedDate = '2026-04-29';
 
     const wrapper = mountFilterBar();
 
-    expect(wrapper.get('.log-filter-bar__more-trigger').classes()).toContain('log-filter-bar__more-trigger--active');
+    expect(wrapper.find('.b-select-stub').attributes('data-value')).toBe('ERROR');
+    expect(wrapper.find('.input-stub').attributes('data-value')).toBe('timeout');
+    expect(wrapper.find('.date-picker-stub').attributes('data-value')).toBe('2026-04-29');
   });
 });

@@ -93,10 +93,10 @@ describe('BPromptEditor slash commands', () => {
 
     expect(wrapper.find('[data-testid="slash-command-menu"]').exists()).toBe(true);
     expect(wrapper.findAll('[data-testid="slash-command-item"]')).toHaveLength(1);
-    expect(wrapper.text()).toContain('Usage');
-    expect(wrapper.text()).not.toContain('Model');
-    expect(wrapper.text()).not.toContain('New Chat');
-    expect(wrapper.text()).not.toContain('Clear Draft');
+    expect(wrapper.text()).toContain('使用情况');
+    expect(wrapper.text()).not.toContain('模型');
+    expect(wrapper.text()).not.toContain('新建聊天');
+    expect(wrapper.text()).not.toContain('清空输入');
   });
 
   test('emits the selected slash command and removes the active slash text', async () => {

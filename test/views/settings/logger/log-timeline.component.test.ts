@@ -1,6 +1,6 @@
 /**
  * @file log-timeline.component.test.ts
- * @description 验证日志时间轴组件的新布局结构，确保左侧信息列、中轴圆点和右侧消息卡片存在。
+ * @description 验证日志时间轴单项组件的新布局结构，确保左侧信息列、中轴圆点和右侧消息卡片存在。
  */
 /* @vitest-environment jsdom */
 
@@ -25,13 +25,17 @@ function createEntry(overrides: Partial<LogEntry> = {}): LogEntry {
 }
 
 /**
- * 挂载时间轴组件。
- * @param entries - 日志列表。
+ * 挂载时间轴单项组件。
+ * @param entry - 日志条目。
+ * @param flags - 位置标记。
  * @returns 挂载结果。
  */
-function mountTimeline(entries: LogEntry[]): VueWrapper {
+function mountTimeline(entry: LogEntry, flags: { isFirst?: boolean; isLast?: boolean; isOnly?: boolean } = {}): VueWrapper {
   return mount(LogTimeline, {
-    props: { entries },
+    props: {
+      entry,
+      ...flags
+    },
     global: {
       stubs: {
         ATag: {
@@ -45,27 +49,18 @@ function mountTimeline(entries: LogEntry[]): VueWrapper {
 
 describe('LogTimeline layout', () => {
   it('renders time and scope in the left column and wraps level plus message inside a content card', () => {
-    const wrapper = mountTimeline([
-      createEntry(),
-      createEntry({
-        timestamp: '2026-04-29 14:31:58.456',
-        scope: 'main',
-        level: 'WARN',
-        message: 'Cache hit rate below threshold: 42% (expected >=60%)'
-      })
-    ]);
+    const wrapper = mountTimeline(createEntry(), { isFirst: true, isLast: true, isOnly: false });
 
-    const firstItem = wrapper.get('.log-timeline__item');
-    const lastItem = wrapper.findAll('.log-timeline__item')[1];
+    const item = wrapper.get('.log-timeline__item');
 
-    expect(firstItem.classes()).toContain('log-timeline__item--first');
-    expect(lastItem.classes()).toContain('log-timeline__item--last');
-    expect(firstItem.get('.log-timeline__meta').text()).toContain('14:32:11');
-    expect(firstItem.get('.log-timeline__meta').text()).toContain('渲染进程');
-    expect(firstItem.find('.log-timeline__axis-track').exists()).toBe(true);
-    expect(firstItem.find('.log-timeline__axis-anchor').exists()).toBe(true);
-    expect(firstItem.find('.log-timeline__axis-dot').classes()).toContain('log-timeline__axis-dot--error');
-    expect(firstItem.get('.log-timeline__card').text()).toContain('错误');
-    expect(firstItem.get('.log-timeline__card').text()).toContain('Failed to fetch ad list');
+    expect(item.classes()).toContain('log-timeline__item--first');
+    expect(item.classes()).toContain('log-timeline__item--last');
+    expect(item.get('.log-timeline__meta').text()).toContain('14:32:11');
+    expect(item.get('.log-timeline__meta').text()).toContain('渲染进程');
+    expect(item.find('.log-timeline__axis-track').exists()).toBe(true);
+    expect(item.find('.log-timeline__axis-anchor').exists()).toBe(true);
+    expect(item.find('.log-timeline__axis-dot').classes()).toContain('log-timeline__axis-dot--error');
+    expect(item.get('.log-timeline__card').text()).toContain('错误');
+    expect(item.get('.log-timeline__card').text()).toContain('Failed to fetch ad list');
   });
 });

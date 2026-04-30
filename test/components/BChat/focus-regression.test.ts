@@ -20,7 +20,7 @@ describe('BChat focus exposure', () => {
     const source = readSource('src/components/BChatSidebar/index.vue');
 
     expect(source).toContain('const promptEditorRef = ref<InstanceType<typeof BPromptEditor>>();');
-    expect(source).toContain('function handleFocusInput(): void');
+    expect(source).toContain('function focusInput(): void');
     expect(source).toContain('promptEditorRef.value?.focus();');
   });
 });
@@ -29,10 +29,11 @@ describe('BChat stream busy state', () => {
   test('disables sidebar session changes while streaming', () => {
     const sidebarSource = readSource('src/components/BChatSidebar/index.vue');
     const sessionHistorySource = readSource('src/components/BChatSidebar/components/SessionHistory.vue');
+    const sessionHookSource = readSource('src/components/BChatSidebar/hooks/useSession.ts');
 
     expect(sidebarSource).not.toContain(':disabled="chatBusy"');
     expect(sidebarSource).toContain(':disabled="chatStream.loading.value"');
-    expect(sidebarSource).toContain('if (chatStream.loading.value) return;');
+    expect(sessionHookSource).toContain('if (options.isStreamLoading()) return;');
     expect(sessionHistorySource).toContain('disabled?: boolean;');
   });
 });
@@ -62,11 +63,12 @@ describe('BChat history pagination', () => {
 
 describe('BChatSidebar new session focus', () => {
   test('focuses the chat input after resetting the current session', () => {
-    const source = readSource('src/components/BChatSidebar/index.vue');
+    const sidebarSource = readSource('src/components/BChatSidebar/index.vue');
+    const sessionHookSource = readSource('src/components/BChatSidebar/hooks/useSession.ts');
 
-    expect(source).toContain('const promptEditorRef = ref<InstanceType<typeof BPromptEditor>>();');
-    expect(source).toContain('await nextTick();');
-    expect(source).toContain('promptEditorRef.value?.focus();');
-    expect(source).toContain('settingStore.setChatSidebarActiveSessionId(null);');
+    expect(sidebarSource).toContain('const promptEditorRef = ref<InstanceType<typeof BPromptEditor>>();');
+    expect(sessionHookSource).toContain('await nextTick();');
+    expect(sessionHookSource).toContain('settingStore.setChatSidebarActiveSessionId(null);');
+    expect(sessionHookSource).toContain('options.focusInput();');
   });
 });

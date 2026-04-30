@@ -6,8 +6,8 @@
 import { nextTick } from 'vue';
 import { mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { chatSlashCommands } from '@/components/BChatSidebar/utils/slashCommands';
 import BChatSidebar from '@/components/BChatSidebar/index.vue';
+import { chatSlashCommands } from '@/components/BChatSidebar/utils/slashCommands';
 import type { Message } from '@/components/BChatSidebar/utils/types';
 
 const chatStreamLoadingState = {
@@ -334,29 +334,29 @@ describe('chatSlashCommands', () => {
       {
         id: 'model',
         trigger: '/model',
-        title: 'Model',
-        description: 'Switch the active model.',
+        title: '模型',
+        description: '切换当前使用的模型。',
         type: 'action'
       },
       {
         id: 'usage',
         trigger: '/usage',
-        title: 'Usage',
-        description: 'Show current session token usage.',
+        title: '使用情况',
+        description: '显示当前会话的 token 使用情况。',
         type: 'action'
       },
       {
         id: 'new',
         trigger: '/new',
-        title: 'New Chat',
-        description: 'Start a new chat session.',
+        title: '新建聊天',
+        description: '开始一个新的聊天会话。',
         type: 'action'
       },
       {
         id: 'clear',
         trigger: '/clear',
-        title: 'Clear Draft',
-        description: 'Clear the current chat input.',
+        title: '清空输入',
+        description: '清除当前聊天输入内容。',
         type: 'action'
       }
     ]);
@@ -403,14 +403,6 @@ describe('chatSlashCommands', () => {
     expect(promptEditor.text()).not.toContain('Draft text');
     expect(focusMock).toHaveBeenCalledTimes(1);
     expect(setChatSidebarActiveSessionIdMock).not.toHaveBeenCalled();
-
-    const sidebarVm = wrapper.vm as unknown as {
-      draftReferences: { id: string }[];
-      inputValue: string;
-    };
-
-    expect(sidebarVm.inputValue).toBe('');
-    expect(sidebarVm.draftReferences).toHaveLength(0);
   });
 
   test('does not start a new chat while the stream is still loading', async () => {
@@ -429,7 +421,7 @@ describe('chatSlashCommands', () => {
     let resolveUsage: ((value: { inputTokens: number; outputTokens: number; totalTokens: number } | undefined) => void) | null = null;
     getSessionUsageMock.mockImplementation(
       async () =>
-        await new Promise<{ inputTokens: number; outputTokens: number; totalTokens: number } | undefined>((resolve) => {
+        new Promise<{ inputTokens: number; outputTokens: number; totalTokens: number } | undefined>((resolve) => {
           resolveUsage = resolve;
         })
     );
@@ -440,7 +432,7 @@ describe('chatSlashCommands', () => {
     await nextTick();
 
     expect(wrapper.findComponent({ name: 'UsagePanel' }).exists()).toBe(true);
-    expect(wrapper.text()).toContain('Loading');
+    expect(wrapper.text()).toContain('加载用量中');
     expect(getSessionUsageMock).toHaveBeenCalledWith('session-usage');
 
     resolveUsage?.({ inputTokens: 12, outputTokens: 8, totalTokens: 20 });
