@@ -6,6 +6,7 @@
 
 <script lang="ts" setup>
 import zhCN from 'ant-design-vue/es/locale/zh_CN';
+import 'dayjs/locale/zh-cn';
 import { useAntdTheme } from '@/hooks/useAntdTheme';
 import { useMenuAction } from '@/hooks/useMenuAction';
 

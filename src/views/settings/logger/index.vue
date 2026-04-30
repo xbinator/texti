@@ -6,21 +6,32 @@
 <template>
   <div class="logger-view">
     <LogFilterBar />
-    <div class="logger-view__content" @scroll="handleScroll">
-      <div v-if="store.entries.length === 0 && !store.isLoading" class="log-empty">
-        <AEmpty :image-style="{ height: '120px' }">
-          <template #description>
-            <div class="log-empty__text">暂无日志数据</div>
-            <div class="log-empty__subtext">可能没有产生日志，或者被当前的过滤条件拦截</div>
-          </template>
-        </AEmpty>
-      </div>
+    <div class="logger-view__content">
+      <BScrollbar inset="auto" @scroll="handleScroll">
+        <div v-if="store.entries.length === 0 && !store.isLoading" class="log-empty">
+          <AEmpty :image-style="{ height: '120px' }">
+            <template #description>
+              <div class="log-empty__text">暂无日志数据</div>
+              <div class="log-empty__subtext">可能没有产生日志，或者被当前的过滤条件拦截</div>
+            </template>
+          </AEmpty>
+        </div>
 
-      <LogTimeline v-else :entries="store.entries" />
+        <div v-else class="log-timeline">
+          <LogTimeline
+            v-for="(entry, index) in store.entries"
+            :key="`${entry.timestamp}-${entry.scope}-${index}`"
+            :entry="entry"
+            :is-first="index === 0"
+            :is-last="index === store.entries.length - 1"
+            :is-only="store.entries.length === 1"
+          />
+        </div>
 
-      <div v-if="store.isLoading" class="log-loading">
-        <ASpin />
-      </div>
+        <div v-if="store.isLoading" class="log-loading">
+          <ASpin />
+        </div>
+      </BScrollbar>
     </div>
   </div>
 </template>
@@ -65,8 +76,14 @@ onMounted(() => {
 
 .logger-view__content {
   flex: 1;
+  height: 0;
   padding: 24px;
-  overflow-y: auto;
+}
+
+.log-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 
 .log-empty {

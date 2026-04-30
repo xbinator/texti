@@ -1,43 +1,33 @@
 <!--
   @file LogTimeline.vue
-  @description 日志时间轴组件，使用左侧信息列、中轴圆点连线和右侧消息卡片展示日志条目。
+  @description 日志时间轴单项组件，使用左侧信息列、中轴圆点连线和右侧消息卡片展示单条日志。
 -->
 <template>
-  <div class="log-timeline">
-    <div
-      v-for="(entry, index) in entries"
-      :key="`${entry.timestamp}-${entry.scope}-${index}`"
-      class="log-timeline__item"
-      :class="{
-        'log-timeline__item--first': index === 0,
-        'log-timeline__item--last': index === entries.length - 1,
-        'log-timeline__item--only': entries.length === 1
-      }"
-    >
-      <div class="log-timeline__meta">
-        <div class="log-timeline__time">{{ formatDisplayTime(entry.timestamp) }}</div>
-        <div class="log-timeline__scope">{{ getLogScopeLabel(entry.scope) }}</div>
-      </div>
+  <div class="log-timeline__item" :class="itemClasses">
+    <div class="log-timeline__meta">
+      <div class="log-timeline__time">{{ formatDisplayTime(entry.timestamp) }}</div>
+      <div class="log-timeline__scope">{{ getLogScopeLabel(entry.scope) }}</div>
+    </div>
 
-      <div class="log-timeline__axis">
-        <div class="log-timeline__axis-track"></div>
-        <div class="log-timeline__axis-anchor"></div>
-        <div class="log-timeline__axis-dot" :class="`log-timeline__axis-dot--${entry.level.toLowerCase()}`"></div>
-      </div>
+    <div class="log-timeline__axis">
+      <div class="log-timeline__axis-track"></div>
+      <div class="log-timeline__axis-anchor"></div>
+      <div class="log-timeline__axis-dot" :class="`log-timeline__axis-dot--${entry.level.toLowerCase()}`"></div>
+    </div>
 
-      <div class="log-timeline__content">
-        <div class="log-timeline__card">
-          <div class="log-timeline__card-header">
-            <ATag :color="getLogLevelColor(entry.level)">{{ getLogLevelLabel(entry.level) }}</ATag>
-          </div>
-          <div class="log-timeline__message">{{ entry.message }}</div>
+    <div class="log-timeline__content">
+      <div class="log-timeline__card">
+        <div class="log-timeline__card-header">
+          <ATag :color="getLogLevelColor(entry.level)">{{ getLogLevelLabel(entry.level) }}</ATag>
         </div>
+        <div class="log-timeline__message">{{ entry.message }}</div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue';
 import type { LogEntry } from '@/shared/logger/types';
 import { getLogLevelColor, getLogLevelLabel, getLogScopeLabel } from '@/views/settings/logger/constant';
 
@@ -45,11 +35,26 @@ import { getLogLevelColor, getLogLevelLabel, getLogScopeLabel } from '@/views/se
  * 组件属性定义
  */
 interface Props {
-  /** 日志条目列表 */
-  entries: LogEntry[];
+  /** 单条日志条目 */
+  entry: LogEntry;
+  /** 是否为第一条 */
+  isFirst?: boolean;
+  /** 是否为最后一条 */
+  isLast?: boolean;
+  /** 是否只有一条 */
+  isOnly?: boolean;
 }
 
-defineProps<Props>();
+const props = defineProps<Props>();
+
+/**
+ * 计算时间轴项的样式类
+ */
+const itemClasses = computed(() => ({
+  'log-timeline__item--first': props.isFirst,
+  'log-timeline__item--last': props.isLast,
+  'log-timeline__item--only': props.isOnly
+}));
 
 /**
  * 提取用于左侧列展示的时间字符串。
@@ -63,12 +68,6 @@ function formatDisplayTime(timestamp: string): string {
 </script>
 
 <style scoped lang="less">
-.log-timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
 .log-timeline__item {
   display: grid;
   grid-template-columns: 100px 28px minmax(0, 1fr);
