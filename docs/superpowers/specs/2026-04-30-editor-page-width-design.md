@@ -135,13 +135,23 @@ export type EditorPageWidth = 'default' | 'wide' | 'full';
 
 在 `electron/main/modules/menu/service.mts` 的 View 菜单下新增“页宽”分组。
 
-建议使用三个互斥的 checkbox 菜单项，模式与现有主题切换保持一致：
+建议继续使用现有系统菜单的 `checkbox` 模式，而不是改成 `radio`。原因是当前 View 菜单中的“主题”已经采用 `checkbox + 渲染进程状态同步` 的实现方式，页宽设置沿用同一模式可以减少菜单层额外分支。
+
+三个菜单项在 Electron 模板中都声明为 `checkbox`，互斥关系不由主进程菜单模板直接维护，而是由渲染进程中的 `settingStore` 单一状态源控制，再通过 `syncNativeMenuState()` 回写各项 `checked` 状态。也就是说：
+
+- 菜单点击只负责发出 action
+- `settingStore.setEditorPageWidth()` 负责写入唯一页宽值
+- `syncNativeMenuState()` 负责把三个菜单项刷新为“仅当前值为 checked，其余为 unchecked”
+
+菜单项建议如下：
 
 - `view:pageWidth:default`
 - `view:pageWidth:wide`
 - `view:pageWidth:full`
 
 这样可以复用当前系统菜单“通过 checked 表达当前状态”的交互风格，也便于 `syncNativeMenuState()` 做单向状态同步。
+
+当前项目的系统菜单标签均直接使用中文文本，并未引入单独的菜单国际化 key 体系，因此“页宽”分组与子项继续采用与现有 `视图`、`主题` 相同的直接文案方式，不额外抽象 `view.pageWidth` 之类的 key。
 
 ### 菜单 Action 分发
 
@@ -198,7 +208,7 @@ settingStore.setEditorPageWidth(input.value)
 
 - `default` -> `900px`
 - `wide` -> `1200px`
-- `full` -> `none`
+- `full` -> `none`（CSS `max-width` 的关键字值）
 
 ### 样式接入方式
 
@@ -213,10 +223,16 @@ settingStore.setEditorPageWidth(input.value)
 实现思路：
 
 - 在脚本中根据 `settingStore.editorPageWidth` 计算 `editorPageMaxWidth`
-- 在正文容器上绑定 `style`
+- 在正文容器上绑定组件局部的内联 `style`
 - 将样式中的固定 `max-width: 900px` 替换为 `max-width: var(--editor-page-max-width)`
 
-当模式为 `full` 时，变量值传入 `none`，浏览器会直接取消正文最大宽度限制。
+这里的 CSS 变量不放到 `:root` 或全局主题变量文件中，而是作为 `BEditor` 组件实例级变量，仅服务当前正文容器。这样更符合这项设置“只影响编辑正文区”的边界，也避免把编辑器局部布局参数扩散成全局样式约定。
+
+当模式为 `full` 时，变量值传入 CSS 关键字 `none`，浏览器会直接取消正文最大宽度限制。
+
+### 容器适用范围确认
+
+当前 `PaneRichEditor` 与 `PaneSourceEditor` 都渲染在同一个 `.b-editor-container` 内，因此正文宽度逻辑只需在 `BEditor` 外层容器实现一次，就能同时覆盖富文本模式和源码模式，无需在两个子编辑器组件中重复处理。
 
 ## 数据流
 
@@ -228,6 +244,8 @@ settingStore.setEditorPageWidth(input.value)
 4. `syncNativeMenuState()` 刷新系统菜单的 checked 状态
 5. `BEditor` 读取新的 `editorPageWidth` 并更新正文容器 `max-width`
 6. 富文本与源码模式在同一容器内共享新宽度
+
+`syncNativeMenuState()` 当前已经承担 `sourceMode`、`showOutline` 和 `theme` 的系统菜单状态同步，因此本次只是按同样方式扩展三个新的页宽菜单项，不需要引入新的同步机制。
 
 ## 兼容性
 
@@ -287,6 +305,13 @@ settingStore.setEditorPageWidth(input.value)
 
 - 宽度只在 `BEditor` 外层容器统一生效
 - 不在 `PaneRichEditor` 与 `PaneSourceEditor` 内部分别处理
+
+### 风险四：后续补快捷键时入口分散
+
+控制方式：
+
+- 第一版先不加入快捷键，保持交互面最小
+- 后续若要增加快捷键，仍应只触发 `settingStore.setEditorPageWidth()` 或其包装 action，不新增旁路写入路径
 
 ## 实施边界
 
