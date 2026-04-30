@@ -72,6 +72,16 @@ export const DEFAULT_PROVIDERS: AIProvider[] = [
     models: []
   },
   {
+    id: 'xiaomi_plan',
+    name: '小米 Plan',
+    description: '提供小米大模型，支持智能助手与多场景应用。',
+    baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1',
+    type: 'openai',
+    isEnabled: false,
+    readonly: true,
+    models: []
+  },
+  {
     id: 'zhipu',
     name: '智谱 AI',
     description: '提供 GLM 系列模型，支持中文场景优化、对话生成与智能问答。',
