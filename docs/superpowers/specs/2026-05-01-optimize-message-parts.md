@@ -85,4 +85,4 @@ if (images.length && supportsVision.value) {
 
 ---
 
-**审核状态**: ⏳ 待审核
+**审核状态**: ✅ 已审核通过并实施（方案 B）
