@@ -4,12 +4,13 @@
 -->
 <template>
   <div class="chat-input-toolbar">
+    <BButton v-if="supportsVision" size="small" type="text" square @click="openImagePicker">
+      <Icon icon="lucide:image-plus" width="16" height="16" />
+    </BButton>
+    <div class="toolbar-space"></div>
     <ModelSelector ref="modelSelectorRef" :model="selectedModel" @update:model="handleModelChange" />
     <div class="action-buttons">
       <input ref="imageInputRef" class="image-input" type="file" accept="image/*" multiple @change="handleImageInputChange" />
-      <BButton v-if="supportsVision" size="small" square @click="openImagePicker">
-        <Icon icon="lucide:image-plus" width="16" height="16" />
-      </BButton>
       <BButton v-if="loading" size="small" square @click="$emit('abort')">
         <svg class="loading-icon" color="currentColor" viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg">
           <title>Stop Loading</title>
@@ -119,6 +120,11 @@ defineExpose({
   display: flex;
   gap: 8px;
   align-items: center;
+  width: 100%;
+}
+
+.toolbar-space {
+  flex: 1;
 }
 
 .action-buttons {

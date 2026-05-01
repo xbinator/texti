@@ -434,6 +434,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   height: 100%;
   background-color: rgb(0 0 0 / 90%);
+  -webkit-app-region: no-drag;
 }
 
 .b-image-viewer__controls {

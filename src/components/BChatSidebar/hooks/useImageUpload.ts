@@ -4,7 +4,6 @@
  */
 import type { ChatMessageFile } from 'types/chat';
 import type { Ref } from 'vue';
-import { computed } from 'vue';
 import { message } from 'ant-design-vue';
 import { createChatImageFile, isImageFile } from '@/components/BChatSidebar/utils/imageUtils';
 import type { PasteImageContext } from '@/components/BPromptEditor/types';
@@ -49,9 +48,6 @@ interface UseImageUploadOptions {
  */
 export function useImageUpload(options: UseImageUploadOptions) {
   const { supportsVision, inputEvents } = options;
-
-  /** 当前是否因模型能力限制而阻止发送图片 */
-  const imagesBlockedByModel = computed<boolean>(() => inputEvents.hasImages() && !supportsVision.value);
 
   /**
    * 判断当前是否允许接收图片。
@@ -128,7 +124,6 @@ export function useImageUpload(options: UseImageUploadOptions) {
   }
 
   return {
-    imagesBlockedByModel,
     canAcceptImages,
     validateIncomingImages,
     appendImages,
