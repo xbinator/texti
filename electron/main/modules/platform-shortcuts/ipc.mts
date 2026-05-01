@@ -2,9 +2,9 @@
  * @file ipc.mts
  * @description 注册系统快捷入口最近文件同步 IPC。
  */
+import type { RecentFileShortcutInput } from './model.mjs';
 import { ipcMain } from 'electron';
 import { updatePlatformShortcuts } from './service.mjs';
-import type { RecentFileShortcutInput } from './model.mjs';
 
 /**
  * 注册系统快捷入口 IPC 处理器。
