@@ -4,7 +4,14 @@
       <template v-if="showHeader" #header>
         <div :class="bem('header')">
           <div v-if="imageFiles.length" :class="bem('images')">
-            <img v-for="file in imageFiles" :key="file.id" :src="file.url || file.path" :alt="file.name" :class="bem('image')" />
+            <img
+              v-for="(file, index) in imageFiles"
+              :key="file.id"
+              :src="file.url || file.path"
+              :alt="file.name"
+              :class="bem('image', { single: isSingleImage })"
+              @click="handleImageClick(index)"
+            />
           </div>
           <div v-if="otherFiles.length" :class="bem('files')">
             <div v-for="file in otherFiles" :key="file.id" :class="bem('file')">
@@ -51,6 +58,9 @@
       <span :class="bem('time')">{{ formatMessageTime(message.createdAt) }}</span>
       <BButton type="text" size="small" square icon="lucide:copy" @click="handleCopy(message)" />
     </div>
+
+    <!-- 图片预览器 -->
+    <BImageViewer v-model:show="showImageViewer" :images="imagePreviewList" :start-position="currentImageIndex" />
   </div>
 </template>
 
@@ -62,10 +72,11 @@
 import type { Message } from '../utils/types';
 import type { AIToolExecutionAwaitingUserInputResult } from 'types/ai';
 import type { AIUserChoiceAnswerData, ChatMessageConfirmationAction, ChatMessagePart, ChatMessageToolResultPart } from 'types/chat';
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import BBubble from '@/components/BBubble/index.vue';
 import BButton from '@/components/BButton/index.vue';
+import BImageViewer from '@/components/BImageViewer/index.vue';
 import { useClipboard } from '@/hooks/useClipboard';
 import { createNamespace } from '@/utils/namespace';
 import { formatMessageTime } from '../utils/timeFormat';
@@ -93,6 +104,8 @@ defineEmits<{
 
 /** 图片文件列表（有 url 或 path 的图片类型文件） */
 const imageFiles = computed(() => props.message.files?.filter((file) => file.type === 'image' && (file.url || file.path)) ?? []);
+/** 是否为单图模式 */
+const isSingleImage = computed(() => imageFiles.value.length === 1);
 /** 非图片文件列表（非图片类型或无 url/path 的文件） */
 const otherFiles = computed(() => props.message.files?.filter((file) => file.type !== 'image' || (!file.url && !file.path)) ?? []);
 /** 是否为用户消息 */
@@ -104,12 +117,28 @@ const bubblePlacement = computed(() => (isAssistantMessage.value ? 'left' : 'rig
 /** 是否显示头部（用户消息且有文件时显示） */
 const showHeader = computed(() => isUserMessage.value && (imageFiles.value.length || otherFiles.value.length));
 
+/** 图片预览器显示状态 */
+const showImageViewer = ref(false);
+/** 当前预览的图片索引 */
+const currentImageIndex = ref(0);
+/** 图片预览列表（提取 url 或 path） */
+const imagePreviewList = computed(() => imageFiles.value.map((file) => file.url || file.path || ''));
+
 /**
  * 判断片段是否为等待用户选择的工具结果。
  * @param part - 消息片段
  */
 function isAwaitingUserChoicePart(part: ChatMessagePart): part is ChatMessageToolResultPart & { result: AIToolExecutionAwaitingUserInputResult } {
   return part.type === 'tool-result' && part.toolName === 'ask_user_choice' && part.result.status === 'awaiting_user_input';
+}
+
+/**
+ * 打开图片预览
+ * @param index - 图片索引
+ */
+function handleImageClick(index: number): void {
+  currentImageIndex.value = index;
+  showImageViewer.value = true;
 }
 
 /**
@@ -151,10 +180,22 @@ function handleCopy(message: Message): void {
 }
 
 .message-bubble__image {
-  max-width: 200px;
-  max-height: 200px;
+  overflow: hidden;
+  cursor: pointer;
   object-fit: cover;
+  border: 1px solid var(--border-primary);
   border-radius: 8px;
+
+  &.message-bubble__image--single {
+    max-width: 200px;
+    max-height: 200px;
+    object-fit: contain;
+  }
+
+  &:not(.message-bubble__image--single) {
+    width: 60px;
+    height: 60px;
+  }
 }
 
 .message-bubble__files {
