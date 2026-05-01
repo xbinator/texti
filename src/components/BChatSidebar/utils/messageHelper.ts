@@ -199,7 +199,7 @@ export const create = {
   },
   // 创建用户消息
   userMessage(content: string, references?: Message['references']): Message {
-    return createBase({ role: 'user', content, references, parts: [{ type: 'text', text: content }], finished: true });
+    return createBase({ role: 'user', content, references, parts: content ? [{ type: 'text', text: content }] : [], finished: true });
   }
 } as const;
 

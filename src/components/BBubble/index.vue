@@ -15,7 +15,7 @@
         <Loading v-if="loading" type="circle" :class="bem('loading')" />
       </template>
 
-      <div :class="bem('container')">
+      <div v-if="showContainer" :class="bem('container')">
         <slot name="top"></slot>
 
         <div ref="contentRef" :class="bem('content', { collapse: collapse.value })">
@@ -57,7 +57,8 @@ const props = withDefaults(defineProps<BBubbleProps>(), {
   placement: 'left',
   avatar: undefined,
   state: 'complete',
-  size: 'fill'
+  size: 'fill',
+  showContainer: true
 });
 
 const contentRef = ref<HTMLDivElement>();

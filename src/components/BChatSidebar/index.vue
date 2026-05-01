@@ -316,8 +316,6 @@ async function handleChatSubmit(): Promise<void> {
 
   const references = inputEvents.getActiveReferences(content);
   const nextMessage = create.userMessage(content, references);
-  nextMessage.content = content;
-  nextMessage.parts = [{ type: 'text', text: nextMessage.content }];
   if (images.length && supportsVision.value) {
     nextMessage.files = [...images];
   }

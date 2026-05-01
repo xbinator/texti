@@ -29,4 +29,6 @@ export interface BBubbleProps {
   size?: BBubbleSize;
   // 气泡的状态，可以是 'wait'、'output' 或 'complete'，默认为 'wait'
   state?: BBubbleState;
+  // 是否显示气泡，默认为 true
+  showContainer?: boolean;
 }

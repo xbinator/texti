@@ -1,6 +1,6 @@
 <template>
   <div :class="name">
-    <BBubble :placement="bubblePlacement" :loading="message.loading" :size="message.role === 'user' ? 'auto' : 'fill'">
+    <BBubble :show-container="showContainer" :placement="bubblePlacement" :loading="message.loading" :size="message.role === 'user' ? 'auto' : 'fill'">
       <template v-if="showHeader" #header>
         <div :class="bem('header')">
           <div v-if="imageFiles.length" :class="bem('images')">
@@ -56,7 +56,7 @@
     <!-- 用户消息底部：时间戳 + 复制按钮（hover 可见） -->
     <div v-if="isUserMessage && message.finished" :class="bem('toolbar', { right: isUserMessage })">
       <span :class="bem('time')">{{ formatMessageTime(message.createdAt) }}</span>
-      <BButton type="text" size="small" square icon="lucide:copy" @click="handleCopy(message)" />
+      <BButton v-if="showContainer" type="text" size="small" square icon="lucide:copy" @click="handleCopy(message)" />
     </div>
 
     <!-- 图片预览器 -->
@@ -116,6 +116,8 @@ const isAssistantMessage = computed(() => props.message.role === 'assistant');
 const bubblePlacement = computed(() => (isAssistantMessage.value ? 'left' : 'right'));
 /** 是否显示头部（用户消息且有文件时显示） */
 const showHeader = computed(() => isUserMessage.value && (imageFiles.value.length || otherFiles.value.length));
+/** 是否显示气泡容器（用户消息且有文件时显示） */
+const showContainer = computed(() => !!props.message.parts?.length);
 
 /** 图片预览器显示状态 */
 const showImageViewer = ref(false);
