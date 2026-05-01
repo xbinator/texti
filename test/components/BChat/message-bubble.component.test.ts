@@ -120,6 +120,34 @@ function createMessageWithConfirmation(): Message {
 }
 
 /**
+ * 创建带文件引用片段的用户消息。
+ * @returns user 消息
+ */
+function createMessageWithFileReferencePart(): Message {
+  return {
+    id: 'user-1',
+    role: 'user',
+    content: '请看 这里',
+    createdAt: '2026-05-02T00:00:00.000Z',
+    finished: true,
+    parts: [
+      { type: 'text', text: '请看 ' },
+      {
+        type: 'file-reference',
+        referenceId: 'ref-1',
+        documentId: 'doc-1',
+        snapshotId: 'snapshot-1',
+        fileName: 'foo.ts',
+        path: '/workspace/foo.ts',
+        startLine: 3,
+        endLine: 5
+      },
+      { type: 'text', text: ' 这里' }
+    ]
+  };
+}
+
+/**
  * 挂载 MessageBubble。
  * @param message - 消息数据
  * @returns 挂载结果
@@ -164,5 +192,13 @@ describe('MessageBubble confirmation integration', () => {
       ['confirmation-1', 'approve'],
       ['confirmation-1', 'cancel']
     ]);
+  });
+
+  it('renders file-reference parts from structured user message parts', () => {
+    const wrapper = mountMessageBubble(createMessageWithFileReferencePart());
+
+    expect(wrapper.text()).toContain('请看');
+    expect(wrapper.text()).toContain('foo.ts:3-5');
+    expect(wrapper.text()).toContain('这里');
   });
 });

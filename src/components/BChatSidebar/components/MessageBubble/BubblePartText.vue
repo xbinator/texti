@@ -14,7 +14,7 @@
 </template>
 
 <script setup lang="ts">
-import type { ChatMessageFileReference, ChatMessageTextPart, ChatMessageErrorPart } from 'types/chat';
+import type { ChatMessageFileReference, ChatMessageFileReferencePart, ChatMessageTextPart, ChatMessageErrorPart } from 'types/chat';
 import { computed } from 'vue';
 import BMessage from '@/components/BMessage/index.vue';
 import { createNamespace } from '@/utils/namespace';
@@ -53,7 +53,7 @@ type MessageBubbleTextSegment = TextDisplaySegment | FileReferenceDisplaySegment
 
 interface Props {
   /** 要渲染的文本片段 */
-  part: ChatMessageTextPart | ChatMessageErrorPart;
+  part: ChatMessageTextPart | ChatMessageErrorPart | ChatMessageFileReferencePart;
   /** 是否启用仅用户可见的文件引用标签渲染 */
   enableFileReferenceChips?: boolean;
   /** 父消息附加的文件引用元数据 */
@@ -86,6 +86,17 @@ const referenceMap = computed<Map<string, ChatMessageFileReference>>(() => {
  * 将原始文本拆分为纯文本和文件引用标签片段。
  */
 const segments = computed<MessageBubbleTextSegment[]>(() => {
+  if (props.part.type === 'file-reference') {
+    const lineLabel = props.part.startLine > 0
+      ? `${props.part.startLine}${props.part.endLine > props.part.startLine ? `-${props.part.endLine}` : ''}`
+      : '';
+
+    return [{
+      type: 'file-reference',
+      label: lineLabel ? `${props.part.fileName}:${lineLabel}` : props.part.fileName
+    }];
+  }
+
   const parts: MessageBubbleTextSegment[] = [];
   let lastIndex = 0;
 

@@ -3,7 +3,7 @@
  * @description 文件引用快照持久化工具
  */
 import type { Message } from './types';
-import type { ChatMessageFileReference, ChatReferenceSnapshot } from 'types/chat';
+import type { ChatMessageFileReference, ChatMessageFileReferencePart, ChatReferenceSnapshot } from 'types/chat';
 import { nanoid } from 'nanoid';
 import pLimit from 'p-limit';
 import { editorToolContextRegistry } from '@/ai/tools/editor-context';
@@ -15,7 +15,7 @@ import { chatStorage } from '@/shared/storage';
 type EditorContext = ReturnType<typeof editorToolContextRegistry.getContext>;
 
 interface GroupEntry {
-  refs: ChatMessageFileReference[];
+  refs: Array<ChatMessageFileReference | ChatMessageFileReferencePart>;
   /** editor 来源时携带 context，避免后续重复查询 registry */
   context?: EditorContext;
 }
@@ -31,12 +31,27 @@ function makeSnapshot(documentId: string, title: string, content: string): ChatR
  * 尝试从 SQLite 历史快照降级，成功则写入 snapshotId 并追加到 snapshots。
  * disk / sqlite 两处共用，避免逻辑重复。
  */
-async function applySnapshotFromSqlite(refs: ChatMessageFileReference[], snapshots: ChatReferenceSnapshot[]): Promise<void> {
+async function applySnapshotFromSqlite(refs: Array<ChatMessageFileReference | ChatMessageFileReferencePart>, snapshots: ChatReferenceSnapshot[]): Promise<void> {
   const cached = await chatStorage.getReferenceSnapshotByDocumentId(refs[0].documentId);
   if (cached) {
     refs.forEach((r) => (r.snapshotId = cached.id));
     snapshots.push(cached);
   }
+}
+
+/**
+ * 收集消息中的文件引用元数据，优先使用结构化片段。
+ * @param message - 聊天消息
+ * @returns 引用列表
+ */
+function collectReferences(message: Message): Array<ChatMessageFileReference | ChatMessageFileReferencePart> {
+  const partReferences = message.parts.filter((part): part is ChatMessageFileReferencePart => part.type === 'file-reference');
+
+  if (partReferences.length > 0) {
+    return partReferences;
+  }
+
+  return message.references ?? [];
 }
 
 // ─── 分组 ─────────────────────────────────────────────────────────────────────
@@ -45,7 +60,7 @@ async function applySnapshotFromSqlite(refs: ChatMessageFileReference[], snapsho
  * 将引用按来源分组，同时缓存 editorContext 避免后续重复查询。
  * 分组键格式：`"editor|documentId"` | `"disk|path"` | `"sqlite|documentId"`
  */
-function buildGroups(references: ChatMessageFileReference[]): Map<string, GroupEntry> {
+function buildGroups(references: Array<ChatMessageFileReference | ChatMessageFileReferencePart>): Map<string, GroupEntry> {
   const groups = new Map<string, GroupEntry>();
 
   for (const ref of references) {
@@ -132,9 +147,10 @@ async function createSqliteSnapshots(groups: Map<string, GroupEntry>): Promise<C
  * 4. 无路径且编辑器未激活 → SQLite 历史快照降级
  */
 export async function persistReferenceSnapshots(message: Message): Promise<void> {
-  if (!message.references?.length) return;
+  const references = collectReferences(message);
+  if (!references.length) return;
 
-  const groups = buildGroups(message.references);
+  const groups = buildGroups(references);
 
   const [diskSnapshots, sqliteSnapshots] = await Promise.all([createDiskSnapshots(groups), createSqliteSnapshots(groups)]);
 

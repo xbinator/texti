@@ -25,7 +25,7 @@
       <div :class="bem('parts')">
         <template v-for="(item, index) in message.parts" :key="`${item.type}-${index}`">
           <BubblePartText
-            v-if="item.type === 'text' || item.type === 'error'"
+            v-if="item.type === 'text' || item.type === 'error' || item.type === 'file-reference'"
             :part="item"
             :enable-file-reference-chips="isUserMessage"
             :references="message.references"
