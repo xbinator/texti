@@ -83,7 +83,6 @@
 import type { ChatMessageConfirmationAction } from 'types/chat';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { Icon } from '@iconify/vue';
-import { message } from 'ant-design-vue';
 import { createBuiltinTools } from '@/ai/tools/builtin';
 import { editorToolContextRegistry } from '@/ai/tools/editor-context';
 import { getDefaultChatToolNames } from '@/ai/tools/policy';
@@ -309,22 +308,17 @@ async function handleComplete(nextMessage: Message): Promise<void> {
 async function handleChatSubmit(): Promise<void> {
   const content = inputContent.value.trim();
   const images = inputImages.value;
-  const summaryText = content || imageUpload.createImageOnlySummary(images.length);
 
   if (!canSubmit.value) return;
-  if (images.length > 0 && !supportsVision.value) {
-    message.error('当前模型不支持图片，请切换到支持视觉识别的模型后发送');
-    return;
-  }
 
   const config = await stream.resolveServiceConfig();
   if (!config) return;
 
   const references = inputEvents.getActiveReferences(content);
-  const nextMessage = create.userMessage(summaryText, references);
-  nextMessage.content = content || summaryText;
+  const nextMessage = create.userMessage(content, references);
+  nextMessage.content = content;
   nextMessage.parts = [{ type: 'text', text: nextMessage.content }];
-  if (images.length > 0) {
+  if (images.length && supportsVision.value) {
     nextMessage.files = [...images];
   }
 

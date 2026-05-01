@@ -89,10 +89,7 @@ export function useImageUpload(options: UseImageUploadOptions) {
    * @param files - 待处理文件列表
    */
   async function appendImages(files: File[]): Promise<void> {
-    if (!supportsVision.value) {
-      message.error('当前模型不支持图片，请切换到支持视觉识别的模型后发送');
-      return;
-    }
+    if (!supportsVision.value) return;
 
     const imageFiles = files.filter((file) => isImageFile(file));
     if (imageFiles.length === 0) return;
@@ -114,20 +111,10 @@ export function useImageUpload(options: UseImageUploadOptions) {
     await appendImages(context.imageFiles);
   }
 
-  /**
-   * 为纯图片消息创建文本摘要。
-   * @param count - 图片数量
-   * @returns 纯图片摘要文本
-   */
-  function createImageOnlySummary(count: number): string {
-    return count === 1 ? '用户上传了一张图片，请结合图片内容回答。' : `用户上传了 ${count} 张图片，请结合这些图片内容回答。`;
-  }
-
   return {
     canAcceptImages,
     validateIncomingImages,
     appendImages,
-    onPasteImages,
-    createImageOnlySummary
+    onPasteImages
   };
 }
