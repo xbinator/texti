@@ -4,13 +4,14 @@
 -->
 <template>
   <div class="chat-input-toolbar">
-    <BButton v-if="supportsVision" size="small" type="text" square @click="openImagePicker">
-      <Icon icon="lucide:image-plus" width="16" height="16" />
-    </BButton>
+    <BUpload v-if="supportsVision" accept="image/*" @change="handleImageInputChange">
+      <BButton size="small" type="text" square>
+        <Icon icon="lucide:image-plus" width="16" height="16" />
+      </BButton>
+    </BUpload>
     <div class="toolbar-space"></div>
     <ModelSelector ref="modelSelectorRef" :model="selectedModel" @update:model="handleModelChange" />
     <div class="action-buttons">
-      <input ref="imageInputRef" class="image-input" type="file" accept="image/*" multiple @change="handleImageInputChange" />
       <BButton v-if="loading" size="small" square @click="$emit('abort')">
         <svg class="loading-icon" color="currentColor" viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg">
           <title>Stop Loading</title>
@@ -66,10 +67,6 @@ const emit = defineEmits<{
  * 模型选择器实例引用。
  */
 const modelSelectorRef = ref<InstanceType<typeof ModelSelector>>();
-/**
- * 图片选择输入框引用。
- */
-const imageInputRef = ref<HTMLInputElement>();
 
 /**
  * 将打开请求转发到内部模型选择器。
@@ -87,25 +84,11 @@ function handleModelChange(model: { providerId: string; modelId: string }): void
 }
 
 /**
- * 打开图片选择器。
- */
-function openImagePicker(): void {
-  imageInputRef.value?.click();
-}
-
-/**
  * 处理图片输入框 change 事件。
  * @param event - 原生 change 事件
  */
-function handleImageInputChange(event: Event): void {
-  const { target } = event;
-  if (!(target instanceof HTMLInputElement)) return;
-
-  const files = Array.from(target.files ?? []);
-  if (files.length > 0) {
-    emit('image-select', files);
-  }
-  target.value = '';
+function handleImageInputChange(files: FileList) {
+  emit('image-select', Array.from(files));
 }
 
 /**
