@@ -140,6 +140,26 @@ export interface PlatformRecentFile {
   path: string | null;
 }
 
+/**
+ * 图片压缩请求参数
+ */
+export interface ElectronImageCompressRequest {
+  /** 原始图片二进制数据 */
+  buffer: ArrayBuffer;
+  /** 图片 MIME 类型 */
+  mimeType: string;
+}
+
+/**
+ * 图片压缩结果
+ */
+export interface ElectronImageCompressResult {
+  /** 压缩后的二进制数据 */
+  buffer: ArrayBuffer;
+  /** 是否实际执行了压缩 */
+  compressed: boolean;
+}
+
 export interface ElectronAPI {
   readFile: (filePath: string) => Promise<ElectronReadFileResult>;
   readWorkspaceFile: (options: ElectronReadWorkspaceFileOptions) => Promise<ElectronReadWorkspaceFileResult>;
@@ -245,6 +265,16 @@ export interface ElectronAPI {
 
   // WebView 操作
   webview: WebViewAPI;
+
+  // ==================== 图片压缩 ====================
+
+  /**
+   * 压缩图片，使用 sharp 在后台进行压缩。
+   * @param buffer - 原始图片二进制数据
+   * @param mimeType - 图片 MIME 类型
+   * @returns 压缩结果（压缩后 ArrayBuffer + 是否实际压缩）
+   */
+  compressImage: (buffer: ArrayBuffer, mimeType: string) => Promise<ElectronImageCompressResult>;
 }
 
 declare global {
