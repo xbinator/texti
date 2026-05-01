@@ -56,6 +56,7 @@
             :on-paste-images="imageUpload.onPasteImages"
             :can-accept-images="imageUpload.canAcceptImages"
             :slash-commands="chatSlashCommands"
+            :on-cancel="handleCancel"
             submit-on-enter
             @slash-command="handleSlashCommand"
             @submit="handleChatSubmit"
@@ -358,6 +359,15 @@ async function handleChatUserChoiceSubmit(answer: import('types/chat').AIUserCho
  */
 function handleAbort(): void {
   stream.abort?.();
+}
+
+/**
+ * 处理 ESC 取消操作：流式输出中则中止。
+ */
+function handleCancel(): void {
+  if (loading.value) {
+    handleAbort();
+  }
 }
 
 /**

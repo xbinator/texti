@@ -52,7 +52,8 @@ const props = withDefaults(defineProps<Props>(), {
   chipResolver: undefined,
   onPasteFiles: undefined,
   onPasteImages: undefined,
-  canAcceptImages: undefined
+  canAcceptImages: undefined,
+  onCancel: undefined
 });
 
 const emit = defineEmits<{
@@ -564,6 +565,9 @@ function createExtensions(): import('@codemirror/state').Extension[] {
           if (triggerVisible.value) {
             editorView.dispatch({ effects: closeTrigger.of() });
             return true;
+          }
+          if (props.onCancel) {
+            return props.onCancel() ?? true;
           }
           return false;
         }

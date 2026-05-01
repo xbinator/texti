@@ -90,4 +90,6 @@ export interface BPromptEditorProps {
   onPasteImages?: (context: PasteImageContext) => Promise<void> | void;
   /** 当前是否允许接收图片 */
   canAcceptImages?: () => boolean;
+  /** ESC 键取消回调，用于中止流式输出等场景 */
+  onCancel?: () => void;
 }
