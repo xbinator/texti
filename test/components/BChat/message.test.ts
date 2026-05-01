@@ -2,9 +2,9 @@
  * @file message.test.ts
  * @description BChat 消息工具行为测试
  */
-import type { ChatMessageFile } from 'types/chat';
+import type { ChatMessageFile, ChatMessageFileReference } from 'types/chat';
 import { describe, expect, it } from 'vitest';
-import { append, convert, create, is, userChoice } from '@/components/BChatSidebar/utils/messageHelper';
+import { append, buildMessagePartsFromDraft, convert, create, is, userChoice } from '@/components/BChatSidebar/utils/messageHelper';
 import type { Message } from '@/components/BChatSidebar/utils/types';
 
 /**
@@ -43,6 +43,24 @@ function createImageFile(overrides: Partial<ChatMessageFile> = {}): ChatMessageF
     extension: 'png',
     url: 'data:image/png;base64,ZmFrZS1pbWFnZQ==',
     contentHash: 'hash-1',
+    ...overrides
+  };
+}
+
+/**
+ * 创建测试文件引用。
+ * @param overrides - 覆盖默认字段
+ * @returns 测试文件引用
+ */
+function createFileReference(overrides: Partial<ChatMessageFileReference> = {}): ChatMessageFileReference {
+  return {
+    id: 'ref-1',
+    token: '{{file-ref:ref-1|foo.ts|3|5}}',
+    documentId: 'doc-1',
+    fileName: 'foo.ts',
+    line: '3-5',
+    path: '/workspace/foo.ts',
+    snapshotId: '',
     ...overrides
   };
 }
@@ -120,6 +138,46 @@ describe('BChat message helpers', () => {
         content: '分析这个引用'
       }
     ]);
+  });
+
+  it('builds ordered text and file-reference parts from active draft references', () => {
+    const parts = buildMessagePartsFromDraft('A {{file-ref:ref-1|foo.ts|3|5}} B', [createFileReference()]);
+
+    expect(parts).toEqual([
+      { type: 'text', text: 'A ' },
+      {
+        type: 'file-reference',
+        referenceId: 'ref-1',
+        documentId: 'doc-1',
+        snapshotId: '',
+        fileName: 'foo.ts',
+        path: '/workspace/foo.ts',
+        startLine: 3,
+        endLine: 5
+      },
+      { type: 'text', text: ' B' }
+    ]);
+  });
+
+  it('keeps unsaved document references with document ids and null paths', () => {
+    const parts = buildMessagePartsFromDraft('查看 {{file-ref:ref-2|draft.ts|10|20}}', [
+      createFileReference({
+        id: 'ref-2',
+        token: '{{file-ref:ref-2|draft.ts|10|20}}',
+        documentId: 'doc-unsaved',
+        fileName: 'draft.ts',
+        line: '10-20',
+        path: null
+      })
+    ]);
+
+    expect(parts[1]).toMatchObject({
+      type: 'file-reference',
+      documentId: 'doc-unsaved',
+      path: null,
+      startLine: 10,
+      endLine: 20
+    });
   });
 
   it('marks error messages as persistable but not model messages', () => {

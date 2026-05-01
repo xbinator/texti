@@ -89,7 +89,7 @@ import { editorToolContextRegistry } from '@/ai/tools/editor-context';
 import { getDefaultChatToolNames } from '@/ai/tools/policy';
 import BButton from '@/components/BButton/index.vue';
 import { chipResolver } from '@/components/BChatSidebar/utils/chipResolver';
-import { create, userChoice } from '@/components/BChatSidebar/utils/messageHelper';
+import { buildMessagePartsFromDraft, create, userChoice } from '@/components/BChatSidebar/utils/messageHelper';
 import { persistReferenceSnapshots } from '@/components/BChatSidebar/utils/referenceSnapshot';
 import { chatSlashCommands } from '@/components/BChatSidebar/utils/slashCommands';
 import type { Message } from '@/components/BChatSidebar/utils/types';
@@ -320,8 +320,9 @@ async function handleChatSubmit(): Promise<void> {
   const config = await stream.resolveServiceConfig();
   if (!config) return;
 
-  const references = inputEvents.getActiveReferences(content);
-  const nextMessage = create.userMessage(content, references);
+  const references = inputEvents.getActiveReferences(content) ?? [];
+  const parts = buildMessagePartsFromDraft(content, references);
+  const nextMessage = create.userMessageFromParts(parts, references);
   if (images.length && supportsVision.value) {
     nextMessage.files = [...images];
   }
