@@ -95,6 +95,7 @@ import { chatSlashCommands } from '@/components/BChatSidebar/utils/slashCommands
 import type { Message } from '@/components/BChatSidebar/utils/types';
 import BPromptEditor from '@/components/BPromptEditor/index.vue';
 import type { SlashCommandOption } from '@/components/BPromptEditor/types';
+import { logger } from '@/shared/logger';
 import { useChatStore } from '@/stores/chat';
 import { useSettingStore } from '@/stores/setting';
 import ConversationView from './components/ConversationView.vue';
@@ -315,7 +316,11 @@ async function handleChatSubmit(): Promise<void> {
   const config = await stream.resolveServiceConfig();
   if (!config) return;
 
-  const references = inputEvents.getActiveReferences(content);
+  const references = fileReference.getActiveReferences(content);
+  // 诊断日志：追踪文件引用是否被正确传入消息
+  if (content.includes('{{file-ref:')) {
+    logger.info(`[file-ref] submit content has token, refs count: ${references?.length ?? 0}, path: ${references?.[0]?.path ?? 'N/A'}`);
+  }
   const nextMessage = create.userMessage(content, references);
   if (images.length && supportsVision.value) {
     nextMessage.files = [...images];
@@ -326,6 +331,7 @@ async function handleChatSubmit(): Promise<void> {
   conversationRef.value?.scrollToBottom({ behavior: 'auto' });
   focusInput();
   inputEvents.clear();
+  fileReference.clearReferences();
 
   await stream.streamMessages(messages.value, config);
 }
@@ -336,6 +342,7 @@ async function handleChatSubmit(): Promise<void> {
  */
 function handleChatEdit(nextMessage: Message): void {
   inputEvents.restoreFromMessage(nextMessage);
+  fileReference.setReferences(nextMessage.references);
 }
 
 /**
@@ -381,6 +388,7 @@ function handleModelChange(model: { providerId: string; modelId: string }): void
 /** 清空当前草稿输入 */
 function handleClearInput(): void {
   inputEvents.clear();
+  fileReference.clearReferences();
 }
 
 /**

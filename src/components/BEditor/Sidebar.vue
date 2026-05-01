@@ -118,13 +118,13 @@ const headerMenuOptions = computed<DropdownOption[]>(() => [
     disabled: !props.filePath,
     onClick: () => emit('copy-path')
   },
-  {
-    value: 'copy-relative-path',
-    label: '复制相对路径',
-    icon: 'lucide:copy-plus',
-    disabled: !props.filePath,
-    onClick: () => emit('copy-relative-path')
-  },
+  // {
+  //   value: 'copy-relative-path',
+  //   label: '复制相对路径',
+  //   icon: 'lucide:copy-plus',
+  //   disabled: !props.filePath,
+  //   onClick: () => emit('copy-relative-path')
+  // },
   {
     type: 'divider'
   },

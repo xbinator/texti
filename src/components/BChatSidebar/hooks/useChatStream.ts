@@ -10,11 +10,10 @@ import type { AIUserChoiceAnswerData, ChatMessageConfirmationAction } from 'type
 import { nextTick, ref, shallowRef, type Ref } from 'vue';
 import { getModelToolSupport } from '@/ai/tools/policy';
 import { executeToolCall, toTransportTools, type ExecutedToolCall } from '@/ai/tools/stream';
-import { buildModelReadyMessages } from '@/components/BChatSidebar/utils/fileReferenceContext';
+import { convertFileRefTokensToMarkers } from '@/components/BChatSidebar/utils/fileReferenceContext';
 import { createToolCallTracker, type ToolCallTracker } from '@/components/BChatSidebar/utils/toolCallTracker';
 import { createToolLoopGuard, type ToolLoopGuard } from '@/components/BChatSidebar/utils/toolLoopGuard';
 import { useChat } from '@/hooks/useChat';
-import { chatStorage } from '@/shared/storage';
 import { useServiceModelStore } from '@/stores/service-model';
 import { append, convert, create, userChoice, is } from '../utils/messageHelper';
 
@@ -265,20 +264,6 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
   }
 
   /**
-   * 加载引用快照映射
-   */
-  async function loadReferenceSnapshotMap(sourceMessages: Message[]) {
-    const references = sourceMessages.flatMap((m) => m.references ?? []);
-    const snapshotIds = references.map((r) => r.snapshotId).filter((id) => id.length > 0);
-    const uniqueSnapshotIds = [...new Set(snapshotIds)];
-
-    if (!uniqueSnapshotIds.length) return new Map();
-
-    const snapshots = await chatStorage.getReferenceSnapshots(uniqueSnapshotIds);
-    return new Map(snapshots.map((s) => [s.id, s]));
-  }
-
-  /**
    * 追加文本片段
    */
   function appendText(content: string): void {
@@ -327,7 +312,9 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
   }
 
   /**
-   * 流式传输消息
+   * 流式传输消息。
+   * 将 {{file-ref:...}} token 替换为结构化标记，由 LLM 通过 read_file 工具按需读取文件内容。
+   * 续轮时标记替换是幂等的，已替换的 [file: ...] 文本不会被二次处理。
    */
   async function handleStreamMessages(sourceMessages: Message[], config: ServiceConfig, reuseLastAssistant = false): Promise<void> {
     loading.value = true;
@@ -336,11 +323,30 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     currentToolCallTracker = createToolCallTracker();
     handlePrepareAssistantMessage(reuseLastAssistant);
 
-    const snapshotsById = await loadReferenceSnapshotMap(sourceMessages);
-    const modelMessages = buildModelReadyMessages(sourceMessages, snapshotsById);
+    // 新消息提交时重置工具循环防护器，避免上一轮对话的状态泄露
+    if (!reuseLastAssistant) {
+      startToolLoopSession();
+    }
+
+    const modelMessages = convertFileRefTokensToMarkers(sourceMessages);
     currentModelMessageCache = convert.toCachedModelMessages(modelMessages, currentModelMessageCache);
 
     const continuedMessages = [...currentModelMessageCache.modelMessages];
+
+    // System prompt 引导：仅在首轮注入文件引用的 read_file 使用指引，续轮时 LLM 已知道如何处理
+    const isFirstRound = !sourceMessages.some((m) => m.role === 'assistant');
+    const hasReferences = sourceMessages.some((m) => m.role === 'user' && m.references?.length);
+    if (hasReferences && isFirstRound) {
+      continuedMessages.unshift({
+        role: 'system',
+        content:
+          '当用户消息中包含 [file: ...] 标记时，表示用户引用了某个文件。请使用 read_file 工具读取对应文件内容后再回答。\n' +
+          '- 路径格式 [file: /path/to/file.ts#L3-L5]：使用 read_file({path: "/path/to/file.ts", offset: 3, limit: 3})\n' +
+          '- 路径格式 [file: /path/to/file.ts]（无行号）：使用 read_file({path: "/path/to/file.ts"})\n' +
+          '- ID 格式 [file: id=xxx name="foo" @L3-L5]：使用 read_file({documentId: "xxx", offset: 3, limit: 3})\n' +
+          '- ID 格式 [file: id=xxx name="foo"]（无行号）：使用 read_file({documentId: "xxx"})'
+      });
+    }
 
     const transportTools = config.toolSupport.supported && Boolean(tools?.length) ? toTransportTools(tools ?? []) : undefined;
 
@@ -505,7 +511,6 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
 
     // 直接修改 messages 数组（由外部控制）
     messages.value.splice(0, messages.value.length, ...sourceMessages);
-    startToolLoopSession();
     nextTick(() => handleStreamMessages(sourceMessages, config));
     return true;
   }

@@ -1,9 +1,10 @@
 /**
  * @file read-file.ts
- * @description 内置本地文件读取工具实现。
+ * @description 内置本地文件读取工具实现，支持磁盘路径和编辑器文档 ID 两种读取方式。
  */
 import type { AIToolConfirmationAdapter, AIToolConfirmationRequest } from '../confirmation';
 import type { AIToolExecutionError, AIToolExecutor } from 'types/ai';
+import { editorToolContextRegistry } from '@/ai/tools/editor-context';
 import { native } from '@/shared/platform';
 import type {
   ReadWorkspaceDirectoryOptions,
@@ -11,6 +12,7 @@ import type {
   ReadWorkspaceFileOptions,
   ReadWorkspaceFileResult
 } from '@/shared/platform/native/types';
+import { chatStorage } from '@/shared/storage';
 import { createToolCancelledResult, createToolFailureResult, createToolSuccessResult } from '../results';
 
 /** read_file 工具名称 */
@@ -31,12 +33,36 @@ type WorkspaceReadErrorCode =
 
 /** read_file 工具输入参数 */
 export interface ReadFileInput {
-  /** 文件路径，支持相对工作区路径或绝对路径 */
-  path: string;
+  /** 文件路径（磁盘文件），与 documentId 二选一 */
+  path?: string;
+  /** 文档 ID（未保存的编辑器文件），与 path 二选一 */
+  documentId?: string;
   /** 起始行号，默认 1 */
   offset?: number;
   /** 读取行数，不传时读取到文件末尾 */
   limit?: number;
+}
+
+/** extractLines 辅助函数参数 */
+interface ExtractLinesParams {
+  /** 起始行号 */
+  offset?: number;
+  /** 读取行数 */
+  limit?: number;
+}
+
+/** extractLines 返回结果 */
+interface ExtractLinesResult {
+  /** 截取后的文本内容 */
+  excerpt: string;
+  /** 文件总行数 */
+  totalLines: number;
+  /** 实际读取行数 */
+  readLines: number;
+  /** 是否还有后续内容 */
+  hasMore: boolean;
+  /** 下一次滚动读取的起始行号 */
+  nextOffset: number | null;
 }
 
 /** read_file 工具返回结果 */
@@ -141,6 +167,33 @@ function normalizeReadRange(input: ReadFileInput): { offset: number; limit?: num
 }
 
 /**
+ * 从文本内容中按 offset/limit 截取行。
+ * 不依赖 ReadFileInput 的必填字段约束，供 documentId 和快照降级路径复用。
+ * @param content - 全文内容
+ * @param params - 截取参数
+ * @returns 截取结果
+ */
+function extractLines(content: string, params: ExtractLinesParams): ExtractLinesResult {
+  const lines = content.split(/\r?\n/);
+  const totalLines = lines.length;
+  const offset = params.offset && params.offset >= 1 ? params.offset : DEFAULT_OFFSET;
+  const hasLimit = params.limit !== undefined && params.limit >= 1;
+  const endIndex = hasLimit ? Math.min(offset - 1 + params.limit!, totalLines) : totalLines;
+
+  const excerpt = lines.slice(offset - 1, endIndex).join('\n');
+  const readLines = endIndex - offset + 1;
+  const hasMore = endIndex < totalLines;
+
+  return {
+    excerpt,
+    totalLines,
+    readLines,
+    hasMore,
+    nextOffset: hasMore ? offset + readLines : null
+  };
+}
+
+/**
  * 判断输入路径是否为绝对路径。
  * @param filePath - 文件路径
  * @returns 是否为 Windows 或 POSIX 绝对路径
@@ -200,7 +253,10 @@ export function createBuiltinReadFileTool(options: CreateBuiltinReadFileToolOpti
   return {
     definition: {
       name: READ_FILE_TOOL_NAME,
-      description: '读取指定本地文本文件内容，可通过 offset 和 limit 滚动读取。相对路径需要工作区根目录，绝对路径需要用户确认。',
+      description:
+        '读取指定本地文件或编辑器文档的内容。' +
+        '当用户消息中包含 [file: /path/to/file.ts#L3-L5] 标记时，使用 path 参数读取磁盘文件，offset 从标记中的行号获取。' +
+        '当用户消息中包含 [file: id=xxx name="foo" @L3-L5] 标记时，使用 documentId 参数（id 的值）读取编辑器中的未保存文档。',
       source: 'builtin',
       riskLevel: 'read',
       requiresActiveDocument: false,
@@ -208,18 +264,73 @@ export function createBuiltinReadFileTool(options: CreateBuiltinReadFileToolOpti
       parameters: {
         type: 'object',
         properties: {
-          path: { type: 'string', description: '文件路径，支持相对工作区路径或绝对路径。' },
+          path: { type: 'string', description: '文件路径（绝对路径），与 documentId 二选一。对应 [file: /path/...] 标记中的路径部分。' },
+          documentId: { type: 'string', description: '文档 ID（未保存的编辑器文件），与 path 二选一。对应 [file: id=xxx ...] 标记中的 id 值。' },
           offset: { type: 'number', description: '起始行号，默认 1。' },
           limit: { type: 'number', description: '读取行数；不传时读取到文件末尾。' }
         },
-        required: ['path'],
+        required: [],
         additionalProperties: false
       }
     },
     async execute(input: ReadFileInput) {
+      // ── documentId 分支：编辑器内存 → SQLite 快照降级 ──
+      if (input.documentId) {
+        const context = editorToolContextRegistry.getContext(input.documentId);
+        let content: string;
+        let pathLabel: string;
+
+        if (context) {
+          // 路径 1：从编辑器内存读取（当前激活的 tab）
+          content = context.document.getContent();
+          pathLabel = context.document.path ?? '';
+        } else {
+          // 路径 2：降级到 SQLite 快照（tab 已关闭，但有历史快照）
+          const snapshot = await chatStorage.getReferenceSnapshotByDocumentId(input.documentId);
+          if (snapshot) {
+            content = snapshot.content;
+            pathLabel = `[快照] ${snapshot.title}`;
+          } else {
+            return createToolFailureResult(READ_FILE_TOOL_NAME, 'EXECUTION_FAILED', '文档未在编辑器中打开，且无历史快照');
+          }
+        }
+
+        const { excerpt, totalLines, readLines, hasMore, nextOffset } = extractLines(content, {
+          offset: input.offset,
+          limit: input.limit
+        });
+        return createToolSuccessResult(READ_FILE_TOOL_NAME, {
+          path: pathLabel,
+          content: excerpt,
+          totalLines,
+          readLines,
+          hasMore,
+          nextOffset
+        });
+      }
+
+      // ── path 分支：磁盘读取逻辑 ──
       const filePath = typeof input.path === 'string' ? input.path.trim() : '';
       if (!filePath) {
-        return createToolFailureResult(READ_FILE_TOOL_NAME, 'INVALID_INPUT', '文件路径不能为空');
+        return createToolFailureResult(READ_FILE_TOOL_NAME, 'INVALID_INPUT', 'path 或 documentId 必须提供一个');
+      }
+
+      // 如果文件已在编辑器中打开，直接从编辑器上下文读取（跳过权限确认）
+      const editorContext = editorToolContextRegistry.getContextByPath(filePath);
+      if (editorContext) {
+        const content = editorContext.document.getContent();
+        const { excerpt, totalLines, readLines, hasMore, nextOffset } = extractLines(content, {
+          offset: input.offset,
+          limit: input.limit
+        });
+        return createToolSuccessResult(READ_FILE_TOOL_NAME, {
+          path: editorContext.document.path ?? filePath,
+          content: excerpt,
+          totalLines,
+          readLines,
+          hasMore,
+          nextOffset
+        });
       }
 
       const workspaceRoot = options.getWorkspaceRoot?.() ?? null;

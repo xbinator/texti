@@ -31,6 +31,12 @@ export interface EditorToolContextRegistry {
    * @returns 工具上下文或 undefined
    */
   getContext: (documentId: string) => AIToolContext | undefined;
+  /**
+   * 按文件路径查找编辑器上下文
+   * @param filePath - 文件绝对路径
+   * @returns 匹配的上下文或 undefined
+   */
+  getContextByPath: (filePath: string) => AIToolContext | undefined;
 }
 
 /**
@@ -61,6 +67,15 @@ export function createEditorToolContextRegistry(): EditorToolContextRegistry {
     },
     getContext(documentId: string): AIToolContext | undefined {
       return contexts.get(documentId);
+    },
+    getContextByPath(filePath: string): AIToolContext | undefined {
+      const normalizedPath = filePath.trim();
+      for (const context of contexts.values()) {
+        if (context.document.path && context.document.path.trim() === normalizedPath) {
+          return context;
+        }
+      }
+      return undefined;
     }
   };
 }

@@ -67,7 +67,8 @@ export function useFileReference(options: FileReferenceOptions) {
    * @param reference - 文件引用信息
    */
   function insertReference(reference: FileReferenceChip): void {
-    const token = `{{file-ref:${reference.referenceId}|${reference.fileName}|${reference.startLine}|${reference.endLine}}} `;
+    const token = `{{file-ref:${reference.referenceId}|${reference.fileName}|${reference.startLine}|${reference.endLine}}}`;
+    const insertText = `${token} `;
     draftReferences.value = [
       ...draftReferences.value.filter((item) => item.id !== reference.referenceId),
       {
@@ -80,7 +81,7 @@ export function useFileReference(options: FileReferenceOptions) {
         snapshotId: ''
       }
     ];
-    options.insertTextAtCursor(token);
+    options.insertTextAtCursor(insertText);
   }
 
   /**
@@ -109,12 +110,16 @@ export function useFileReference(options: FileReferenceOptions) {
   }
 
   /**
-   * 获取内容中活跃的草稿文件引用
+   * 获取内容中活跃的草稿文件引用。
+   * 使用正则转义 token 进行匹配，避免 trim 导致的尾随空格丢失问题。
    * @param content - 输入内容
    * @returns 活跃的引用列表，无则返回 undefined
    */
   function getActiveReferences(content: string): ChatMessageFileReference[] | undefined {
-    const references = draftReferences.value.filter((reference) => content.includes(reference.token));
+    const references = draftReferences.value.filter((reference) => {
+      const escapedToken = reference.token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp(escapedToken).test(content);
+    });
 
     return references.length ? references : undefined;
   }
