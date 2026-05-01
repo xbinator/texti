@@ -1,86 +1,48 @@
 /**
  * @file useModelSelection.ts
- * @description 模型选择状态管理 hook，管理当前选中模型、视觉能力判断和模型切换
+ * @description 模型选择状态管理 hook，从 service-model store 读取选中模型，
+ * 从 provider store 派生视觉能力，自动响应所有数据变更。
  */
-import { ref, watch } from 'vue';
-import { getModelVisionSupport } from '@/ai/tools/policy';
-import { serviceModelsStorage } from '@/shared/storage';
-
-/**
- * 解析选中的模型标识结果
- */
-interface ParsedModel {
-  /** 服务商 ID */
-  providerId: string;
-  /** 模型 ID */
-  modelId: string;
-}
-
-/**
- * 解析选中的模型标识。
- * @param value - providerId:modelId 格式的模型值
- * @returns 解析结果，无效时返回 null
- */
-function parseSelectedModel(value: string | undefined): ParsedModel | null {
-  if (!value) return null;
-  const index = value.indexOf(':');
-  if (index <= 0 || index === value.length - 1) return null;
-
-  return {
-    providerId: value.slice(0, index),
-    modelId: value.slice(index + 1)
-  };
-}
+import { computed } from 'vue';
+import { useProviderStore } from '@/stores/provider';
+import { useServiceModelStore } from '@/stores/service-model';
 
 /**
  * 模型选择状态管理 hook
  * @returns 模型选择状态和操作方法
  */
 export function useModelSelection() {
-  /** 当前选中的模型标识（providerId:modelId） */
-  const selectedModel = ref<string | undefined>(undefined);
-  /** 当前模型是否支持视觉识别 */
-  const supportsVision = ref(false);
-  /** 模型视觉能力检查版本号，用于防止快速切换模型时竞态覆盖 */
-  let visionCheckVersion = 0;
+  const serviceModelStore = useServiceModelStore();
+  const providerStore = useProviderStore();
+
+  /** 当前选中的模型标识，从 store 读取 */
+  const selectedModel = computed(() => serviceModelStore.chatModel);
+
+  /** 当前模型是否支持视觉识别，从 providerStore 响应式派生 */
+  const supportsVision = computed(() => {
+    const model = selectedModel.value;
+    if (!model) return false;
+    const provider = providerStore.providers.find((p) => p.id === model.providerId);
+    const foundModel = provider?.models?.find((m) => m.id === model.modelId);
+    return foundModel?.supportsVision === true;
+  });
 
   /**
    * 初始化加载当前选中的模型配置。
-   * 从 serviceModelsStorage 读取 chat 场景的默认模型。
+   * 从 serviceModelsStorage 读取 chat 场景的默认模型并写入 store。
    */
   async function loadSelectedModel(): Promise<void> {
-    const config = await serviceModelsStorage.getConfig('chat');
-    selectedModel.value = config?.providerId && config?.modelId ? `${config.providerId}:${config.modelId}` : undefined;
+    await serviceModelStore.loadChatModel();
   }
 
   /**
    * 处理模型变更。
-   * @param value - 新选中的模型标识（providerId:modelId）
+   * 通过 store 保存并更新状态，computed 自动派生 supportsVision。
+   * @param model - 新选中的模型标识
    */
-  function onModelChange(value: string): void {
-    selectedModel.value = value;
+  async function onModelChange(model: { providerId: string; modelId: string }): Promise<void> {
+    await serviceModelStore.setChatModel(model);
   }
-
-  // 监听模型变更，派生视觉能力，含竞态保护
-  watch(
-    () => selectedModel.value,
-    async (value) => {
-      const version = ++visionCheckVersion;
-      const parsed = parseSelectedModel(value);
-
-      if (!parsed) {
-        supportsVision.value = false;
-        return;
-      }
-
-      const supported = await getModelVisionSupport(parsed.providerId, parsed.modelId);
-
-      if (version === visionCheckVersion) {
-        supportsVision.value = supported;
-      }
-    },
-    { immediate: true }
-  );
 
   return {
     selectedModel,

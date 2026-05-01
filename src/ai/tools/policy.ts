@@ -44,20 +44,6 @@ export async function getModelToolSupport(providerId: string, modelId: string): 
 }
 
 /**
- * 获取模型是否支持视觉识别。
- * @param providerId - 服务商 ID
- * @param modelId - 模型 ID
- * @returns 是否支持视觉识别
- */
-export async function getModelVisionSupport(providerId: string, modelId: string): Promise<boolean> {
-  const provider = await providerStorage.getProvider(providerId);
-  if (!provider) return false;
-
-  const model = provider.models?.find((item) => item.id === modelId);
-  return model?.supportsVision === true;
-}
-
-/**
  * 获取默认聊天工具名称列表
  * @returns 工具名称数组
  */

@@ -30,6 +30,7 @@
 import { ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import BButton from '@/components/BButton/index.vue';
+import type { SelectedModel } from '@/stores/service-model';
 import ModelSelector from './InputToolbar/ModelSelector.vue';
 
 /**
@@ -40,8 +41,8 @@ interface Props {
   loading: boolean;
   /** 输入框内容。 */
   inputValue: string;
-  /** 当前选中的模型（providerId:modelId）。 */
-  selectedModel?: string;
+  /** 当前选中的模型标识。 */
+  selectedModel?: SelectedModel;
   /** 当前模型是否支持视觉识别。 */
   supportsVision: boolean;
   /** 当前是否允许提交。 */
@@ -57,7 +58,7 @@ withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (e: 'submit'): void;
   (e: 'abort'): void;
-  (e: 'model-change', value: string): void;
+  (e: 'model-change', model: { providerId: string; modelId: string }): void;
   (e: 'image-select', files: File[]): void;
 }>();
 
@@ -81,8 +82,8 @@ function open(): void {
  * 转发模型选择事件。
  * @param value - 新的模型值。
  */
-function handleModelChange(value: string): void {
-  emit('model-change', value);
+function handleModelChange(model: { providerId: string; modelId: string }): void {
+  emit('model-change', model);
 }
 
 /**

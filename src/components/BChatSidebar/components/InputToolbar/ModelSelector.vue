@@ -39,9 +39,8 @@ import { Icon } from '@iconify/vue';
 import BButton from '@/components/BButton/index.vue';
 import BDropdown from '@/components/BDropdown/index.vue';
 import BModelIcon from '@/components/BModelIcon/index.vue';
-import { serviceModelsStorage } from '@/shared/storage';
-import { dispatchServiceModelUpdated } from '@/shared/storage/service-models/events';
 import { useProviderStore } from '@/stores/provider';
+import type { SelectedModel } from '@/stores/service-model';
 
 /**
  * 渲染到下拉菜单中的单个模型项。
@@ -71,8 +70,8 @@ interface ModelGroup {
  * 组件属性。
  */
 interface Props {
-  /** 当前选中的模型值，格式为 providerId:modelId。 */
-  model?: string;
+  /** 当前选中的模型标识。 */
+  model?: SelectedModel;
 }
 
 /**
@@ -98,7 +97,7 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<{
-  (e: 'update:model', value: string): void;
+  (e: 'update:model', model: SelectedModel): void;
 }>();
 
 const open = ref(false);
@@ -131,34 +130,24 @@ const groupedModels = computed<ModelGroup[]>(() => {
   return result;
 });
 
-async function loadSavedConfig(): Promise<void> {
-  if (internalModel.value) return;
-  const config = await serviceModelsStorage.getConfig('chat');
-  if (config?.providerId && config?.modelId) {
-    internalModel.value = `${config.providerId}:${config.modelId}`;
-  }
-}
-
 function handleModelChange(value: string): void {
   const parsed = parseModelValue(value);
   if (parsed) {
-    serviceModelsStorage.saveConfig('chat', parsed);
-    dispatchServiceModelUpdated('chat');
+    emit('update:model', parsed);
   }
-  emit('update:model', value);
   open.value = false;
 }
 
 watch(
   () => props.model,
   (value) => {
-    internalModel.value = value;
+    internalModel.value = value ? `${value.providerId}:${value.modelId}` : undefined;
   },
   { immediate: true }
 );
 
 onMounted(async () => {
-  await Promise.all([store.loadProviders(), loadSavedConfig()]);
+  await store.loadProviders();
 });
 
 /**

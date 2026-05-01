@@ -366,8 +366,8 @@ function handleAbort(): void {
  * 处理模型变更（委托给 modelSelection hook）。
  * @param value - 新选中的模型标识
  */
-function handleModelChange(value: string): void {
-  modelSelectionEvents.onModelChange(value);
+function handleModelChange(model: { providerId: string; modelId: string }): void {
+  modelSelectionEvents.onModelChange(model);
 }
 
 /** 清空当前草稿输入 */
