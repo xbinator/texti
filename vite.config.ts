@@ -29,7 +29,8 @@ const COMPONENT_DIRS = [
   'BDropdown',
   'BEditor',
   'BScrollbar',
-  'BTruncateText'
+  'BTruncateText',
+  'BImageViewer'
 ];
 
 /**
