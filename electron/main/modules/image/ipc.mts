@@ -4,8 +4,6 @@
  */
 import { ipcMain } from 'electron';
 import sharp from 'sharp';
-import { writeLog } from '../logger/service.mjs';
-import { LogLevel } from '../logger/types.mjs';
 
 /** 压缩参数 */
 interface ImageCompressRequest {
@@ -92,14 +90,6 @@ export function registerImageHandlers(): void {
       // 若 sharp 无法推断则 toBuffer() 抛异常，外层 catch 降级返回 inputBuffer
 
       const outputBuffer = await pipeline.toBuffer();
-      const compressedSize = outputBuffer.length;
-      const compressionRatio = (((originalSize - compressedSize) / originalSize) * 100).toFixed(2);
-
-      writeLog({
-        level: LogLevel.INFO,
-        scope: 'main',
-        message: `图片压缩完成 - 原始大小: ${(originalSize / 1024).toFixed(2)}KB, 压缩后: ${(compressedSize / 1024).toFixed(2)}KB, 压缩率: ${compressionRatio}%`
-      });
 
       return { buffer: outputBuffer, compressed: true };
     } catch {
