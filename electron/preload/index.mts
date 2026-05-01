@@ -330,16 +330,15 @@ const electronAPI: ElectronAPI = {
     // 主进程返回的 Buffer 经结构化克隆后变为 Uint8Array
     // 取其底层 .buffer 并 slice 出有效字节范围
     if (result.buffer instanceof Uint8Array) {
-      result.buffer = result.buffer.buffer.slice(
-        result.buffer.byteOffset,
-        result.buffer.byteOffset + result.buffer.byteLength
-      );
+      const { byteOffset, byteLength } = result.buffer;
+
+      result.buffer = result.buffer.buffer.slice(byteOffset, byteOffset + byteLength);
       return result;
     }
     // 兜底：无法识别的类型，回退到原始 buffer（调用方已有 fallback）
     result.buffer = buffer;
     return result;
-  },
+  }
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);
