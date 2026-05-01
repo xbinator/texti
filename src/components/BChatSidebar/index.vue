@@ -44,15 +44,7 @@
 
       <div class="b-chat-sidebar__input">
         <div class="b-chat-sidebar__input-container">
-          <div v-if="inputImages.length" class="b-chat-sidebar__image-preview">
-            <div v-for="image in inputImages" :key="image.id" class="b-chat-sidebar__image-preview-item">
-              <img :src="image.url" :alt="image.name" class="b-chat-sidebar__image-preview-image" />
-              <BButton class="b-chat-sidebar__image-preview-remove" size="small" square type="text" @click="inputEvents.removeImage(image.id)">
-                <Icon icon="lucide:x" width="14" height="14" />
-              </BButton>
-            </div>
-          </div>
-          <div v-if="imageUpload.imagesBlockedByModel.value" class="b-chat-sidebar__image-warning">当前模型不支持图片，请切换到支持视觉识别的模型后发送</div>
+          <ImagePreview :images="inputImages" :supports-vision="supportsVision" :on-remove-image="inputEvents.removeImage" />
 
           <BPromptEditor
             ref="promptEditorRef"
@@ -106,6 +98,7 @@ import type { SlashCommandOption } from '@/components/BPromptEditor/types';
 import { useChatStore } from '@/stores/chat';
 import { useSettingStore } from '@/stores/setting';
 import ConversationView from './components/ConversationView.vue';
+import ImagePreview from './components/ImagePreview.vue';
 import InputToolbar from './components/InputToolbar.vue';
 import SessionHistory from './components/SessionHistory.vue';
 import UsagePanel from './components/UsagePanel.vue';
@@ -483,45 +476,10 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  align-items: flex-end;
   padding: 12px;
   background: var(--input-bg);
   border: 1px solid var(--border-primary);
   border-radius: 6px;
-}
-
-.b-chat-sidebar__image-preview {
-  display: flex;
-  gap: 8px;
-  width: 100%;
-  overflow-x: auto;
-}
-
-.b-chat-sidebar__image-preview-item {
-  position: relative;
-  flex: 0 0 auto;
-  width: 60px;
-  height: 60px;
-  overflow: hidden;
-  border-radius: 8px;
-}
-
-.b-chat-sidebar__image-preview-image {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.b-chat-sidebar__image-preview-remove {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-}
-
-.b-chat-sidebar__image-warning {
-  width: 100%;
-  font-size: 12px;
-  color: var(--color-danger, #d14343);
 }
 
 .b-chat-sidebar__input-container .b-prompt-editor {
