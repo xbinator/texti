@@ -9,6 +9,7 @@ import { registerShellHandlers } from './shell/ipc.mjs';
 import { registerStoreHandlers } from './store/ipc.mjs';
 import { registerWebviewHandlers } from './webview/ipc.mjs';
 import { registerWindowHandlers } from './window/ipc.mjs';
+import { registerImageHandlers } from './image/ipc.mjs';
 
 export function registerAllIpcHandlers() {
   registerDialogHandlers();
@@ -23,6 +24,7 @@ export function registerAllIpcHandlers() {
   registerMenuHandlers();
   registerPlatformShortcutHandlers();
   registerWebviewHandlers();
+  registerImageHandlers();
 }
 
 export {
@@ -36,7 +38,8 @@ export {
   registerLoggerHandlers,
   registerPlatformShortcutHandlers,
   registerWebviewHandlers,
-  registerLogFileHandlers
+  registerLogFileHandlers,
+  registerImageHandlers
 };
 
 export { aiService } from './ai/service.mjs';
