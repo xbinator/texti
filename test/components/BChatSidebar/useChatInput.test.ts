@@ -1,10 +1,10 @@
 /**
- * @file useDraftInput.test.ts
- * @description useDraftInput 图片草稿状态测试
+ * @file useChatInput.test.ts
+ * @description useChatInput 图片草稿状态测试
  */
 import type { ChatMessageFile, ChatMessageFileReference } from 'types/chat';
 import { describe, expect, it, vi } from 'vitest';
-import { useDraftInput } from '@/components/BChatSidebar/hooks/useDraftInput';
+import { useChatInput } from '@/components/BChatSidebar/hooks/useChatInput';
 import type { Message } from '@/components/BChatSidebar/utils/types';
 
 /**
@@ -40,27 +40,27 @@ function createReference(): ChatMessageFileReference {
   };
 }
 
-describe('useDraftInput', () => {
+describe('useChatInput', () => {
   it('tracks image drafts independently from text emptiness', () => {
     const focusInput = vi.fn();
-    const draftInput = useDraftInput({ focusInput });
+    const chatInput = useChatInput({ focusInput });
 
-    expect(draftInput.isEmpty()).toBe(true);
-    expect(draftInput.hasImages()).toBe(false);
+    expect(chatInput.isEmpty()).toBe(true);
+    expect(chatInput.hasImages()).toBe(false);
 
-    draftInput.addImages([createImageFile()]);
+    chatInput.addImages([createImageFile()]);
 
-    expect(draftInput.isEmpty()).toBe(true);
-    expect(draftInput.hasImages()).toBe(true);
+    expect(chatInput.isEmpty()).toBe(true);
+    expect(chatInput.hasImages()).toBe(true);
 
-    draftInput.removeImage('image-1');
+    chatInput.removeImage('image-1');
 
-    expect(draftInput.hasImages()).toBe(false);
+    expect(chatInput.hasImages()).toBe(false);
   });
 
   it('restores image drafts and clears them together with references', () => {
     const focusInput = vi.fn();
-    const draftInput = useDraftInput({ focusInput });
+    const chatInput = useChatInput({ focusInput });
     const reference = createReference();
     const message: Message = {
       id: 'message-1',
@@ -73,17 +73,17 @@ describe('useDraftInput', () => {
       finished: true
     };
 
-    draftInput.restoreFromMessage(message);
+    chatInput.restoreFromMessage(message);
 
-    expect(draftInput.inputValue.value).toBe('请看这张图');
-    expect(draftInput.draftReferences.value).toEqual([reference]);
-    expect(draftInput.draftImages.value).toEqual([createImageFile()]);
+    expect(chatInput.inputContent.value).toBe('请看这张图');
+    expect(chatInput.inputReferences.value).toEqual([reference]);
+    expect(chatInput.inputImages.value).toEqual([createImageFile()]);
 
-    draftInput.clear();
+    chatInput.clear();
 
-    expect(draftInput.inputValue.value).toBe('');
-    expect(draftInput.draftReferences.value).toEqual([]);
-    expect(draftInput.draftImages.value).toEqual([]);
+    expect(chatInput.inputContent.value).toBe('');
+    expect(chatInput.inputReferences.value).toEqual([]);
+    expect(chatInput.inputImages.value).toEqual([]);
     expect(focusInput).toHaveBeenCalledTimes(1);
   });
 });
