@@ -96,7 +96,7 @@ const currentSession = computed<ChatSession | undefined>(() => {
 
 const loading = ref(false);
 
-const isDisabled = computed(() => props.disabled || !sessions.value.length);
+const isDisabled = computed(() => props.disabled);
 
 async function refreshSessions(): Promise<void> {
   sessions.value = await chatStore.getSessions(CHAT_SESSION_TYPE);
