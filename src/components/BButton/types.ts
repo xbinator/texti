@@ -19,4 +19,6 @@ export interface BButtonProps {
   text?: string;
   // 是否危险
   danger?: boolean;
+  // 提示信息
+  tooltip?: string;
 }

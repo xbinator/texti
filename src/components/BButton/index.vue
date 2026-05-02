@@ -1,44 +1,120 @@
-<template>
-  <button
-    :class="bem([type, size, { disabled, loading, icon: $slots.icon || icon, block, rounded, square, danger }])"
-    :disabled="disabled || loading"
-    @click="handleClick"
-  >
-    <div v-if="loading" :class="bem('loading')">
-      <div :class="bem('loading-spinner')"></div>
-    </div>
-    <Icon v-if="icon" :class="bem('icon')" :icon="icon" />
-    <slot></slot>
-  </button>
-</template>
-
-<script setup lang="ts">
-import type { BButtonProps as Props } from './types';
+<script lang="tsx">
+import type { BButtonProps } from './types';
+import { defineComponent, type PropType } from 'vue';
 import { Icon } from '@iconify/vue';
+import { Tooltip } from 'ant-design-vue';
 import { createNamespace } from '@/utils/namespace';
 
 const [, bem] = createNamespace('button');
 
-const props = withDefaults(defineProps<Props>(), {
-  type: 'primary',
-  size: 'middle',
-  disabled: false,
-  loading: false,
-  block: false,
-  rounded: false,
-  square: false,
-  icon: '',
-  text: '',
-  danger: false
-});
+/**
+ * 按钮组件
+ * 支持多种类型、尺寸、图标和 tooltip
+ */
+export default defineComponent({
+  name: 'BButton',
+  props: {
+    type: {
+      type: String as PropType<'primary' | 'secondary' | 'outline' | 'text'>,
+      default: 'primary'
+    },
+    size: {
+      type: String as PropType<'small' | 'middle' | 'large'>,
+      default: 'middle'
+    },
+    disabled: {
+      type: Boolean,
+      default: false
+    },
+    loading: {
+      type: Boolean,
+      default: false
+    },
+    block: {
+      type: Boolean,
+      default: false
+    },
+    rounded: {
+      type: Boolean,
+      default: false
+    },
+    square: {
+      type: Boolean,
+      default: false
+    },
+    icon: {
+      type: String,
+      default: ''
+    },
+    text: {
+      type: String,
+      default: ''
+    },
+    danger: {
+      type: Boolean,
+      default: false
+    },
+    tooltip: {
+      type: String,
+      default: ''
+    }
+  },
+  emits: ['click'],
+  setup(props: BButtonProps, { emit, slots }) {
+    /**
+     * 处理按钮点击事件
+     * @param event - 鼠标事件对象
+     */
+    function handleClick(event: MouseEvent) {
+      if (!props.disabled && !props.loading) {
+        emit('click', event);
+      }
+    }
 
-const emit = defineEmits(['click']);
+    /**
+     * 渲染按钮内容
+     * @returns 按钮 JSX 元素
+     */
+    function renderButton() {
+      const hasIcon = slots.icon || props.icon;
 
-function handleClick(event: MouseEvent) {
-  if (!props.disabled && !props.loading) {
-    emit('click', event);
+      return (
+        <button
+          class={bem([
+            props.type,
+            props.size,
+            {
+              disabled: props.disabled,
+              loading: props.loading,
+              icon: hasIcon,
+              block: props.block,
+              rounded: props.rounded,
+              square: props.square,
+              danger: props.danger
+            }
+          ])}
+          disabled={props.disabled || props.loading}
+          onClick={handleClick}
+        >
+          {props.loading && (
+            <div class={bem('loading')}>
+              <div class={bem('loading-spinner')}></div>
+            </div>
+          )}
+          {props.icon && <Icon class={bem('icon')} icon={props.icon} />}
+          {slots.default?.()}
+        </button>
+      );
+    }
+
+    return () => {
+      if (props.tooltip) {
+        return <Tooltip title={props.tooltip}>{renderButton()}</Tooltip>;
+      }
+      return renderButton();
+    };
   }
-}
+});
 </script>
 
 <style scoped lang="less">
