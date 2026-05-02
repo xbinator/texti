@@ -3,17 +3,14 @@
  * @description 维护语音录音器的最小状态与波形采样输出。
  */
 import { ref } from 'vue';
+import { noop } from 'lodash-es';
 
-/**
- * 录音状态。
- * @description 录音器当前状态，包括空闲、录音中、停止中。
- *
- */
+// ─── 类型定义 ────────────────────────────────────────────────────────────────
+
+/** 录音器当前状态。 */
 export type VoiceRecorderStatus = 'idle' | 'recording' | 'stopping';
 
-/**
- * 单段录音结果。
- */
+/** 单段录音结果。 */
 export interface VoiceRecorderSegment {
   /** 音频二进制数据。 */
   buffer: ArrayBuffer;
@@ -21,198 +18,208 @@ export interface VoiceRecorderSegment {
   mimeType: string;
 }
 
-/**
- * 录音器配置。
- */
+/** 录音器配置。 */
 export interface VoiceRecorderOptions {
   /** 单段录音完成时的回调。 */
   onSegment?: (segment: VoiceRecorderSegment) => Promise<void> | void;
-  /** 自动切片时长，单位毫秒。 */
+  /** 自动切片时长（毫秒），默认 4000。 */
   segmentDurationMs?: number;
 }
 
+// ─── 常量 ────────────────────────────────────────────────────────────────────
+
+const PREFERRED_MIME = 'audio/webm;codecs=opus';
+const FALLBACK_MIME = 'audio/webm';
+const STOP_TIMEOUT_MS = 5000;
+const FFT_SIZE = 64;
+const WAVEFORM_BINS = 13;
+
+// ─── Hook ────────────────────────────────────────────────────────────────────
+
 /**
  * 语音录音器 hook。
- * 当前为最小实现，后续再接入真实 MediaRecorder 与 AudioContext。
- * @returns 录音状态、波形采样与控制方法
+ * @returns 录音状态、波形采样与控制方法。
  */
 export function useVoiceRecorder(options: VoiceRecorderOptions = {}) {
-  /**
-   * 当前录音状态。
-   */
   const status = ref<VoiceRecorderStatus>('idle');
-
-  /**
-   * 当前波形采样。
-   */
   const waveformSamples = ref<number[]>([]);
 
-  /**
-   * 媒体录音器实例。
-   */
+  // 内部状态，不对外暴露
   const mediaRecorder = ref<MediaRecorder | null>(null);
-
-  /**
-   * 当前媒体流。
-   */
   const mediaStream = ref<MediaStream | null>(null);
-
-  /**
-   * 当前录音片段缓存。
-   */
-  const recordedChunks = ref<Blob[]>([]);
-
-  /**
-   * 录音 MIME 类型。
-   */
-  const mimeType = ref<string>('audio/webm');
-
-  /**
-   * 音频上下文实例。
-   */
   const audioContext = ref<AudioContext | null>(null);
-
-  /**
-   * 波形分析节点。
-   */
   const analyserNode = ref<AnalyserNode | null>(null);
+  const recordedChunks = ref<Blob[]>([]);
+  const activeMimeType = ref<string>(FALLBACK_MIME);
 
-  /**
-   * 波形采样动画帧 ID。
-   */
-  const waveformFrameId = ref<number | null>(null);
+  // 哨兵值 -1 表示「无动画帧」，避免 null 检查
+  let waveformFrameId = -1;
+  // 每个实例独立持有自己的 delivery queue，避免多实例共享
+  let segmentDeliveryQueue = Promise.resolve();
 
-  /**
-   * 已投递的音频段回调串行队列。
-   */
-  let segmentDeliveryQueue: Promise<void> = Promise.resolve();
+  // ── 波形采样 ──────────────────────────────────────────────────────────────
 
-  /**
-   * 停止当前波形采样循环。
-   */
   function stopWaveformLoop(): void {
-    if (waveformFrameId.value !== null && typeof cancelAnimationFrame !== 'undefined') {
-      cancelAnimationFrame(waveformFrameId.value);
+    if (waveformFrameId !== -1) {
+      cancelAnimationFrame(waveformFrameId);
+      waveformFrameId = -1;
     }
-    waveformFrameId.value = null;
     waveformSamples.value = [];
   }
 
-  /**
-   * 清理所有录音相关资源。
-   * @param clearChunks - 是否清空录音片段缓存，默认 true
-   */
-  function cleanupResources(clearChunks = true): void {
-    if (clearChunks) {
-      recordedChunks.value = [];
-    }
-    mediaRecorder.value = null;
-    mediaStream.value?.getTracks().forEach((track) => track.stop());
-    mediaStream.value = null;
-    stopWaveformLoop();
-    audioContext.value = null;
-    analyserNode.value = null;
-    status.value = 'idle';
-  }
-
-  /**
-   * 启动当前媒体流的波形采样。
-   * @param stream - 当前录音媒体流
-   */
   function startWaveformLoop(stream: MediaStream): void {
-    if (typeof window === 'undefined' || typeof AudioContext === 'undefined') {
+    if (typeof AudioContext === 'undefined') {
       waveformSamples.value = [1, 2, 1];
       return;
     }
 
-    audioContext.value = new AudioContext();
-    const sourceNode = audioContext.value.createMediaStreamSource(stream);
-    analyserNode.value = audioContext.value.createAnalyser();
-    analyserNode.value.fftSize = 64;
-    sourceNode.connect(analyserNode.value);
+    const ctx = new AudioContext();
+    audioContext.value = ctx;
 
-    const dataArray = new Uint8Array(analyserNode.value.frequencyBinCount);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = FFT_SIZE;
+    ctx.createMediaStreamSource(stream).connect(analyser);
+    analyserNode.value = analyser;
+
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
     const tick = (): void => {
-      if (!analyserNode.value) return;
-
-      analyserNode.value.getByteFrequencyData(dataArray);
-      waveformSamples.value = Array.from(dataArray.slice(0, 13)).map((sample) => Math.max(Math.round(sample / 32), 1));
-      waveformFrameId.value = window.requestAnimationFrame(tick);
+      analyser.getByteFrequencyData(dataArray);
+      waveformSamples.value = Array.from(dataArray.subarray(0, WAVEFORM_BINS)).map((s) => Math.max(Math.round(s / 32), 1));
+      waveformFrameId = requestAnimationFrame(tick);
     };
 
-    waveformFrameId.value = window.requestAnimationFrame(tick);
+    waveformFrameId = requestAnimationFrame(tick);
   }
 
+  // ── 资源清理 ──────────────────────────────────────────────────────────────
+
   /**
-   * 开始录音。
+   * 统一清理所有录音资源。
+   * @param preserveChunks - 为 true 时保留已录音片段（stop 流程用）。
    */
+  function cleanupResources(preserveChunks = false): void {
+    stopWaveformLoop();
+
+    mediaStream.value?.getTracks().forEach((t) => t.stop());
+    mediaStream.value = null;
+
+    mediaRecorder.value = null;
+
+    // 显式关闭 AudioContext，释放系统音频资源
+    audioContext.value?.close().catch(noop);
+    audioContext.value = null;
+    analyserNode.value = null;
+
+    if (!preserveChunks) {
+      recordedChunks.value = [];
+    }
+
+    status.value = 'idle';
+  }
+
+  // ── 音频段投递 ────────────────────────────────────────────────────────────
+
+  /**
+   * 将一个 Blob 片段序列化后通过 onSegment 回调投递。
+   * 投递操作串行排队，保证顺序且不阻塞录音主流程。
+   */
+  function enqueueSegment(blob: Blob): void {
+    if (!options.onSegment) return;
+
+    const { onSegment } = options;
+    segmentDeliveryQueue = segmentDeliveryQueue.then(async () => {
+      try {
+        await onSegment({
+          buffer: await blob.arrayBuffer(),
+          mimeType: blob.type || activeMimeType.value
+        });
+      } catch (err) {
+        //
+      }
+    });
+  }
+
+  // ── 对外接口 ──────────────────────────────────────────────────────────────
+
+  /** 开始录音。 */
   async function start(): Promise<void> {
+    // SSR / 测试环境降级
     if (typeof navigator === 'undefined' || typeof MediaRecorder === 'undefined') {
       status.value = 'recording';
       return;
     }
 
     recordedChunks.value = [];
+    segmentDeliveryQueue = Promise.resolve();
+
     mediaStream.value = await navigator.mediaDevices.getUserMedia({ audio: true });
     startWaveformLoop(mediaStream.value);
-    mimeType.value = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
-    mediaRecorder.value = new MediaRecorder(mediaStream.value, { mimeType: mimeType.value });
-    mediaRecorder.value.ondataavailable = (event: BlobEvent) => {
-      if (event.data.size === 0) {
-        return;
-      }
 
-      recordedChunks.value.push(event.data);
-      const currentBlob = event.data;
+    activeMimeType.value = MediaRecorder.isTypeSupported(PREFERRED_MIME) ? PREFERRED_MIME : FALLBACK_MIME;
 
-      segmentDeliveryQueue = segmentDeliveryQueue.then(async () => {
-        if (!options.onSegment) {
-          return;
-        }
-
-        await options.onSegment({
-          buffer: await currentBlob.arrayBuffer(),
-          mimeType: currentBlob.type || mimeType.value
-        });
-      });
+    const recorder = new MediaRecorder(mediaStream.value, { mimeType: activeMimeType.value });
+    recorder.ondataavailable = ({ data }: BlobEvent) => {
+      if (data.size === 0) return;
+      recordedChunks.value.push(data);
+      enqueueSegment(data);
     };
-    mediaRecorder.value.start(options.segmentDurationMs ?? 4000);
+
+    mediaRecorder.value = recorder;
+    recorder.start(options.segmentDurationMs ?? 4000);
     status.value = 'recording';
   }
 
-  /**
-   * 停止录音。
-   */
+  /** 正常停止录音，等待所有音频段投递完毕后返回。 */
   async function stop(): Promise<void> {
-    if (!mediaRecorder.value) {
-      status.value = 'idle';
+    const recorder = mediaRecorder.value;
+    if (!recorder) {
+      cleanupResources();
       return;
     }
 
     status.value = 'stopping';
 
-    const recorder = mediaRecorder.value;
     await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        cleanupResources();
+        resolve();
+      }, STOP_TIMEOUT_MS);
+
       recorder.onstop = async () => {
+        clearTimeout(timer);
         try {
+          // 等待最后一批音频段全部投递完成，再清理资源
           await segmentDeliveryQueue;
-          cleanupResources();
+          cleanupResources(/* preserveChunks */ true);
           resolve();
-        } catch (error) {
+        } catch (err) {
           cleanupResources();
-          reject(error);
+          reject(err);
         }
       };
+
       recorder.stop();
     });
   }
 
-  /**
-   * 取消录音并清空当前缓存。
-   */
+  /** 取消录音，丢弃全部已录音数据。 */
   async function cancel(): Promise<void> {
-    mediaRecorder.value?.stop();
+    const recorder = mediaRecorder.value;
+    if (!recorder) {
+      cleanupResources();
+      return;
+    }
+
+    // 先清除回调，再 stop，确保 ondataavailable 触发后不会再入队
+    recorder.ondataavailable = null;
+    recorder.onstop = noop;
+
+    await new Promise<void>((resolve) => {
+      recorder.onstop = () => resolve();
+      recorder.stop();
+    });
+
     cleanupResources();
   }
 

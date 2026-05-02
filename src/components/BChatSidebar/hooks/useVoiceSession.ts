@@ -5,14 +5,12 @@
 import { computed, ref } from 'vue';
 import { hasElectronAPI, getElectronAPI } from '@/shared/platform/electron-api';
 
-/**
- * 语音段状态。
- */
+// ─── 类型定义 ────────────────────────────────────────────────────────────────
+
+/** 语音段状态。 */
 export type VoiceSegmentStatus = 'pending' | 'transcribing' | 'partial' | 'final' | 'failed';
 
-/**
- * 待转写的语音段输入。
- */
+/** 待转写的语音段输入。 */
 export interface PendingVoiceSegment {
   /** 段落唯一标识。 */
   id: string;
@@ -24,11 +22,9 @@ export interface PendingVoiceSegment {
   mimeType: string;
 }
 
-/**
- * 已登记的语音段。
- */
+/** 已登记的语音段。 */
 export interface VoiceSegment extends PendingVoiceSegment {
-  /** 段序号。 */
+  /** 段序号（即入队顺序）。 */
   index: number;
   /** 当前状态。 */
   status: VoiceSegmentStatus;
@@ -36,17 +32,28 @@ export interface VoiceSegment extends PendingVoiceSegment {
   text: string;
 }
 
-/**
- * 单段转写函数。
- */
-export type VoiceSegmentTranscriber = (segment: PendingVoiceSegment) => Promise<{ text: string }>;
+/** 单段转写结果。 */
+export interface TranscribeResult {
+  text: string;
+}
+
+/** 会话完成结果。 */
+export interface SessionResult {
+  /** 最终拼接文本。 */
+  text: string;
+  /** 转写失败的段 ID 列表，为空则表示全部成功。 */
+  failedSegmentIds: string[];
+}
+
+/** 单段转写函数签名。 */
+export type VoiceSegmentTranscriber = (segment: PendingVoiceSegment) => Promise<TranscribeResult>;
+
+// ─── 默认转写执行器 ──────────────────────────────────────────────────────────
 
 /**
- * 默认单段转写执行器。
- * @param segment - 待转写语音段
- * @returns 转写文本
+ * 默认单段转写执行器，调用 Electron IPC 完成转写。
  */
-async function defaultVoiceSegmentTranscriber(segment: PendingVoiceSegment): Promise<{ text: string }> {
+export async function defaultVoiceSegmentTranscriber(segment: PendingVoiceSegment): Promise<TranscribeResult> {
   if (!hasElectronAPI()) {
     return { text: '' };
   }
@@ -57,80 +64,100 @@ async function defaultVoiceSegmentTranscriber(segment: PendingVoiceSegment): Pro
     segmentId: segment.id
   });
 
-  return {
-    text: result.text
-  };
+  return { text: result.text };
 }
+
+// ─── Hook ────────────────────────────────────────────────────────────────────
 
 /**
  * 管理语音转写分段会话。
- * @param transcribe - 单段转写执行器
- * @returns 段列表、最终拼接文本与入队方法
+ *
+ * - 保证转写串行执行，入队顺序即转写顺序。
+ * - `finalText` 仅拼接状态为 `final` 的段。
+ * - `completeSession` 返回失败段列表，供调用方决策。
+ *
+ * @param transcribe - 单段转写执行器，默认使用 Electron IPC。
  */
 export function useVoiceSession(transcribe: VoiceSegmentTranscriber = defaultVoiceSegmentTranscriber) {
-  /**
-   * 当前会话的全部段信息。
-   */
+  /** 当前会话的全部段信息。 */
   const segments = ref<VoiceSegment[]>([]);
 
   /**
-   * 当前串行转写队列。
+   * 串行转写队列尾部 Promise。
+   * 每次入队都链在当前尾部，保证严格串行。
    */
-  let transcriptionQueue: Promise<void> = Promise.resolve();
+  let queueTail: Promise<void> = Promise.resolve();
+
+  // ── 计算属性 ───────────────────────────────────────────────────────────────
 
   /**
-   * 已完成段的最终拼接文本。
+   * 已完成段按入队顺序拼接的最终文本。
+   * index 即 push 顺序，无需额外排序。
    */
-  const finalText = computed<string>(() => {
-    return segments.value
-      .filter((segment) => segment.status === 'final')
-      .sort((left, right) => left.index - right.index)
-      .map((segment) => `${segment.separator}${segment.text}`)
-      .join('');
-  });
+  const finalText = computed<string>(() =>
+    segments.value
+      .filter((s) => s.status === 'final')
+      .map((s) => `${s.separator}${s.text}`)
+      .join('')
+  );
+
+  // ── 内部工具 ───────────────────────────────────────────────────────────────
 
   /**
-   * 把新的语音段加入队列并立即串行转写。
-   * @param input - 待转写语音段
+   * 通过索引更新段字段，触发 Vue 响应式。
+   * 直接修改 `segment.xxx` 在某些场景下会绕过代理追踪。
    */
-  async function enqueueSegment(input: PendingVoiceSegment): Promise<void> {
-    const segment: VoiceSegment = {
-      ...input,
-      index: segments.value.length,
-      status: 'pending',
-      text: ''
-    };
+  function patchSegment(index: number, patch: Partial<Pick<VoiceSegment, 'status' | 'text'>>): void {
+    segments.value[index] = { ...segments.value[index], ...patch };
+  }
 
-    segments.value.push(segment);
-    transcriptionQueue = transcriptionQueue.then(async () => {
-      segment.status = 'transcribing';
+  // ── 对外接口 ───────────────────────────────────────────────────────────────
 
-      const result = await transcribe(input);
-      segment.text = result.text;
-      segment.status = 'final';
+  /**
+   * 把新的语音段加入队列并串行转写。
+   *
+   * 调用方无需 await 此方法；如需等待转写完成，await `completeSession()`。
+   * 若确实需要等待单段完成，可 await 返回值，但注意并发调用仍保证串行。
+   *
+   * @param input - 待入队语音段
+   */
+  function enqueueSegment(input: PendingVoiceSegment): void {
+    const index = segments.value.length;
+    segments.value.push({ ...input, index, status: 'pending', text: '' });
+
+    // 链在当前队列尾部，保证严格串行；不在此处 await，避免并发调用时的竞态
+    queueTail = queueTail.then(async () => {
+      patchSegment(index, { status: 'transcribing' });
+
+      try {
+        const { text } = await transcribe(input);
+        patchSegment(index, { status: 'final', text });
+      } catch (err) {
+        patchSegment(index, { status: 'failed', text: '' });
+      }
     });
-
-    await transcriptionQueue;
   }
 
   /**
-   * 完成当前会话并返回最终文本。
-   * @returns 会话最终文本
+   * 等待所有已入队段转写完毕，返回最终结果。
+   *
+   * @returns 最终拼接文本与失败段 ID 列表
    */
-  async function completeSession(): Promise<{ text: string }> {
-    await transcriptionQueue;
+  async function completeSession(): Promise<SessionResult> {
+    await queueTail;
 
-    return {
-      text: finalText.value
-    };
+    const failedSegmentIds = segments.value.filter((s) => s.status === 'failed').map((s) => s.id);
+
+    return { text: finalText.value, failedSegmentIds };
   }
 
   /**
-   * 重置当前会话状态，为下一次录音做准备。
+   * 重置会话，清空所有段与队列，为下一次录音做准备。
+   * 建议在 `completeSession` 完成后调用，避免重置正在转写中的段。
    */
   function resetSession(): void {
     segments.value = [];
-    transcriptionQueue = Promise.resolve();
+    queueTail = Promise.resolve();
   }
 
   return {
