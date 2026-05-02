@@ -6,6 +6,8 @@ import { ref } from 'vue';
 
 /**
  * 录音状态。
+ * @description 录音器当前状态，包括空闲、录音中、停止中。
+ *
  */
 export type VoiceRecorderStatus = 'idle' | 'recording' | 'stopping';
 
@@ -97,6 +99,23 @@ export function useVoiceRecorder(options: VoiceRecorderOptions = {}) {
   }
 
   /**
+   * 清理所有录音相关资源。
+   * @param clearChunks - 是否清空录音片段缓存，默认 true
+   */
+  function cleanupResources(clearChunks = true): void {
+    if (clearChunks) {
+      recordedChunks.value = [];
+    }
+    mediaRecorder.value = null;
+    mediaStream.value?.getTracks().forEach((track) => track.stop());
+    mediaStream.value = null;
+    stopWaveformLoop();
+    audioContext.value = null;
+    analyserNode.value = null;
+    status.value = 'idle';
+  }
+
+  /**
    * 启动当前媒体流的波形采样。
    * @param stream - 当前录音媒体流
    */
@@ -174,24 +193,16 @@ export function useVoiceRecorder(options: VoiceRecorderOptions = {}) {
     status.value = 'stopping';
 
     const recorder = mediaRecorder.value;
-    await new Promise<void>((resolve) => {
+    await new Promise<void>((resolve, reject) => {
       recorder.onstop = async () => {
-        await segmentDeliveryQueue;
-        recordedChunks.value = [];
-        mediaRecorder.value = null;
-
-        mediaStream.value?.getTracks().forEach((track) => {
-          track.stop();
-        });
-        mediaStream.value = null;
-        stopWaveformLoop();
-        if (audioContext.value) {
-          audioContext.value.close();
+        try {
+          await segmentDeliveryQueue;
+          cleanupResources();
+          resolve();
+        } catch (error) {
+          cleanupResources();
+          reject(error);
         }
-        audioContext.value = null;
-        analyserNode.value = null;
-        status.value = 'idle';
-        resolve();
       };
       recorder.stop();
     });
@@ -201,20 +212,8 @@ export function useVoiceRecorder(options: VoiceRecorderOptions = {}) {
    * 取消录音并清空当前缓存。
    */
   async function cancel(): Promise<void> {
-    recordedChunks.value = [];
     mediaRecorder.value?.stop();
-    mediaRecorder.value = null;
-    mediaStream.value?.getTracks().forEach((track) => {
-      track.stop();
-    });
-    mediaStream.value = null;
-    stopWaveformLoop();
-    if (audioContext.value) {
-      audioContext.value.close();
-    }
-    audioContext.value = null;
-    analyserNode.value = null;
-    status.value = 'idle';
+    cleanupResources();
   }
 
   return {

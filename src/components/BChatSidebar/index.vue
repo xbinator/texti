@@ -130,8 +130,6 @@ const modelSelectorRef = ref<InstanceType<typeof InputToolbar>>();
 const conversationRef = ref<InstanceType<typeof ConversationView>>();
 /** 会话历史组件引用 */
 const sessionHistoryRef = ref<InstanceType<typeof SessionHistory>>();
-/** 当前活跃语音占位块 ID。 */
-const activeVoicePlaceholderId = ref<string | null>(null);
 
 /** 聊天历史加载状态和方法 */
 const { setLoadedMessages, fetchAllPriorHistory, messages, hasMoreHistory, loadHistory } = useChatHistory();
