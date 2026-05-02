@@ -10,6 +10,7 @@ import { registerStoreHandlers } from './store/ipc.mjs';
 import { registerWebviewHandlers } from './webview/ipc.mjs';
 import { registerWindowHandlers } from './window/ipc.mjs';
 import { registerImageHandlers } from './image/ipc.mjs';
+import { registerSpeechHandlers } from './speech/ipc.mjs';
 
 export function registerAllIpcHandlers() {
   registerDialogHandlers();
@@ -25,6 +26,7 @@ export function registerAllIpcHandlers() {
   registerPlatformShortcutHandlers();
   registerWebviewHandlers();
   registerImageHandlers();
+  registerSpeechHandlers();
 }
 
 export {
@@ -39,7 +41,8 @@ export {
   registerPlatformShortcutHandlers,
   registerWebviewHandlers,
   registerLogFileHandlers,
-  registerImageHandlers
+  registerImageHandlers,
+  registerSpeechHandlers
 };
 
 export { aiService } from './ai/service.mjs';

@@ -20,9 +20,10 @@ function collectFileReferenceParts(message: Message): ChatMessageFileReferencePa
  * @returns 单行索引文本
  */
 function formatReferenceLine(reference: ChatMessageFileReferencePart): string {
-  const lineLabel = reference.startLine > 0
-    ? `lines ${reference.startLine}${reference.endLine > reference.startLine ? `-${reference.endLine}` : ''}`
-    : 'no explicit line range';
+  const lineLabel =
+    reference.startLine > 0
+      ? `lines ${reference.startLine}${reference.endLine > reference.startLine ? `-${reference.endLine}` : ''}`
+      : 'no explicit line range';
   const unsavedLabel = reference.path ? '' : ' (unsaved document)';
 
   return `- ${reference.referenceId}: ${reference.fileName}${unsavedLabel} (${lineLabel})`;

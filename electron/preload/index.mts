@@ -198,6 +198,15 @@ const electronAPI: ElectronAPI = {
    */
   openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
 
+  // ==================== 语音转写 ====================
+
+  /**
+   * 转写单段音频。
+   * @param request - 音频转写请求
+   * @returns 转写结果
+   */
+  transcribeAudio: (request) => ipcRenderer.invoke('speech:transcribe', request),
+
   // ==================== AI 服务操作 ====================
 
   /**

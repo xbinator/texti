@@ -28,10 +28,10 @@ type PromptEditorInstance = InstanceType<typeof BPromptEditor>;
  * @param options - 编辑器挂载选项
  * @returns 编辑器包装器
  */
-function mountPromptEditor(options: { submitOnEnter?: boolean } = {}): VueWrapper<PromptEditorInstance> {
+function mountPromptEditor(options: { submitOnEnter?: boolean; value?: string } = {}): VueWrapper<PromptEditorInstance> {
   return mount(BPromptEditor, {
     props: {
-      value: '',
+      value: options.value ?? '',
       slashCommands: chatSlashCommands,
       submitOnEnter: options.submitOnEnter ?? false
     },
@@ -141,6 +141,18 @@ describe('BPromptEditor DOM safety regressions', () => {
     expect(indexSource).toContain('saveCursorPosition');
     expect(indexSource).toContain('view.value.state.selection');
     // useEditorCore.ts and useEditorSelection.ts no longer exist in CodeMirror 6 migration
+  });
+
+  test('replaces a voice placeholder with final text at the current cursor anchor', async () => {
+    const wrapper = mountPromptEditor();
+
+    await insertEditorText(wrapper, 'hello ');
+    const placeholderId = wrapper.vm.insertVoicePlaceholder('正在语音转写…');
+    await nextTick();
+    wrapper.vm.replaceVoicePlaceholder(placeholderId, '语音结果');
+    await nextTick();
+
+    expect(wrapper.vm.getText()).toBe('hello 语音结果');
   });
 });
 

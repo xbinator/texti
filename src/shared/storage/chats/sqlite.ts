@@ -157,9 +157,9 @@ function mapSessionRow(row: ChatSessionRow): ChatSession | null {
 }
 
 /**
- * Maps a SQLite message row into the shared chat message record shape.
- * @param row - Raw SQLite message row.
- * @returns Normalized chat message record.
+ * 将 SQLite 消息行映射为共享聊天消息记录格式
+ * @param row - 原始 SQLite 消息行
+ * @returns 标准化的聊天消息记录
  */
 function mapMessageRow(row: ChatMessageRow): ChatMessageRecord {
   return {
@@ -193,16 +193,16 @@ function saveFallbackMessages(messages: FallbackMessagesMap): void {
 }
 
 /**
- * Loads persisted reference snapshots from local fallback storage.
- * @returns Snapshot map keyed by snapshot id.
+ * 从本地降级存储加载持久化的引用快照
+ * @returns 以快照 ID 为键的快照映射
  */
 function loadFallbackReferenceSnapshots(): FallbackReferenceSnapshotsMap {
   return local.getItem<FallbackReferenceSnapshotsMap>(CHAT_REFERENCE_SNAPSHOTS_STORAGE_KEY) ?? {};
 }
 
 /**
- * Saves persisted reference snapshots into local fallback storage.
- * @param snapshots - Snapshot map keyed by snapshot id.
+ * 将持久化的引用快照保存到本地降级存储
+ * @param snapshots - 以快照 ID 为键的快照映射
  */
 function saveFallbackReferenceSnapshots(snapshots: FallbackReferenceSnapshotsMap): void {
   local.setItem(CHAT_REFERENCE_SNAPSHOTS_STORAGE_KEY, snapshots);
@@ -270,9 +270,9 @@ function addUsage(currentUsage: AIUsage | undefined, nextUsage: AIUsage): AIUsag
 }
 
 /**
- * Maps a SQLite snapshot row into the shared reference snapshot shape.
- * @param row - Raw SQLite snapshot row.
- * @returns Normalized reference snapshot.
+ * 将 SQLite 快照行映射为共享引用快照格式
+ * @param row - 原始 SQLite 快照行
+ * @returns 标准化的引用快照
  */
 function mapReferenceSnapshotRow(row: ChatReferenceSnapshotRow): ChatReferenceSnapshot {
   return {
@@ -285,17 +285,17 @@ function mapReferenceSnapshotRow(row: ChatReferenceSnapshotRow): ChatReferenceSn
 }
 
 /**
- * Builds the placeholder list used by SQLite `IN (...)` clauses.
- * @param ids - Snapshot ids to query.
- * @returns Parenthesized placeholder list matching the id count.
+ * 构建 SQLite `IN (...)` 子句使用的占位符列表
+ * @param ids - 要查询的快照 ID 列表
+ * @returns 与 ID 数量匹配的括号占位符列表
  */
 function buildSqlPlaceholders(ids: string[]): string {
   return `(${ids.map(() => '?').join(', ')})`;
 }
 
 /**
- * Persists a batch of messages through the shared SQLite upsert statement.
- * @param messages - Messages to persist.
+ * 通过共享 SQLite upsert 语句持久化一批消息
+ * @param messages - 要持久化的消息列表
  */
 async function upsertSessionMessages(messages: ChatMessageRecord[]): Promise<void> {
   await Promise.all(
@@ -443,9 +443,9 @@ export const chatStorage = {
   },
 
   /**
-   * Loads persisted reference snapshots by id.
-   * @param snapshotIds - Snapshot ids to load.
-   * @returns Matching snapshots in arbitrary order.
+   * 按 ID 加载持久化的引用快照
+   * @param snapshotIds - 要加载的快照 ID 列表
+   * @returns 匹配的快照列表（顺序不确定）
    */
   async getReferenceSnapshots(snapshotIds: string[]): Promise<ChatReferenceSnapshot[]> {
     if (!snapshotIds.length) {
@@ -486,8 +486,8 @@ export const chatStorage = {
   },
 
   /**
-   * Persists one or more reference snapshots.
-   * @param snapshots - Snapshots to persist.
+   * 持久化一个或多个引用快照
+   * @param snapshots - 要持久化的快照列表
    */
   async upsertReferenceSnapshots(snapshots: ChatReferenceSnapshot[]): Promise<void> {
     if (!snapshots.length) {

@@ -73,6 +73,7 @@
             @abort="handleAbort"
             @image-select="imageUpload.appendImages"
             @model-change="handleModelChange"
+            @voice-complete="handleVoiceComplete"
           />
         </div>
       </div>
@@ -129,6 +130,8 @@ const modelSelectorRef = ref<InstanceType<typeof InputToolbar>>();
 const conversationRef = ref<InstanceType<typeof ConversationView>>();
 /** 会话历史组件引用 */
 const sessionHistoryRef = ref<InstanceType<typeof SessionHistory>>();
+/** 当前活跃语音占位块 ID。 */
+const activeVoicePlaceholderId = ref<string | null>(null);
 
 /** 聊天历史加载状态和方法 */
 const { setLoadedMessages, fetchAllPriorHistory, messages, hasMoreHistory, loadHistory } = useChatHistory();
@@ -151,6 +154,15 @@ function saveCursorPosition(): void {
 /** 插入文本到光标位置 */
 function insertTextAtCursor(text: string): void {
   promptEditorRef.value?.insertTextAtCursor(text);
+}
+
+/**
+ * 使用最终转写文本替换当前语音占位块。
+ * @param payload - 语音转写结果
+ */
+function handleVoiceComplete(payload: { text: string }): void {
+  console.log('🚀 ~ handleVoiceComplete ~ payload:', payload);
+  // insertTextAtCursor(payload.text);
 }
 
 /** 用量面板 hook */
@@ -338,13 +350,13 @@ async function handleChatSubmit(): Promise<void> {
   if (!config) return;
 
   const _content = buildMessagePartsFromDraft(content);
-  const nextMessage = create.userMessage(_content);
-  if (images.length && supportsVision.value) {
-    nextMessage.files = [...images];
-  }
 
-  await handleBeforeSend(nextMessage);
-  messages.value.push(nextMessage);
+  const message = create.userMessage(_content);
+  // 如果有图片，添加到消息中
+  images.length && supportsVision.value && (message.files = [...images]);
+
+  await handleBeforeSend(message);
+  messages.value.push(message);
   conversationRef.value?.scrollToBottom({ behavior: 'auto' });
   focusInput();
   inputEvents.clear();

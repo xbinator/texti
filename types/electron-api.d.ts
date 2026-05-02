@@ -160,6 +160,36 @@ export interface ElectronImageCompressResult {
   compressed: boolean;
 }
 
+/**
+ * 语音转写请求参数。
+ */
+export interface ElectronAudioTranscribeRequest {
+  /** 音频二进制数据。 */
+  buffer: ArrayBuffer;
+  /** 音频 MIME 类型。 */
+  mimeType: string;
+  /** 段落唯一标识。 */
+  segmentId: string;
+  /** 指定语言。 */
+  language?: string;
+  /** 可选提示词。 */
+  prompt?: string;
+}
+
+/**
+ * 语音转写结果。
+ */
+export interface ElectronAudioTranscribeResult {
+  /** 段落唯一标识。 */
+  segmentId: string;
+  /** 转写文本。 */
+  text: string;
+  /** 识别语言。 */
+  language?: string;
+  /** 转写耗时，单位毫秒。 */
+  durationMs: number;
+}
+
 export interface ElectronAPI {
   readFile: (filePath: string) => Promise<ElectronReadFileResult>;
   readWorkspaceFile: (options: ElectronReadWorkspaceFileOptions) => Promise<ElectronReadWorkspaceFileResult>;
@@ -200,6 +230,9 @@ export interface ElectronAPI {
 
   // 系统操作
   openExternal: (url: string) => Promise<void>;
+
+  // 语音转写
+  transcribeAudio: (request: ElectronAudioTranscribeRequest) => Promise<ElectronAudioTranscribeResult>;
 
   // AI 服务操作
   aiInvoke: (createOptions: AICreateOptions, request: AIRequestOptions) => Promise<AsyncResult<AIInvokeResult, AIServiceError>>;
