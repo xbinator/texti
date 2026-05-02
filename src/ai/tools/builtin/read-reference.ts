@@ -165,11 +165,7 @@ export function createBuiltinReadReferenceTool(options: CreateBuiltinReadReferen
       try {
         range = normalizeReadRange(input);
       } catch (error) {
-        return createToolFailureResult(
-          READ_REFERENCE_TOOL_NAME,
-          'INVALID_INPUT',
-          error instanceof Error ? error.message : '读取范围无效'
-        );
+        return createToolFailureResult(READ_REFERENCE_TOOL_NAME, 'INVALID_INPUT', error instanceof Error ? error.message : '读取范围无效');
       }
 
       const snapshot = await (options.getReferenceSnapshot?.(input.referenceId) ?? Promise.resolve(null));

@@ -81,7 +81,7 @@
 </template>
 
 <script setup lang="ts">
-import type { ChatMessageConfirmationAction, ChatMessageFileReferencePart } from 'types/chat';
+import type { ChatMessageConfirmationAction } from 'types/chat';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { createBuiltinTools } from '@/ai/tools/builtin';
@@ -90,6 +90,7 @@ import { getDefaultChatToolNames } from '@/ai/tools/policy';
 import BButton from '@/components/BButton/index.vue';
 import { chipResolver } from '@/components/BChatSidebar/utils/chipResolver';
 import { buildMessagePartsFromDraft, create, userChoice } from '@/components/BChatSidebar/utils/messageHelper';
+import { resolveReferenceSnapshotFromMessages } from '@/components/BChatSidebar/utils/referenceResolver';
 import { persistReferenceSnapshots } from '@/components/BChatSidebar/utils/referenceSnapshot';
 import { chatSlashCommands } from '@/components/BChatSidebar/utils/slashCommands';
 import type { Message } from '@/components/BChatSidebar/utils/types';
@@ -178,50 +179,16 @@ const fileReference = useFileReference({
 const filesStore = useFilesStore();
 
 /**
- * 在当前消息历史中查找文件引用片段。
- * @param referenceId - 引用 ID
- * @returns 引用片段或 null
- */
-function findReferencePart(referenceId: string): ChatMessageFileReferencePart | null {
-  for (let messageIndex = messages.value.length - 1; messageIndex >= 0; messageIndex -= 1) {
-    const referencePart = messages.value[messageIndex].parts.find(
-      (part): part is ChatMessageFileReferencePart => part.type === 'file-reference' && part.referenceId === referenceId
-    );
-
-    if (referencePart) {
-      return referencePart;
-    }
-  }
-
-  return null;
-}
-
-/**
  * 解析聊天文件引用对应的冻结快照。
  * @param referenceId - 引用 ID
  * @returns 冻结快照内容或 null
  */
-async function getReferenceSnapshot(referenceId: string): Promise<import('@/ai/tools/builtin/read-reference').ResolvedReferenceSnapshot | null> {
-  const referencePart = findReferencePart(referenceId);
-  if (!referencePart?.snapshotId) {
-    return null;
-  }
-
-  const [snapshot] = await chatStorage.getReferenceSnapshots([referencePart.snapshotId]);
-  if (!snapshot) {
-    return null;
-  }
-
-  return {
-    referenceId: referencePart.referenceId,
-    fileName: referencePart.fileName,
-    path: referencePart.path,
-    documentId: referencePart.documentId,
-    snapshotId: referencePart.snapshotId,
-    content: snapshot.content,
-    startLine: referencePart.startLine,
-    endLine: referencePart.endLine
-  };
+async function getReferenceSnapshot(referenceId: string) {
+  return resolveReferenceSnapshotFromMessages(messages.value, referenceId, {
+    getSnapshotsByIds: (snapshotIds: string[]) => chatStorage.getReferenceSnapshots(snapshotIds),
+    getLatestSnapshotByDocumentId: (documentId: string) => chatStorage.getReferenceSnapshotByDocumentId(documentId),
+    getEditorContext: (documentId: string) => editorToolContextRegistry.getContext(documentId)
+  });
 }
 
 const tools = createBuiltinTools({
