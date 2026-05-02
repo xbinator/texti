@@ -4,14 +4,18 @@
 -->
 <template>
   <div class="chat-input-toolbar">
-    <BUpload v-if="supportsVision" accept="image/*" @change="handleImageInputChange">
-      <BButton size="small" type="text" square>
-        <Icon icon="lucide:image-plus" width="16" height="16" />
-      </BButton>
-    </BUpload>
+    <template v-if="!isVoiceRecording">
+      <BUpload v-if="supportsVision" accept="image/*" @change="handleImageInputChange">
+        <BButton size="small" type="text" square>
+          <Icon icon="lucide:image-plus" width="16" height="16" />
+        </BButton>
+      </BUpload>
+    </template>
     <div class="toolbar-space"></div>
     <ModelSelector ref="modelSelectorRef" :model="selectedModel" @update:model="handleModelChange" />
     <div class="action-buttons">
+      <VoiceInput ref="voiceInputRef" :disabled="loading" @start="emit('voice-start')" @complete="handleVoiceComplete" />
+
       <BButton v-if="loading" size="small" square @click="$emit('abort')">
         <svg class="loading-icon" color="currentColor" viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg">
           <title>Stop Loading</title>
@@ -28,11 +32,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import BButton from '@/components/BButton/index.vue';
 import type { SelectedModel } from '@/stores/service-model';
 import ModelSelector from './InputToolbar/ModelSelector.vue';
+import VoiceInput from './InputToolbar/VoiceInput.vue';
 
 /**
  * 输入工具栏属性。
@@ -61,12 +66,27 @@ const emit = defineEmits<{
   (e: 'abort'): void;
   (e: 'model-change', model: { providerId: string; modelId: string }): void;
   (e: 'image-select', files: File[]): void;
+  (e: 'voice-start'): void;
+  (e: 'voice-complete', payload: { text: string }): void;
 }>();
 
 /**
  * 模型选择器实例引用。
  */
 const modelSelectorRef = ref<InstanceType<typeof ModelSelector>>();
+
+/**
+ * 语音输入组件实例引用。
+ */
+const voiceInputRef = ref<InstanceType<typeof VoiceInput>>();
+
+/**
+ * 当前是否正在录音。
+ */
+const isVoiceRecording = computed<boolean>(() => {
+  const input = voiceInputRef.value;
+  return input?.isRecording ?? false;
+});
 
 /**
  * 将打开请求转发到内部模型选择器。
@@ -89,6 +109,14 @@ function handleModelChange(model: { providerId: string; modelId: string }): void
  */
 function handleImageInputChange(files: FileList) {
   emit('image-select', Array.from(files));
+}
+
+/**
+ * 处理语音输入完成事件。
+ * @param payload - 语音转写结果
+ */
+function handleVoiceComplete(payload: { text: string }): void {
+  emit('voice-complete', payload);
 }
 
 /**
