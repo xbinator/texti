@@ -4,19 +4,27 @@
 -->
 <template>
   <div class="chat-input-toolbar">
-    <template v-if="!isVoiceRecording">
+    <template v-if="isVoiceRecording">
+      <VoiceWaveform :samples="voiceWaveformSamples" />
+
+      <div class="toolbar-space"></div>
+    </template>
+    <template v-else>
       <BUpload v-if="supportsVision" accept="image/*" @change="handleImageInputChange">
         <BButton size="small" type="text" square>
           <Icon icon="lucide:image-plus" width="16" height="16" />
         </BButton>
       </BUpload>
+
+      <div class="toolbar-space"></div>
+
+      <ModelSelector ref="modelSelectorRef" :model="selectedModel" @update:model="handleModelChange" />
     </template>
-    <div class="toolbar-space"></div>
-    <ModelSelector ref="modelSelectorRef" :model="selectedModel" @update:model="handleModelChange" />
+
     <div class="action-buttons">
       <VoiceInput ref="voiceInputRef" :disabled="loading" @start="emit('voice-start')" @complete="handleVoiceComplete" />
 
-      <BButton v-if="loading" size="small" square @click="$emit('abort')">
+      <BButton v-if="loading" size="small" tooltip="停止" square @click="$emit('abort')">
         <svg class="loading-icon" color="currentColor" viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg">
           <title>Stop Loading</title>
           <rect fill="currentColor" height="250" rx="24" ry="24" width="250" x="375" y="375"></rect>
@@ -26,7 +34,7 @@
           </circle>
         </svg>
       </BButton>
-      <BButton v-else size="small" square :disabled="!canSubmit" icon="lucide:arrow-up" @click="$emit('submit')" />
+      <BButton v-else size="small" tooltip="发送" square :disabled="!canSubmit" icon="lucide:arrow-up" @click="$emit('submit')" />
     </div>
   </div>
 </template>
@@ -38,6 +46,7 @@ import BButton from '@/components/BButton/index.vue';
 import type { SelectedModel } from '@/stores/service-model';
 import ModelSelector from './InputToolbar/ModelSelector.vue';
 import VoiceInput from './InputToolbar/VoiceInput.vue';
+import VoiceWaveform from './InputToolbar/VoiceWaveform.vue';
 
 /**
  * 输入工具栏属性。
@@ -86,6 +95,14 @@ const voiceInputRef = ref<InstanceType<typeof VoiceInput>>();
 const isVoiceRecording = computed<boolean>(() => {
   const input = voiceInputRef.value;
   return input?.isRecording ?? false;
+});
+
+/**
+ * 当前录音波形采样数据。
+ */
+const voiceWaveformSamples = computed<number[]>(() => {
+  const input = voiceInputRef.value;
+  return input?.waveformSamples ?? [];
 });
 
 /**

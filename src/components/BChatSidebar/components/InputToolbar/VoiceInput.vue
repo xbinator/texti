@@ -4,10 +4,12 @@
 -->
 <template>
   <div class="voice-input">
-    <BButton v-if="isIdle" data-testid="voice-start" size="small" type="text" square :disabled="disabled" @click="handleStart">
+    <BButton v-if="isIdle" tooltip="语言输入" data-testid="voice-start" size="small" type="text" square :disabled="disabled" @click="handleStart">
       <Icon icon="lucide:mic" width="16" height="16" />
     </BButton>
-    <span v-else data-testid="voice-stop" class="voice-breathing-light" :style="breathingLightStyle" @click="handleStop"></span>
+    <BButton v-else tooltip="停止语言输入" data-testid="voice-stop" size="small" type="outline" square :disabled="disabled" @click="handleStop">
+      <div class="voice-stop-icon"></div>
+    </BButton>
   </div>
 </template>
 
@@ -80,28 +82,6 @@ const isIdle = computed<boolean>(() => recorder.status.value === 'idle');
 const isRecording = computed<boolean>(() => recorder.status.value === 'recording');
 
 /**
- * 归一化当前采样值（0-1 范围）。
- */
-const normalizedSample = computed<number>(() => {
-  const samples = recorder.waveformSamples.value;
-  if (samples.length === 0) return 0;
-  const latest = samples[samples.length - 1];
-  return Math.min(1, Math.max(0, latest / 10));
-});
-
-/**
- * 呼吸灯动态样式。
- */
-const breathingLightStyle = computed<Record<string, string>>(() => {
-  const size = 8 + normalizedSample.value * 8;
-  const opacity = 0.4 + normalizedSample.value * 0.6;
-  return {
-    '--size': `${size}px`,
-    '--opacity': String(opacity)
-  };
-});
-
-/**
  * 暴露给父组件的状态和方法。
  */
 defineExpose({
@@ -137,14 +117,10 @@ async function handleStop(): Promise<void> {
   align-items: center;
 }
 
-.voice-breathing-light {
-  display: inline-block;
-  width: var(--size, 8px);
-  height: var(--size, 8px);
-  cursor: pointer;
-  background: var(--color-primary, #4080ff);
-  border-radius: 50%;
-  opacity: var(--opacity, 0.4);
-  transition: width 0.1s ease-out, height 0.1s ease-out, opacity 0.1s ease-out;
+.voice-stop-icon {
+  width: 11px;
+  height: 11px;
+  background-color: var(--color-primary);
+  border-radius: 2px;
 }
 </style>
