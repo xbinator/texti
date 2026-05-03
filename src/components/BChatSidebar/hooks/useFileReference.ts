@@ -65,6 +65,7 @@ export function useFileReference(options: FileReferenceOptions) {
    * @param reference - 文件引用插入载荷
    */
   async function handleFileReferenceInsert(reference: ChatFileReferenceInsertPayload): Promise<void> {
+    console.log('🚀 ~ handleFileReferenceInsert ~ reference:', reference);
     const toolContext = editorToolContextRegistry.getCurrentContext();
     const { document } = toolContext || {};
 

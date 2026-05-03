@@ -12,7 +12,7 @@ export type ChatSessionType = 'assistant';
 /**
  * 聊天消息角色
  */
-export type ChatMessageRole = 'user' | 'assistant' | 'error';
+export type ChatMessageRole = 'user' | 'system' | 'assistant' | 'error';
 
 /**
  * 聊天消息附件类型

@@ -17,8 +17,7 @@
     <SelectionToolbar
       v-if="editor"
       :editor="editor"
-      :file-path="filePath"
-      :file-name="fileName"
+      :editor-state="editorState"
       @ai-input-toggle="handleAIInputToggle"
       @selection-reference-insert="handleSelectionReferenceInsert"
       @selection-reference-clear="handleSelectionReferenceClear"
@@ -26,13 +25,13 @@
     <!-- 选择 AI 输入框 -->
     <SelectionAIInput v-model:visible="aiInputVisible" :editor="editor" :selection-range="selectionRange" />
     <!-- 编辑器内容 -->
-    <EditorContent :key="editorId" :editor="editor ?? undefined" class="b-editor-content" />
+    <EditorContent :key="editorState?.id" :editor="editor ?? undefined" class="b-editor-content" />
   </div>
 </template>
 
 <script setup lang="ts">
 import type { FrontMatterData } from '../hooks/useFrontMatter';
-import type { SelectionRange } from '../types';
+import type { SelectionRange, EditorState } from '../types';
 import type { Editor } from '@tiptap/vue-3';
 import { onBeforeUnmount, ref, watch } from 'vue';
 import { EditorContent } from '@tiptap/vue-3';
@@ -46,21 +45,15 @@ import SelectionToolbar from './SelectionToolbar.vue';
 interface Props {
   // Editor Instance
   editor?: Editor | null;
-  // Editor ID
-  editorId?: string;
-  // 文件路径
-  filePath?: string | null;
-  // 文件名
-  fileName?: string;
+  // 编辑器状态
+  editorState?: EditorState;
   // 是否显示 Front Matter 卡片
   shouldShowFrontMatterCard?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   editor: null,
-  editorId: '',
-  filePath: null,
-  fileName: '',
+  editorState: () => ({ content: '', name: '', path: '', id: '', ext: '' }),
   shouldShowFrontMatterCard: false
 });
 

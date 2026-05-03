@@ -12,6 +12,10 @@ export const CHAT_FILE_REFERENCE_INSERT_EVENT = 'chat:file-reference:insert';
  * 聊天输入框文件引用插入事件负载。
  */
 export interface ChatFileReferenceInsertPayload {
+  /** 文件引用ID */
+  id: string;
+  /** 文件扩展名 */
+  ext: string;
   /** 完整文件路径，未保存文件为 null */
   filePath: string | null;
   /** 展示用文件名 */

@@ -6,10 +6,10 @@
   <div ref="layoutRef" class="b-editor-layout">
     <BEditorSidebar
       v-if="showOutline"
-      :title="editorTitle"
-      :file-path="props.filePath"
+      :title="editorState.name"
+      :file-path="editorState.path"
       :content="outlineContent"
-      :anchor-id-prefix="props.editorId"
+      :anchor-id-prefix="editorState.id"
       :active-id="activeAnchorId"
       @change="handleEditorAnchorChange"
       @rename-file="emit('rename-file')"
@@ -25,23 +25,21 @@
         <PaneRichEditor
           v-if="isRichMode"
           ref="richEditorPaneRef"
-          v-model:value="editorContent"
+          v-model:value="editorState.content"
           v-model:outline-content="outlineContent"
-          :editor-id="props.editorId"
-          :file-path="props.filePath"
-          :file-name="editorTitle"
-          :editable="props.editable"
+          :editor-state="editorState"
+          :editable="editable"
           :on-search-match-element-focus="scrollSearchMatchElementIntoView"
         />
 
         <PaneSourceEditor
           v-else
           ref="sourceEditorPaneRef"
-          v-model:value="editorContent"
+          v-model:value="editorState.content"
           v-model:outline-content="outlineContent"
-          :editor-id="props.editorId"
+          :editor-id="editorState.id"
           :on-anchor-scroll="scrollSourceAnchorIntoView"
-          :editable="props.editable"
+          :editable="editable"
         />
       </div>
 
@@ -53,7 +51,7 @@
 <script setup lang="ts">
 import type { BEditorPublicInstance, EditorController, EditorSearchState } from './adapters/types';
 import type { AnchorRecord } from './hooks/useAnchors';
-import type { BEditorViewMode } from './types';
+import type { BEditorViewMode, EditorState } from './types';
 import type { CSSProperties } from 'vue';
 import { computed, defineAsyncComponent, ref } from 'vue';
 import BScrollbar from '@/components/BScrollbar/index.vue';
@@ -71,11 +69,8 @@ const scrollbarRef = ref<InstanceType<typeof BScrollbar> | null>(null);
 const settingStore = useSettingStore();
 
 interface Props {
+  // 是否可编辑
   editable?: boolean;
-  // 编辑器实例ID
-  editorId?: string;
-  // 文件路径
-  filePath?: string | null;
   // 编辑器视图模式
   viewMode?: BEditorViewMode;
   // 是否显示大纲
@@ -84,9 +79,6 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   editable: true,
-  // 编辑器实例ID
-  editorId: '',
-  filePath: null,
   viewMode: 'rich',
   showOutline: true
 });
@@ -95,9 +87,14 @@ const emit = defineEmits(['rename-file', 'save', 'save-as', 'copy-path', 'copy-r
 
 const isRichMode = computed<boolean>(() => props.viewMode === 'rich');
 
-const editorContent = defineModel<string>('value', { default: '' });
+/**
+ * 编辑器状态数据项，包含内容、文件名、路径等信息
+ */
+const editorState = defineModel<EditorState>('value', { default: () => ({ content: '', name: '', path: '', id: '', ext: '' }) });
 
-const editorTitle = defineModel<string>('title', { default: '' });
+/**
+ * 大纲内容
+ */
 const outlineContent = defineModel<string>('outlineContent', { default: '' });
 
 const richEditorPaneRef = ref<EditorController | null>(null);
@@ -184,7 +181,7 @@ function handleEditorScrollEvent(): void {
 }
 
 function setContent(text: string): void {
-  editorContent.value = text;
+  editorState.value = { ...editorState.value, content: text };
 }
 
 function undo(): void {

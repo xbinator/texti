@@ -5,10 +5,7 @@
         <BEditor
           ref="editorRef"
           :key="fileState.id"
-          v-model:value="fileState.content"
-          v-model:title="fileState.name"
-          :editor-id="fileState.id"
-          :file-path="fileState.path"
+          v-model:value="fileState"
           :view-mode="settingStore.sourceMode ? 'source' : 'rich'"
           :show-outline="settingStore.showOutline"
           @rename-file="actions.onRename"

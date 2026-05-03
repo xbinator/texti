@@ -9,7 +9,7 @@
         <div class="selection-toolbar__divider"></div>
       </template>
 
-      <template v-if="props.filePath || props.fileName">
+      <template v-if="editorState?.path || editorState?.name">
         <div class="selection-toolbar__ai-btn" @mousedown.prevent="insertSelectionReferenceToChat">
           <Icon icon="lucide:message-square-plus" />
           <span>插入对话</span>
@@ -32,6 +32,7 @@
 </template>
 
 <script setup lang="ts">
+import type { EditorState as BEditorState } from '../types';
 import type { Editor } from '@tiptap/vue-3';
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { Icon } from '@iconify/vue';
@@ -57,13 +58,11 @@ interface SelectionRange {
  */
 interface Props {
   editor: Editor;
-  filePath?: string | null;
-  fileName?: string;
+  editorState?: BEditorState;
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  filePath: null,
-  fileName: ''
+  editorState: () => ({ content: '', name: '', path: '', id: '', ext: '' })
 });
 
 const emit = defineEmits<{
@@ -167,7 +166,7 @@ function getCurrentSelectionRange(): SelectionRange | null {
  * 将当前选区所在文件与行号插入聊天输入框。
  */
 function insertSelectionReferenceToChat(): void {
-  const { filePath } = props;
+  const { editorState } = props;
   const { editor } = props;
   const selectionRange = getCurrentSelectionRange();
   if (!editor || !selectionRange) {
@@ -182,12 +181,11 @@ function insertSelectionReferenceToChat(): void {
 
   const range = getLineRangeFromTextBeforeSelection(textBeforeStart, textBeforeEnd);
 
-  emitChatFileReferenceInsert({
-    filePath: filePath ?? null,
-    fileName: props.fileName || getFileNameFromPath(filePath ?? '未保存文件'),
-    startLine: range.startLine,
-    endLine: range.endLine
-  });
+  const { id = '', ext = '', path, name } = editorState || {};
+
+  const fileName = name || getFileNameFromPath(path ?? '未保存文件');
+
+  emitChatFileReferenceInsert({ id, ext, filePath: path, fileName, startLine: range.startLine, endLine: range.endLine });
 }
 
 // ---- Format Buttons ----

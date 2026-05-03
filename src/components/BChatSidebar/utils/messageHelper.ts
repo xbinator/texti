@@ -211,7 +211,11 @@ export const create = {
   },
   // 创建用户消息
   userMessage(content: string): Message {
-    return createBase({ role: 'user', content, finished: true });
+    return createBase({ role: 'user', content, parts: content ? [{ type: 'text', text: content }] : [], finished: true });
+  },
+  // system 消息
+  systemMessage(content: string): Message {
+    return createBase({ role: 'system', content, parts: [{ type: 'text', text: content }], finished: true });
   }
 } as const;
 

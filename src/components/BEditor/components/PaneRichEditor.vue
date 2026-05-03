@@ -2,9 +2,7 @@
   <RichEditorContent
     v-model:front-matter-data="frontMatterModel"
     :editor="editorInstance"
-    :editor-id="editorInstanceId"
-    :file-path="props.filePath"
-    :file-name="props.fileName"
+    :editor-state="editorState"
     :should-show-front-matter-card="shouldShowFrontMatterCard"
   />
 </template>
@@ -13,6 +11,7 @@
 import type { EditorController, EditorSearchState, EditorSelection as EditorSelectionRange } from '../adapters/types';
 import type { SearchScrollContext } from '../extensions/Search';
 import type { FrontMatterData } from '../hooks/useFrontMatter';
+import type { EditorState } from '../types';
 import { computed, toRef, watch } from 'vue';
 import { getSearchSnapshot } from '../extensions/Search';
 import { useFrontMatter } from '../hooks/useFrontMatter';
@@ -21,24 +20,21 @@ import RichEditorContent from './RichEditorContent.vue';
 
 interface Props {
   editable?: boolean;
-  editorId?: string;
-  filePath?: string | null;
-  fileName?: string;
+  // 编辑器状态
+  editorState?: EditorState;
   onSearchMatchElementFocus?: (targetElement: HTMLElement) => void;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   editable: true,
-  editorId: '',
-  filePath: null,
-  fileName: '',
+  editorState: () => ({ content: '', name: '', path: '', id: '', ext: '' }),
   onSearchMatchElementFocus: undefined
 });
 
 const editorContent = defineModel<string>('value', { default: '' });
 const outlineContent = defineModel<string>('outlineContent', { default: '' });
 
-const editorInstanceId = computed<string>(() => `${props.editorId || ''}`);
+const editorInstanceId = computed<string>(() => props.editorState?.id || '');
 
 const { bodyContent, frontMatterData, hasFrontMatter, updateFrontMatter, reconstructContent } = useFrontMatter(editorContent);
 
