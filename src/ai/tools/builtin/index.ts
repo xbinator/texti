@@ -32,9 +32,6 @@ interface CreateBuiltinToolsOptions {
   getWorkspaceRoot?: () => string | null;
   /** 判断文件路径是否在最近文件列表中，命中时跳过绝对路径确认 */
   isFileInRecent?: (filePath: string) => boolean;
-
-  /** 根据文档 ID 查找编辑器上下文，用于 documentId 反查文件路径 */
-  getEditorContext?: (documentId: string) => import('types/ai').AIToolContext | undefined;
 }
 
 /**
@@ -61,8 +58,7 @@ export function createBuiltinTools(options: CreateBuiltinToolsOptions = {}): AIT
     createBuiltinReadFileTool({
       confirm: options.confirm,
       getWorkspaceRoot: options.getWorkspaceRoot,
-      isFileInRecent: options.isFileInRecent,
-      getEditorContext: options.getEditorContext
+      isFileInRecent: options.isFileInRecent
     }),
 
     createBuiltinReadDirectoryTool({

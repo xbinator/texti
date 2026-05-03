@@ -41,7 +41,7 @@
 
 ```
 ---
-📎 File References:
+File References:
 - [doc-1] src/utils/foo.ts (lines 3-5)
 - [doc-2] config/bar.md (unsaved, lines 10-20)
 - [doc-3] README.md

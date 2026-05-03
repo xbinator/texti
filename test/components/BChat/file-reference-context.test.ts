@@ -49,7 +49,7 @@ describe('file reference context builder', () => {
 
     const [message] = buildModelReadyMessages(sourceMessages);
 
-    expect(message.content).toContain('📎 File References:');
+    expect(message.content).toContain('File References:');
     expect(message.content).toContain('[doc-1] docs/draft.md (lines 12-14)');
     expect(message.content).toContain('Please check this file.');
   });

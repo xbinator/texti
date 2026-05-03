@@ -166,14 +166,14 @@ async function handleDrop(e: DragEvent): Promise<void> {
     let openedId = '';
 
     if (filePath) {
-      const openedFile = await filesStore.openOrCreateByPath(filePath, 'drop');
+      const openedFile = await filesStore.openOrCreateByPath(filePath);
       if (!openedFile) return;
 
       openedId = openedFile.id;
     } else {
       const content = await file.text();
       const name = file.name.split('.').slice(0, -1).join('.') || file.name;
-      const createdFile = await filesStore.createAndOpen({ id: nanoid(), path: null, name, ext, content, savedContent: content }, 'drop');
+      const createdFile = await filesStore.createAndOpen({ id: nanoid(), path: null, name, ext, content, savedContent: content });
 
       openedId = createdFile.id;
     }

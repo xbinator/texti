@@ -41,7 +41,7 @@ function buildReferenceIndexBlock(references: ChatMessageFileReferencePart[]): s
     return '';
   }
 
-  return ['📎 File References:', ...references.map(formatReferenceLine), '', 'Use read_file with documentId to read file content.'].join('\n');
+  return ['File References:', ...references.map(formatReferenceLine), '', 'Use read_file with documentId to read file content.'].join('\n');
 }
 
 /**

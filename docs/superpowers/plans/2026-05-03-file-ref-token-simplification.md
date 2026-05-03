@@ -304,7 +304,7 @@ function buildReferenceIndexBlock(references: ChatMessageFileReferencePart[]): s
   }
 
   return [
-    '📎 File References:',
+    'File References:',
     ...references.map(formatReferenceLine),
     '',
     'Use read_file with documentId to read file content.'
@@ -330,7 +330,7 @@ git commit -m "feat(file-ref): update reference index block with [documentId] fo
 
 将测试中的旧格式断言替换为新格式：
 
-- `'Available file references for this message:'` → `'📎 File References:'`
+- `'Available file references for this message:'` → `'File References:'`
 - `'doc-1: draft.md (lines 12-14)'` → `'[doc-1] docs/draft.md (lines 12-14)'`
 - `'doc-1: foo.ts (lines 3-5)'` → `'[doc-1] foo.ts (lines 3-5)'`
 - `'doc-2: bar.ts (lines 10-20)'` → `'[doc-2] bar.ts (lines 10-20)'`
@@ -346,7 +346,7 @@ git commit -m "feat(file-ref): update reference index block with [documentId] fo
 4. `'doc-2: bar.ts (lines 10-20)'` → `'[doc-2] bar.ts (lines 10-20)'`
 5. `'lines 5'` → `'line 5'`
 6. `'no explicit line range'` → `'[doc-1] docs/draft.md'`（无行号时无括号部分）
-7. `'Available file references for this message:'` → `'📎 File References:'`
+7. `'Available file references for this message:'` → `'File References:'`
 8. `'File contents are not included yet.'` → `'Use read_file with documentId to read file content.'`
 9. `'Prefer reading a small window first.'` → 移除此断言
 

@@ -3,7 +3,7 @@
  * @description 内置本地文件读取工具实现。
  */
 import type { AIToolConfirmationAdapter, AIToolConfirmationRequest } from '../confirmation';
-import type { AIToolContext, AIToolExecutionError, AIToolExecutor } from 'types/ai';
+import type { AIToolExecutionError, AIToolExecutor } from 'types/ai';
 import { native } from '@/shared/platform';
 import type {
   ReadWorkspaceDirectoryOptions,
@@ -11,6 +11,7 @@ import type {
   ReadWorkspaceFileOptions,
   ReadWorkspaceFileResult
 } from '@/shared/platform/native/types';
+import { recentFilesStorage } from '@/shared/storage';
 import { createToolCancelledResult, createToolFailureResult, createToolSuccessResult } from '../results';
 
 /** read_file 工具名称 */
@@ -65,8 +66,6 @@ export interface CreateBuiltinReadFileToolOptions {
   getWorkspaceRoot?: () => string | null;
   /** 判断文件路径是否在最近文件列表中，命中时跳过绝对路径确认 */
   isFileInRecent?: (filePath: string) => boolean;
-  /** 根据文档 ID 查找编辑器上下文，用于 documentId 反查文件路径 */
-  getEditorContext?: (documentId: string) => AIToolContext | undefined;
   /** 读取本地文件，测试时可注入替身 */
   readWorkspaceFile?: (options: ReadWorkspaceFileOptions) => Promise<ReadWorkspaceFileResult>;
   /** 读取本地目录，测试时可注入替身 */
@@ -231,9 +230,29 @@ export function createBuiltinReadFileTool(options: CreateBuiltinReadFileToolOpti
       let filePath = typeof input.path === 'string' ? input.path.trim() : '';
 
       if (input.documentId) {
-        const editorContext = options.getEditorContext?.(input.documentId);
-        if (editorContext?.document.path) {
-          filePath = editorContext.document.path;
+        const storedFile = await recentFilesStorage.getRecentFile(input.documentId);
+
+        if (storedFile?.path) {
+          filePath = storedFile.path;
+        } else if (storedFile?.content !== undefined) {
+          // 未保存文件，直接处理并返回
+          const range = normalizeReadRange(input);
+          const lines = storedFile.content.split('\n');
+          const totalLines = lines.length;
+          const startLine = Math.max(1, range.offset) - 1;
+          const endLine = range.limit === undefined ? totalLines : Math.min(startLine + range.limit, totalLines);
+          const content = lines.slice(startLine, endLine).join('\n');
+          const readLines = endLine - startLine;
+          const hasMore = endLine < totalLines;
+
+          return createToolSuccessResult<ReadFileResult>(READ_FILE_TOOL_NAME, {
+            path: `unsaved://${input.documentId}`,
+            content,
+            totalLines,
+            readLines,
+            hasMore,
+            nextOffset: hasMore ? endLine + 1 : null
+          });
         } else if (!filePath) {
           return createToolFailureResult(READ_FILE_TOOL_NAME, 'INVALID_INPUT', 'documentId 未找到对应文件路径，且未提供 path');
         }

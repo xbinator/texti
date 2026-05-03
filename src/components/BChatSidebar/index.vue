@@ -191,7 +191,6 @@ const tools = createBuiltinTools({
   isFileInRecent: (filePath: string) => {
     return Boolean(filesStore.recentFiles?.some((file) => file.path === filePath));
   },
-  getEditorContext: (documentId: string) => editorToolContextRegistry.getContext(documentId),
   getPendingQuestion: () => {
     const pendingQuestion = userChoice.findPending(messages.value);
     if (!pendingQuestion) return null;

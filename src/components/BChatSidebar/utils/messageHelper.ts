@@ -97,7 +97,7 @@ export function buildMessagePartsFromDraft(content: string, references: ChatMess
         type: 'file-reference',
         documentId: reference.documentId,
         snapshotId: reference.snapshotId,
-        fileName: reference.fileName,
+        fileName: `${reference.fileName}`,
         path: reference.path,
         startLine,
         endLine
