@@ -1,3 +1,4 @@
+/* eslint-disable max-classes-per-file */
 /**
  * @file chat-storage-sqlite.test.ts
  * @description 验证聊天消息 references 在真实 SQLite 链路中的迁移、写入与读取。
@@ -6,9 +7,9 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChatMessageFileReference, ChatMessageRecord, ChatReferenceSnapshot, ChatSession } from 'types/chat';
+import type { ChatMessageFileReference, ChatMessageRecord, ChatSession } from 'types/chat';
 import type { DbExecuteResult, ElectronAPI } from 'types/electron-api';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * SQLite 表结构信息行。
@@ -177,20 +178,6 @@ function createMessage(overrides: Partial<ChatMessageRecord> = {}): ChatMessageR
   };
 }
 
-/**
- * Builds a normalized snapshot fixture for persistence assertions.
- * @returns Chat reference snapshot fixture.
- */
-function createSnapshot(): ChatReferenceSnapshot {
-  return {
-    id: 'snapshot-1',
-    documentId: 'doc-1',
-    title: 'draft.md',
-    content: 'line 1\nline 2\nline 3',
-    createdAt: '2026-04-25T00:00:00.000Z'
-  };
-}
-
 describe('chatStorage SQLite references', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -276,10 +263,7 @@ describe('chatStorage SQLite references', () => {
     await chatStorage.createSession(session);
     await chatStorage.addMessage(message);
 
-    const persistedRows = await dbSelect<{ references_json: string | null }>(
-      'SELECT references_json FROM chat_messages WHERE id = ?',
-      [message.id]
-    );
+    const persistedRows = await dbSelect<{ references_json: string | null }>('SELECT references_json FROM chat_messages WHERE id = ?', [message.id]);
     const loadedMessages = await chatStorage.getMessages(session.id);
 
     expect(persistedRows[0]?.references_json).toBe(JSON.stringify(message.references));
@@ -349,58 +333,6 @@ describe('chatStorage SQLite references', () => {
     expect(loadedMessages).toEqual([firstMessage, secondMessage]);
   }, 15000);
 
-  it('round-trips persisted reference snapshots through SQLite storage', async () => {
-    const { initDatabase, dbExecute, dbSelect } = await import('../../electron/main/modules/database/service.mts');
-
-    await initDatabase();
-
-    vi.doMock('@/shared/platform/electron-api', () => {
-      /**
-       * Creates the minimal Electron API backed by the real test SQLite database.
-       * @returns Electron API subset used by shared storage.
-       */
-      function createElectronApi(): ElectronAPI {
-        return {
-          dbExecute: async (sql: string, params?: unknown[]): Promise<DbExecuteResult> => {
-            const result = dbExecute(sql, params);
-
-            return {
-              changes: result.changes,
-              lastInsertRowid: Number(result.lastInsertRowid)
-            };
-          },
-          dbSelect: async <T>(sql: string, params?: unknown[]): Promise<T[]> => dbSelect<T>(sql, params)
-        } as ElectronAPI;
-      }
-
-      return {
-        hasElectronAPI: (): boolean => true,
-        getElectronAPI: (): ElectronAPI => createElectronApi()
-      };
-    });
-
-    const { chatStorage } = await import('@/shared/storage/chats');
-    const snapshot = createSnapshot();
-
-    await chatStorage.upsertReferenceSnapshots([snapshot]);
-
-    const persistedRows = await dbSelect<{ id: string; document_id: string; title: string; content: string }>(
-      'SELECT id, document_id, title, content FROM chat_reference_snapshots WHERE id = ?',
-      [snapshot.id]
-    );
-    const loadedSnapshots = await chatStorage.getReferenceSnapshots([snapshot.id]);
-
-    expect(persistedRows).toEqual([
-      {
-        id: snapshot.id,
-        document_id: snapshot.documentId,
-        title: snapshot.title,
-        content: snapshot.content
-      }
-    ]);
-    expect(loadedSnapshots).toEqual([snapshot]);
-  }, 15000);
-
   it('updates only the session title metadata when auto naming completes', async () => {
     const { initDatabase, dbExecute, dbSelect } = await import('../../electron/main/modules/database/service.mts');
 
@@ -449,10 +381,7 @@ describe('chatStorage SQLite references', () => {
       updated_at: string;
       last_message_at: string;
       usage_json: string | null;
-    }>(
-      'SELECT title, updated_at, last_message_at, usage_json FROM chat_sessions WHERE id = ?',
-      [session.id]
-    );
+    }>('SELECT title, updated_at, last_message_at, usage_json FROM chat_sessions WHERE id = ?', [session.id]);
 
     expect(rows).toHaveLength(1);
     expect(rows[0]?.title).toBe('自动命名标题');

@@ -99,9 +99,14 @@ function parseDraftReferenceLine(text: string) {
 export function buildMessagePartsFromDraft(content: string) {
   const FILE_REF_RE = /\{\{file-ref:(?<documentId>[^|}]+)\|(?<fileName>[^|}]+)\|(?<start>\d+)(?:\|(?<end>\d+))?\}\}/g;
 
-  return content.replace(FILE_REF_RE, (text) => {
+  return content.replace(FILE_REF_RE, (_, ...groups) => {
+    const [documentId, fileName, start, end] = groups;
+
+    const startLine = Number(start);
+    const endLine = end ? Number(end) : startLine;
+    console.log('🚀 ~ buildMessagePartsFromDraft ~ groups:', documentId);
     // const reference = references.find((ref) => ref.documentId === documentId && ref.fileName === fileName);
-    return `{{${text}}}}`;
+    return `<USER_SELECT_FRAGMENT referenceId="${documentId}" startLine="${startLine}" endLine="${endLine}"></USER_SELECT_FRAGMENT>`;
   });
 }
 

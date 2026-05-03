@@ -54,12 +54,6 @@ vi.mock('@/stores/service-model', () => ({
   })
 }));
 
-vi.mock('@/shared/storage', () => ({
-  chatStorage: {
-    getReferenceSnapshots: vi.fn(async () => [])
-  }
-}));
-
 /**
  * 创建一个已经收到部分流式内容、但仍处于 loading 的助手消息。
  * @returns 可用于中止测试的助手消息。

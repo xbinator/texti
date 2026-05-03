@@ -2,7 +2,7 @@
  * @file fileReferenceContext.ts
  * @description 基于结构化文件引用片段构建模型可读的引用索引上下文。
  */
-import type { ChatMessageFileReferencePart, ChatReferenceSnapshot } from 'types/chat';
+import type { ChatMessageFileReferencePart } from 'types/chat';
 import type { Message } from '@/components/BChatSidebar/utils/types';
 
 /**
@@ -52,12 +52,9 @@ function buildReferenceIndexBlock(references: ChatMessageFileReferencePart[]): s
 /**
  * 构建面向模型的就绪消息列表，将结构化引用片段改写为引用索引块。
  * @param sourceMessages - 原始聊天消息
- * @param snapshotsById - snapshotId → 快照的映射；当前仅用于确保引用快照已预加载
  * @returns 模型就绪消息列表
  */
-export function buildModelReadyMessages(sourceMessages: Message[], snapshotsById: Map<string, ChatReferenceSnapshot>): Message[] {
-  void snapshotsById;
-
+export function buildModelReadyMessages(sourceMessages: Message[]): Message[] {
   return sourceMessages.map((message) => {
     if (message.role !== 'user') {
       return message;

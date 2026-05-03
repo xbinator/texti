@@ -92,12 +92,10 @@ import BButton from '@/components/BButton/index.vue';
 import { chipResolver } from '@/components/BChatSidebar/utils/chipResolver';
 import { buildMessagePartsFromDraft, create, userChoice } from '@/components/BChatSidebar/utils/messageHelper';
 import { resolveReferenceSnapshotFromMessages } from '@/components/BChatSidebar/utils/referenceResolver';
-import { persistReferenceSnapshots } from '@/components/BChatSidebar/utils/referenceSnapshot';
 import { chatSlashCommands } from '@/components/BChatSidebar/utils/slashCommands';
 import type { Message } from '@/components/BChatSidebar/utils/types';
 import BPromptEditor from '@/components/BPromptEditor/index.vue';
 import type { SlashCommandOption } from '@/components/BPromptEditor/types';
-import { chatStorage } from '@/shared/storage';
 import { useChatStore } from '@/stores/chat';
 import { useFilesStore } from '@/stores/files';
 import { useSettingStore } from '@/stores/setting';
@@ -195,8 +193,6 @@ const filesStore = useFilesStore();
  */
 async function getReferenceSnapshot(referenceId: string) {
   return resolveReferenceSnapshotFromMessages(messages.value, referenceId, {
-    getSnapshotsByIds: (snapshotIds: string[]) => chatStorage.getReferenceSnapshots(snapshotIds),
-    getLatestSnapshotByDocumentId: (documentId: string) => chatStorage.getReferenceSnapshotByDocumentId(documentId),
     getEditorContext: (documentId: string) => editorToolContextRegistry.getContext(documentId)
   });
 }
@@ -257,7 +253,6 @@ async function handleBeforeRegenerate(nextMessages: Message[]): Promise<void> {
  */
 async function handleBeforeSend(nextMessage: Message): Promise<void> {
   confirmationController.expirePendingConfirmation();
-  await persistReferenceSnapshots(nextMessage);
 
   if (!settingStore.chatSidebarActiveSessionId) {
     const session = await chatStore.createSession('assistant', { title: nextMessage.content });

@@ -14,7 +14,6 @@ import { buildModelReadyMessages } from '@/components/BChatSidebar/utils/fileRef
 import { createToolCallTracker, type ToolCallTracker } from '@/components/BChatSidebar/utils/toolCallTracker';
 import { createToolLoopGuard, type ToolLoopGuard } from '@/components/BChatSidebar/utils/toolLoopGuard';
 import { useChat } from '@/hooks/useChat';
-import { chatStorage } from '@/shared/storage';
 import { useServiceModelStore } from '@/stores/service-model';
 import { append, convert, create, userChoice, is } from '../utils/messageHelper';
 
@@ -265,22 +264,6 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
   }
 
   /**
-   * 加载引用快照映射
-   */
-  async function loadReferenceSnapshotMap(sourceMessages: Message[]) {
-    const references = sourceMessages.flatMap((message) => {
-      return message.parts.filter((part): part is Extract<Message['parts'][number], { type: 'file-reference' }> => part.type === 'file-reference');
-    });
-    const snapshotIds = references.map((reference) => reference.snapshotId).filter((id) => id.length > 0);
-    const uniqueSnapshotIds = [...new Set(snapshotIds)];
-
-    if (!uniqueSnapshotIds.length) return new Map();
-
-    const snapshots = await chatStorage.getReferenceSnapshots(uniqueSnapshotIds);
-    return new Map(snapshots.map((s) => [s.id, s]));
-  }
-
-  /**
    * 追加文本片段
    */
   function appendText(content: string): void {
@@ -340,8 +323,7 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     currentToolCallTracker = createToolCallTracker();
     handlePrepareAssistantMessage(reuseLastAssistant);
 
-    const snapshotsById = await loadReferenceSnapshotMap(sourceMessages);
-    const modelMessages = buildModelReadyMessages(sourceMessages, snapshotsById);
+    const modelMessages = buildModelReadyMessages(sourceMessages);
     currentModelMessageCache = convert.toCachedModelMessages(modelMessages, currentModelMessageCache);
 
     const continuedMessages = [...currentModelMessageCache.modelMessages];

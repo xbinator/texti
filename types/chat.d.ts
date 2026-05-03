@@ -42,22 +42,6 @@ export interface ChatMessageFileReference {
 }
 
 /**
- * 聊天引用快照
- */
-export interface ChatReferenceSnapshot {
-  /** 快照唯一标识 */
-  id: string;
-  /** 快照所属文档 ID */
-  documentId: string;
-  /** 快照标题 */
-  title: string;
-  /** 快照内容 */
-  content: string;
-  /** 创建时间 */
-  createdAt: string;
-}
-
-/**
  * 聊天消息附件
  */
 export interface ChatMessageFile {

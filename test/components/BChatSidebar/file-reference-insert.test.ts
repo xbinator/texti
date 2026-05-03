@@ -84,45 +84,7 @@ describe('chat file reference insert wiring', () => {
     expect(fileReferenceHookSource).toContain('type ChatFileReferenceInsertPayload');
     expect(fileReferenceHookSource).toContain('referenceId: nanoid()');
     expect(fileReferenceHookSource).toContain('documentId: toolContext?.document.id || reference.filePath || reference.fileName');
-    expect(sidebarSource).toContain('import { persistReferenceSnapshots }');
     expect(fileReferenceHookSource).toContain('getActiveReferences');
     expect(fileReferenceHookSource).toContain('formatLineRange');
-  });
-
-  test('persistReferenceSnapshots uses bidirectional strategy with editor context and disk fallback', () => {
-    const sidebarSource = readSource('src/components/BChatSidebar/index.vue');
-    const referenceSnapshotSource = readSource('src/components/BChatSidebar/utils/referenceSnapshot.ts');
-    const editorContextSource = readSource('src/ai/tools/editor-context.ts');
-
-    // 双向获取策略：编辑器激活 → 内存获取，未激活 → 磁盘读取
-    expect(referenceSnapshotSource).toContain('editor|');
-    expect(referenceSnapshotSource).toContain('disk|');
-    expect(referenceSnapshotSource).toContain('editorToolContextRegistry.getContext');
-    expect(referenceSnapshotSource).toContain('native.readFile');
-    expect(referenceSnapshotSource).toContain('applySnapshotFromSqlite');
-
-    // 按来源分组并分阶段创建快照
-    expect(referenceSnapshotSource).toContain('function buildGroups');
-    expect(referenceSnapshotSource).toContain(createTemplateKeySource('editor', 'ref.documentId'));
-    expect(referenceSnapshotSource).toContain(createTemplateKeySource('disk', 'ref.path'));
-    expect(referenceSnapshotSource).toContain(createTemplateKeySource('sqlite', 'ref.documentId'));
-    expect(referenceSnapshotSource).toContain('function createEditorSnapshots');
-    expect(referenceSnapshotSource).toContain('async function createDiskSnapshots');
-    expect(referenceSnapshotSource).toContain('async function createSqliteSnapshots');
-
-    // 并发限流使用 p-limit
-    expect(referenceSnapshotSource).toContain("import pLimit from 'p-limit'");
-    expect(referenceSnapshotSource).toContain('const limit = pLimit(5)');
-
-    // editor-context 新增 getContext 方法
-    expect(editorContextSource).toContain('getContext: (documentId: string) => AIToolContext | undefined');
-    expect(editorContextSource).toContain('getContext(documentId: string): AIToolContext | undefined');
-
-    // 导入 native 平台模块
-    expect(referenceSnapshotSource).toContain("import { native } from '@/shared/platform'");
-
-    // persistReferenceSnapshots 从 index.vue 移除，移到独立模块
-    expect(sidebarSource).not.toContain('async function persistReferenceSnapshots');
-    expect(sidebarSource).toContain('import { persistReferenceSnapshots }');
   });
 });

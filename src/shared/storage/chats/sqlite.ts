@@ -9,7 +9,6 @@ import type {
   ChatMessageHistoryCursor,
   ChatMessagePart,
   ChatMessageRecord,
-  ChatReferenceSnapshot,
   ChatMessageRole,
   ChatSession,
   ChatSessionType,
@@ -22,7 +21,6 @@ import { dbSelect, dbExecute, isDatabaseAvailable, parseJson, stringifyJson } fr
 
 const CHAT_SESSIONS_STORAGE_KEY = 'chat_sessions_fallback';
 const CHAT_MESSAGES_STORAGE_KEY = 'chat_messages_fallback';
-const CHAT_REFERENCE_SNAPSHOTS_STORAGE_KEY = 'chat_reference_snapshots_fallback';
 const CHAT_MESSAGE_HISTORY_LIMIT = 30;
 
 const SELECT_SESSIONS_BY_TYPE_SQL = `
@@ -78,23 +76,6 @@ const UPSERT_MESSAGE_SQL = `
     (id, session_id, role, content, parts_json, references_json, thinking, files_json, usage_json, created_at)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
-const UPSERT_REFERENCE_SNAPSHOT_SQL = `
-  INSERT OR REPLACE INTO chat_reference_snapshots
-    (id, document_id, title, content, created_at)
-  VALUES (?, ?, ?, ?, ?)
-`;
-const SELECT_REFERENCE_SNAPSHOTS_BY_IDS_SQL_PREFIX = `
-  SELECT id, document_id, title, content, created_at
-  FROM chat_reference_snapshots
-  WHERE id IN
-`;
-const SELECT_LATEST_REFERENCE_SNAPSHOT_BY_DOCUMENT_ID_SQL = `
-  SELECT id, document_id, title, content, created_at
-  FROM chat_reference_snapshots
-  WHERE document_id = ?
-  ORDER BY created_at DESC
-  LIMIT 1
-`;
 const DELETE_SESSION_SQL = 'DELETE FROM chat_sessions WHERE id = ?';
 const DELETE_MESSAGES_BY_SESSION_SQL = 'DELETE FROM chat_messages WHERE session_id = ?';
 
@@ -125,20 +106,8 @@ interface FallbackMessagesMap {
   [sessionId: string]: ChatMessageRecord[] | undefined;
 }
 
-interface FallbackReferenceSnapshotsMap {
-  [snapshotId: string]: ChatReferenceSnapshot | undefined;
-}
-
 interface ChatSessionUsageRow {
   usage_json: string | null;
-}
-
-interface ChatReferenceSnapshotRow {
-  id: string;
-  document_id: string;
-  title: string;
-  content: string;
-  created_at: string;
 }
 
 function isChatSessionType(value: string): value is ChatSessionType {
@@ -204,22 +173,6 @@ function saveFallbackMessages(messages: FallbackMessagesMap): void {
   local.setItem(CHAT_MESSAGES_STORAGE_KEY, messages);
 }
 
-/**
- * 从本地降级存储加载持久化的引用快照
- * @returns 以快照 ID 为键的快照映射
- */
-function loadFallbackReferenceSnapshots(): FallbackReferenceSnapshotsMap {
-  return local.getItem<FallbackReferenceSnapshotsMap>(CHAT_REFERENCE_SNAPSHOTS_STORAGE_KEY) ?? {};
-}
-
-/**
- * 将持久化的引用快照保存到本地降级存储
- * @param snapshots - 以快照 ID 为键的快照映射
- */
-function saveFallbackReferenceSnapshots(snapshots: FallbackReferenceSnapshotsMap): void {
-  local.setItem(CHAT_REFERENCE_SNAPSHOTS_STORAGE_KEY, snapshots);
-}
-
 function sortSessions(sessions: ChatSession[]): ChatSession[] {
   return [...sessions].sort((left, right) => {
     if (right.lastMessageAt !== left.lastMessageAt) return right.lastMessageAt.localeCompare(left.lastMessageAt);
@@ -281,34 +234,6 @@ function addUsage(currentUsage: AIUsage | undefined, nextUsage: AIUsage): AIUsag
   };
 }
 
-/**
- * 将 SQLite 快照行映射为共享引用快照格式
- * @param row - 原始 SQLite 快照行
- * @returns 标准化的引用快照
- */
-function mapReferenceSnapshotRow(row: ChatReferenceSnapshotRow): ChatReferenceSnapshot {
-  return {
-    id: row.id,
-    documentId: row.document_id,
-    title: row.title,
-    content: row.content,
-    createdAt: row.created_at
-  };
-}
-
-/**
- * 构建 SQLite `IN (...)` 子句使用的占位符列表
- * @param ids - 要查询的快照 ID 列表
- * @returns 与 ID 数量匹配的括号占位符列表
- */
-function buildSqlPlaceholders(ids: string[]): string {
-  return `(${ids.map(() => '?').join(', ')})`;
-}
-
-/**
- * 通过共享 SQLite upsert 语句持久化一批消息
- * @param messages - 要持久化的消息列表
- */
 async function upsertSessionMessages(messages: ChatMessageRecord[]): Promise<void> {
   await Promise.all(
     messages.map((message) =>
@@ -510,74 +435,6 @@ export const chatStorage = {
       : await dbSelect<ChatMessageRow>(SELECT_MESSAGES_BY_SESSION_SQL, [sessionId, CHAT_MESSAGE_HISTORY_LIMIT]);
 
     return sortMessages(rows.map(mapMessageRow));
-  },
-
-  /**
-   * 按 ID 加载持久化的引用快照
-   * @param snapshotIds - 要加载的快照 ID 列表
-   * @returns 匹配的快照列表（顺序不确定）
-   */
-  async getReferenceSnapshots(snapshotIds: string[]): Promise<ChatReferenceSnapshot[]> {
-    if (!snapshotIds.length) {
-      return [];
-    }
-
-    if (!isDatabaseAvailable()) {
-      const snapshots = loadFallbackReferenceSnapshots();
-      return snapshotIds.map((snapshotId) => snapshots[snapshotId]).filter((snapshot): snapshot is ChatReferenceSnapshot => snapshot !== undefined);
-    }
-
-    const rows = await dbSelect<ChatReferenceSnapshotRow>(`${SELECT_REFERENCE_SNAPSHOTS_BY_IDS_SQL_PREFIX} ${buildSqlPlaceholders(snapshotIds)}`, snapshotIds);
-    return rows.map(mapReferenceSnapshotRow);
-  },
-
-  /**
-   * 按 documentId 查找最新的一条历史快照，用于磁盘文件读取失败时的降级兜底。
-   * @param documentId - 文档标识
-   * @returns 最新快照，不存在时返回 undefined
-   */
-  async getReferenceSnapshotByDocumentId(documentId: string): Promise<ChatReferenceSnapshot | undefined> {
-    if (!isDatabaseAvailable()) {
-      const snapshots = loadFallbackReferenceSnapshots();
-      // 遍历降级存储，找到匹配 documentId 的最新快照
-      let latest: ChatReferenceSnapshot | undefined;
-      for (const snapshot of Object.values(snapshots)) {
-        if (snapshot && snapshot.documentId === documentId) {
-          if (!latest || snapshot.createdAt > latest.createdAt) {
-            latest = snapshot;
-          }
-        }
-      }
-      return latest;
-    }
-
-    const rows = await dbSelect<ChatReferenceSnapshotRow>(SELECT_LATEST_REFERENCE_SNAPSHOT_BY_DOCUMENT_ID_SQL, [documentId]);
-    return rows.length > 0 ? mapReferenceSnapshotRow(rows[0]) : undefined;
-  },
-
-  /**
-   * 持久化一个或多个引用快照
-   * @param snapshots - 要持久化的快照列表
-   */
-  async upsertReferenceSnapshots(snapshots: ChatReferenceSnapshot[]): Promise<void> {
-    if (!snapshots.length) {
-      return;
-    }
-
-    if (!isDatabaseAvailable()) {
-      const snapshotMap = loadFallbackReferenceSnapshots();
-      snapshots.forEach((snapshot) => {
-        snapshotMap[snapshot.id] = snapshot;
-      });
-      saveFallbackReferenceSnapshots(snapshotMap);
-      return;
-    }
-
-    await Promise.all(
-      snapshots.map((snapshot) =>
-        dbExecute(UPSERT_REFERENCE_SNAPSHOT_SQL, [snapshot.id, snapshot.documentId, snapshot.title, snapshot.content, snapshot.createdAt])
-      )
-    );
   },
 
   async addMessage(message: ChatMessageRecord): Promise<void> {
