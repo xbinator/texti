@@ -3,7 +3,7 @@
  * @description 内置本地文件读取工具实现。
  */
 import type { AIToolConfirmationAdapter, AIToolConfirmationRequest } from '../confirmation';
-import type { AIToolExecutionError, AIToolExecutor } from 'types/ai';
+import type { AIToolContext, AIToolExecutionError, AIToolExecutor } from 'types/ai';
 import { native } from '@/shared/platform';
 import type {
   ReadWorkspaceDirectoryOptions,
@@ -31,8 +31,10 @@ type WorkspaceReadErrorCode =
 
 /** read_file 工具输入参数 */
 export interface ReadFileInput {
-  /** 文件路径，支持相对工作区路径或绝对路径 */
-  path: string;
+  /** 文件路径，支持相对工作区路径或绝对路径；与 documentId 至少提供一个 */
+  path?: string;
+  /** 文档 ID，优先于 path，通过编辑器上下文反查文件路径后读取 */
+  documentId?: string;
   /** 起始行号，默认 1 */
   offset?: number;
   /** 读取行数，不传时读取到文件末尾 */
@@ -63,6 +65,8 @@ export interface CreateBuiltinReadFileToolOptions {
   getWorkspaceRoot?: () => string | null;
   /** 判断文件路径是否在最近文件列表中，命中时跳过绝对路径确认 */
   isFileInRecent?: (filePath: string) => boolean;
+  /** 根据文档 ID 查找编辑器上下文，用于 documentId 反查文件路径 */
+  getEditorContext?: (documentId: string) => AIToolContext | undefined;
   /** 读取本地文件，测试时可注入替身 */
   readWorkspaceFile?: (options: ReadWorkspaceFileOptions) => Promise<ReadWorkspaceFileResult>;
   /** 读取本地目录，测试时可注入替身 */
@@ -204,7 +208,8 @@ export function createBuiltinReadFileTool(options: CreateBuiltinReadFileToolOpti
   return {
     definition: {
       name: READ_FILE_TOOL_NAME,
-      description: '读取指定本地文本文件内容，可通过 offset 和 limit 滚动读取。相对路径需要工作区根目录，绝对路径需要用户确认（最近文件列表中的路径除外）。',
+      description:
+        '读取指定本地文本文件内容，可通过 offset 和 limit 滚动读取。支持通过 documentId 反查文件路径（优先于 path），也可直接提供 path。相对路径需要工作区根目录，绝对路径需要用户确认（最近文件列表中的路径除外）。',
       source: 'builtin',
       riskLevel: 'read',
       requiresActiveDocument: false,
@@ -212,18 +217,30 @@ export function createBuiltinReadFileTool(options: CreateBuiltinReadFileToolOpti
       parameters: {
         type: 'object',
         properties: {
-          path: { type: 'string', description: '文件路径，支持相对工作区路径或绝对路径。' },
+          path: { type: 'string', description: '文件路径，支持相对工作区路径或绝对路径。与 documentId 至少提供一个。' },
+          documentId: { type: 'string', description: '文档 ID，优先于 path，通过编辑器上下文反查文件路径后读取。' },
           offset: { type: 'number', description: '起始行号，默认 1。' },
           limit: { type: 'number', description: '读取行数；不传时读取到文件末尾。' }
         },
-        required: ['path'],
+        required: [],
         additionalProperties: false
       }
     },
     async execute(input: ReadFileInput) {
-      const filePath = typeof input.path === 'string' ? input.path.trim() : '';
+      /** 通过 documentId 反查文件路径，优先于 path */
+      let filePath = typeof input.path === 'string' ? input.path.trim() : '';
+
+      if (input.documentId) {
+        const editorContext = options.getEditorContext?.(input.documentId);
+        if (editorContext?.document.path) {
+          filePath = editorContext.document.path;
+        } else if (!filePath) {
+          return createToolFailureResult(READ_FILE_TOOL_NAME, 'INVALID_INPUT', 'documentId 未找到对应文件路径，且未提供 path');
+        }
+      }
+
       if (!filePath) {
-        return createToolFailureResult(READ_FILE_TOOL_NAME, 'INVALID_INPUT', '文件路径不能为空');
+        return createToolFailureResult(READ_FILE_TOOL_NAME, 'INVALID_INPUT', '文件路径不能为空，请提供 path 或 documentId');
       }
 
       const workspaceRoot = options.getWorkspaceRoot?.() ?? null;

@@ -2,6 +2,7 @@
  * @file builtin-read-file.test.ts
  * @description 内置 read_file 工具测试。
  */
+import type { AIToolContext } from 'types/ai';
 import { describe, expect, it } from 'vitest';
 import { createBuiltinReadFileTool } from '@/ai/tools/builtin/read-file';
 import type { ReadWorkspaceFileOptions, ReadWorkspaceFileResult as NativeReadWorkspaceFileResult } from '@/shared/platform/native/types';
@@ -149,5 +150,172 @@ describe('createBuiltinReadFileTool', () => {
 
     expect(result.status).toBe('failure');
     expect(result.error?.code).toBe('UNSUPPORTED_PROVIDER');
+  });
+
+  it('rejects when neither path nor documentId is provided', async () => {
+    const tool = createBuiltinReadFileTool({
+      getWorkspaceRoot: () => '/workspace',
+      readWorkspaceFile: async () => ({ path: '', content: '', totalLines: 0, readLines: 0, hasMore: false, nextOffset: null })
+    });
+
+    const result = await tool.execute({});
+
+    expect(result.status).toBe('failure');
+    expect(result.error?.code).toBe('INVALID_INPUT');
+  });
+
+  it('resolves documentId to file path via editor context', async () => {
+    let capturedOptions: ReadWorkspaceFileOptions | null = null;
+    const expectedResult: NativeReadWorkspaceFileResult = {
+      path: '/workspace\\src\\note.md',
+      content: '# Hello',
+      hasMore: false,
+      nextOffset: null,
+      totalLines: 1,
+      readLines: 1
+    };
+    const editorContext: AIToolContext = {
+      document: {
+        id: 'doc-1',
+        title: 'Note',
+        path: '/workspace\\src\\note.md',
+        getContent: () => '# Hello'
+      },
+      editor: {
+        getSelection: () => null,
+        insertAtCursor: async () => undefined,
+        replaceSelection: async () => undefined,
+        replaceDocument: async () => undefined
+      }
+    };
+    const tool = createBuiltinReadFileTool({
+      getWorkspaceRoot: () => '/workspace',
+      getEditorContext: (documentId: string) => (documentId === 'doc-1' ? editorContext : undefined),
+      readWorkspaceFile: async (options: ReadWorkspaceFileOptions) => {
+        capturedOptions = options;
+        return expectedResult;
+      }
+    });
+
+    const result = await tool.execute({ documentId: 'doc-1' });
+
+    expect(capturedOptions).toEqual({
+      filePath: '/workspace\\src\\note.md',
+      workspaceRoot: '/workspace',
+      offset: 1
+    });
+    expect(result.status).toBe('success');
+  });
+
+  it('falls back to path when documentId has no editor context', async () => {
+    let capturedOptions: ReadWorkspaceFileOptions | null = null;
+    const expectedResult: NativeReadWorkspaceFileResult = {
+      path: '/workspace\\src\\fallback.md',
+      content: 'fallback',
+      hasMore: false,
+      nextOffset: null,
+      totalLines: 1,
+      readLines: 1
+    };
+    const tool = createBuiltinReadFileTool({
+      getWorkspaceRoot: () => '/workspace',
+      getEditorContext: () => undefined,
+      readWorkspaceFile: async (options: ReadWorkspaceFileOptions) => {
+        capturedOptions = options;
+        return expectedResult;
+      }
+    });
+
+    const result = await tool.execute({ documentId: 'unknown-doc', path: 'src/fallback.md' });
+
+    expect(capturedOptions).toEqual({
+      filePath: 'src/fallback.md',
+      workspaceRoot: '/workspace',
+      offset: 1
+    });
+    expect(result.status).toBe('success');
+  });
+
+  it('rejects when documentId has no editor context and no path provided', async () => {
+    const tool = createBuiltinReadFileTool({
+      getWorkspaceRoot: () => '/workspace',
+      getEditorContext: () => undefined,
+      readWorkspaceFile: async () => ({ path: '', content: '', totalLines: 0, readLines: 0, hasMore: false, nextOffset: null })
+    });
+
+    const result = await tool.execute({ documentId: 'unknown-doc' });
+
+    expect(result.status).toBe('failure');
+    expect(result.error?.code).toBe('INVALID_INPUT');
+  });
+
+  it('rejects when documentId resolves to unsaved document with null path and no path provided', async () => {
+    const editorContext: AIToolContext = {
+      document: {
+        id: 'unsaved-doc',
+        title: 'Unsaved',
+        path: null,
+        getContent: () => 'unsaved content'
+      },
+      editor: {
+        getSelection: () => null,
+        insertAtCursor: async () => undefined,
+        replaceSelection: async () => undefined,
+        replaceDocument: async () => undefined
+      }
+    };
+    const tool = createBuiltinReadFileTool({
+      getWorkspaceRoot: () => '/workspace',
+      getEditorContext: (documentId: string) => (documentId === 'unsaved-doc' ? editorContext : undefined),
+      readWorkspaceFile: async () => ({ path: '', content: '', totalLines: 0, readLines: 0, hasMore: false, nextOffset: null })
+    });
+
+    const result = await tool.execute({ documentId: 'unsaved-doc' });
+
+    expect(result.status).toBe('failure');
+    expect(result.error?.code).toBe('INVALID_INPUT');
+  });
+
+  it('documentId takes priority over path when both are provided', async () => {
+    let capturedOptions: ReadWorkspaceFileOptions | null = null;
+    const expectedResult: NativeReadWorkspaceFileResult = {
+      path: '/workspace\\src\\from-docid.md',
+      content: 'from documentId',
+      hasMore: false,
+      nextOffset: null,
+      totalLines: 1,
+      readLines: 1
+    };
+    const editorContext: AIToolContext = {
+      document: {
+        id: 'doc-1',
+        title: 'From DocId',
+        path: '/workspace\\src\\from-docid.md',
+        getContent: () => 'from documentId'
+      },
+      editor: {
+        getSelection: () => null,
+        insertAtCursor: async () => undefined,
+        replaceSelection: async () => undefined,
+        replaceDocument: async () => undefined
+      }
+    };
+    const tool = createBuiltinReadFileTool({
+      getWorkspaceRoot: () => '/workspace',
+      getEditorContext: (documentId: string) => (documentId === 'doc-1' ? editorContext : undefined),
+      readWorkspaceFile: async (options: ReadWorkspaceFileOptions) => {
+        capturedOptions = options;
+        return expectedResult;
+      }
+    });
+
+    const result = await tool.execute({ documentId: 'doc-1', path: 'src/other.md' });
+
+    expect(capturedOptions).toEqual({
+      filePath: '/workspace\\src\\from-docid.md',
+      workspaceRoot: '/workspace',
+      offset: 1
+    });
+    expect(result.status).toBe('success');
   });
 });

@@ -35,6 +35,8 @@ interface CreateBuiltinToolsOptions {
   isFileInRecent?: (filePath: string) => boolean;
   /** 根据引用 ID 解析冻结快照 */
   getReferenceSnapshot?: (referenceId: string) => Promise<ResolvedReferenceSnapshot | null>;
+  /** 根据文档 ID 查找编辑器上下文，用于 documentId 反查文件路径 */
+  getEditorContext?: (documentId: string) => import('types/ai').AIToolContext | undefined;
 }
 
 /**
@@ -61,7 +63,8 @@ export function createBuiltinTools(options: CreateBuiltinToolsOptions = {}): AIT
     createBuiltinReadFileTool({
       confirm: options.confirm,
       getWorkspaceRoot: options.getWorkspaceRoot,
-      isFileInRecent: options.isFileInRecent
+      isFileInRecent: options.isFileInRecent,
+      getEditorContext: options.getEditorContext
     }),
     createBuiltinReadReferenceTool({
       getReferenceSnapshot: options.getReferenceSnapshot

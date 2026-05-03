@@ -203,6 +203,7 @@ const tools = createBuiltinTools({
     return Boolean(filesStore.recentFiles?.some((file) => file.path === filePath));
   },
   getReferenceSnapshot,
+  getEditorContext: (documentId: string) => editorToolContextRegistry.getContext(documentId),
   getPendingQuestion: () => {
     const pendingQuestion = userChoice.findPending(messages.value);
     if (!pendingQuestion) return null;
