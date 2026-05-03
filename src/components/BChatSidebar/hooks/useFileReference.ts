@@ -3,11 +3,10 @@
  * @description 文件引用管理 hook
  */
 import type { FileReferenceChip } from '../types';
-import type { ChatMessageFileReference } from 'types/chat';
-import { nextTick, onMounted, onUnmounted, ref } from 'vue';
-import { nanoid } from 'nanoid';
+import { nextTick, onMounted, onUnmounted } from 'vue';
 import { editorToolContextRegistry } from '@/ai/tools/editor-context';
-import { onChatFileReferenceInsert, type ChatFileReferenceInsertPayload } from '@/shared/chat/fileReference';
+import type { ChatFileReferenceInsertPayload } from '@/shared/chat/fileReference';
+import { onChatFileReferenceInsert } from '@/shared/chat/fileReference';
 import { useSettingStore } from '@/stores/setting';
 
 /**
@@ -30,8 +29,6 @@ interface FileReferenceOptions {
 export function useFileReference(options: FileReferenceOptions) {
   const settingStore = useSettingStore();
 
-  /** 草稿文件引用列表 */
-  const draftReferences = ref<ChatMessageFileReference[]>([]);
   /** 文件引用插入事件取消注册函数 */
   let unregisterFileReferenceInsert: (() => void) | null = null;
 
@@ -48,38 +45,12 @@ export function useFileReference(options: FileReferenceOptions) {
   }
 
   /**
-   * 将 startLine/endLine 转换为 ChatMessageFileReference.line 字符串格式
-   * @param startLine - 起始行号
-   * @param endLine - 结束行号
-   * @returns 格式化的行号字符串，如 "10" 或 "10-20"
-   */
-  function formatLineRange(startLine: number, endLine: number): string {
-    if (startLine <= 0) {
-      return '';
-    }
-
-    return startLine === endLine ? String(startLine) : `${startLine}-${endLine}`;
-  }
-
-  /**
    * 处理聊天中插入文件引用
    * 将文件引用添加到草稿列表并插入 token 到输入框
    * @param reference - 文件引用信息
    */
   function insertReference(reference: FileReferenceChip): void {
-    const token = `{{file-ref:${reference.referenceId}|${reference.fileName}|${reference.startLine}|${reference.endLine}}} `;
-    draftReferences.value = [
-      ...draftReferences.value.filter((item) => item.id !== reference.referenceId),
-      {
-        id: reference.referenceId,
-        token,
-        documentId: reference.documentId,
-        fileName: reference.fileName,
-        line: formatLineRange(reference.startLine, reference.endLine),
-        path: reference.filePath,
-        snapshotId: ''
-      }
-    ];
+    const token = `{{file-ref:${reference.documentId}|${reference.fileName}|${reference.startLine}|${reference.endLine}}} `;
     options.insertTextAtCursor(token);
   }
 
@@ -91,7 +62,6 @@ export function useFileReference(options: FileReferenceOptions) {
   async function handleFileReferenceInsert(reference: ChatFileReferenceInsertPayload): Promise<void> {
     const toolContext = editorToolContextRegistry.getCurrentContext();
     const enrichedReference: FileReferenceChip = {
-      referenceId: nanoid(),
       documentId: toolContext?.document.id || reference.filePath || reference.fileName,
       filePath: reference.filePath ?? toolContext?.document.path ?? null,
       fileName: reference.fileName,
@@ -108,32 +78,6 @@ export function useFileReference(options: FileReferenceOptions) {
     options.focusInput();
   }
 
-  /**
-   * 获取内容中活跃的草稿文件引用
-   * @param content - 输入内容
-   * @returns 活跃的引用列表，无则返回 undefined
-   */
-  function getActiveReferences(content: string): ChatMessageFileReference[] | undefined {
-    const references = draftReferences.value.filter((reference) => content.includes(reference.token));
-
-    return references.length ? references : undefined;
-  }
-
-  /**
-   * 清空草稿文件引用
-   */
-  function clearReferences(): void {
-    draftReferences.value = [];
-  }
-
-  /**
-   * 设置草稿文件引用（用于编辑消息时恢复）
-   * @param references - 文件引用列表
-   */
-  function setReferences(references: ChatMessageFileReference[] | undefined): void {
-    draftReferences.value = references ? [...references] : [];
-  }
-
   /** 注册文件引用插入事件监听 */
   onMounted(() => {
     unregisterFileReferenceInsert = onChatFileReferenceInsert((reference) => {
@@ -148,11 +92,7 @@ export function useFileReference(options: FileReferenceOptions) {
   });
 
   return {
-    draftReferences,
     onPasteFiles,
-    insertReference,
-    getActiveReferences,
-    clearReferences,
-    setReferences
+    insertReference
   };
 }

@@ -54,8 +54,8 @@ function createImageFile(overrides: Partial<ChatMessageFile> = {}): ChatMessageF
  */
 function createFileReference(overrides: Partial<ChatMessageFileReference> = {}): ChatMessageFileReference {
   return {
-    id: 'ref-1',
-    token: '{{file-ref:ref-1|foo.ts|3|5}}',
+    id: 'doc-1',
+    token: '{{file-ref:doc-1|foo.ts|3|5}}',
     documentId: 'doc-1',
     fileName: 'foo.ts',
     line: '3-5',
@@ -95,7 +95,6 @@ describe('BChat message helpers', () => {
       { type: 'text', text: '请看 ' },
       {
         type: 'file-reference',
-        referenceId: 'ref-1',
         documentId: 'doc-1',
         snapshotId: '',
         fileName: 'useChatStream.ts',
@@ -108,10 +107,8 @@ describe('BChat message helpers', () => {
 
     expect(message.content).toBe('请看  这里');
     expect(message.parts.map((part) => part.type)).toEqual(['text', 'file-reference', 'text']);
-    expect(
-      message.parts.find((part): part is Extract<Message['parts'][number], { type: 'file-reference' }> => part.type === 'file-reference')
-    ).toMatchObject({
-      referenceId: 'ref-1',
+    expect(message.parts.find((part): part is Extract<Message['parts'][number], { type: 'file-reference' }> => part.type === 'file-reference')).toMatchObject({
+      documentId: 'doc-1',
       startLine: 300,
       endLine: 360
     });
@@ -122,7 +119,6 @@ describe('BChat message helpers', () => {
       { type: 'text', text: '分析这个引用' },
       {
         type: 'file-reference',
-        referenceId: 'ref-1',
         documentId: 'doc-1',
         snapshotId: 'snapshot-1',
         fileName: 'draft.ts',
@@ -141,13 +137,12 @@ describe('BChat message helpers', () => {
   });
 
   it('builds ordered text and file-reference parts from active draft references', () => {
-    const parts = buildMessagePartsFromDraft('A {{file-ref:ref-1|foo.ts|3|5}} B', [createFileReference()]);
+    const parts = buildMessagePartsFromDraft('A {{file-ref:doc-1|foo.ts|3|5}} B', [createFileReference()]);
 
     expect(parts).toEqual([
       { type: 'text', text: 'A ' },
       {
         type: 'file-reference',
-        referenceId: 'ref-1',
         documentId: 'doc-1',
         snapshotId: '',
         fileName: 'foo.ts',
@@ -160,10 +155,10 @@ describe('BChat message helpers', () => {
   });
 
   it('keeps unsaved document references with document ids and null paths', () => {
-    const parts = buildMessagePartsFromDraft('查看 {{file-ref:ref-2|draft.ts|10|20}}', [
+    const parts = buildMessagePartsFromDraft('查看 {{file-ref:doc-unsaved|draft.ts|10|20}}', [
       createFileReference({
-        id: 'ref-2',
-        token: '{{file-ref:ref-2|draft.ts|10|20}}',
+        id: 'doc-unsaved',
+        token: '{{file-ref:doc-unsaved|draft.ts|10|20}}',
         documentId: 'doc-unsaved',
         fileName: 'draft.ts',
         line: '10-20',

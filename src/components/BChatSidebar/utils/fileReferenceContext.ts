@@ -26,7 +26,7 @@ function formatReferenceLine(reference: ChatMessageFileReferencePart): string {
       : 'no explicit line range';
   const unsavedLabel = reference.path ? '' : ' (unsaved document)';
 
-  return `- ${reference.referenceId}: ${reference.fileName}${unsavedLabel} (${lineLabel})`;
+  return `- ${reference.documentId}: ${reference.fileName}${unsavedLabel} (${lineLabel})`;
 }
 
 /**

@@ -85,8 +85,6 @@ export interface ChatMessageTextPart {
 export interface ChatMessageFileReferencePart {
   /** 片段类型 */
   type: 'file-reference';
-  /** 引用唯一标识 */
-  referenceId: string;
   /** 引用对应的文档 ID */
   documentId: string;
   /** 引用快照 ID */

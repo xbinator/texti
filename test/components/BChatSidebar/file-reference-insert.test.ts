@@ -20,16 +20,6 @@ function readSource(relativePath: string): string {
   return readFileSync(resolve(process.cwd(), relativePath), 'utf-8');
 }
 
-/**
- * 构造源码中的模板字面量片段，避免测试字面量触发 no-template-curly-in-string。
- * @param pathExpression - 模板中的表达式内容
- * @returns 源码字符串片段
- */
-function createTemplateKeySource(prefix: string, pathExpression: string): string {
-  const interpolationStart = '${';
-  return `key = \`${prefix}|${interpolationStart}${pathExpression}}\`;`;
-}
-
 describe('chat file reference insert event utilities', () => {
   test('normalizes file names across slash styles', () => {
     expect(getFileNameFromPath('src/foo/file.ts')).toBe('file.ts');
@@ -82,9 +72,6 @@ describe('chat file reference insert wiring', () => {
     expect(fileReferenceHookSource).toContain('handleFileReferenceInsert');
     expect(fileReferenceHookSource).toContain('onChatFileReferenceInsert');
     expect(fileReferenceHookSource).toContain('type ChatFileReferenceInsertPayload');
-    expect(fileReferenceHookSource).toContain('referenceId: nanoid()');
     expect(fileReferenceHookSource).toContain('documentId: toolContext?.document.id || reference.filePath || reference.fileName');
-    expect(fileReferenceHookSource).toContain('getActiveReferences');
-    expect(fileReferenceHookSource).toContain('formatLineRange');
   });
 });

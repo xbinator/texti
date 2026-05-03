@@ -134,7 +134,6 @@ function createMessageWithFileReferencePart(): Message {
       { type: 'text', text: '请看 ' },
       {
         type: 'file-reference',
-        referenceId: 'ref-1',
         documentId: 'doc-1',
         snapshotId: 'snapshot-1',
         fileName: 'foo.ts',

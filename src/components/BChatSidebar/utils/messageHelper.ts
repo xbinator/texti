@@ -58,39 +58,6 @@ function toJsonValue(value: unknown): JSONValue {
 }
 
 /**
- * 将引用行范围文本解析为起止行号。
- * @param line - 引用行范围文本
- * @returns 起止行号；未指定行号时返回 0 和 0
- */
-// function parseDraftReferenceLine(line: string): { startLine: number; endLine: number } {
-//   const INVALID = { startLine: 0, endLine: 0 };
-
-//   if (!line) return INVALID;
-
-//   const parts = line.split('-').map((s) => Number(s.trim()));
-//   const [start, end = start] = parts;
-
-//   const isValidInt = (n: number) => Number.isInteger(n) && n > 0;
-
-//   if (parts.length > 2 || !isValidInt(start) || !isValidInt(end) || end < start) {
-//     return INVALID;
-//   }
-
-//   return { startLine: start, endLine: end };
-// }
-function parseDraftReferenceLine(text: string) {
-  const FILE_REF_RE = /\{\{file-ref:(?<documentId>[^|}]+)\|(?<fileName>[^|}]+)\|(?<start>\d+)(?:\|(?<end>\d+))?\}\}/g;
-
-  return Array.from(text.matchAll(FILE_REF_RE), ({ groups }) => {
-    const { documentId, fileName, start, end } = groups as Record<string, string>;
-    const startLine = Number(start);
-    const endLine = end ? Number(end) : startLine;
-
-    return { type: 'file-reference', documentId, fileName, startLine, endLine };
-  });
-}
-
-/**
  * 将草稿正文和活动引用解析为有序消息片段。
  * @param content - 草稿正文
  * @param references - 活动文件引用
@@ -100,13 +67,12 @@ export function buildMessagePartsFromDraft(content: string) {
   const FILE_REF_RE = /\{\{file-ref:(?<documentId>[^|}]+)\|(?<fileName>[^|}]+)\|(?<start>\d+)(?:\|(?<end>\d+))?\}\}/g;
 
   return content.replace(FILE_REF_RE, (_, ...groups) => {
-    const [documentId, fileName, start, end] = groups;
+    const [documentId, , start, end] = groups;
 
     const startLine = Number(start);
     const endLine = end ? Number(end) : startLine;
-    console.log('🚀 ~ buildMessagePartsFromDraft ~ groups:', documentId);
-    // const reference = references.find((ref) => ref.documentId === documentId && ref.fileName === fileName);
-    return `<USER_SELECT_FRAGMENT referenceId="${documentId}" startLine="${startLine}" endLine="${endLine}"></USER_SELECT_FRAGMENT>`;
+
+    return `<USER_SELECT_FRAGMENT documentId="${documentId}" startLine="${startLine}" endLine="${endLine}"></USER_SELECT_FRAGMENT>`;
   });
 }
 

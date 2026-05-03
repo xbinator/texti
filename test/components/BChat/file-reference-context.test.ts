@@ -15,7 +15,6 @@ import type { Message } from '@/components/BChatSidebar/utils/types';
 function createReferencePart(overrides: Partial<ChatMessageFileReferencePart> = {}): ChatMessageFileReferencePart {
   return {
     type: 'file-reference',
-    referenceId: 'ref-1',
     documentId: 'doc-1',
     snapshotId: 'snapshot-1',
     fileName: 'draft.md',
@@ -51,7 +50,7 @@ describe('file reference context builder', () => {
     const [message] = buildModelReadyMessages(sourceMessages);
 
     expect(message.content).toContain('Available file references for this message:');
-    expect(message.content).toContain('ref-1: draft.md (lines 12-14)');
+    expect(message.content).toContain('doc-1: draft.md (lines 12-14)');
     expect(message.content).toContain('Please check this file.');
   });
 
@@ -96,14 +95,14 @@ describe('file reference context builder', () => {
   });
 
   it('handles multiple file references from different files', () => {
-    const ref1 = createReferencePart({ referenceId: 'ref-1', fileName: 'foo.ts', startLine: 3, endLine: 5 });
-    const ref2 = createReferencePart({ referenceId: 'ref-2', fileName: 'bar.ts', startLine: 10, endLine: 20 });
+    const ref1 = createReferencePart({ documentId: 'doc-1', fileName: 'foo.ts', startLine: 3, endLine: 5 });
+    const ref2 = createReferencePart({ documentId: 'doc-2', fileName: 'bar.ts', startLine: 10, endLine: 20 });
     const sourceMessages = [createUserMessage([ref1, ref2])];
 
     const [message] = buildModelReadyMessages(sourceMessages);
 
-    expect(message.content).toContain('ref-1: foo.ts (lines 3-5)');
-    expect(message.content).toContain('ref-2: bar.ts (lines 10-20)');
+    expect(message.content).toContain('doc-1: foo.ts (lines 3-5)');
+    expect(message.content).toContain('doc-2: bar.ts (lines 10-20)');
   });
 
   it('handles reference with no explicit line range', () => {

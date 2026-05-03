@@ -95,7 +95,7 @@ const segments = computed<MessageBubbleTextSegment[]>(() => {
   const parts: MessageBubbleTextSegment[] = [];
   let lastIndex = 0;
 
-  props.part.text.replace(FILE_REFERENCE_TOKEN_PATTERN, (match: string, referenceId: string, offset: number) => {
+  props.part.text.replace(FILE_REFERENCE_TOKEN_PATTERN, (match: string, documentId: string, offset: number) => {
     if (offset > lastIndex) {
       parts.push({ type: 'text', text: props.part.text.slice(lastIndex, offset) });
     }
@@ -104,7 +104,7 @@ const segments = computed<MessageBubbleTextSegment[]>(() => {
     if (reference) {
       parts.push({ type: 'file-reference', label: `${reference.fileName}:${reference.line}` });
     } else {
-      parts.push({ type: 'text', text: `{{file-ref:${referenceId}}}` });
+      parts.push({ type: 'text', text: `{{file-ref:${documentId}}}` });
     }
 
     lastIndex = offset + match.length;
