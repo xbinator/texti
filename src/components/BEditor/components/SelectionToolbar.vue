@@ -39,10 +39,11 @@ import { Icon } from '@iconify/vue';
 import { PluginKey, type EditorState } from '@tiptap/pm/state';
 import { BubbleMenu } from '@tiptap/vue-3/menus';
 import { useEventListener } from '@vueuse/core';
-import { emitChatFileReferenceInsert, getLineRangeFromTextBeforeSelection } from '@/shared/chat/fileReference';
+import { emitChatFileReferenceInsert } from '@/shared/chat/fileReference';
 import type { ServiceModelUpdatedDetail } from '@/shared/storage/service-models/events';
 import { SERVICE_MODEL_UPDATED_EVENT } from '@/shared/storage/service-models/events';
 import { useServiceModelStore } from '@/stores/service-model';
+import { getSelectionSourceLineRange } from '../adapters/sourceLineMapping';
 
 /**
  * 选区范围信息。
@@ -176,14 +177,17 @@ function insertSelectionReferenceToChat(): void {
   // 在工具栏点击导致编辑器失焦前，先把选区交给父组件缓存并恢复显示。
   emit('selection-reference-insert', selectionRange);
 
+  const sourceLineRange = getSelectionSourceLineRange(editor.state.doc, selectionRange.from, selectionRange.to);
   const textBeforeStart = editor.state.doc.textBetween(0, selectionRange.from, '\n', '\n');
   const textBeforeEnd = editor.state.doc.textBetween(0, selectionRange.to, '\n', '\n');
-
-  const range = getLineRangeFromTextBeforeSelection(textBeforeStart, textBeforeEnd);
+  const renderStartLine = textBeforeStart.split(/\r?\n/).length;
+  const renderEndLine = textBeforeEnd.split(/\r?\n/).length;
 
   const { id = '', ext = '', path: filePath, name: fileName } = editorState || {};
 
-  emitChatFileReferenceInsert({ id, ext, filePath, fileName, startLine: range.startLine, endLine: range.endLine });
+  const { startLine = 0, endLine = 0 } = sourceLineRange || {};
+
+  emitChatFileReferenceInsert({ id, ext, filePath, fileName, startLine, endLine, renderStartLine, renderEndLine });
 }
 
 // ---- Format Buttons ----

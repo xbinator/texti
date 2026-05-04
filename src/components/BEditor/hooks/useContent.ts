@@ -9,6 +9,7 @@ interface UseBEditorContentParams {
   editorContent: Ref<string | undefined>;
   getEditorInstance: () => Editor | undefined;
   resetHeadingIndex: () => void;
+  resetSourceLineTracker: () => void;
   onContentChange?: () => void;
 }
 
@@ -26,6 +27,7 @@ export function useContent({
   editorContent,
   getEditorInstance,
   resetHeadingIndex,
+  resetSourceLineTracker,
   onContentChange
 }: UseBEditorContentParams): UseBEditorContentResult {
   let lastImportedRawContent = '';
@@ -44,6 +46,7 @@ export function useContent({
     }
 
     resetHeadingIndex();
+    resetSourceLineTracker();
     instance.commands.setContent(normalizeEditorContent(text), {
       emitUpdate,
       contentType: text ? 'markdown' : undefined

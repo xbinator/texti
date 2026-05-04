@@ -34,6 +34,7 @@ import { Markdown } from '@tiptap/markdown';
 import StarterKit from '@tiptap/starter-kit';
 import { VueNodeViewRenderer } from '@tiptap/vue-3';
 import { common, createLowlight } from 'lowlight';
+import { captureSourceLineRange, createSourceLineTracker, resetSourceLineTracker } from '../adapters/sourceLineMapping';
 import CodeBlockView from '../components/CodeBlock.vue';
 import { AISelectionHighlight } from '../extensions/AISelectionHighlight';
 import { Search, type SearchScrollContext } from '../extensions/Search';
@@ -43,6 +44,7 @@ const lowlight = createLowlight(common);
 interface UseBEditorExtensionsResult {
   assignHeadingIds: (editor: Editor) => void;
   editorExtensions: AnyExtension[];
+  resetSourceLineTracker: () => void;
   resetHeadingIndex: () => void;
 }
 
@@ -256,10 +258,9 @@ function buildMarkdownTableSignatureFromToken(token: MarkdownTableTokenData, hel
 /**
  * 基于当前表格节点构建签名，用于和导入时签名比对。
  * @param node - 表格节点
- * @param helpers - Markdown 渲染辅助函数
  * @returns 当前表格的签名字符串
  */
-function buildMarkdownTableSignatureFromNode(node: JSONContent, helpers: { renderChildren: (content: JSONContent | JSONContent[]) => string }): string {
+function buildMarkdownTableSignatureFromNode(node: JSONContent): string {
   const rows = Array.isArray(node.content) ? node.content : [];
 
   return JSON.stringify(
@@ -353,9 +354,47 @@ function renderMarkdownTableFallback(node: JSONContent, helpers: { renderChildre
 
 export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensionsOptions = {}): UseBEditorExtensionsResult {
   let headingIndex = 0;
+  const sourceLineTracker = createSourceLineTracker();
 
   function resetHeadingIndex(): void {
     headingIndex = 0;
+  }
+
+  /**
+   * 为支持源码引用的块节点生成统一的源码行号属性定义。
+   * @param parentAttributes - 原节点已有 attrs 定义
+   * @returns 合并后的 attrs 定义
+   */
+  function createSourceLineAttributes(parentAttributes: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      ...parentAttributes,
+      sourceLineStart: {
+        default: null,
+        renderHTML: () => ({})
+      },
+      sourceLineEnd: {
+        default: null,
+        renderHTML: () => ({})
+      }
+    };
+  }
+
+  /**
+   * 从当前 Markdown token 中提取源码行号 attrs。
+   * @param token - 当前 Markdown token
+   * @returns 可直接挂到块节点上的源码行号 attrs
+   */
+  function createSourceLineNodeAttrs(token: MarkdownToken): { sourceLineStart: number; sourceLineEnd: number } | {} {
+    if (typeof token.raw !== 'string' || !token.raw) {
+      return {};
+    }
+
+    const range = captureSourceLineRange(sourceLineTracker, token.raw);
+
+    return {
+      sourceLineStart: range.startLine,
+      sourceLineEnd: range.endLine
+    };
   }
 
   function getHeadingId(index: number): string {
@@ -382,7 +421,7 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
         return [];
       }
 
-      return helpers.createNode('paragraph', undefined, [helpers.createTextNode(normalized)]);
+      return helpers.createNode('paragraph', createSourceLineNodeAttrs(token), [helpers.createTextNode(normalized)]);
     }
   });
 
@@ -396,36 +435,46 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
         return [];
       }
 
-      return helpers.createNode('paragraph', undefined, [helpers.createTextNode(raw)]);
+      return helpers.createNode('paragraph', createSourceLineNodeAttrs(token), [helpers.createTextNode(raw)]);
     }
   });
 
   const CodeBlock = CodeBlockLowlight.extend({
+    addAttributes() {
+      return createSourceLineAttributes(this.parent?.() ?? {});
+    },
+    parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
+      const language = typeof token.lang === 'string' && token.lang ? token.lang : null;
+      const text = typeof token.text === 'string' ? token.text : '';
+
+      return helpers.createNode('codeBlock', { ...createSourceLineNodeAttrs(token), language }, text ? [helpers.createTextNode(text)] : []);
+    },
     addNodeView: () => VueNodeViewRenderer(CodeBlockView as unknown as Component<NodeViewProps>)
   }).configure({ lowlight });
 
   const Heading = BaseHeading.extend({
     addAttributes() {
-      return {
-        ...this.parent?.(),
+      return createSourceLineAttributes({
+        ...(this.parent?.() ?? {}),
         id: {
           default: null,
-          parseHTML: (element) => element.getAttribute('id'),
-          renderHTML: (attributes) => (attributes.id ? { id: attributes.id } : {})
+          parseHTML: (element: HTMLElement) => element.getAttribute('id'),
+          renderHTML: (attributes: Record<string, unknown>) => (attributes.id ? { id: attributes.id } : {})
         }
-      };
+      });
     },
     parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
       const content = parseInlinePreservingReferenceLinks(token.tokens, helpers);
       const id = getHeadingId(headingIndex++);
+      const sourceLineAttrs = createSourceLineNodeAttrs(token);
 
       if (content.length) {
-        return helpers.createNode('heading', { level: token.depth || 1, id }, content);
+        return helpers.createNode('heading', { ...sourceLineAttrs, level: token.depth || 1, id }, content);
       }
 
       const text = typeof token.text === 'string' ? token.text.trim() : '';
 
-      return helpers.createNode('heading', { level: token.depth || 1, id }, text ? [helpers.createTextNode(text)] : []);
+      return helpers.createNode('heading', { ...sourceLineAttrs, level: token.depth || 1, id }, text ? [helpers.createTextNode(text)] : []);
     },
     addKeyboardShortcuts() {
       return this.parent?.() ?? {};
@@ -439,16 +488,20 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
   }).configure({ levels: [1, 2, 3, 4, 5, 6] });
 
   const Paragraph = BaseParagraph.extend({
+    addAttributes() {
+      return createSourceLineAttributes(this.parent?.() ?? {});
+    },
     parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
       const content = parseInlinePreservingReferenceLinks(token.tokens, helpers);
+      const sourceLineAttrs = createSourceLineNodeAttrs(token);
 
       if (content.length) {
-        return helpers.createNode('paragraph', undefined, content);
+        return helpers.createNode('paragraph', sourceLineAttrs, content);
       }
 
       const text = typeof token.text === 'string' ? token.text : '';
 
-      return helpers.createNode('paragraph', undefined, text ? [helpers.createTextNode(text)] : []);
+      return helpers.createNode('paragraph', sourceLineAttrs, text ? [helpers.createTextNode(text)] : []);
     },
     renderMarkdown: (node: JSONContent, helpers, context): string => {
       const rawHtmlComment = getRawHtmlCommentFromParagraph(node);
@@ -469,6 +522,9 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
   });
 
   const ListItem = BaseListItem.extend({
+    addAttributes() {
+      return createSourceLineAttributes(this.parent?.() ?? {});
+    },
     parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
       if (token.type !== 'list_item') {
         return [];
@@ -487,7 +543,9 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
           const [firstToken, ...remainingTokens] = token.tokens;
 
           if (firstToken?.type === 'text' && firstToken.tokens && firstToken.tokens.length > 0) {
-            contentNodes = [createParagraphNode(parseInlinePreservingReferenceLinks(firstToken.tokens, helpers))];
+            contentNodes = [
+              helpers.createNode('paragraph', createSourceLineNodeAttrs(firstToken), parseInlinePreservingReferenceLinks(firstToken.tokens, helpers))
+            ];
 
             if (remainingTokens.length > 0) {
               contentNodes.push(...parseBlockChildren(remainingTokens));
@@ -508,8 +566,8 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
 
   const MarkdownTable = Table.extend({
     addAttributes() {
-      return {
-        ...this.parent?.(),
+      return createSourceLineAttributes({
+        ...(this.parent?.() ?? {}),
         markdownRaw: {
           default: null,
           renderHTML: () => ({})
@@ -518,7 +576,7 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
           default: null,
           renderHTML: () => ({})
         }
-      };
+      });
     },
     parseMarkdown: (token: MarkdownTableTokenData, helpers: MarkdownParseHelpers): MarkdownParseResult => {
       const rows: JSONContent[] = [];
@@ -553,6 +611,7 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
       return helpers.createNode(
         'table',
         {
+          ...createSourceLineNodeAttrs(token),
           markdownRaw: typeof token.raw === 'string' ? token.raw.replace(/\r\n/g, '\n').replace(/\n+$/, '') : null,
           markdownSignature: buildMarkdownTableSignatureFromToken(token, helpers)
         },
@@ -563,7 +622,7 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
       const rawMarkdown = typeof node.attrs?.markdownRaw === 'string' ? node.attrs.markdownRaw : null;
       const importedSignature = typeof node.attrs?.markdownSignature === 'string' ? node.attrs.markdownSignature : null;
 
-      if (rawMarkdown && importedSignature === buildMarkdownTableSignatureFromNode(node, helpers)) {
+      if (rawMarkdown && importedSignature === buildMarkdownTableSignatureFromNode(node)) {
         return rawMarkdown.trimEnd();
       }
 
@@ -678,6 +737,7 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
   return {
     assignHeadingIds,
     editorExtensions,
+    resetSourceLineTracker: () => resetSourceLineTracker(sourceLineTracker),
     resetHeadingIndex
   };
 }

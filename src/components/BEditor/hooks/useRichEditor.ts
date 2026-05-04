@@ -65,7 +65,7 @@ function handleSelectAllInCodeBlock(editor: Editor, event: KeyboardEvent): boole
 }
 
 export function useRichEditor({ bodyContent, editable, editorInstanceId, onContentChange, onSearchMatchFocus }: UseRichEditorParams): UseRichEditorResult {
-  const { editorExtensions, resetHeadingIndex, assignHeadingIds } = useExtensions(editorInstanceId, { onSearchMatchFocus });
+  const { editorExtensions, resetHeadingIndex, resetSourceLineTracker, assignHeadingIds } = useExtensions(editorInstanceId, { onSearchMatchFocus });
   const editorInstanceRef = ref<Editor>();
 
   const { setEditorContent, onPaste, onEditorUpdate, isEquivalentToImportedContent, rememberImportedContent } = useContent({
@@ -74,6 +74,7 @@ export function useRichEditor({ bodyContent, editable, editorInstanceId, onConte
     editorContent: bodyContent,
     getEditorInstance: () => editorInstanceRef.value,
     resetHeadingIndex,
+    resetSourceLineTracker,
     onContentChange
   });
 
