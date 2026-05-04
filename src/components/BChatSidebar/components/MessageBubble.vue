@@ -24,9 +24,9 @@
 
       <div :class="bem('parts')">
         <template v-for="(item, index) in message.parts" :key="`${item.type}-${index}`">
-          <BubblePartUserInput v-if="isUserMessage && isTextOrFileReference(item)" :part="item" />
+          <BubblePartUserInput v-if="isUserMessage" :part="item as ChatMessageTextPart" />
 
-          <BubblePartText v-else-if="!isUserMessage && isTextOrError(item)" :part="item" />
+          <BubblePartText v-else-if="item.type === 'text' || item.type === 'error'" :item="item" :part="item" />
 
           <BubblePartThinking v-else-if="item.type === 'thinking'" :part="item" />
 
@@ -74,8 +74,6 @@ import type {
   AIUserChoiceAnswerData,
   ChatMessageConfirmationAction,
   ChatMessageConfirmationCustomInputPayload,
-  ChatMessageErrorPart,
-  ChatMessageFileReferencePart,
   ChatMessagePart,
   ChatMessageTextPart,
   ChatMessageToolResultPart
@@ -141,22 +139,6 @@ const imagePreviewList = computed(() => imageFiles.value.map((file) => file.url 
  */
 function isAwaitingUserChoicePart(part: ChatMessagePart): part is ChatMessageToolResultPart & { result: AIToolExecutionAwaitingUserInputResult } {
   return part.type === 'tool-result' && part.toolName === 'ask_user_choice' && part.result.status === 'awaiting_user_input';
-}
-
-/**
- * 判断片段是否为文本或文件引用类型（用户消息）。
- * @param part - 消息片段
- */
-function isTextOrFileReference(part: ChatMessagePart): part is ChatMessageTextPart | ChatMessageFileReferencePart {
-  return part.type === 'text' || part.type === 'file-reference';
-}
-
-/**
- * 判断片段是否为文本或错误类型（助手消息）。
- * @param part - 消息片段
- */
-function isTextOrError(part: ChatMessagePart): part is ChatMessageTextPart | ChatMessageErrorPart {
-  return part.type === 'text' || part.type === 'error';
 }
 
 /**

@@ -112,7 +112,7 @@ import { useSession } from './hooks/useSession';
 import { useUsagePanel } from './hooks/useUsagePanel';
 import { chipResolver } from './utils/chipResolver';
 import { createChatConfirmationController } from './utils/confirmationController';
-import { create, userChoice, buildChatMessageContext } from './utils/messageHelper';
+import { create, userChoice, buildMessageReferences } from './utils/messageHelper';
 import { chatSlashCommands } from './utils/slashCommands';
 
 /** 聊天数据存储 */
@@ -357,10 +357,9 @@ async function submitUserTextMessage(content: string, images: typeof inputImages
     return;
   }
 
-  const messageContext = await buildChatMessageContext(trimmedContent);
-  console.log('🚀 ~ submitUserTextMessage ~ messageContext:', messageContext);
+  const references = await buildMessageReferences(trimmedContent);
 
-  const message = create.userMessage(messageContext);
+  const message = create.userMessage(trimmedContent, references);
   if (images.length && supportsVision.value) {
     message.files = [...images];
   }

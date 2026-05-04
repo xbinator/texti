@@ -12,6 +12,7 @@ import { getModelToolSupport } from '@/ai/tools/policy';
 import { executeToolCall, toTransportTools, type ExecutedToolCall } from '@/ai/tools/stream';
 import { useChat } from '@/hooks/useChat';
 import { useServiceModelStore } from '@/stores/service-model';
+import { buildChatMessageReferences } from '../utils/fileReferenceContext';
 import { append, convert, create, userChoice, is } from '../utils/messageHelper';
 import { createToolCallTracker, type ToolCallTracker } from '../utils/toolCallTracker';
 import { createToolLoopGuard, type ToolLoopGuard } from '../utils/toolLoopGuard';
@@ -322,7 +323,9 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     currentToolCallTracker = createToolCallTracker();
     handlePrepareAssistantMessage(reuseLastAssistant);
 
-    currentModelMessageCache = convert.toCachedModelMessages(sourceMessages, currentModelMessageCache);
+    // 处理文件引用
+    const nextMessages = buildChatMessageReferences(sourceMessages);
+    currentModelMessageCache = convert.toCachedModelMessages(nextMessages, currentModelMessageCache);
 
     const continuedMessages = [...currentModelMessageCache.modelMessages];
 

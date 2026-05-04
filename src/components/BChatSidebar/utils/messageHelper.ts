@@ -3,11 +3,13 @@
  * @description BChatSidebar 消息创建、转换与持久化过滤工具。
  */
 import type { Message } from './types';
+import type { FileReference } from '../types';
 import type { JSONValue, ModelMessage } from 'ai';
 import type { AIAwaitingUserChoiceQuestion, AIToolExecutionAwaitingUserInputResult } from 'types/ai';
 import type { AIUserChoiceAnswerData, ChatMessagePart, ChatMessageRole, ChatMessageToolResultPart } from 'types/chat';
 import { nanoid } from 'nanoid';
-import { extractFileReferenceLines, MESSAGE_REF_PATTERN, type FileReferenceResult } from './fileReferenceContext';
+import { asyncTo } from '@/utils/asyncTo';
+import { extractFileReferenceLines, MESSAGE_REF_PATTERN } from './fileReferenceContext';
 
 // ─── 公开类型 ────────────────────────────────────────────────────────────────
 
@@ -58,37 +60,15 @@ function toJsonValue(value: unknown): JSONValue {
   return JSON.parse(JSON.stringify(value)) as JSONValue;
 }
 
-function buildReferenceBlock(ref: FileReferenceResult): string {
-  const lines = ref.fullContent.split('\n');
-
-  const CONTEXT_LINES = 50;
-
-  // 截取选中行前后各30行
-  const sliceStart = Math.max(0, ref.startLine - 1 - CONTEXT_LINES);
-  const sliceEnd = Math.min(lines.length, ref.endLine + CONTEXT_LINES);
-  const contextLines = lines.slice(sliceStart, sliceEnd);
-
-  // 插入选中标记（相对于截取后的偏移）
-  const selectionStartIndex = ref.startLine - 1 - sliceStart;
-  const selectionEndIndex = ref.endLine - 1 - sliceStart;
-
-  contextLines.splice(selectionStartIndex, 0, '// [SELECTION_START]');
-  contextLines.splice(selectionEndIndex + 2, 0, '// [SELECTION_END]');
-
-  return [`<USER_REFERENCE path="${ref.path}" startLine="${ref.startLine}" endLine="${ref.endLine}">`, contextLines.join('\n'), `</USER_REFERENCE>`].join('\n');
-}
-
-export async function buildChatMessageContext(content: string): Promise<string> {
+export async function buildMessageReferences(content: string) {
   const matches = [...content.matchAll(MESSAGE_REF_PATTERN)];
-  if (!matches.length) return content;
+  if (!matches.length) return undefined;
 
-  const references = await Promise.all(matches.map(([, filePath, startLine, endLine]) => extractFileReferenceLines(filePath, startLine, endLine)));
+  const values = matches.map(([token, ...match]) => extractFileReferenceLines(token, match));
 
-  return matches.reduce((result, [fullMatch], i) => {
-    const ref = references[i];
-    if (!ref) return result;
-    return result.replace(fullMatch, () => buildReferenceBlock(ref));
-  }, content);
+  const [, result] = await asyncTo(Promise.all(values));
+
+  return result;
 }
 
 // ─── is —— 消息类型判断 ──────────────────────────────────────────────────────
@@ -189,12 +169,10 @@ export const create = {
     return createBase({ role: 'assistant', content, parts: [{ type: 'error', text: content }], finished: true });
   },
   // 创建用户消息
-  userMessage(content: string): Message {
-    return createBase({ role: 'user', content, parts: content ? [{ type: 'text', text: content }] : [], finished: true });
-  },
-  // system 消息
-  systemMessage(content: string): Message {
-    return createBase({ role: 'system', content, parts: [{ type: 'text', text: content }], finished: true });
+  userMessage(content: string, references?: FileReference[]): Message {
+    const parts: ChatMessagePart[] = content ? [{ type: 'text', text: content }] : [];
+
+    return createBase({ role: 'user', content, parts, references, finished: true });
   }
 } as const;
 
