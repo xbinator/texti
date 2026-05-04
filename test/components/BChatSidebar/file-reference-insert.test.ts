@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { CHAT_FILE_REFERENCE_INSERT_EVENT, getLineRangeFromTextBeforeSelection, isChatFileReferenceInsertPayload } from '@/shared/chat/fileReference';
+import { CHAT_FILE_REFERENCE_INSERT_EVENT, isChatFileReferenceInsertPayload } from '@/shared/chat/fileReference';
 
 /**
  * 读取源码文件。
@@ -16,25 +16,65 @@ function readSource(relativePath: string): string {
 }
 
 describe('chat file reference insert event utilities', () => {
-  test('calculates single line and line range from selected text boundaries', () => {
-    expect(getLineRangeFromTextBeforeSelection('first line', 'first line')).toEqual({ startLine: 1, endLine: 1 });
-    expect(getLineRangeFromTextBeforeSelection('first\nsecond', 'first\nsecond\nthird')).toEqual({ startLine: 2, endLine: 3 });
-    // 空字符串视为第 1 行开头
-    expect(getLineRangeFromTextBeforeSelection('', '')).toEqual({ startLine: 1, endLine: 1 });
-  });
-
   test('validates file reference insert payloads', () => {
     expect(CHAT_FILE_REFERENCE_INSERT_EVENT).toBe('chat:file-reference:insert');
     // 正常范围
-    expect(isChatFileReferenceInsertPayload({ filePath: 'src/foo/file.ts', fileName: 'file.ts', startLine: 12, endLine: 14 })).toBe(true);
+    expect(
+      isChatFileReferenceInsertPayload({
+        filePath: 'src/foo/file.ts',
+        fileName: 'file.ts',
+        startLine: 12,
+        endLine: 14,
+        renderStartLine: 10,
+        renderEndLine: 12
+      })
+    ).toBe(true);
     // 单行
-    expect(isChatFileReferenceInsertPayload({ filePath: null, fileName: '临时笔记', startLine: 3, endLine: 3 })).toBe(true);
+    expect(
+      isChatFileReferenceInsertPayload({
+        filePath: null,
+        fileName: '临时笔记',
+        startLine: 3,
+        endLine: 3,
+        renderStartLine: 2,
+        renderEndLine: 2
+      })
+    ).toBe(true);
     // 无行号场景允许 startLine === endLine === 0
-    expect(isChatFileReferenceInsertPayload({ filePath: null, fileName: '临时笔记', startLine: 0, endLine: 0 })).toBe(true);
+    expect(
+      isChatFileReferenceInsertPayload({
+        filePath: null,
+        fileName: '临时笔记',
+        startLine: 0,
+        endLine: 0,
+        renderStartLine: 0,
+        renderEndLine: 0
+      })
+    ).toBe(true);
     // startLine=0 但 endLine>0 歧义，拒绝
-    expect(isChatFileReferenceInsertPayload({ filePath: null, fileName: '临时笔记', startLine: 0, endLine: 5 })).toBe(false);
+    expect(
+      isChatFileReferenceInsertPayload({
+        filePath: null,
+        fileName: '临时笔记',
+        startLine: 0,
+        endLine: 5,
+        renderStartLine: 0,
+        renderEndLine: 5
+      })
+    ).toBe(false);
     // startLine > endLine 非法
-    expect(isChatFileReferenceInsertPayload({ filePath: 'src/foo/file.ts', fileName: 'file.ts', startLine: 5, endLine: 2 })).toBe(false);
+    expect(
+      isChatFileReferenceInsertPayload({
+        filePath: 'src/foo/file.ts',
+        fileName: 'file.ts',
+        startLine: 5,
+        endLine: 2,
+        renderStartLine: 3,
+        renderEndLine: 2
+      })
+    ).toBe(false);
+    // 渲染行号缺失时拒绝
+    expect(isChatFileReferenceInsertPayload({ filePath: 'src/foo/file.ts', fileName: 'file.ts', startLine: 5, endLine: 5 })).toBe(false);
   });
 });
 
@@ -42,26 +82,23 @@ describe('chat file reference insert wiring', () => {
   test('wires editor selection toolbar to chat sidebar through BChat insert API', () => {
     const selectionToolbarSource = readSource('src/components/BEditor/components/SelectionToolbar.vue');
     const richEditorContentSource = readSource('src/components/BEditor/components/RichEditorContent.vue');
-    const paneRichEditoSource = readSource('src/components/BEditor/components/PaneRichEditor.vue');
-    const editorSource = readSource('src/components/BEditor/index.vue');
     const sidebarSource = readSource('src/components/BChatSidebar/index.vue');
     const fileReferenceHookSource = readSource('src/components/BChatSidebar/hooks/useFileReference.ts');
 
     expect(selectionToolbarSource).toContain('insertSelectionReferenceToChat');
     expect(selectionToolbarSource).toContain('emitChatFileReferenceInsert');
-    expect(selectionToolbarSource).toContain('getLineRangeFromTextBeforeSelection');
-    expect(selectionToolbarSource).toContain('fileName: props.fileName || getFileNameFromPath');
-    expect(richEditorContentSource).toContain(':file-path="filePath"');
-    expect(richEditorContentSource).toContain(':file-name="fileName"');
-    expect(paneRichEditoSource).toContain(':file-path="props.filePath"');
-    expect(paneRichEditoSource).toContain(':file-name="props.fileName"');
-    expect(editorSource).toContain(':file-path="props.filePath"');
-    expect(editorSource).toContain(':file-name="editorTitle"');
+    expect(selectionToolbarSource).toContain('getSelectionSourceLineRange');
+    expect(selectionToolbarSource).toContain('const { startLine = 0, endLine = 0 } = sourceLineRange || {}');
+    expect(selectionToolbarSource).toContain('renderStartLine');
+    expect(selectionToolbarSource).toContain('renderEndLine');
+    expect(richEditorContentSource).toContain('@selection-reference-insert="handleSelectionReferenceInsert"');
     expect(sidebarSource).toContain('insertTextAtCursor');
     expect(sidebarSource).toContain('useFileReference');
     expect(fileReferenceHookSource).toContain('handleFileReferenceInsert');
     expect(fileReferenceHookSource).toContain('onChatFileReferenceInsert');
     expect(fileReferenceHookSource).toContain('ChatFileReferenceInsertPayload');
-    expect(fileReferenceHookSource).toContain('documentId = document?.id || reference.filePath || reference.fileName');
+    expect(fileReferenceHookSource).toContain('insertReference');
+    expect(fileReferenceHookSource).toContain('renderStartLine');
+    expect(fileReferenceHookSource).toContain('renderEndLine');
   });
 });

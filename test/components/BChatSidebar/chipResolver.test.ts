@@ -4,13 +4,16 @@
  * @vitest-environment jsdom
  */
 import { describe, expect, test } from 'vitest';
-import { chipResolver } from '@/components/BChatSidebar/utils/chipResolver';
+import { chipResolver, parseFileRef } from '@/components/BChatSidebar/utils/chipResolver';
 import type { ChipResult } from '@/components/BPromptEditor/extensions/variableChip';
 
 /**
  * 窄化 ChipResult 并断言 Widget 构造参数。
  */
-function expectFileRefWidget(result: ChipResult | null, expected: { fileName: string; startLine: number; endLine: number }): void {
+function expectFileRefWidget(
+  result: ChipResult | null,
+  expected: { fileName: string; startLine: number; endLine: number; renderStartLine?: number; renderEndLine?: number }
+): void {
   expect(result).not.toBeNull();
   const chipResult = result as ChipResult;
   expect(chipResult).toHaveProperty('widget');
@@ -18,7 +21,9 @@ function expectFileRefWidget(result: ChipResult | null, expected: { fileName: st
     expect(chipResult.widget).toMatchObject({
       fileName: expected.fileName,
       startLine: expected.startLine,
-      endLine: expected.endLine
+      endLine: expected.endLine,
+      renderStartLine: expected.renderStartLine ?? expected.startLine,
+      renderEndLine: expected.renderEndLine ?? expected.endLine
     });
   }
 }
@@ -58,6 +63,26 @@ describe('chipResolver', () => {
     });
   });
 
+  describe('存储格式（#path 行号）', () => {
+    test('范围引用优先显示 render 行号', () => {
+      expectFileRefWidget(chipResolver('#src/demo.ts 12-14|20-24'), {
+        fileName: 'demo.ts',
+        startLine: 12,
+        endLine: 14,
+        renderStartLine: 20,
+        renderEndLine: 24
+      });
+    });
+
+    test('旧格式缺少 render 行号时回退到源码行号', () => {
+      expectFileRefWidget(chipResolver('#src/demo.ts 12-14'), {
+        fileName: 'demo.ts',
+        startLine: 12,
+        endLine: 14
+      });
+    });
+  });
+
   describe('非 file-ref 类型', () => {
     test('其他类型 body → 返回 null', () => {
       expect(chipResolver('todo:something')).toBeNull();
@@ -93,6 +118,33 @@ describe('chipResolver', () => {
     test('toDOM 无行号仅显示文件名', () => {
       const dom = resolveWidgetDom('@file.ts');
       expect(dom?.textContent).toBe('file.ts');
+    });
+
+    test('toDOM 存储格式优先显示 render 行号', () => {
+      const dom = resolveWidgetDom('#src/demo.ts 12-14|20-24');
+      expect(dom?.textContent).toBe('demo.ts:20-24');
+    });
+  });
+});
+
+describe('parseFileRef', () => {
+  test('parses storage token with render line metadata', () => {
+    expect(parseFileRef('#src/demo.ts 12-14|20-24')).toEqual({
+      filePath: 'src/demo.ts',
+      startLine: 12,
+      endLine: 14,
+      renderStartLine: 20,
+      renderEndLine: 24
+    });
+  });
+
+  test('falls back to source lines when render metadata is absent', () => {
+    expect(parseFileRef('#src/demo.ts 12-14')).toEqual({
+      filePath: 'src/demo.ts',
+      startLine: 12,
+      endLine: 14,
+      renderStartLine: 12,
+      renderEndLine: 14
     });
   });
 });
