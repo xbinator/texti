@@ -94,7 +94,7 @@ function buildReferenceBlock(ref: FileReference): string {
   contextLines.splice(selectionEndIndex + 1, 0, '// [SELECTION_END]');
   contextLines.splice(selectionStartIndex, 0, '// [SELECTION_START]');
 
-  return [`<USER_QUOTED_FRAGMENT path="${path}" startLine="${startLine}" endLine="${endLine}">`, contextLines.join('\n'), `</USER_QUOTED_FRAGMENT>`].join('\n');
+  return [`<QUOTED_FRAGMENT path="${path}" startLine="${startLine}" endLine="${endLine}">`, contextLines.join('\n'), `</QUOTED_FRAGMENT>`].join('\n');
 }
 
 export function buildChatMessageReferences(messages: Message[]): Message[] {
