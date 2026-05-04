@@ -79,6 +79,23 @@ describe('built-in settings tools', () => {
     );
   });
 
+  it('adds custom input config to settings confirmation so users can override the suggested value', async () => {
+    const confirm = vi.fn(async () => ({ approved: false }));
+    const tools = createBuiltinSettingsTools({ confirm });
+
+    await tools.updateSettings.execute({ key: 'theme', value: 'dark' }, createToolContext());
+
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customInput: {
+          enabled: true,
+          placeholder: '输入新的设置值...',
+          triggerLabel: '改成别的'
+        }
+      })
+    );
+  });
+
   it('keeps current settings when confirmation is rejected', async () => {
     const confirm = vi.fn(async () => ({ approved: false }));
     const tools = createBuiltinSettingsTools({ confirm });

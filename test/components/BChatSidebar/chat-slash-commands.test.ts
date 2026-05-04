@@ -26,6 +26,12 @@ const chatStreamHookState: {
   options: null
 };
 
+const chatHistoryState: {
+  messages: Message[];
+} = {
+  messages: []
+};
+
 const {
   insertTextAtCursorMock,
   focusMock,
@@ -40,7 +46,11 @@ const {
   setSessionMessagesMock,
   setChatSidebarActiveSessionIdMock,
   setSidebarVisibleMock,
-  onChatFileReferenceInsertMock
+  onChatFileReferenceInsertMock,
+  streamMessagesMock,
+  resolveServiceConfigMock,
+  submitUserChoiceMock,
+  cancelConfirmationMock
 } = vi.hoisted(() => ({
   insertTextAtCursorMock: vi.fn(),
   focusMock: vi.fn(),
@@ -55,7 +65,11 @@ const {
   setSessionMessagesMock: vi.fn(async () => undefined),
   setChatSidebarActiveSessionIdMock: vi.fn(),
   setSidebarVisibleMock: vi.fn(),
-  onChatFileReferenceInsertMock: vi.fn(() => vi.fn())
+  onChatFileReferenceInsertMock: vi.fn(() => vi.fn()),
+  streamMessagesMock: vi.fn(async () => undefined),
+  resolveServiceConfigMock: vi.fn(async () => ({ providerId: 'provider-1', modelId: 'model-1', toolSupport: { supported: true } })),
+  submitUserChoiceMock: vi.fn(async () => undefined),
+  cancelConfirmationMock: vi.fn()
 }));
 
 vi.mock('@/components/BPromptEditor/index.vue', async () => {
@@ -111,12 +125,16 @@ vi.mock('@/components/BChatSidebar/components/ConversationView.vue', async () =>
           default: () => []
         },
         loading: {
-          type: Boolean,
+          type: [Boolean, Object],
           default: false
         }
       },
-      emits: ['edit', 'regenerate', 'load-history', 'confirmation-action', 'user-choice-submit'],
-      setup(_props, { slots }) {
+      emits: ['edit', 'regenerate', 'load-history', 'confirmation-action', 'confirmation-custom-input', 'user-choice-submit'],
+      setup(_props, { slots, expose }) {
+        expose({
+          scrollToBottom: vi.fn()
+        });
+
         return () => h('div', { 'data-testid': 'conversation-view-stub' }, slots.default?.());
       }
     })
@@ -209,6 +227,12 @@ vi.mock('@/stores/chat', () => ({
   })
 }));
 
+vi.mock('@/stores/files', () => ({
+  useFilesStore: () => ({
+    recentFiles: []
+  })
+}));
+
 const settingStoreState = {
   chatSidebarActiveSessionId: 'session-usage'
 };
@@ -240,6 +264,19 @@ vi.mock('@/ai/tools/policy', () => ({
   getDefaultChatToolNames: () => []
 }));
 
+vi.mock('@/components/BChatSidebar/hooks/useModelSelection', async () => {
+  const { ref } = await import('vue');
+
+  return {
+    useModelSelection: () => ({
+      selectedModel: ref(undefined),
+      supportsVision: ref(false),
+      onModelChange: vi.fn(),
+      loadSelectedModel: vi.fn(async () => undefined)
+    })
+  };
+});
+
 vi.mock('@/components/BChatSidebar/hooks/useChatHistory', async () => {
   const { ref } = await import('vue');
 
@@ -248,7 +285,7 @@ vi.mock('@/components/BChatSidebar/hooks/useChatHistory', async () => {
       getHistoryCursor: vi.fn(() => null),
       setLoadedMessages: vi.fn(),
       fetchAllPriorHistory: vi.fn(async () => []),
-      messages: ref([])
+      messages: ref(chatHistoryState.messages)
     })
   };
 });
@@ -260,11 +297,13 @@ vi.mock('@/components/BChatSidebar/hooks/useChatStream', async () => {
 
       return {
         loading: chatStreamLoadingState,
-        abort: vi.fn(),
-        resolveServiceConfig: vi.fn(async () => null),
-        streamMessages: vi.fn(async () => undefined),
-        regenerate: vi.fn(async () => undefined),
-        submitUserChoice: vi.fn(async () => undefined)
+        stream: {
+          abort: vi.fn(),
+          resolveServiceConfig: resolveServiceConfigMock,
+          streamMessages: streamMessagesMock,
+          regenerate: vi.fn(async () => undefined),
+          submitUserChoice: submitUserChoiceMock
+        }
       };
     }
   };
@@ -281,7 +320,7 @@ vi.mock('@/components/BChatSidebar/utils/confirmationController', () => ({
   createChatConfirmationController: () => ({
     createAdapter: vi.fn(),
     approveConfirmation: vi.fn(),
-    cancelConfirmation: vi.fn(),
+    cancelConfirmation: cancelConfirmationMock,
     expirePendingConfirmation: vi.fn(),
     dispose: vi.fn()
   })
@@ -301,8 +340,8 @@ function mountChatSidebar() {
       stubs: {
         Icon: true,
         BButton: true,
-        ConversationView: true,
-        SessionHistory: true
+        SessionHistory: true,
+        BImageViewer: true
       }
     }
   });
@@ -324,9 +363,14 @@ describe('chatSlashCommands', () => {
     setChatSidebarActiveSessionIdMock.mockClear();
     setSidebarVisibleMock.mockClear();
     onChatFileReferenceInsertMock.mockClear();
+    streamMessagesMock.mockClear();
+    resolveServiceConfigMock.mockClear();
+    submitUserChoiceMock.mockClear();
+    cancelConfirmationMock.mockClear();
     settingStoreState.chatSidebarActiveSessionId = 'session-usage';
     chatStreamLoadingState.value = false;
     chatStreamHookState.options = null;
+    chatHistoryState.messages = [];
   });
 
   test('exports first-version commands with the shared metadata contract', () => {
@@ -499,5 +543,28 @@ describe('chatSlashCommands', () => {
     expect(getSessionUsageMock).toHaveBeenNthCalledWith(1, 'session-usage');
     expect(getSessionUsageMock).toHaveBeenNthCalledWith(2, 'session-usage');
     expect(wrapper.text()).toContain('24');
+  });
+
+  test('cancels the pending confirmation and sends a new user message when confirmation custom input is submitted', async () => {
+    const wrapper = mountChatSidebar();
+
+    wrapper.getComponent({ name: 'ConversationView' }).vm.$emit('confirmation-custom-input', {
+      confirmationId: 'confirmation-1',
+      text: '请改成这个版本'
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await nextTick();
+    await nextTick();
+
+    expect(cancelConfirmationMock).toHaveBeenCalledWith('confirmation-1');
+    expect(resolveServiceConfigMock).toHaveBeenCalledTimes(1);
+    expect(streamMessagesMock).toHaveBeenCalledTimes(1);
+    expect(streamMessagesMock.mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({
+        role: 'user',
+        content: '请改成这个版本'
+      })
+    ]);
   });
 });

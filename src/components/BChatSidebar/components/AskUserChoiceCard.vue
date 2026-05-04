@@ -34,7 +34,6 @@
 import type { AIAwaitingUserChoiceQuestion } from 'types/ai';
 import type { AIUserChoiceAnswerData } from 'types/chat';
 import { computed, ref } from 'vue';
-import BButton from '@/components/BButton/index.vue';
 
 const props = defineProps<{
   /** 等待用户回答的问题 */

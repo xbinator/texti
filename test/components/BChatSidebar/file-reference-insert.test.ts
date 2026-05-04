@@ -5,12 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import {
-  CHAT_FILE_REFERENCE_INSERT_EVENT,
-  getFileNameFromPath,
-  getLineRangeFromTextBeforeSelection,
-  isChatFileReferenceInsertPayload
-} from '@/shared/chat/fileReference';
+import { CHAT_FILE_REFERENCE_INSERT_EVENT, getLineRangeFromTextBeforeSelection, isChatFileReferenceInsertPayload } from '@/shared/chat/fileReference';
 
 /**
  * 读取源码文件。
@@ -21,11 +16,6 @@ function readSource(relativePath: string): string {
 }
 
 describe('chat file reference insert event utilities', () => {
-  test('normalizes file names across slash styles', () => {
-    expect(getFileNameFromPath('src/foo/file.ts')).toBe('file.ts');
-    expect(getFileNameFromPath('/workspace\\src\\foo\\file.ts')).toBe('file.ts');
-  });
-
   test('calculates single line and line range from selected text boundaries', () => {
     expect(getLineRangeFromTextBeforeSelection('first line', 'first line')).toEqual({ startLine: 1, endLine: 1 });
     expect(getLineRangeFromTextBeforeSelection('first\nsecond', 'first\nsecond\nthird')).toEqual({ startLine: 2, endLine: 3 });

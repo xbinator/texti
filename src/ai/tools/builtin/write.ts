@@ -138,6 +138,11 @@ export function createBuiltinWriteTools(adapter: AIToolConfirmationAdapter): Bui
           title: 'AI 想要插入内容',
           description: 'AI 请求在当前光标位置插入新内容。',
           riskLevel: 'write',
+          customInput: {
+            enabled: true,
+            placeholder: '输入你想插入的内容...',
+            triggerLabel: '改成别的'
+          },
           afterText: content
         };
         const cancelled = await confirmOrCancel(adapter, request, INSERT_AT_CURSOR_TOOL_NAME);
@@ -185,6 +190,11 @@ export function createBuiltinWriteTools(adapter: AIToolConfirmationAdapter): Bui
           title: 'AI 想要替换当前选区',
           description: 'AI 请求用新内容替换当前选中的文本。',
           riskLevel: 'write',
+          customInput: {
+            enabled: true,
+            placeholder: '输入你想替换成的内容...',
+            triggerLabel: '改成别的'
+          },
           beforeText: selection.text,
           afterText: content
         };

@@ -223,6 +223,11 @@ export function createBuiltinSettingsTools(adapter: AIToolConfirmationAdapter): 
           riskLevel: 'write',
           allowRemember: true,
           rememberScopes: ['session', 'always'],
+          customInput: {
+            enabled: true,
+            placeholder: '输入新的设置值...',
+            triggerLabel: '改成别的'
+          },
           beforeText: `${validatedInput.key}: ${String(previousValue)}`,
           afterText: `${validatedInput.key}: ${String(validatedInput.value)}`
         };

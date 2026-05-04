@@ -27,14 +27,6 @@ export interface ChatFileReferenceInsertPayload {
 }
 
 /**
- * 从文件路径中提取展示文件名。
- * @param filePath - 完整文件路径
- */
-export function getFileNameFromPath(filePath: string): string {
-  return filePath.split(/[\\/]/).filter(Boolean).pop() ?? filePath;
-}
-
-/**
  * 根据选区起止位置前的文本计算行号，空字符串视为第 1 行开头。
  * @param textBeforeStart - 选区起点之前的文本
  * @param textBeforeEnd - 选区终点之前的文本

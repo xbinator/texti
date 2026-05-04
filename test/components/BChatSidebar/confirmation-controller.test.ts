@@ -3,8 +3,8 @@
  * @description 聊天会话确认控制器测试。
  */
 import { describe, expect, it } from 'vitest';
-import type { Message } from '@/components/BChatSidebar/utils/types';
 import { createChatConfirmationController } from '@/components/BChatSidebar/utils/confirmationController';
+import type { Message } from '@/components/BChatSidebar/utils/types';
 
 /**
  * 创建测试消息列表。
@@ -130,5 +130,34 @@ describe('chat confirmation controller', () => {
     controller.approveConfirmation(confirmationId, 'session');
 
     await expect(promise).resolves.toEqual({ approved: true, grantScope: 'session' });
+  });
+
+  it('preserves custom input config on the created confirmation card', async () => {
+    const messages = createMessages();
+    const controller = createChatConfirmationController({
+      getMessages: () => messages
+    });
+
+    void controller.requestConfirmation({
+      toolName: 'insert_at_cursor',
+      title: 'AI 想要插入内容',
+      description: 'AI 请求在当前光标位置插入新内容。',
+      riskLevel: 'write',
+      afterText: 'hello',
+      customInput: {
+        enabled: true,
+        placeholder: '输入新的设置值...',
+        triggerLabel: '改成别的'
+      }
+    });
+
+    const confirmationPart = messages[0].parts[0];
+
+    expect(confirmationPart?.type).toBe('confirmation');
+    expect(confirmationPart?.type === 'confirmation' ? confirmationPart.customInput : undefined).toEqual({
+      enabled: true,
+      placeholder: '输入新的设置值...',
+      triggerLabel: '改成别的'
+    });
   });
 });

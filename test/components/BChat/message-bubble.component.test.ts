@@ -112,6 +112,11 @@ function createMessageWithConfirmation(): Message {
         description: 'AI 请求在当前光标位置插入新内容。',
         riskLevel: 'write',
         afterText: 'hello',
+        customInput: {
+          enabled: true,
+          placeholder: '输入新的设置值...',
+          triggerLabel: '改成别的'
+        },
         confirmationStatus: 'pending',
         executionStatus: 'idle'
       }
@@ -190,6 +195,18 @@ describe('MessageBubble confirmation integration', () => {
     expect(wrapper.emitted('confirmation-action')).toEqual([
       ['confirmation-1', 'approve'],
       ['confirmation-1', 'cancel']
+    ]);
+  });
+
+  it('re-emits confirmation-custom-input from the embedded confirmation card', async () => {
+    const wrapper = mountMessageBubble(createMessageWithConfirmation());
+
+    await wrapper.get('.confirm-card__custom-trigger button').trigger('click');
+    await wrapper.get('.confirm-card__custom-input').setValue('自定义答案');
+    await wrapper.get('.confirm-card__custom-submit button').trigger('click');
+
+    expect(wrapper.emitted('confirmation-custom-input')).toEqual([
+      [{ confirmationId: 'confirmation-1', text: '自定义答案' }]
     ]);
   });
 

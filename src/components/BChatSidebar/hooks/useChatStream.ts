@@ -10,12 +10,11 @@ import type { AIUserChoiceAnswerData, ChatMessageConfirmationAction } from 'type
 import { nextTick, ref, shallowRef, type Ref } from 'vue';
 import { getModelToolSupport } from '@/ai/tools/policy';
 import { executeToolCall, toTransportTools, type ExecutedToolCall } from '@/ai/tools/stream';
-import { buildModelReadyMessages } from '@/components/BChatSidebar/utils/fileReferenceContext';
-import { createToolCallTracker, type ToolCallTracker } from '@/components/BChatSidebar/utils/toolCallTracker';
-import { createToolLoopGuard, type ToolLoopGuard } from '@/components/BChatSidebar/utils/toolLoopGuard';
 import { useChat } from '@/hooks/useChat';
 import { useServiceModelStore } from '@/stores/service-model';
 import { append, convert, create, userChoice, is } from '../utils/messageHelper';
+import { createToolCallTracker, type ToolCallTracker } from '../utils/toolCallTracker';
+import { createToolLoopGuard, type ToolLoopGuard } from '../utils/toolLoopGuard';
 
 export interface UseChatStreamOptions {
   /** 消息列表（响应式引用） */
@@ -323,8 +322,7 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     currentToolCallTracker = createToolCallTracker();
     handlePrepareAssistantMessage(reuseLastAssistant);
 
-    const modelMessages = buildModelReadyMessages(sourceMessages);
-    currentModelMessageCache = convert.toCachedModelMessages(modelMessages, currentModelMessageCache);
+    currentModelMessageCache = convert.toCachedModelMessages(sourceMessages, currentModelMessageCache);
 
     const continuedMessages = [...currentModelMessageCache.modelMessages];
 

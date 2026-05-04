@@ -37,6 +37,26 @@
         </BButton>
         <BButton size="small" type="text" @click="$emit('confirmation-action', { confirmationId: part.confirmationId, action: 'cancel' })">取消</BButton>
       </div>
+      <div v-if="canShowCustomInput" :class="bem('custom')">
+        <div v-if="!showCustomInput" :class="bem('custom-trigger')">
+          <BButton size="small" type="text" @click="handleShowCustomInput">{{ props.part.customInput?.triggerLabel ?? '自己输入' }}</BButton>
+        </div>
+        <template v-else>
+          <input
+            v-model="customInput"
+            :class="bem('custom-input')"
+            type="text"
+            :placeholder="props.part.customInput?.placeholder ?? '输入你自己的答案...'"
+            @keydown.enter.prevent="handleSubmitCustomInput"
+          />
+          <div :class="bem('custom-actions')">
+            <div :class="bem('custom-submit')">
+              <BButton size="small" :disabled="!canSubmitCustomInput" @click="handleSubmitCustomInput">发送</BButton>
+            </div>
+            <BButton size="small" type="text" @click="handleCancelCustomInput">取消</BButton>
+          </div>
+        </template>
+      </div>
     </template>
   </div>
 </template>
@@ -46,10 +66,9 @@
  * @file ConfirmationCard.vue
  * @description 聊天流中的确认卡片组件，负责展示确认状态、预览和折叠交互。
  */
-import type { ChatMessageConfirmationActionPayload, ChatMessageConfirmationPart } from 'types/chat';
+import type { ChatMessageConfirmationActionPayload, ChatMessageConfirmationCustomInputPayload, ChatMessageConfirmationPart } from 'types/chat';
 import { computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
-import BButton from '@/components/BButton/index.vue';
 import { formatConfirmationPreviewText, getConfirmationStatusText, isConfirmationCollapsed } from '@/components/BChatSidebar/utils/confirmationCard';
 import { createNamespace } from '@/utils/namespace';
 
@@ -60,13 +79,15 @@ const props = defineProps<{
   part: ChatMessageConfirmationPart;
 }>();
 
-defineEmits<{
-  (e: 'confirmation-action', payload: ChatMessageConfirmationActionPayload): void;
-}>();
-
 const manuallyCollapsed = ref(false);
 const manuallyExpanded = ref(false);
+const showCustomInput = ref(false);
+const customInput = ref('');
 const [, bem] = createNamespace('', 'confirm-card');
+const emit = defineEmits<{
+  (e: 'confirmation-action', payload: ChatMessageConfirmationActionPayload): void;
+  (e: 'custom-input-submit', payload: ChatMessageConfirmationCustomInputPayload): void;
+}>();
 
 /**
  * 当前是否折叠。
@@ -77,6 +98,20 @@ const collapsed = computed(() => isConfirmationCollapsed(props.part, manuallyCol
  * 当前状态文案。
  */
 const statusText = computed(() => getConfirmationStatusText(props.part));
+
+/**
+ * 当前卡片是否允许展示自定义输入。
+ */
+const canShowCustomInput = computed(() => {
+  return props.part.confirmationStatus === 'pending' && props.part.customInput?.enabled === true;
+});
+
+/**
+ * 当前是否允许提交自定义输入。
+ */
+const canSubmitCustomInput = computed(() => {
+  return canShowCustomInput.value && customInput.value.trim().length > 0;
+});
 
 /**
  * 切换折叠状态。
@@ -90,6 +125,40 @@ function toggleCollapse(): void {
 
   manuallyExpanded.value = false;
   manuallyCollapsed.value = true;
+}
+
+/**
+ * 展示自定义输入区域。
+ */
+function handleShowCustomInput(): void {
+  if (!canShowCustomInput.value) {
+    return;
+  }
+
+  showCustomInput.value = true;
+}
+
+/**
+ * 取消自定义输入并清空草稿。
+ */
+function handleCancelCustomInput(): void {
+  customInput.value = '';
+  showCustomInput.value = false;
+}
+
+/**
+ * 提交用户自定义输入答案。
+ */
+function handleSubmitCustomInput(): void {
+  if (!canSubmitCustomInput.value) {
+    return;
+  }
+
+  emit('custom-input-submit', {
+    confirmationId: props.part.confirmationId,
+    text: customInput.value.trim()
+  });
+  handleCancelCustomInput();
 }
 </script>
 
@@ -167,5 +236,25 @@ function toggleCollapse(): void {
   display: flex;
   gap: 8px;
   margin-top: 10px;
+}
+
+.confirm-card__custom {
+  margin-top: 10px;
+}
+
+.confirm-card__custom-input {
+  width: 100%;
+  padding: 7px 9px;
+  color: var(--text-primary);
+  outline: none;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+}
+
+.confirm-card__custom-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
 }
 </style>

@@ -3,6 +3,7 @@
  * @description AI 工具确认机制，用于危险操作的用户确认
  */
 import type { AIToolGrantScope, AIToolRiskLevel } from 'types/ai';
+import type { ChatMessageConfirmationCustomInputConfig } from 'types/chat';
 
 /**
  * AI 工具确认决策。
@@ -37,6 +38,8 @@ export interface AIToolConfirmationRequest {
   allowRemember?: boolean;
   /** 可选的记忆授权范围 */
   rememberScopes?: AIToolGrantScope[];
+  /** 与确认卡片关联的自定义输入配置 */
+  customInput?: ChatMessageConfirmationCustomInputConfig;
 }
 
 /**

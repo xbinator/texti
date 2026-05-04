@@ -177,6 +177,28 @@ export interface ChatMessageConfirmationActionPayload {
 }
 
 /**
+ * 确认卡片自定义输入事件载荷
+ */
+export interface ChatMessageConfirmationCustomInputPayload {
+  /** 确认项 ID */
+  confirmationId: string;
+  /** 用户自定义输入内容 */
+  text: string;
+}
+
+/**
+ * 确认卡片自定义输入配置
+ */
+export interface ChatMessageConfirmationCustomInputConfig {
+  /** 是否允许用户绕过当前建议，自行输入内容 */
+  enabled: boolean;
+  /** 输入区提示文案 */
+  placeholder?: string;
+  /** 触发按钮文案 */
+  triggerLabel?: string;
+}
+
+/**
  * 聊天消息确认卡片片段
  */
 export interface ChatMessageConfirmationPart {
@@ -200,6 +222,8 @@ export interface ChatMessageConfirmationPart {
   allowRemember?: boolean;
   /** 可选的记忆授权范围 */
   rememberScopes?: Array<'session' | 'always'>;
+  /** 与当前确认卡关联的自定义输入配置 */
+  customInput?: ChatMessageConfirmationCustomInputConfig;
   /** 确认状态 */
   confirmationStatus: ChatMessageConfirmationStatus;
   /** 执行状态 */

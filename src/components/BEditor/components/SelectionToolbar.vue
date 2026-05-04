@@ -39,7 +39,7 @@ import { Icon } from '@iconify/vue';
 import { PluginKey, type EditorState } from '@tiptap/pm/state';
 import { BubbleMenu } from '@tiptap/vue-3/menus';
 import { useEventListener } from '@vueuse/core';
-import { emitChatFileReferenceInsert, getFileNameFromPath, getLineRangeFromTextBeforeSelection } from '@/shared/chat/fileReference';
+import { emitChatFileReferenceInsert, getLineRangeFromTextBeforeSelection } from '@/shared/chat/fileReference';
 import type { ServiceModelUpdatedDetail } from '@/shared/storage/service-models/events';
 import { SERVICE_MODEL_UPDATED_EVENT } from '@/shared/storage/service-models/events';
 import { useServiceModelStore } from '@/stores/service-model';
@@ -181,11 +181,9 @@ function insertSelectionReferenceToChat(): void {
 
   const range = getLineRangeFromTextBeforeSelection(textBeforeStart, textBeforeEnd);
 
-  const { id = '', ext = '', path, name } = editorState || {};
+  const { id = '', ext = '', path: filePath, name: fileName } = editorState || {};
 
-  const fileName = name || getFileNameFromPath(path ?? '未保存文件');
-
-  emitChatFileReferenceInsert({ id, ext, filePath: path, fileName, startLine: range.startLine, endLine: range.endLine });
+  emitChatFileReferenceInsert({ id, ext, filePath, fileName, startLine: range.startLine, endLine: range.endLine });
 }
 
 // ---- Format Buttons ----

@@ -119,4 +119,25 @@ describe('ConfirmationCard', () => {
       [{ confirmationId: 'confirmation-1', action: 'cancel' }]
     ]);
   });
+
+  it('submits custom user input through custom-input-submit when confirmation supports other input', async () => {
+    const wrapper = mountConfirmationCard(createConfirmationPart({
+      customInput: {
+        enabled: true,
+        placeholder: '输入新的设置值...',
+        triggerLabel: '改成别的'
+      }
+    }));
+
+    expect(wrapper.text()).toContain('改成别的');
+
+    await wrapper.get('.confirm-card__custom-trigger button').trigger('click');
+    expect(wrapper.get('.confirm-card__custom-input').attributes('placeholder')).toBe('输入新的设置值...');
+    await wrapper.get('.confirm-card__custom-input').setValue('我自己来写');
+    await wrapper.get('.confirm-card__custom-submit button').trigger('click');
+
+    expect(wrapper.emitted('custom-input-submit')).toEqual([
+      [{ confirmationId: 'confirmation-1', text: '我自己来写' }]
+    ]);
+  });
 });

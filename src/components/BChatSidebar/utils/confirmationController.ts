@@ -61,6 +61,7 @@ function createConfirmationPart(confirmationId: string, request: AIToolConfirmat
     afterText: request.afterText,
     allowRemember: request.allowRemember,
     rememberScopes: request.rememberScopes,
+    customInput: request.customInput,
     confirmationStatus: 'pending',
     executionStatus: 'idle'
   };

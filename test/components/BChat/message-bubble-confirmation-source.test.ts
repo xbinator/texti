@@ -22,6 +22,7 @@ describe('MessageBubble confirmation card extraction', () => {
     expect(source).toContain("import ConfirmationCard from './ConfirmationCard.vue';");
     expect(source).toContain('<ConfirmationCard');
     expect(source).toContain('@confirmation-action="$emit(\'confirmation-action\', $event.confirmationId, $event.action)"');
+    expect(source).toContain('@custom-input-submit="$emit(\'confirmation-custom-input\', $event)"');
   });
 
   test('keeps confirmation card class names on the shared namespace helper', () => {

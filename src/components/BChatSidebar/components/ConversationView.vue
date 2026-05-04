@@ -10,6 +10,7 @@
           @edit="$emit('edit', item)"
           @regenerate="$emit('regenerate', item)"
           @confirmation-action="(confirmationId, action) => $emit('confirmation-action', confirmationId, action)"
+          @confirmation-custom-input="$emit('confirmation-custom-input', $event)"
           @user-choice-submit="$emit('user-choice-submit', $event)"
         />
       </div>
@@ -35,7 +36,7 @@
 
 <script setup lang="ts">
 import type { Message } from '../utils/types';
-import type { ChatMessageConfirmationAction, AIUserChoiceAnswerData } from 'types/chat';
+import type { AIUserChoiceAnswerData, ChatMessageConfirmationAction, ChatMessageConfirmationCustomInputPayload } from 'types/chat';
 import { Icon } from '@iconify/vue';
 import { useChatScroll } from '../hooks/useChatScroll';
 import MessageBubble from './MessageBubble.vue';
@@ -61,6 +62,7 @@ defineEmits<{
   (e: 'regenerate', message: Message): void;
   (e: 'load-history'): void;
   (e: 'confirmation-action', confirmationId: string, action: ChatMessageConfirmationAction): void;
+  (e: 'confirmation-custom-input', payload: ChatMessageConfirmationCustomInputPayload): void;
   (e: 'user-choice-submit', answer: AIUserChoiceAnswerData): void;
 }>();
 

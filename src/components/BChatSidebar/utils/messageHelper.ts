@@ -5,8 +5,9 @@
 import type { Message } from './types';
 import type { JSONValue, ModelMessage } from 'ai';
 import type { AIAwaitingUserChoiceQuestion, AIToolExecutionAwaitingUserInputResult } from 'types/ai';
-import type { AIUserChoiceAnswerData, ChatMessageFileReference, ChatMessagePart, ChatMessageRole, ChatMessageToolResultPart } from 'types/chat';
+import type { AIUserChoiceAnswerData, ChatMessagePart, ChatMessageRole, ChatMessageToolResultPart } from 'types/chat';
 import { nanoid } from 'nanoid';
+import { extractFileReferenceLines, MESSAGE_REF_PATTERN, type FileReferenceResult } from './fileReferenceContext';
 
 // ─── 公开类型 ────────────────────────────────────────────────────────────────
 
@@ -57,59 +58,37 @@ function toJsonValue(value: unknown): JSONValue {
   return JSON.parse(JSON.stringify(value)) as JSONValue;
 }
 
-/**
- * 将草稿正文和活动引用解析为有序消息片段。
- * 格式: {{#[id]filePathOrFileName:startLine-endLine}} 或 {{#[id]filePathOrFileName:startLine}} 或 {{#[fileName}}
- * @param content - 草稿正文
- * @param references - 文件引用元数据列表
- * @returns 消息片段数组
- */
-export function buildMessagePartsFromDraft(content: string, references: ChatMessageFileReference[] = []): ChatMessagePart[] {
-  const TOKEN_RE = /\{\{@([^\s:}]+)(?::(\d+)(?:-(\d+))?)?\}\}/g;
-  const parts: ChatMessagePart[] = [];
-  let lastIndex = 0;
+function buildReferenceBlock(ref: FileReferenceResult): string {
+  const lines = ref.fullContent.split('\n');
 
-  const matches = Array.from(content.matchAll(TOKEN_RE));
+  const CONTEXT_LINES = 50;
 
-  for (const match of matches) {
-    const [fullMatch, , start, end] = match;
-    const offset = match.index ?? 0;
+  // 截取选中行前后各30行
+  const sliceStart = Math.max(0, ref.startLine - 1 - CONTEXT_LINES);
+  const sliceEnd = Math.min(lines.length, ref.endLine + CONTEXT_LINES);
+  const contextLines = lines.slice(sliceStart, sliceEnd);
 
-    const startLine = start ? Number(start) : 0;
-    const endLine = end ? Number(end) : startLine;
+  // 插入选中标记（相对于截取后的偏移）
+  const selectionStartIndex = ref.startLine - 1 - sliceStart;
+  const selectionEndIndex = ref.endLine - 1 - sliceStart;
 
-    // 提取 token 前的纯文本
-    if (offset > lastIndex) {
-      parts.push({ type: 'text', text: content.slice(lastIndex, offset) });
-    }
+  contextLines.splice(selectionStartIndex, 0, '// [SELECTION_START]');
+  contextLines.splice(selectionEndIndex + 2, 0, '// [SELECTION_END]');
 
-    // 从 references 中查找匹配的引用
-    const reference = references.find((ref) => ref.token === fullMatch);
-    if (reference) {
-      parts.push({
-        type: 'file-reference',
-        documentId: reference.documentId,
-        snapshotId: reference.snapshotId,
-        fileName: `${reference.fileName}`,
-        path: reference.path,
-        startLine,
-        endLine
-      });
-    } else {
-      // 未找到匹配的引用，降级为纯文本
-      parts.push({ type: 'text', text: fullMatch });
-    }
+  return [`<USER_REFERENCE path="${ref.path}" startLine="${ref.startLine}" endLine="${ref.endLine}">`, contextLines.join('\n'), `</USER_REFERENCE>`].join('\n');
+}
 
-    lastIndex = offset + fullMatch.length;
-  }
+export async function buildChatMessageContext(content: string): Promise<string> {
+  const matches = [...content.matchAll(MESSAGE_REF_PATTERN)];
+  if (!matches.length) return content;
 
-  // 提取剩余的纯文本
-  if (lastIndex < content.length) {
-    parts.push({ type: 'text', text: content.slice(lastIndex) });
-  }
+  const references = await Promise.all(matches.map(([, filePath, startLine, endLine]) => extractFileReferenceLines(filePath, startLine, endLine)));
 
-  // 无内容时返回空数组
-  return parts;
+  return matches.reduce((result, [fullMatch], i) => {
+    const ref = references[i];
+    if (!ref) return result;
+    return result.replace(fullMatch, () => buildReferenceBlock(ref));
+  }, content);
 }
 
 // ─── is —— 消息类型判断 ──────────────────────────────────────────────────────

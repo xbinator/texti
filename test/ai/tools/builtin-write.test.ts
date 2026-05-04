@@ -51,6 +51,24 @@ describe('built-in write tools', () => {
     expect(confirm).toHaveBeenCalledTimes(1);
   });
 
+  it('adds custom input config to insert confirmation so users can override generated content', async () => {
+    const confirm = vi.fn(async () => false);
+    const tools = createBuiltinWriteTools({ confirm });
+    const { context } = createContext();
+
+    await tools.insertAtCursor.execute({ content: ' ++' }, context);
+
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customInput: {
+          enabled: true,
+          placeholder: '输入你想插入的内容...',
+          triggerLabel: '改成别的'
+        }
+      })
+    );
+  });
+
   it('returns cancelled when user rejects confirmation', async () => {
     const confirm = vi.fn(async () => false);
     const tools = createBuiltinWriteTools({ confirm });
@@ -74,6 +92,24 @@ describe('built-in write tools', () => {
     expect(result.status).toBe('failure');
     expect(result.error?.code).toBe('NO_SELECTION');
     expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('adds custom input config to replace-selection confirmation so users can override generated content', async () => {
+    const confirm = vi.fn(async () => false);
+    const tools = createBuiltinWriteTools({ confirm });
+    const { context } = createContext();
+
+    await tools.replaceSelection.execute({ content: 'new text' }, context);
+
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customInput: {
+          enabled: true,
+          placeholder: '输入你想替换成的内容...',
+          triggerLabel: '改成别的'
+        }
+      })
+    );
   });
 
   it('replaces the full document after dangerous confirmation', async () => {

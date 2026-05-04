@@ -2,70 +2,77 @@
  * @file fileReferenceContext.ts
  * @description 基于结构化文件引用片段构建模型可读的引用索引上下文。
  */
-import type { ChatMessageFileReferencePart } from 'types/chat';
-import type { Message } from '@/components/BChatSidebar/utils/types';
+import { recentFilesStorage } from '@/shared/storage';
+
+// ─── 类型定义 ────────────────────────────────────────────────────────────────
 
 /**
- * 读取消息中的文件引用片段。
- * @param message - 聊天消息
- * @returns 文件引用片段列表
+ * 文件引用解析结果
  */
-function collectFileReferenceParts(message: Message): ChatMessageFileReferencePart[] {
-  return message.parts.filter((part): part is ChatMessageFileReferencePart => part.type === 'file-reference');
+export interface FileReferenceResult {
+  /** 文件路径 */
+  path: string;
+  /** 起始行号（从 1 开始） */
+  startLine: number;
+  /** 结束行号（从 1 开始） */
+  endLine: number;
+  /** 指定行号范围的内容 */
+  selectedContent: string;
+  /** 文件完整内容 */
+  fullContent: string;
 }
 
 /**
- * 将单个文件引用片段格式化为模型侧索引文本。
- * 格式: - [documentId] path (lines start-end) 或 - [documentId] path (unsaved)
- * @param reference - 文件引用片段
- * @returns 单行索引文本
+ * 消息文件引用解析结果
  */
-function formatReferenceLine(reference: ChatMessageFileReferencePart): string {
-  const pathLabel = reference.path || reference.fileName;
-  const unsavedLabel = reference.path ? '' : ' (unsaved)';
-  let lineLabel = '';
-  if (reference.startLine > 0) {
-    lineLabel = reference.endLine > reference.startLine ? ` (lines ${reference.startLine}-${reference.endLine})` : ` (line ${reference.startLine})`;
+export interface MessageFileReferencesResult {
+  /** 替换后的消息内容 */
+  message: string;
+  /** 所有文件引用的解析结果 */
+  references: FileReferenceResult[];
+}
+
+// ─── 常量定义 ────────────────────────────────────────────────────────────────
+
+/** 文件引用正则表达式（不含双花括号） */
+export const FILE_REF_PATTERN = /^#(?<filePath>\S+)\s+(?<startLine>\d+)-(?<endLine>\d+)$/;
+
+/** 消息中的文件引用正则表达式（含双花括号） */
+export const MESSAGE_REF_PATTERN = /\{\{#(\S+)\s+(\d+)-(\d+)\}\}/g;
+
+// ─── 内部工具函数 ────────────────────────────────────────────────────────────
+
+/**
+ * 从文件中提取指定行号范围的内容和完整内容
+ * 支持两种格式：
+ * - unsaved://id/fileName - 未保存文件，从路径中提取 id
+ * - 实际文件路径 - 已保存文件，通过路径查找
+ * @param path - 文件路径或 unsaved:// 引用
+ * @param startLine - 起始行号（从 1 开始）
+ * @param endLine - 结束行号
+ * @returns 文件引用解析结果，文件不存在时返回空内容
+ */
+export async function extractFileReferenceLines(path: string, startLine: string, endLine: string): Promise<FileReferenceResult> {
+  let storedFile: Awaited<ReturnType<typeof recentFilesStorage.getRecentFile>> = null;
+
+  // 检查是否为 unsaved:// 格式
+  if (path.startsWith('unsaved://')) {
+    // 从 unsaved://id/fileName 中提取 id
+    const id = path.replace(/^unsaved:\/\/([^/]+)\/.*$/, '$1');
+    storedFile = await recentFilesStorage.getRecentFile(id);
+  } else {
+    // 通过文件路径查找
+    const files = await recentFilesStorage.getAllRecentFiles();
+    storedFile = files.find((file) => file.path === path) || null;
   }
 
-  return `- [${reference.documentId}] ${pathLabel}${unsavedLabel}${lineLabel}`;
-}
+  if (!storedFile) return { path, startLine: 0, endLine: 0, selectedContent: '', fullContent: '' };
 
-/**
- * 构建模型侧文件引用索引块。
- * @param references - 文件引用片段列表
- * @returns 引用索引文本；无引用时返回空字符串
- */
-function buildReferenceIndexBlock(references: ChatMessageFileReferencePart[]): string {
-  if (!references.length) {
-    return '';
-  }
+  const _startLine = parseInt(startLine, 10);
+  const _endLine = parseInt(endLine, 10);
 
-  return ['File References:', ...references.map(formatReferenceLine), '', 'Use read_file with documentId to read file content.'].join('\n');
-}
+  const lines = storedFile.content.split('\n');
+  const selectedContent = lines.slice(Math.max(0, _startLine - 1), Math.min(lines.length, _endLine)).join('\n');
 
-/**
- * 构建面向模型的就绪消息列表，将结构化引用片段改写为引用索引块。
- * @param sourceMessages - 原始聊天消息
- * @returns 模型就绪消息列表
- */
-export function buildModelReadyMessages(sourceMessages: Message[]): Message[] {
-  return sourceMessages.map((message) => {
-    if (message.role !== 'user') {
-      return message;
-    }
-
-    const references = collectFileReferenceParts(message);
-    const referenceIndexBlock = buildReferenceIndexBlock(references);
-    if (!referenceIndexBlock) {
-      return message;
-    }
-
-    const content = `${referenceIndexBlock}\n\n${message.content}`.trim();
-    return {
-      ...message,
-      content,
-      parts: [{ type: 'text', text: content }]
-    };
-  });
+  return { selectedContent, fullContent: storedFile.content, path, startLine: _startLine, endLine: _endLine };
 }

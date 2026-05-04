@@ -38,6 +38,7 @@
             v-else-if="item.type === 'confirmation'"
             :part="item"
             @confirmation-action="$emit('confirmation-action', $event.confirmationId, $event.action)"
+            @custom-input-submit="$emit('confirmation-custom-input', $event)"
           />
 
           <AskUserChoiceCard v-else-if="isAwaitingUserChoicePart(item)" :question="item.result.data" @submit-choice="$emit('user-choice-submit', $event)" />
@@ -70,11 +71,10 @@
  */
 import type { Message } from '../utils/types';
 import type { AIToolExecutionAwaitingUserInputResult } from 'types/ai';
-import type { AIUserChoiceAnswerData, ChatMessageConfirmationAction, ChatMessagePart, ChatMessageToolResultPart } from 'types/chat';
+import type { AIUserChoiceAnswerData, ChatMessageConfirmationAction, ChatMessageConfirmationCustomInputPayload, ChatMessagePart, ChatMessageToolResultPart } from 'types/chat';
 import { computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import BBubble from '@/components/BBubble/index.vue';
-import BButton from '@/components/BButton/index.vue';
 import BImageViewer from '@/components/BImageViewer/index.vue';
 import { useClipboard } from '@/hooks/useClipboard';
 import { createNamespace } from '@/utils/namespace';
@@ -98,6 +98,7 @@ defineEmits<{
   (e: 'edit', message: Message): void;
   (e: 'regenerate', message: Message): void;
   (e: 'confirmation-action', confirmationId: string, action: ChatMessageConfirmationAction): void;
+  (e: 'confirmation-custom-input', payload: ChatMessageConfirmationCustomInputPayload): void;
   (e: 'user-choice-submit', answer: AIUserChoiceAnswerData): void;
 }>();
 

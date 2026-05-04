@@ -49,9 +49,9 @@ export function useFileReference(options: FileReferenceOptions) {
    * @param reference - 文件引用信息
    */
   function insertReference(reference: FileReferenceChip) {
-    const { id, fileName, filePath = fileName, startLine, endLine } = reference;
+    const { id, fileName, filePath, startLine, endLine } = reference;
 
-    const token = `{{#[${id}](${filePath || fileName}) ${startLine}-${endLine}}} `;
+    const token = `{{#${filePath || `unsaved://${id}/${fileName}`} ${startLine}-${endLine}}}`;
 
     options.insertTextAtCursor(token);
   }

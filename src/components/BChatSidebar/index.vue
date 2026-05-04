@@ -31,6 +31,7 @@
         @edit="handleChatEdit"
         @regenerate="handleChatRegenerate"
         @confirmation-action="handleConfirmationAction"
+        @confirmation-custom-input="handleConfirmationCustomInput"
         @user-choice-submit="handleChatUserChoiceSubmit"
       />
 
@@ -83,7 +84,7 @@
 
 <script setup lang="ts">
 import type { Message } from './utils/types';
-import type { ChatMessageConfirmationAction } from 'types/chat';
+import type { ChatMessageConfirmationAction, ChatMessageConfirmationCustomInputPayload } from 'types/chat';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { createBuiltinTools } from '@/ai/tools/builtin';
@@ -111,7 +112,7 @@ import { useSession } from './hooks/useSession';
 import { useUsagePanel } from './hooks/useUsagePanel';
 import { chipResolver } from './utils/chipResolver';
 import { createChatConfirmationController } from './utils/confirmationController';
-import { create, userChoice } from './utils/messageHelper';
+import { create, userChoice, buildChatMessageContext } from './utils/messageHelper';
 import { chatSlashCommands } from './utils/slashCommands';
 
 /** 聊天数据存储 */
@@ -318,31 +319,6 @@ async function handleComplete(nextMessage: Message): Promise<void> {
 }
 
 /**
- * 处理聊天消息提交。
- */
-async function handleChatSubmit(): Promise<void> {
-  const content = inputContent.value.trim();
-  const images = inputImages.value;
-
-  if (!canSubmit.value) return;
-
-  const config = await stream.resolveServiceConfig();
-  if (!config) return;
-
-  const message = create.userMessage(content);
-  // 如果有图片，添加到消息中
-  images.length && supportsVision.value && (message.files = [...images]);
-
-  await handleBeforeSend(message);
-  messages.value.push(message);
-  conversationRef.value?.scrollToBottom({ behavior: 'auto' });
-  focusInput();
-  inputEvents.clear();
-
-  await stream.streamMessages(messages.value, config);
-}
-
-/**
  * 处理消息编辑。
  * @param nextMessage - 要编辑的消息
  */
@@ -364,6 +340,58 @@ async function handleChatRegenerate(nextMessage: Message): Promise<void> {
  */
 async function handleChatUserChoiceSubmit(answer: import('types/chat').AIUserChoiceAnswerData): Promise<void> {
   await stream.submitUserChoice(answer);
+}
+
+/**
+ * 提交用户文本消息并启动新一轮流式对话。
+ * @param content - 用户输入内容
+ * @param images - 可选图片列表
+ * @param clearDraft - 是否清空当前主输入框草稿
+ */
+async function submitUserTextMessage(content: string, images: typeof inputImages.value = [], clearDraft = true): Promise<void> {
+  const trimmedContent = content.trim();
+  if (!trimmedContent && !images.length) return;
+
+  const config = await stream.resolveServiceConfig();
+  if (!config) {
+    return;
+  }
+
+  const messageContext = await buildChatMessageContext(trimmedContent);
+  console.log('🚀 ~ submitUserTextMessage ~ messageContext:', messageContext);
+
+  const message = create.userMessage(messageContext);
+  if (images.length && supportsVision.value) {
+    message.files = [...images];
+  }
+
+  await handleBeforeSend(message);
+  messages.value.push(message);
+  conversationRef.value?.scrollToBottom({ behavior: 'auto' });
+  focusInput();
+  clearDraft && inputEvents.clear();
+
+  await stream.streamMessages(messages.value, config);
+}
+
+/**
+ * 处理确认卡片中的自定义输入提交。
+ * @param payload - 自定义输入载荷
+ */
+async function handleConfirmationCustomInput(payload: ChatMessageConfirmationCustomInputPayload): Promise<void> {
+  confirmationController.cancelConfirmation(payload.confirmationId);
+  await submitUserTextMessage(payload.text, [], false);
+}
+
+/**
+ * 处理聊天消息提交。
+ */
+async function handleChatSubmit(): Promise<void> {
+  const content = inputContent.value.trim();
+
+  if (!canSubmit.value) return;
+
+  await submitUserTextMessage(content, inputImages.value);
 }
 
 /**

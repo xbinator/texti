@@ -12,14 +12,6 @@ import type { DbExecuteResult, ElectronAPI } from 'types/electron-api';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * SQLite 表结构信息行。
- */
-interface TableInfoRow {
-  /** 列名。 */
-  name: string;
-}
-
-/**
  * 测试期间使用的临时 userData 目录。
  */
 let tempUserDataDir = '';
