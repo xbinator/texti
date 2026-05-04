@@ -51,7 +51,7 @@ export function useFileReference(options: FileReferenceOptions) {
   function insertReference(reference: FileReferenceChip) {
     const { id, fileName, filePath, startLine, endLine, renderStartLine, renderEndLine } = reference;
 
-    const token = `{{#${filePath || `unsaved://${id}/${fileName}`} ${startLine}-${endLine}|${renderStartLine}-${renderEndLine}}}`;
+    const token = `{{#${filePath || `unsaved://${id}/${fileName}`} ${startLine}-${endLine}|${renderStartLine}-${renderEndLine}}} `;
 
     options.insertTextAtCursor(token);
   }

@@ -131,7 +131,7 @@ function handleClose(): void {
  */
 async function handleSelect(file: StoredFile): Promise<void> {
   handleClose();
-  await openFile(file, 'search');
+  await openFile(file);
   emit('select', file);
 }
 

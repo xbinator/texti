@@ -67,19 +67,14 @@ function parseSegments(text: string): Segment[] {
   let lastIndex = 0;
 
   for (const match of text.matchAll(pattern)) {
-    const [, filePath, startLine, endLine, renderStartLine, renderEndLine] = match;
+    const [, filePath, startLine, endLine] = match;
     const matchStart = match.index!;
 
     if (matchStart > lastIndex) {
       result.push({ type: 'text', text: text.slice(lastIndex, matchStart) });
     }
 
-    result.push({
-      type: 'fileRef',
-      fullPath: filePath,
-      fileName: extractFileName(filePath),
-      lineText: renderStartLine && renderEndLine ? `${renderStartLine}-${renderEndLine}` : `${startLine}-${endLine}`
-    });
+    result.push({ type: 'fileRef', fullPath: filePath, fileName: extractFileName(filePath), lineText: `${startLine}-${endLine}` });
 
     lastIndex = matchStart + match[0].length;
   }

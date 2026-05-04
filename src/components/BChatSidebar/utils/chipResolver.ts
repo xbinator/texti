@@ -30,9 +30,9 @@ class FileRefWidget extends WidgetType {
     const span = document.createElement('span');
     span.className = 'b-prompt-chip b-prompt-chip--file';
 
-    const { fileName, startLine, endLine, renderStartLine, renderEndLine } = this.location;
+    const { fileName, startLine, endLine } = this.location;
 
-    const lineText = renderStartLine && renderEndLine ? `${renderStartLine}-${renderEndLine}` : `${startLine}-${endLine}`;
+    const lineText = `${startLine}-${endLine}`;
 
     span.innerHTML = `<span class="truncate" style="max-width: 120px;">${fileName}</span> <span>${lineText}</span>`;
 

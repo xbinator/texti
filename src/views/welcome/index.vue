@@ -80,14 +80,14 @@ onMounted(() => filesStore.ensureLoaded());
  * 创建新的未保存文件。
  */
 function handleNewFile(): void {
-  createNewFile('new');
+  createNewFile();
 }
 
 /**
  * 通过欢迎页入口打开原生文件。
  */
 async function handleOpenFile(): Promise<void> {
-  await openNativeFile('welcome');
+  await openNativeFile();
 }
 
 /**
@@ -95,7 +95,7 @@ async function handleOpenFile(): Promise<void> {
  * @param id - 文件 ID
  */
 async function handleOpenRecentFile(id: string): Promise<void> {
-  await openFileById(id, 'welcome');
+  await openFileById(id);
 }
 
 /**

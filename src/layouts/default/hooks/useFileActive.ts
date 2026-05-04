@@ -35,14 +35,14 @@ export function useFileActive(visible: UseFileActiveOptions['visible']): UseFile
    * 创建并打开一个新文件。
    */
   async function handleCreateNewFile(): Promise<void> {
-    await createNewFile('new');
+    await createNewFile();
   }
 
   /**
    * 通过原生文件选择器打开文件。
    */
   async function handleOpenNativeFile(): Promise<void> {
-    await openNativeFile('menu');
+    await openNativeFile();
   }
 
   /**
@@ -56,7 +56,7 @@ export function useFileActive(visible: UseFileActiveOptions['visible']): UseFile
       return;
     }
 
-    await openFileById(id, 'platform-recent');
+    await openFileById(id);
   }
 
   const toolbarFileOptions = computed<ToolbarOptions>(() => [

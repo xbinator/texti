@@ -60,11 +60,19 @@ function toJsonValue(value: unknown): JSONValue {
   return JSON.parse(JSON.stringify(value)) as JSONValue;
 }
 
+/**
+ * 构建消息中的文件引用列表
+ * @param content - 消息内容
+ * @returns 文件引用数组，无引用时返回 undefined
+ */
 export async function buildMessageReferences(content: string) {
   const matches = [...content.matchAll(MESSAGE_REF_PATTERN)];
   if (!matches.length) return undefined;
 
-  const values = matches.map(([token, ...match]) => extractFileReferenceLines(token, match));
+  // 去重：相同 token 只处理一次，避免重复读取文件
+  const uniqueMatches = [...new Map(matches.map((m) => [m[0], m])).values()];
+
+  const values = uniqueMatches.map(([token, ...match]) => extractFileReferenceLines(token, match));
 
   const [, result] = await asyncTo(Promise.all(values));
 

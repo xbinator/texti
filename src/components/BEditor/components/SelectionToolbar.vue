@@ -187,7 +187,7 @@ function insertSelectionReferenceToChat(): void {
 
   const { startLine = 0, endLine = 0 } = sourceLineRange || {};
 
-  emitChatFileReferenceInsert({ id, ext, filePath, fileName, startLine, endLine, renderStartLine, renderEndLine });
+  emitChatFileReferenceInsert({ id, ext, filePath: filePath || '', fileName, startLine, endLine, renderStartLine, renderEndLine });
 }
 
 // ---- Format Buttons ----
