@@ -17,38 +17,35 @@ export interface ChatFileReferenceInsertPayload {
   /** 文件扩展名 */
   ext: string;
   /** 完整文件路径，未保存文件为 null */
-  filePath: string | null;
+  filePath: string;
   /** 展示用文件名 */
   fileName: string;
   /** 起始行号（1-based），0 表示无行号 */
   startLine: number;
   /** 结束行号（1-based），等于 startLine 时表示单行，0 仅与 startLine=0 配对 */
   endLine: number;
+  /** 渲染视图中的起始行号（1-based），0 表示无行号 */
+  renderStartLine: number;
+  /** 渲染视图中的结束行号（1-based），等于 renderStartLine 时表示单行，0 仅与 renderStartLine=0 配对 */
+  renderEndLine: number;
 }
 
-/**
- * 根据选区起止位置前的文本计算行号，空字符串视为第 1 行开头。
- * @param textBeforeStart - 选区起点之前的文本
- * @param textBeforeEnd - 选区终点之前的文本
- * @returns 包含 startLine 和 endLine 的对象
- */
-export function getLineRangeFromTextBeforeSelection(textBeforeStart: string, textBeforeEnd: string): { startLine: number; endLine: number } {
-  const startLine = textBeforeStart.split(/\r?\n/).length;
-  const endLine = textBeforeEnd.split(/\r?\n/).length;
-
-  return { startLine, endLine };
+function isValidLineRange(start: number, end: number): boolean {
+  return isNumber(start) && isNumber(end) && start >= 0 && (start === end || (start > 0 && end >= start));
 }
 
 export function isChatFileReferenceInsertPayload(payload: unknown): payload is ChatFileReferenceInsertPayload {
   if (!isObject(payload) || isArray(payload)) return false;
 
-  const { filePath, fileName, startLine, endLine } = payload as Partial<ChatFileReferenceInsertPayload>;
+  const { filePath, fileName, startLine, endLine, renderStartLine, renderEndLine } = payload as ChatFileReferenceInsertPayload;
 
-  const isValidFilePath = (isString(filePath) && filePath.length > 0) || isNull(filePath);
-  const isValidFileName = isString(fileName) && fileName.length > 0;
-  const isValidLines = isNumber(startLine) && isNumber(endLine) && startLine >= 0 && (startLine === endLine || (startLine > 0 && endLine >= startLine));
-
-  return isValidFilePath && isValidFileName && isValidLines;
+  return (
+    ((isString(filePath) && filePath.length > 0) || isNull(filePath)) &&
+    isString(fileName) &&
+    fileName.length > 0 &&
+    isValidLineRange(startLine, endLine) &&
+    isValidLineRange(renderStartLine, renderEndLine)
+  );
 }
 /**
  * 发出聊天输入框文件引用插入事件。

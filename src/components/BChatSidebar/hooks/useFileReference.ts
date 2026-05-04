@@ -49,9 +49,9 @@ export function useFileReference(options: FileReferenceOptions) {
    * @param reference - 文件引用信息
    */
   function insertReference(reference: FileReferenceChip) {
-    const { id, fileName, filePath, startLine, endLine } = reference;
+    const { id, fileName, filePath, startLine, endLine, renderStartLine, renderEndLine } = reference;
 
-    const token = `{{#${filePath || `unsaved://${id}/${fileName}`} ${startLine}-${endLine}}}`;
+    const token = `{{#${filePath || `unsaved://${id}/${fileName}`} ${startLine}-${endLine}|${renderStartLine}-${renderEndLine}}}`;
 
     options.insertTextAtCursor(token);
   }
@@ -62,14 +62,14 @@ export function useFileReference(options: FileReferenceOptions) {
    * @param reference - 文件引用插入载荷
    */
   async function handleFileReferenceInsert(reference: ChatFileReferenceInsertPayload): Promise<void> {
-    const { startLine, endLine, id, ext, filePath, fileName } = reference;
+    const { startLine, endLine, id, ext, filePath, fileName, renderStartLine, renderEndLine } = reference;
 
     // 先锁定聊天输入框最近一次有效插入位置，再处理侧边栏聚焦与引用插入
     options.saveCursorPosition();
     settingStore.setSidebarVisible(true);
 
     await nextTick();
-    insertReference({ id, filePath, fileName: `${fileName}.${ext}`, startLine, endLine });
+    insertReference({ id, filePath, fileName: `${fileName}.${ext}`, startLine, endLine, renderStartLine, renderEndLine });
     options.focusInput();
   }
 
