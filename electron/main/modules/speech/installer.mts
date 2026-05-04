@@ -75,10 +75,7 @@ function resolveWhisperBinaryName(platform: 'darwin' | 'win32'): string {
  * @param arch - 架构标识
  * @returns 运行时清单
  */
-function resolveSpeechRuntimeManifestFromBaseUrl(
-  platform: 'darwin' | 'win32',
-  arch: 'arm64' | 'x64'
-): SpeechRuntimeManifestDefinition {
+function resolveSpeechRuntimeManifestFromBaseUrl(platform: 'darwin' | 'win32', arch: 'arm64' | 'x64'): SpeechRuntimeManifestDefinition {
   const baseUrl = process.env.TIBIS_SPEECH_RUNTIME_BASE_URL?.trim();
   const version = process.env.TIBIS_SPEECH_RUNTIME_VERSION?.trim() || 'latest';
   const modelName = process.env.TIBIS_SPEECH_MODEL_NAME?.trim() || 'ggml-base';
