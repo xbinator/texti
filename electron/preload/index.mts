@@ -7,6 +7,7 @@
 import type { AIServiceError, AIStreamFinishChunk, AIStreamToolCallChunk } from 'types/ai';
 import type { ElectronAPI, FileChangeEvent } from 'types/electron-api';
 import { contextBridge, ipcRenderer } from 'electron';
+import { formatPreloadErrorMessage, shouldIgnorePreloadError } from './error-collector.mjs';
 import webviewAPI from './webview.mjs';
 
 /**
@@ -31,26 +32,29 @@ async function writeScopedLog(scope: 'renderer' | 'preload', level: 'ERROR' | 'W
  * 在 contextBridge 暴露之前调用，捕获 preload 自身错误
  */
 function initPreloadErrorCollector(): void {
-  const formatError = (err: Error, ctx?: Record<string, unknown>): string => {
-    const base = `Error: ${err.name}: ${err.message}\nStack: ${err.stack || 'N/A'}`;
-    return ctx ? `${base}\nContext: ${JSON.stringify(ctx)}` : base;
-  };
-
   window.onerror = (message, source, lineno, colno, error) => {
     const errorObj = error || new Error(String(message));
+    if (shouldIgnorePreloadError(errorObj)) {
+      return false;
+    }
+
     const context = {
       source: source ? source.replace(/.*\//, '') : 'N/A',
       lineno,
       colno,
       type: 'preload.onerror'
     };
-    writeScopedLog('preload', 'ERROR', formatError(errorObj, context));
+    writeScopedLog('preload', 'ERROR', formatPreloadErrorMessage(errorObj, context));
     return false;
   };
 
   window.onunhandledrejection = (event) => {
     const error = event.reason instanceof Error ? event.reason : new Error(String(event.reason));
-    writeScopedLog('preload', 'ERROR', formatError(error, { type: 'unhandledrejection' }));
+    if (shouldIgnorePreloadError(error)) {
+      return;
+    }
+
+    writeScopedLog('preload', 'ERROR', formatPreloadErrorMessage(error, { type: 'unhandledrejection' }));
   };
 }
 
