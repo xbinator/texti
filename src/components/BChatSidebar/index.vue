@@ -87,6 +87,7 @@ import type { Message } from './utils/types';
 import type { ChatMessageConfirmationAction, ChatMessageConfirmationCustomInputPayload } from 'types/chat';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { Icon } from '@iconify/vue';
+import { message } from 'ant-design-vue';
 import { createBuiltinTools } from '@/ai/tools/builtin';
 import { editorToolContextRegistry } from '@/ai/tools/editor-context';
 import { getDefaultChatToolNames } from '@/ai/tools/policy';
@@ -157,8 +158,12 @@ function insertTextAtCursor(text: string): void {
  * @param payload - 语音转写结果
  */
 function handleVoiceComplete(payload: { text: string }): void {
-  console.log('🚀 ~ handleVoiceComplete ~ payload:', payload);
-  // insertTextAtCursor(payload.text);
+  if (!payload.text.trim()) {
+    message.error('语音转写结果为空，请重试');
+    return;
+  }
+
+  insertTextAtCursor(payload.text);
 }
 
 /** 用量面板 hook */
@@ -359,13 +364,13 @@ async function submitUserTextMessage(content: string, images: typeof inputImages
 
   const references = await buildMessageReferences(trimmedContent);
 
-  const message = create.userMessage(trimmedContent, references);
+  const userMessage = create.userMessage(trimmedContent, references);
   if (images.length && supportsVision.value) {
-    message.files = [...images];
+    userMessage.files = [...images];
   }
 
-  await handleBeforeSend(message);
-  messages.value.push(message);
+  await handleBeforeSend(userMessage);
+  messages.value.push(userMessage);
   conversationRef.value?.scrollToBottom({ behavior: 'auto' });
   focusInput();
   clearDraft && inputEvents.clear();

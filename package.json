@@ -16,6 +16,9 @@
     "electron:build": "pnpm run build && pnpm run electron:build-main && electron-builder",
     "postinstall": "electron-rebuild",
     "test": "cross-env HOST=127.0.0.1 vitest run",
+    "speech:manifest:fill": "node ./scripts/speech/manifest-tool.mjs fill",
+    "speech:manifest:hash": "node ./scripts/speech/manifest-tool.mjs hash",
+    "speech:manifest:validate": "node ./scripts/speech/manifest-tool.mjs validate",
     "lint": "eslint src --ext .vue,.ts,.tsx,.js,.jsx --fix",
     "lint:style": "stylelint 'src/**/*.{vue,less,css}' --fix"
   },

@@ -6,40 +6,36 @@ import { execFile } from 'node:child_process';
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SpeechRuntimeConfig, SpeechTranscribeRequest, SpeechTranscribeResult } from './types.mjs';
+import { resolveInstalledSpeechRuntimePaths } from './runtime.mjs';
 
 /**
  * 解析语音转写运行时配置。
  * @returns 运行时配置
  */
-export function resolveSpeechRuntimeConfig(): SpeechRuntimeConfig {
-  return {
-    ffmpegBinaryPath: process.env.TIBIS_FFMPEG_PATH ?? '',
-    whisperBinaryPath: process.env.TIBIS_WHISPER_CPP_PATH ?? '',
-    whisperModelPath: process.env.TIBIS_WHISPER_MODEL_PATH ?? '',
-    tempDirectory: process.env.TIBIS_WHISPER_TEMP_DIR ?? '/tmp'
-  };
+export async function resolveSpeechRuntimeConfig(): Promise<SpeechRuntimeConfig> {
+  try {
+    const installedRuntime = await resolveInstalledSpeechRuntimePaths();
+    return {
+      whisperBinaryPath: installedRuntime.whisperBinaryPath,
+      whisperModelPath: installedRuntime.whisperModelPath,
+      tempDirectory: process.env.TIBIS_WHISPER_TEMP_DIR ?? '/tmp'
+    };
+  } catch {
+    return {
+      whisperBinaryPath: process.env.TIBIS_WHISPER_CPP_PATH ?? '',
+      whisperModelPath: process.env.TIBIS_WHISPER_MODEL_PATH ?? '',
+      tempDirectory: process.env.TIBIS_WHISPER_TEMP_DIR ?? '/tmp'
+    };
+  }
 }
 
 /**
- * 把 MIME 类型映射为临时音频文件扩展名。
+ * 判断当前音频 MIME 是否受支持。
  * @param mimeType - 音频 MIME 类型
- * @returns 适合落盘的扩展名
+ * @returns 是否为受支持的 wav 音频
  */
-function resolveAudioExtension(mimeType: string): string {
-  if (mimeType.includes('wav')) return 'wav';
-  if (mimeType.includes('mpeg') || mimeType.includes('mp3')) return 'mp3';
-  if (mimeType.includes('ogg')) return 'ogg';
-  return 'webm';
-}
-
-/**
- * 判断当前音频是否需要转成 wav 再交给 whisper.cpp。
- * @param mimeType - 音频 MIME 类型
- * @param config - 运行时配置
- * @returns 是否需要转码
- */
-function shouldTranscodeToWav(mimeType: string, config: SpeechRuntimeConfig): boolean {
-  return mimeType !== 'audio/wav' && mimeType !== 'audio/wave' && Boolean(config.ffmpegBinaryPath);
+function isSupportedSpeechMimeType(mimeType: string): boolean {
+  return mimeType === 'audio/wav' || mimeType === 'audio/wave';
 }
 
 /**
@@ -78,35 +74,28 @@ async function assertSpeechConfig(config: SpeechRuntimeConfig): Promise<void> {
 
 /**
  * 转写单段音频。
- * 当前为最小实现，只完成配置校验与返回结构，后续再补临时文件和真实 whisper.cpp 调用。
  * @param request - 转写请求
  * @param config - 运行时配置
  * @returns 转写结果
  */
-export async function transcribeAudioSegment(
-  request: SpeechTranscribeRequest,
-  config: SpeechRuntimeConfig = resolveSpeechRuntimeConfig()
-): Promise<SpeechTranscribeResult> {
-  await assertSpeechConfig(config);
+export async function transcribeAudioSegment(request: SpeechTranscribeRequest, config?: SpeechRuntimeConfig): Promise<SpeechTranscribeResult> {
+  if (!isSupportedSpeechMimeType(request.mimeType)) {
+    throw new Error(`Unsupported speech mime type: ${request.mimeType}`);
+  }
+
+  const resolvedConfig = config ?? (await resolveSpeechRuntimeConfig());
+  await assertSpeechConfig(resolvedConfig);
 
   const startedAt = Date.now();
-  const workDirectory = await mkdtemp(join(config.tempDirectory, 'tibis-speech-'));
-  const originalInputPath = join(workDirectory, `input.${resolveAudioExtension(request.mimeType)}`);
-  const wavInputPath = join(workDirectory, 'input.wav');
+  const workDirectory = await mkdtemp(join(resolvedConfig.tempDirectory, 'tibis-speech-'));
+  const inputPath = join(workDirectory, 'input.wav');
   const outputBasePath = join(workDirectory, 'output');
   const outputTextPath = `${outputBasePath}.txt`;
 
   try {
-    await writeFile(originalInputPath, Buffer.from(request.buffer));
+    await writeFile(inputPath, Buffer.from(request.buffer));
 
-    let whisperInputPath = originalInputPath;
-
-    if (shouldTranscodeToWav(request.mimeType, config) && config.ffmpegBinaryPath) {
-      await runExecFile(config.ffmpegBinaryPath, ['-i', originalInputPath, wavInputPath]);
-      whisperInputPath = wavInputPath;
-    }
-
-    const args = ['-m', config.whisperModelPath, '-f', whisperInputPath, '-of', outputBasePath, '-otxt'];
+    const args = ['-m', resolvedConfig.whisperModelPath, '-f', inputPath, '-of', outputBasePath, '-otxt'];
     if (request.language) {
       args.push('-l', request.language);
     }
@@ -114,7 +103,7 @@ export async function transcribeAudioSegment(
       args.push('--prompt', request.prompt);
     }
 
-    await runExecFile(config.whisperBinaryPath, args);
+    await runExecFile(resolvedConfig.whisperBinaryPath, args);
     const text = (await readFile(outputTextPath, 'utf-8')).trim();
 
     return {

@@ -1,6 +1,6 @@
 import type { AIProviderType } from 'types/ai';
 
-export type SettingsMenuKey = 'provider' | 'service-model' | 'logger';
+export type SettingsMenuKey = 'provider' | 'service-model' | 'speech' | 'logger';
 
 export interface MenuItem {
   key: SettingsMenuKey;
@@ -12,6 +12,7 @@ export interface MenuItem {
 export const menuItems: MenuItem[] = [
   { key: 'provider', label: 'AI服务商', icon: 'lucide:brain', path: '/settings/provider' },
   { key: 'service-model', label: '服务模型', icon: 'lucide:sparkles', path: '/settings/service-model' },
+  { key: 'speech', label: '语音组件', icon: 'lucide:mic', path: '/settings/speech' },
   { key: 'logger', label: '运行日志', icon: 'lucide:file-text', path: '/settings/logger' }
 ];
 

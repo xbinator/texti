@@ -182,7 +182,7 @@ interface VoiceSegment {
 职责：
 
 - 封装 `navigator.mediaDevices.getUserMedia`
-- 使用 `MediaRecorder` 生成音频片段
+- 采集 PCM 音频数据并按段编码为 `wav`
 - 使用 `AudioContext + AnalyserNode` 生成波形采样
 - 对外暴露：
   - `start`
@@ -192,7 +192,15 @@ interface VoiceSegment {
   - `waveformSamples`
   - `permissionState`
 
-第一版录音格式优先选择浏览器稳定可用的 `audio/webm`。
+第一版录音格式调整为浏览器直接产出语音识别友好的 `audio/wav`，不再依赖中间 `webm` 转码。
+
+推荐参数：
+
+- `16000 Hz`
+- `mono`
+- `16-bit PCM`
+
+录音实现不再以 `MediaRecorder` 产物作为转写输入，而是由前端采集 PCM 后直接编码为分段 `wav`。这样可以去掉对 `ffmpeg` 的依赖，同时控制单段体积。
 
 ## 输入框集成策略
 
@@ -275,7 +283,6 @@ transcribeAudio: (request) => ipcRenderer.invoke('speech:transcribe', request)
 
 - 接收单段音频
 - 写入临时目录
-- 必要时做格式转换
 - 调用 `whisper.cpp`
 - 读取文本结果
 - 清理临时文件
@@ -284,22 +291,20 @@ transcribeAudio: (request) => ipcRenderer.invoke('speech:transcribe', request)
 
 1. 接收 `speech:transcribe` 请求
 2. 在临时目录创建当前段工作目录
-3. 写入 `input.webm`
-4. 转码得到 `input.wav`
-5. 调用 `whisper.cpp`
-6. 读取 `output.txt`
-7. 删除临时目录
-8. 返回 `segmentId + text + durationMs`
+3. 写入 `input.wav`
+4. 调用 `whisper.cpp`
+5. 读取 `output.txt`
+6. 删除临时目录
+7. 返回 `segmentId + text + durationMs`
 
 ### 文件格式策略
 
 第一版统一流程为：
 
-- 前端录制 `webm`
-- 主进程转成 `wav`
+- 前端直接编码 `wav`
 - `whisper.cpp` 读取 `wav`
 
-这样可以把浏览器录音兼容性问题和 `whisper.cpp` 输入格式要求集中在主进程处理。
+这样可以移除对 `ffmpeg` 的依赖，同时通过前端固定采样参数控制单段大小。
 
 ### whisper.cpp 配置
 
@@ -320,7 +325,7 @@ transcribeAudio: (request) => ipcRenderer.invoke('speech:transcribe', request)
 以下错误进入 `error` 状态并中止当前会话：
 
 - 麦克风权限被拒绝
-- `MediaRecorder` 不可用
+- PCM 采集能力不可用
 - `whisper.cpp` 二进制不存在
 - 模型文件不存在
 - 无法初始化录音设备
@@ -329,7 +334,7 @@ transcribeAudio: (request) => ipcRenderer.invoke('speech:transcribe', request)
 
 以下错误只影响当前段，不直接废弃整个会话：
 
-- 单段转码失败
+- 单段 wav 编码失败
 - `whisper.cpp` 子进程非零退出
 - 单段超时
 - 单段输出为空且可重试
@@ -343,7 +348,7 @@ transcribeAudio: (request) => ipcRenderer.invoke('speech:transcribe', request)
 - 段开始转写
 - 段完成与耗时
 - `stderr` 摘要
-- 转码失败原因
+- wav 编码失败原因
 - 二进制或模型缺失
 
 渲染层记录：
@@ -390,7 +395,7 @@ transcribeAudio: (request) => ipcRenderer.invoke('speech:transcribe', request)
 - 实时字幕不直接写编辑器，牺牲了一点“正文实时可见性”，换来更稳定的光标与撤销体验
 - 第一版不做静音检测，切片边界可能不如理想，但实现风险更低
 - 主进程串行转写吞吐更低，但对桌面本地模型场景更稳
-- 如果 `webm -> wav` 转码依赖额外二进制，后续需要明确随应用一起分发的策略
+- 若采用前端 PCM 编码 `wav`，需要明确采样率、声道数和分段时长，避免长录音导致单段内存压力上升
 
 ## 决策结论
 

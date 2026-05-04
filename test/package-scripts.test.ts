@@ -32,4 +32,12 @@ describe('package scripts', () => {
 
     expect(manifest.scripts?.test).toBe('cross-env HOST=127.0.0.1 vitest run');
   });
+
+  it('declares speech manifest helper scripts', () => {
+    const manifest = readPackageScripts();
+
+    expect(manifest.scripts?.['speech:manifest:fill']).toBe('node ./scripts/speech/manifest-tool.mjs fill');
+    expect(manifest.scripts?.['speech:manifest:hash']).toBe('node ./scripts/speech/manifest-tool.mjs hash');
+    expect(manifest.scripts?.['speech:manifest:validate']).toBe('node ./scripts/speech/manifest-tool.mjs validate');
+  });
 });

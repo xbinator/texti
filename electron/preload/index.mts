@@ -5,7 +5,7 @@
  */
 
 import type { AIServiceError, AIStreamFinishChunk, AIStreamToolCallChunk } from 'types/ai';
-import type { ElectronAPI, FileChangeEvent } from 'types/electron-api';
+import type { ElectronAPI, ElectronSpeechInstallProgress, FileChangeEvent } from 'types/electron-api';
 import { contextBridge, ipcRenderer } from 'electron';
 import { formatPreloadErrorMessage, shouldIgnorePreloadError } from './error-collector.mjs';
 import webviewAPI from './webview.mjs';
@@ -210,6 +210,38 @@ const electronAPI: ElectronAPI = {
    * @returns 转写结果
    */
   transcribeAudio: (request) => ipcRenderer.invoke('speech:transcribe', request),
+
+  /**
+   * 获取语音运行时状态。
+   * @returns 语音运行时状态
+   */
+  getSpeechRuntimeStatus: () => ipcRenderer.invoke('speech:getRuntimeStatus'),
+
+  /**
+   * 下载并安装语音运行时。
+   * @returns 安装完成后的运行时状态
+   */
+  installSpeechRuntime: () => ipcRenderer.invoke('speech:installRuntime'),
+
+  /**
+   * 删除已安装的语音运行时。
+   * @returns 删除后的运行时状态
+   */
+  removeSpeechRuntime: () => ipcRenderer.invoke('speech:removeRuntime'),
+
+  /**
+   * 监听语音运行时安装进度。
+   * @param callback - 进度回调
+   * @returns 取消监听函数
+   */
+  onSpeechInstallProgress: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload as ElectronSpeechInstallProgress);
+
+    ipcRenderer.on('speech:install-progress', handler);
+    return () => {
+      ipcRenderer.removeListener('speech:install-progress', handler);
+    };
+  },
 
   // ==================== AI 服务操作 ====================
 

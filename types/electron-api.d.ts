@@ -190,6 +190,40 @@ export interface ElectronAudioTranscribeResult {
   durationMs: number;
 }
 
+/**
+ * 语音运行时状态。
+ */
+export interface ElectronSpeechRuntimeStatus {
+  /** 当前状态。 */
+  state: 'ready' | 'missing' | 'installing' | 'failed';
+  /** 平台标识。 */
+  platform: 'darwin' | 'win32';
+  /** 架构标识。 */
+  arch: 'arm64' | 'x64';
+  /** 默认模型名。 */
+  modelName?: string;
+  /** 当前安装目录。 */
+  installDir?: string;
+  /** 当前运行时版本。 */
+  version?: string;
+  /** 失败时的错误信息。 */
+  errorMessage?: string;
+}
+
+/**
+ * 语音运行时安装进度。
+ */
+export interface ElectronSpeechInstallProgress {
+  /** 当前阶段。 */
+  phase: 'downloading' | 'extracting' | 'verifying' | 'completed';
+  /** 当前完成数量。 */
+  current: number;
+  /** 总数。 */
+  total: number;
+  /** 当前说明。 */
+  message: string;
+}
+
 export interface ElectronAPI {
   readFile: (filePath: string) => Promise<ElectronReadFileResult>;
   readWorkspaceFile: (options: ElectronReadWorkspaceFileOptions) => Promise<ElectronReadWorkspaceFileResult>;
@@ -233,6 +267,10 @@ export interface ElectronAPI {
 
   // 语音转写
   transcribeAudio: (request: ElectronAudioTranscribeRequest) => Promise<ElectronAudioTranscribeResult>;
+  getSpeechRuntimeStatus: () => Promise<ElectronSpeechRuntimeStatus>;
+  installSpeechRuntime: () => Promise<ElectronSpeechRuntimeStatus>;
+  removeSpeechRuntime: () => Promise<ElectronSpeechRuntimeStatus>;
+  onSpeechInstallProgress: (listener: (progress: ElectronSpeechInstallProgress) => void) => () => void;
 
   // AI 服务操作
   aiInvoke: (createOptions: AICreateOptions, request: AIRequestOptions) => Promise<AsyncResult<AIInvokeResult, AIServiceError>>;

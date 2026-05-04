@@ -30,7 +30,8 @@ describe('BChat voice input flow', () => {
     const sidebarSource = readSource('src/components/BChatSidebar/index.vue');
 
     expect(sidebarSource).toContain('function handleVoiceComplete(payload: { text: string }): void {');
-    expect(sidebarSource).toContain('// insertTextAtCursor(payload.text);');
+    expect(sidebarSource).toContain("message.error('语音转写结果为空，请重试');");
+    expect(sidebarSource).toContain('insertTextAtCursor(payload.text);');
     expect(sidebarSource).toContain('@voice-complete="handleVoiceComplete"');
   });
 });

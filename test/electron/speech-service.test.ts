@@ -46,6 +46,12 @@ vi.mock('node:child_process', () => ({
   execFile: execFileMock
 }));
 
+vi.mock('../../electron/main/modules/speech/runtime.mjs', () => ({
+  resolveInstalledSpeechRuntimePaths: vi.fn(async () => {
+    throw new Error('not installed');
+  })
+}));
+
 describe('speechService', () => {
   beforeEach(() => {
     accessMock.mockReset();
@@ -67,25 +73,24 @@ describe('speechService', () => {
     });
 
     const { transcribeAudioSegment } = await import('../../electron/main/modules/speech/service.mjs');
-    const result = await transcribeAudioSegment({
-      buffer: new ArrayBuffer(8),
-      mimeType: 'audio/webm',
-      segmentId: 'seg-1'
-    }, {
-      whisperBinaryPath: '/tmp/whisper',
-      whisperModelPath: '/tmp/model.bin',
-      tempDirectory: '/tmp'
-    });
+    const result = await transcribeAudioSegment(
+      {
+        buffer: new ArrayBuffer(8),
+        mimeType: 'audio/wav',
+        segmentId: 'seg-1'
+      },
+      {
+        whisperBinaryPath: '/tmp/whisper',
+        whisperModelPath: '/tmp/model.bin',
+        tempDirectory: '/tmp'
+      }
+    );
 
     expect(result.segmentId).toBe('seg-1');
     expect(result.text).toBe('识别结果');
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
     expect(writeFileMock).toHaveBeenCalled();
-    expect(execFileMock).toHaveBeenCalledWith(
-      '/tmp/whisper',
-      expect.arrayContaining(['-m', '/tmp/model.bin']),
-      expect.any(Function)
-    );
+    expect(execFileMock).toHaveBeenCalledWith('/tmp/whisper', expect.arrayContaining(['-m', '/tmp/model.bin']), expect.any(Function));
     expect(readFileMock).toHaveBeenCalledWith('/tmp/tibis-speech-123/output.txt', 'utf-8');
     expect(rmMock).toHaveBeenCalledWith('/tmp/tibis-speech-123', { force: true, recursive: true });
   });
@@ -94,15 +99,18 @@ describe('speechService', () => {
     const { transcribeAudioSegment } = await import('../../electron/main/modules/speech/service.mjs');
 
     await expect(
-      transcribeAudioSegment({
-        buffer: new ArrayBuffer(8),
-        mimeType: 'audio/webm',
-        segmentId: 'seg-1'
-      }, {
-        whisperBinaryPath: '',
-        whisperModelPath: '/tmp/model.bin',
-        tempDirectory: '/tmp'
-      })
+      transcribeAudioSegment(
+        {
+          buffer: new ArrayBuffer(8),
+          mimeType: 'audio/wav',
+          segmentId: 'seg-1'
+        },
+        {
+          whisperBinaryPath: '',
+          whisperModelPath: '/tmp/model.bin',
+          tempDirectory: '/tmp'
+        }
+      )
     ).rejects.toThrow('whisper binary path');
   });
 
@@ -110,13 +118,11 @@ describe('speechService', () => {
     vi.stubEnv('TIBIS_WHISPER_CPP_PATH', '/env/whisper');
     vi.stubEnv('TIBIS_WHISPER_MODEL_PATH', '/env/model.bin');
     vi.stubEnv('TIBIS_WHISPER_TEMP_DIR', '/env/tmp');
-    vi.stubEnv('TIBIS_FFMPEG_PATH', '/env/ffmpeg');
 
     const { resolveSpeechRuntimeConfig } = await import('../../electron/main/modules/speech/service.mjs');
-    const config = resolveSpeechRuntimeConfig();
+    const config = await resolveSpeechRuntimeConfig();
 
     expect(config).toEqual({
-      ffmpegBinaryPath: '/env/ffmpeg',
       whisperBinaryPath: '/env/whisper',
       whisperModelPath: '/env/model.bin',
       tempDirectory: '/env/tmp'
@@ -125,40 +131,22 @@ describe('speechService', () => {
     vi.unstubAllEnvs();
   });
 
-  it('transcodes non-wav audio to wav before invoking whisper when ffmpeg is configured', async () => {
-    accessMock.mockResolvedValue(undefined);
-    mkdtempMock.mockResolvedValue('/tmp/tibis-speech-456');
-    writeFileMock.mockResolvedValue(undefined);
-    readFileMock.mockResolvedValue('转码结果');
-    rmMock.mockResolvedValue(undefined);
-    execFileMock.mockImplementation((_file, _args, callback: (error: null, result: { stdout: string; stderr: string }) => void) => {
-      callback(null, { stdout: '', stderr: '' });
-    });
-
+  it('rejects unsupported non-wav audio input', async () => {
     const { transcribeAudioSegment } = await import('../../electron/main/modules/speech/service.mjs');
-    const result = await transcribeAudioSegment({
-      buffer: new ArrayBuffer(8),
-      mimeType: 'audio/webm',
-      segmentId: 'seg-2'
-    }, {
-      ffmpegBinaryPath: '/tmp/ffmpeg',
-      whisperBinaryPath: '/tmp/whisper',
-      whisperModelPath: '/tmp/model.bin',
-      tempDirectory: '/tmp'
-    });
 
-    expect(result.text).toBe('转码结果');
-    expect(execFileMock).toHaveBeenNthCalledWith(
-      1,
-      '/tmp/ffmpeg',
-      expect.arrayContaining(['-i', '/tmp/tibis-speech-456/input.webm', '/tmp/tibis-speech-456/input.wav']),
-      expect.any(Function)
-    );
-    expect(execFileMock).toHaveBeenNthCalledWith(
-      2,
-      '/tmp/whisper',
-      expect.arrayContaining(['-f', '/tmp/tibis-speech-456/input.wav']),
-      expect.any(Function)
-    );
+    await expect(
+      transcribeAudioSegment(
+        {
+          buffer: new ArrayBuffer(8),
+          mimeType: 'audio/webm',
+          segmentId: 'seg-2'
+        },
+        {
+          whisperBinaryPath: '/tmp/whisper',
+          whisperModelPath: '/tmp/model.bin',
+          tempDirectory: '/tmp'
+        }
+      )
+    ).rejects.toThrow('Unsupported speech mime type');
   });
 });
