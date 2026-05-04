@@ -62,9 +62,8 @@ export async function extractFileReferenceLines(token: string, references: strin
   const _endLine = parseInt(endLine, 10);
 
   const lines = storedFile.content.split('\n');
-  console.log('🚀 ~ extractFileReferenceLines ~ lines:', lines);
+
   const selectedContent = lines.slice(Math.max(0, _startLine - 1), Math.min(lines.length, _endLine)).join('\n');
-  console.log('🚀 ~ extractFileReferenceLines ~ selectedContent:', selectedContent);
 
   return {
     token,

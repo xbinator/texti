@@ -43,7 +43,7 @@ import { emitChatFileReferenceInsert } from '@/shared/chat/fileReference';
 import type { ServiceModelUpdatedDetail } from '@/shared/storage/service-models/events';
 import { SERVICE_MODEL_UPDATED_EVENT } from '@/shared/storage/service-models/events';
 import { useServiceModelStore } from '@/stores/service-model';
-import { getSelectionSourceLineRange } from '../adapters/sourceLineMapping';
+import { getSelectionSourceLineRange, getSelectionSourceLineRangeFromMarkdown } from '../adapters/sourceLineMapping';
 
 /**
  * 选区范围信息。
@@ -177,7 +177,9 @@ function insertSelectionReferenceToChat(): void {
   // 在工具栏点击导致编辑器失焦前，先把选区交给父组件缓存并恢复显示。
   emit('selection-reference-insert', selectionRange);
 
-  const sourceLineRange = getSelectionSourceLineRange(editor.state.doc, selectionRange.from, selectionRange.to);
+  const sourceLineRange =
+    getSelectionSourceLineRangeFromMarkdown(editor.state.doc, selectionRange.from, selectionRange.to, editorState?.content || '') ||
+    getSelectionSourceLineRange(editor.state.doc, selectionRange.from, selectionRange.to);
   const textBeforeStart = editor.state.doc.textBetween(0, selectionRange.from, '\n', '\n');
   const textBeforeEnd = editor.state.doc.textBetween(0, selectionRange.to, '\n', '\n');
   const renderStartLine = textBeforeStart.split(/\r?\n/).length;

@@ -6,6 +6,7 @@ import { Schema } from '@tiptap/pm/model';
 import { describe, expect, it } from 'vitest';
 import {
   captureSourceLineRange,
+  consumeSourceLineToken,
   createSourceLineTracker,
   getNodeSourceLineRange,
   getSelectionSourceLineRange,
@@ -42,6 +43,24 @@ describe('sourceLineMapping', () => {
     expect(tracker.currentLine).toBe(5);
   });
 
+  it('consumes standalone space tokens so later block mappings keep blank lines', () => {
+    const tracker = createSourceLineTracker();
+
+    expect(captureSourceLineRange(tracker, '# Title')).toEqual({ startLine: 1, endLine: 1 });
+    expect(tracker.currentLine).toBe(2);
+
+    consumeSourceLineToken(tracker, '\n\n');
+    expect(tracker.currentLine).toBe(3);
+
+    expect(captureSourceLineRange(tracker, '> Quote')).toEqual({ startLine: 3, endLine: 3 });
+    expect(tracker.currentLine).toBe(4);
+
+    consumeSourceLineToken(tracker, '\n\n');
+    expect(tracker.currentLine).toBe(5);
+
+    expect(captureSourceLineRange(tracker, 'Paragraph')).toEqual({ startLine: 5, endLine: 5 });
+  });
+
   it('resets the source line tracker back to the first line', () => {
     const tracker = createSourceLineTracker();
 
@@ -62,12 +81,20 @@ describe('sourceLineMapping', () => {
   it('aggregates real source lines across the selected block nodes', () => {
     const doc = testSchema.node('doc', undefined, [
       testSchema.node('paragraph', { sourceLineStart: 2, sourceLineEnd: 2 }, [testSchema.text('alpha')]),
-      testSchema.node('paragraph', { sourceLineStart: 4, sourceLineEnd: 6 }, [testSchema.text('beta')]),
+      testSchema.node('paragraph', { sourceLineStart: 4, sourceLineEnd: 6 }, [testSchema.text('beta1\nbeta2\nbeta3')]),
       testSchema.node('paragraph', { sourceLineStart: 8, sourceLineEnd: 8 }, [testSchema.text('gamma')])
     ]);
 
-    expect(getSelectionSourceLineRange(doc, 1, 12)).toEqual({ startLine: 2, endLine: 6 });
-    expect(getSelectionSourceLineRange(doc, 8, 14)).toEqual({ startLine: 4, endLine: 8 });
+    expect(getSelectionSourceLineRange(doc, 1, 25)).toEqual({ startLine: 2, endLine: 6 });
+    expect(getSelectionSourceLineRange(doc, 15, 28)).toEqual({ startLine: 5, endLine: 8 });
     expect(getSelectionSourceLineRange(doc, 1, 1)).toBeNull();
+  });
+
+  it('maps a selection inside a multi-line block to the precise source line range', () => {
+    const doc = testSchema.node('doc', undefined, [
+      testSchema.node('paragraph', { sourceLineStart: 5, sourceLineEnd: 6 }, [testSchema.text('alpha\nbeta')])
+    ]);
+
+    expect(getSelectionSourceLineRange(doc, 8, 11)).toEqual({ startLine: 6, endLine: 6 });
   });
 });
