@@ -4,7 +4,17 @@
 -->
 <template>
   <div class="voice-input">
-    <BButton v-if="isIdle" tooltip="语言输入" data-testid="voice-start" size="small" type="text" square :disabled="disabled" @click="handleStart">
+    <BButton
+      v-if="isTranscribing"
+      tooltip="正在转写语音"
+      data-testid="voice-transcribing"
+      size="small"
+      type="outline"
+      square
+      :loading="true"
+      :disabled="true"
+    />
+    <BButton v-else-if="isIdle" tooltip="语言输入" data-testid="voice-start" size="small" type="text" square :disabled="disabled" @click="handleStart">
       <Icon icon="lucide:mic" width="16" height="16" />
     </BButton>
     <BButton v-else tooltip="停止语言输入" data-testid="voice-stop" size="small" type="outline" square :disabled="disabled" @click="handleStop">
@@ -45,6 +55,7 @@ const emit = defineEmits<{
 const nextSeparator = ref<'' | '\n'>('');
 const nextSegmentIndex = ref<number>(0);
 const installingRuntime = ref<boolean>(false);
+const isTranscribing = ref<boolean>(false);
 const unbindInstallProgress = ref<(() => void) | null>(null);
 
 /**
@@ -175,8 +186,14 @@ async function handleStart(): Promise<void> {
  */
 async function handleStop(): Promise<void> {
   await recorder.stop();
-  const payload = await session.completeSession();
-  emit('complete', payload);
+  isTranscribing.value = true;
+
+  try {
+    const payload = await session.completeSession();
+    emit('complete', payload);
+  } finally {
+    isTranscribing.value = false;
+  }
 }
 
 onUnmounted(() => {

@@ -176,7 +176,7 @@ export function useVoiceRecorder(options: VoiceRecorderOptions = {}) {
   /**
    * 释放录音与音频图资源。
    */
-  function cleanupResources(): void {
+  async function cleanupResources(): Promise<void> {
     stopWaveformLoop();
 
     if (segmentTimerId !== null) {
@@ -196,8 +196,11 @@ export function useVoiceRecorder(options: VoiceRecorderOptions = {}) {
     analyserNode.value?.disconnect();
     analyserNode.value = null;
 
-    audioContext.value?.close().catch(noop);
+    const closingAudioContext = audioContext.value;
     audioContext.value = null;
+    if (closingAudioContext) {
+      await closingAudioContext.close().catch(noop);
+    }
 
     pcmChunks = [];
     status.value = 'idle';
@@ -277,7 +280,7 @@ export function useVoiceRecorder(options: VoiceRecorderOptions = {}) {
    */
   async function stop(): Promise<void> {
     if (status.value !== 'recording') {
-      cleanupResources();
+      await cleanupResources();
       return;
     }
 
@@ -291,7 +294,7 @@ export function useVoiceRecorder(options: VoiceRecorderOptions = {}) {
       })
     ]);
 
-    cleanupResources();
+    await cleanupResources();
   }
 
   /**
@@ -299,7 +302,7 @@ export function useVoiceRecorder(options: VoiceRecorderOptions = {}) {
    */
   async function cancel(): Promise<void> {
     pcmChunks = [];
-    cleanupResources();
+    await cleanupResources();
   }
 
   return {

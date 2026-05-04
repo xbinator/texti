@@ -61,7 +61,8 @@ export async function defaultVoiceSegmentTranscriber(segment: PendingVoiceSegmen
   const result = await getElectronAPI().transcribeAudio({
     buffer: segment.buffer,
     mimeType: 'audio/wav',
-    segmentId: segment.id
+    segmentId: segment.id,
+    language: 'zh'
   });
 
   return { text: result.text };
