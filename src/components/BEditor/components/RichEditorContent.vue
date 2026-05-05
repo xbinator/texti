@@ -1,5 +1,5 @@
 <template>
-  <div class="rich-editor-pane" @click="navigate.onLink">
+  <div ref="overlayRootRef" class="rich-editor-pane" @click="navigate.onLink">
     <!-- Front Matter 卡片 -->
     <FrontMatterCard
       v-if="shouldShowFrontMatterCard"
@@ -13,41 +13,56 @@
 
     <!-- 当前选中块菜单 -->
     <CurrentBlockMenu :editor="editor" />
-    <!-- 选择工具栏 -->
-    <SelectionToolbar
-      v-if="editor"
+
+    <!-- Rich 模式选区工具栏宿主 -->
+    <SelectionToolbarRich
+      v-if="editor && adapter"
+      ref="toolbarHostRef"
       :editor="editor"
-      :editor-state="editorState"
-      @ai-input-toggle="handleAIInputToggle"
-      @selection-reference-insert="handleSelectionReferenceInsert"
-      @selection-reference-clear="handleSelectionReferenceClear"
+      :visible="assistant.toolbarVisible.value"
+      :format-buttons="formatButtons"
+      @ai="onToolbarAI"
+      @reference="assistant.insertReference()"
     />
+
     <!-- 选择 AI 输入框 -->
-    <SelectionAIInput v-model:visible="aiInputVisible" :editor="editor" :selection-range="selectionRange" />
+    <SelectionAIInput
+      :visible="assistant.aiInputVisible.value"
+      :adapter="adapter"
+      :selection-range="assistant.cachedSelectionRange.value"
+      :position="assistant.panelPosition.value"
+      @update:visible="onAIInputVisibleChange"
+      @apply="assistant.applyAIResult($event)"
+      @streaming-change="assistant.setStreaming($event)"
+    />
+
     <!-- 编辑器内容 -->
     <EditorContent :key="editorState?.id" :editor="editor ?? undefined" class="b-editor-content" />
   </div>
 </template>
 
 <script setup lang="ts">
+import type { SelectionAssistantAdapter, SelectionToolbarAction } from '../adapters/selectionAssistant';
 import type { FrontMatterData } from '../hooks/useFrontMatter';
-import type { SelectionRange, EditorState } from '../types';
+import type { EditorState } from '../types';
 import type { Editor } from '@tiptap/vue-3';
-import { onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import { EditorContent } from '@tiptap/vue-3';
+import { useEventListener } from '@vueuse/core';
 import { useNavigate } from '@/hooks/useNavigate';
-import { clearAISelectionHighlight, setAISelectionHighlight } from '../extensions/AISelectionHighlight';
+import { createRichSelectionAssistantAdapter } from '../adapters/richSelectionAssistant';
+import { useSelectionAssistant } from '../hooks/useSelectionAssistant';
 import CurrentBlockMenu from './CurrentBlockMenu.vue';
 import FrontMatterCard from './FrontMatterCard.vue';
 import SelectionAIInput from './SelectionAIInput.vue';
-import SelectionToolbar from './SelectionToolbar.vue';
+import SelectionToolbarRich from './SelectionToolbarRich.vue';
 
 interface Props {
-  // Editor Instance
+  /** Tiptap Editor 实例 */
   editor?: Editor | null;
-  // 编辑器状态
+  /** 编辑器文件状态 */
   editorState?: EditorState;
-  // 是否显示 Front Matter 卡片
+  /** 是否显示 Front Matter 卡片 */
   shouldShowFrontMatterCard?: boolean;
 }
 
@@ -61,8 +76,68 @@ const navigate = useNavigate();
 
 const frontMatterData = defineModel<FrontMatterData>('frontMatterData', { default: () => ({}) });
 
-const aiInputVisible = ref(false);
-const selectionRange = ref<SelectionRange>({ from: 0, to: 0, text: '' });
+// ---- Adapter & Orchestration ----
+
+const overlayRootRef = ref<HTMLElement | null>(null);
+const toolbarHostRef = ref<InstanceType<typeof SelectionToolbarRich> | null>(null);
+const adapter = shallowRef<SelectionAssistantAdapter | null>(null);
+
+const assistant = useSelectionAssistant({
+  adapter: () => adapter.value,
+  isEditable: () => true
+});
+
+// 监听 editor + overlayRoot 就绪后创建 adapter
+watch(
+  [() => props.editor, overlayRootRef, () => props.editorState],
+  ([editor, root, editorState]) => {
+    if (editor && root) {
+      adapter.value = createRichSelectionAssistantAdapter(editor, {
+        editorState: editorState || { content: '', name: '', path: '', id: '', ext: '' },
+        overlayRoot: root
+      });
+    } else {
+      adapter.value = null;
+    }
+  },
+  { immediate: true }
+);
+
+onBeforeUnmount(() => {
+  adapter.value?.dispose?.();
+  adapter.value = null;
+});
+
+// ---- Format Buttons ----
+
+/** Rich 模式格式按钮列表 */
+const formatButtons = computed(() => [
+  { command: 'bold' as SelectionToolbarAction, icon: 'lucide:bold' },
+  { command: 'italic' as SelectionToolbarAction, icon: 'lucide:italic' },
+  { command: 'underline' as SelectionToolbarAction, icon: 'lucide:underline' },
+  { command: 'strike' as SelectionToolbarAction, icon: 'lucide:strikethrough' },
+  { command: 'code' as SelectionToolbarAction, icon: 'lucide:code' }
+]);
+
+// ---- Toolbar Actions ----
+
+/**
+ * 点击"AI 助手"按钮，先通过 host 主动隐藏工具栏，再打开 AI 面板。
+ */
+function onToolbarAI(): void {
+  toolbarHostRef.value?.suppress();
+  assistant.openAIInput();
+}
+
+/**
+ * 同步 AI 面板显隐到统一编排层。
+ * @param visible - 面板是否可见
+ */
+function onAIInputVisibleChange(visible: boolean): void {
+  if (!visible) {
+    assistant.closeAIInput();
+  }
+}
 
 // ---- Editor Commands ----
 
@@ -72,148 +147,6 @@ const canUndo = () => Boolean(props.editor?.can().undo());
 const canRedo = () => Boolean(props.editor?.can().redo());
 const focusEditor = () => props.editor?.commands.focus();
 const focusEditorAtStart = () => props.editor?.commands.focus('start');
-
-// ---- AI Input ----
-
-/**
- * 仅在内容变化时更新选区缓存，避免触发不必要的响应式循环。
- * @param nextSelectionRange - 最新选区
- */
-function updateSelectionRange(nextSelectionRange: SelectionRange): void {
-  const currentSelectionRange = selectionRange.value;
-  if (
-    currentSelectionRange.from === nextSelectionRange.from &&
-    currentSelectionRange.to === nextSelectionRange.to &&
-    currentSelectionRange.text === nextSelectionRange.text
-  ) {
-    return;
-  }
-
-  selectionRange.value = nextSelectionRange;
-}
-
-/**
- * 从编辑器状态中读取当前选区，并同步到本地缓存。
- * @returns 当前有效选区；无文本选区时返回 null
- */
-function getCurrentSelectionRange(): SelectionRange | null {
-  const { editor } = props;
-  const selection = editor?.state.selection;
-  if (!editor || !selection || selection.from === selection.to) {
-    return null;
-  }
-
-  const nextSelectionRange = {
-    from: selection.from,
-    to: selection.to,
-    text: editor.state.doc.textBetween(selection.from, selection.to, '')
-  };
-
-  updateSelectionRange(nextSelectionRange);
-
-  return nextSelectionRange;
-}
-
-/**
- * 将真实选区持续映射到自定义 decoration，高亮统一走同一套视觉层。
- */
-function syncSelectionHighlight(): void {
-  const { editor } = props;
-  if (!editor) {
-    return;
-  }
-
-  const nextSelectionRange = getCurrentSelectionRange();
-  if (nextSelectionRange) {
-    setAISelectionHighlight(editor, nextSelectionRange);
-    return;
-  }
-
-  if (!aiInputVisible.value) {
-    clearAISelectionHighlight(editor);
-  }
-}
-
-/**
- * 缓存并恢复当前选区，供“插入对话”在编辑器失焦后继续保持可见。
- * @param nextSelectionRange - 当前需要保留的选区
- */
-function handleSelectionReferenceInsert(nextSelectionRange: SelectionRange): void {
-  updateSelectionRange({ ...nextSelectionRange });
-
-  // “插入对话”只需要保留视觉高亮，不应恢复真实选区；
-  // 这里同步写入装饰高亮，避免跨帧切换造成原生选区与装饰高亮来回闪动。
-  setAISelectionHighlight(props.editor, nextSelectionRange);
-}
-
-/**
- * 控制选区 AI 面板显隐，并同步记录关联的选区范围。
- * @param value - 是否显示 AI 面板
- * @param nextSelectionRange - 需要绑定的选区范围
- */
-function handleAIInputToggle(value: boolean, nextSelectionRange?: SelectionRange): void {
-  if (nextSelectionRange) {
-    updateSelectionRange({ ...nextSelectionRange });
-  }
-  aiInputVisible.value = value;
-}
-
-/**
- * 在工具栏真正隐藏后清理“插入对话”留下的临时选区高亮。
- */
-function handleSelectionReferenceClear(): void {
-  clearAISelectionHighlight(props.editor);
-}
-
-/**
- * 监听编辑器选区与焦点变化，统一维护自定义选区高亮。
- * @param editor - 当前编辑器实例
- * @returns 解绑函数
- */
-function bindSelectionHighlight(editor: Editor | null | undefined): (() => void) | undefined {
-  if (!editor) {
-    return undefined;
-  }
-
-  editor.on('selectionUpdate', syncSelectionHighlight);
-  editor.on('focus', syncSelectionHighlight);
-  editor.on('blur', syncSelectionHighlight);
-  syncSelectionHighlight();
-
-  return () => {
-    editor.off('selectionUpdate', syncSelectionHighlight);
-    editor.off('focus', syncSelectionHighlight);
-    editor.off('blur', syncSelectionHighlight);
-    clearAISelectionHighlight(editor);
-  };
-}
-
-let cleanupSelectionHighlight: (() => void) | undefined;
-
-watch(
-  () => props.editor,
-  (editor) => {
-    cleanupSelectionHighlight?.();
-    cleanupSelectionHighlight = bindSelectionHighlight(editor);
-  },
-  { immediate: true }
-);
-
-watch(aiInputVisible, (isVisible) => {
-  if (!props.editor) {
-    return;
-  }
-
-  if (isVisible && selectionRange.value.from !== selectionRange.value.to) {
-    setAISelectionHighlight(props.editor, {
-      from: selectionRange.value.from,
-      to: selectionRange.value.to
-    });
-    return;
-  }
-
-  syncSelectionHighlight();
-});
 
 // ---- Front Matter ----
 function handleFrontMatterUpdate(data: FrontMatterData): void {
@@ -226,7 +159,6 @@ function handleFrontMatterFieldUpdate(key: string, value: unknown): void {
 
 function handleFrontMatterFieldRemove(key: string): void {
   const rest = Object.fromEntries(Object.entries(frontMatterData.value).filter(([k]) => k !== key));
-
   frontMatterData.value = rest;
 }
 
@@ -235,8 +167,8 @@ function handleFrontMatterFieldAdd(key: string, value: unknown): void {
   frontMatterData.value = { ...frontMatterData.value, [key]: value };
 }
 
-onBeforeUnmount(() => {
-  cleanupSelectionHighlight?.();
+useEventListener(window, 'resize', () => {
+  assistant.recomputeAllPositions();
 });
 
 defineExpose({ undo, redo, canUndo, canRedo, focusEditor, focusEditorAtStart });

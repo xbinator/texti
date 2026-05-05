@@ -32,19 +32,21 @@ describe('PaneRichEditor AI selection highlight regression', () => {
 
   test('binds editor selection lifecycle to custom highlight updates instead of relying on native selection paint', () => {
     const richEditorContentSource = readSource('src/components/BEditor/components/RichEditorContent.vue');
+    const richAdapterSource = readSource('src/components/BEditor/adapters/richSelectionAssistant.ts');
+    const selectionAssistantSource = readSource('src/components/BEditor/hooks/useSelectionAssistant.ts');
     const selectionHighlightSource = readSource('src/components/BEditor/extensions/AISelectionHighlight.ts');
 
-    expect(richEditorContentSource).toContain("editor.on('selectionUpdate', syncSelectionHighlight);");
-    expect(richEditorContentSource).toContain("editor.on('focus', syncSelectionHighlight);");
-    expect(richEditorContentSource).toContain("editor.on('blur', syncSelectionHighlight);");
-    expect(richEditorContentSource).toContain('function syncSelectionHighlight(): void {');
-    expect(richEditorContentSource).toContain('function bindSelectionHighlight(editor: Editor | null | undefined): (() => void) | undefined {');
-    expect(richEditorContentSource).not.toContain("editor.on('transaction', syncSelectionHighlight);");
-    expect(richEditorContentSource).toContain('watch(aiInputVisible, (isVisible) => {');
-    expect(richEditorContentSource).not.toContain('() => [aiInputVisible.value, selectionRange.value.from, selectionRange.value.to]');
+    expect(richAdapterSource).toContain("editor.on('selectionUpdate', handlers.onSelectionChange);");
+    expect(richAdapterSource).toContain("editor.on('focus', handlers.onFocus);");
+    expect(richAdapterSource).toContain("editor.on('blur', onTiptapBlur);");
+    expect(selectionAssistantSource).toContain('function handleSelectionChange(): void {');
+    expect(selectionAssistantSource).toContain('adapter.showSelectionHighlight(selection);');
+    expect(selectionAssistantSource).toContain('function handleFocus(): void {');
+    expect(richEditorContentSource).toContain('assistant.openAIInput();');
+    expect(richEditorContentSource).toContain('assistant.closeAIInput();');
     expect(selectionHighlightSource).toContain('function isSameRange(');
     expect(selectionHighlightSource).toContain('if (isSameRange(currentRange, range)) return;');
     expect(selectionHighlightSource).toContain('if (!currentRange) return;');
-    expect(richEditorContentSource).not.toContain('requestAnimationFrame(() => {');
+    expect(richAdapterSource).not.toContain("editor.on('transaction', handlers.onSelectionChange);");
   });
 });

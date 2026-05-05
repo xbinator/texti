@@ -161,7 +161,6 @@ export function setupAppMenu(): void {
           if (win) win.webContents.reloadIgnoringCache();
         }
       },
-      { role: 'toggleDevTools' as const, label: '切换开发者工具' },
       { type: 'separator' as const },
       { role: 'togglefullscreen' as const, label: '切换全屏' }
     ]
@@ -170,7 +169,11 @@ export function setupAppMenu(): void {
   // 帮助菜单（所有平台）
   template.push({
     label: '帮助',
-    submenu: [{ label: '快捷键', accelerator: 'CmdOrCtrl+/', click: () => sendMenuAction('help:shortcuts') }]
+    submenu: [
+      { label: '快捷键', accelerator: 'CmdOrCtrl+/', click: () => sendMenuAction('help:shortcuts') },
+      { type: 'separator' as const },
+      { role: 'toggleDevTools' as const, label: '切换开发者工具' }
+    ]
   });
 
   const menu = Menu.buildFromTemplate(template);

@@ -1,5 +1,5 @@
 <template>
-  <div v-if="editor && visible" ref="wrapperRef" class="ai-input-wrapper" :style="wrapperStyle">
+  <div v-if="adapter && visible" ref="wrapperRef" class="ai-input-wrapper" :style="wrapperStyle">
     <!-- AI 生成预览区 -->
     <div v-if="previewText || loading" class="ai-preview">
       <div class="ai-preview-text">
@@ -28,12 +28,14 @@
 </template>
 
 <script setup lang="ts">
-import type { SelectionRange } from '../types';
-import type { Editor } from '@tiptap/vue-3';
+/**
+ * @file SelectionAIInput.vue
+ * @description 选区 AI 输入面板，通过 adapter 协议屏蔽 Tiptap/CodeMirror 差异。
+ */
+import type { SelectionAssistantAdapter, SelectionAssistantPosition, SelectionAssistantRange } from '../adapters/selectionAssistant';
 import type { CSSProperties } from 'vue';
 import { onBeforeUnmount, computed, nextTick, ref, watch } from 'vue';
 import { Icon } from '@iconify/vue';
-import { TextSelection } from '@tiptap/pm/state';
 import { onClickOutside, useEventListener } from '@vueuse/core';
 import { message } from 'ant-design-vue';
 import { useChat } from '@/hooks/useChat';
@@ -44,16 +46,28 @@ import type { AvailableServiceModelConfig } from '@/stores/service-model';
 import { useServiceModelStore } from '@/stores/service-model';
 
 interface Props {
-  editor?: Editor | null;
-  selectionRange?: SelectionRange;
+  /** 面板是否可见 */
+  visible?: boolean;
+  /** 选区工具适配器 */
+  adapter?: SelectionAssistantAdapter | null;
+  /** 缓存选区范围 */
+  selectionRange?: SelectionAssistantRange | null;
+  /** 面板定位信息（由编排层注入） */
+  position?: SelectionAssistantPosition | null;
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  editor: null,
-  selectionRange: () => ({ from: 0, to: 0, text: '' })
+  visible: false,
+  adapter: null,
+  selectionRange: null,
+  position: null
 });
 
-const visible = defineModel<boolean>('visible', { default: false });
+const emit = defineEmits<{
+  (e: 'update:visible', value: boolean): void;
+  (e: 'apply', content: string): void;
+  (e: 'streaming-change', value: boolean): void;
+}>();
 
 const inputValue = ref('');
 const previewText = ref('');
@@ -73,9 +87,11 @@ const { agent } = useChat({
   },
   onComplete() {
     loading.value = false;
+    emit('streaming-change', false);
   },
   onError(error) {
     loading.value = false;
+    emit('streaming-change', false);
     message.error(error.message);
   }
 });
@@ -97,40 +113,37 @@ function scrollIntoViewIfObscured(): void {
   }
 }
 
+/**
+ * 根据编排层注入的 position 更新面板定位。
+ * 坐标已由 adapter 计算为相对 overlayRoot 的值。
+ */
 function syncFloatPosition(): void {
-  if (!props.editor) return;
+  const { position } = props;
+  if (!position) return;
 
-  const { from, to } = props.selectionRange!;
-  if (from === to) return;
-
-  const editorDom = props.editor.view.dom as HTMLElement;
-  const editorRect = editorDom.getBoundingClientRect();
-  const endCoords = props.editor.view.coordsAtPos(to);
-  const lineHeight = endCoords.bottom - endCoords.top;
-  const top = endCoords.top - editorRect.top + editorDom.offsetTop;
-
-  wrapperStyle.value = { top: `${top + lineHeight + 6}px` };
+  const top = position.anchorRect.top + position.lineHeight + 6;
+  wrapperStyle.value = { top: `${top}px` };
 
   nextTick(scrollIntoViewIfObscured);
 }
 
 // ---- Selection ----
 
-function restoreEditorSelection(): void {
-  if (!props.editor) return;
-
-  const { from, to } = props.selectionRange!;
-  if (from === to) return;
-
-  const { state, view } = props.editor;
-  view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, from, to)));
-}
-
+/**
+ * 关闭面板时将光标收缩到原选区起始位置。
+ */
 function collapseToSelectionStart(): void {
-  if (!props.editor) return;
+  const { adapter } = props;
+  const range = props.selectionRange;
+  if (!adapter || !range) return;
 
-  const { from } = props.selectionRange!;
-  props.editor.chain().focus().setTextSelection(from).run();
+  adapter.restoreSelection({
+    from: range.from,
+    to: range.from,
+    text: '',
+    docVersion: range.docVersion,
+    snapshotId: range.snapshotId
+  });
 }
 
 // ---- State ----
@@ -144,14 +157,15 @@ function resetState(): void {
 function stopStreaming(): void {
   if (loading.value) {
     agent.abort();
+    emit('streaming-change', false);
   }
 }
 
 function closePanel(): void {
   stopStreaming();
   resetState();
-  visible.value = false;
   collapseToSelectionStart();
+  emit('update:visible', false);
 }
 
 // ---- Model Config ----
@@ -172,18 +186,31 @@ fetchModelConfig();
 
 // ---- Visible Watch ----
 
-watch(visible, (isVisible) => {
-  if (isVisible) {
-    fetchModelConfig();
-    nextTick(syncFloatPosition);
-    nextTick(() => inputRef.value?.focus({ preventScroll: true }));
-    unregisterEscape = registerShortcut({ key: 'escape', handler: closePanel });
-  } else {
-    resetState();
-    unregisterEscape?.();
-    unregisterEscape = null;
+watch(
+  () => props.visible,
+  (isVisible) => {
+    if (isVisible) {
+      fetchModelConfig();
+      nextTick(syncFloatPosition);
+      nextTick(() => inputRef.value?.focus({ preventScroll: true }));
+      unregisterEscape = registerShortcut({ key: 'escape', handler: closePanel });
+    } else {
+      resetState();
+      unregisterEscape?.();
+      unregisterEscape = null;
+    }
   }
-});
+);
+
+// 监听 position 变化，重新定位面板
+watch(
+  () => props.position,
+  () => {
+    if (props.visible) {
+      syncFloatPosition();
+    }
+  }
+);
 
 // ---- AI ----
 
@@ -194,7 +221,8 @@ function buildAIPrompt(selectedText: string, userInput: string): string {
 
 async function sendInstruction(): Promise<void> {
   const value = inputValue.value.trim();
-  if (!value || !props.editor || loading.value) return;
+  const range = props.selectionRange;
+  if (!value || loading.value || !range) return;
 
   const config = modelConfig.value;
   if (!config?.providerId || !config?.modelId) {
@@ -202,24 +230,19 @@ async function sendInstruction(): Promise<void> {
     return;
   }
 
-  const { from, to, text } = props.selectionRange!;
-  if (from === to) return;
+  if (range.from === range.to) return;
 
-  const selectedText = text || props.editor.state.doc.textBetween(from, to, '');
+  const selectedText = range.text;
   const prompt = buildAIPrompt(selectedText, value);
 
   loading.value = true;
+  emit('streaming-change', true);
   agent.stream({ modelId: config.modelId, prompt });
 }
 
 function applyGeneratedContent(): void {
-  if (!props.editor || !previewText.value) return;
-
-  const { from, to } = props.selectionRange!;
-  restoreEditorSelection();
-  props.editor.chain().focus().insertContentAt({ from, to }, previewText.value).run();
-
-  closePanel();
+  if (!previewText.value) return;
+  emit('apply', previewText.value);
 }
 
 // ---- Events ----

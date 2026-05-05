@@ -38,6 +38,7 @@
           v-model:value="editorState.content"
           v-model:outline-content="outlineContent"
           :editor-id="editorState.id"
+          :editor-state="editorState"
           :on-anchor-scroll="scrollSourceAnchorIntoView"
           :editable="editable"
         />

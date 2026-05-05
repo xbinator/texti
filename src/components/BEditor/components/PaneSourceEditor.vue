@@ -1,11 +1,36 @@
 <template>
   <div class="source-editor-pane">
-    <div ref="editorHostRef" class="source-editor-codemirror"></div>
+    <div ref="overlayRootRef" class="source-editor-content-host">
+      <div ref="editorViewHostRef" class="source-editor-codemirror"></div>
+      <SelectionToolbarSource
+        :visible="assistant.toolbarVisible.value"
+        :position="assistant.toolbarPosition.value"
+        :overlay-root="overlayRootRef"
+        :format-buttons="[]"
+        @ai="assistant.openAIInput()"
+        @reference="assistant.insertReference()"
+      />
+      <SelectionAIInput
+        :visible="assistant.aiInputVisible.value"
+        :adapter="adapter"
+        :selection-range="assistant.cachedSelectionRange.value"
+        :position="assistant.panelPosition.value"
+        @update:visible="onAIInputVisibleChange"
+        @apply="assistant.applyAIResult($event)"
+        @streaming-change="assistant.setStreaming($event)"
+      />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
+/**
+ * @file PaneSourceEditor.vue
+ * @description Source 模式 CodeMirror 编辑器窗格，集成选区工具适配器。
+ */
+import type { SelectionAssistantAdapter } from '../adapters/selectionAssistant';
 import type { EditorController, EditorSearchState, EditorSelection as EditorSelectionRange } from '../adapters/types';
+import type { EditorState as BEditorState } from '../types';
 import type { Extension } from '@codemirror/state';
 import type { ViewUpdate } from '@codemirror/view';
 import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
@@ -22,6 +47,7 @@ import {
 import { markdown } from '@codemirror/lang-markdown';
 import { Compartment, EditorSelection, EditorState } from '@codemirror/state';
 import { EditorView, keymap, placeholder } from '@codemirror/view';
+import { useEventListener } from '@vueuse/core';
 import { getRenderedSourceAnchorOffsetTop } from '../adapters/sourceEditorAnchorScroll';
 import { createSourceCodeBlockHighlightExtension } from '../adapters/sourceEditorCodeBlockHighlight';
 import { createSourceHeadingAnchorExtension, getSourceActiveHeadingId, getSourceHeadingLines } from '../adapters/sourceEditorHeadingAnchors';
@@ -35,27 +61,52 @@ import {
   getSourceEditorSearchState,
   setSourceEditorSearchTerm
 } from '../adapters/sourceEditorSearch';
+import { createSourceSelectionAssistantAdapter, createSourceSelectionHighlightExtension } from '../adapters/sourceSelectionAssistant';
 import { useFrontMatter } from '../hooks/useFrontMatter';
+import { useSelectionAssistant } from '../hooks/useSelectionAssistant';
+import SelectionAIInput from './SelectionAIInput.vue';
+import SelectionToolbarSource from './SelectionToolbarSource.vue';
 
 interface Props {
   editorId?: string;
   editable?: boolean;
+  editorState?: BEditorState;
   onAnchorScroll?: (hostElement: HTMLElement, offsetTop: number) => void;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   editorId: '',
   editable: true,
+  editorState: () => ({ content: '', name: '', path: null, id: '', ext: '' }),
   onAnchorScroll: undefined
 });
 
 const editorContent = defineModel<string>('value', { default: '' });
 const outlineContent = defineModel<string>('outlineContent', { default: '' });
-const editorHostRef = ref<HTMLDivElement | null>(null);
+const overlayRootRef = ref<HTMLElement | null>(null);
+const editorViewHostRef = ref<HTMLDivElement | null>(null);
 const editorView = shallowRef<EditorView | null>(null);
 const editableCompartment = new Compartment();
 const headingAnchorCompartment = new Compartment();
 const { bodyContent } = useFrontMatter(editorContent);
+
+const adapter = shallowRef<SelectionAssistantAdapter | null>(null);
+
+const assistant = useSelectionAssistant({
+  adapter: () => adapter.value,
+  isEditable: () => props.editable
+});
+let cleanupSelectionOverlayPosition: (() => void) | null = null;
+
+/**
+ * 同步 AI 面板显隐到统一编排层。
+ * @param visible - 面板是否可见
+ */
+function onAIInputVisibleChange(visible: boolean): void {
+  if (!visible) {
+    assistant.closeAIInput();
+  }
+}
 
 function createEditableExtension(editable: boolean): Extension {
   return EditorView.editable.of(editable);
@@ -84,7 +135,8 @@ function createEditorExtensions(): Extension[] {
       if (nextContent !== editorContent.value) {
         editorContent.value = nextContent;
       }
-    })
+    }),
+    createSourceSelectionHighlightExtension()
   ];
 }
 
@@ -254,7 +306,7 @@ function scrollHostToAnchor(hostElement: HTMLElement, anchorId: string, fallback
 
 function scrollToAnchor(anchorId: string): boolean {
   const view = getView();
-  const hostElement = editorHostRef.value;
+  const hostElement = overlayRootRef.value;
   if (!view || !hostElement) {
     return false;
   }
@@ -280,7 +332,7 @@ function scrollToAnchor(anchorId: string): boolean {
 
 function getActiveAnchorId(scrollContainer: HTMLElement, thresholdPx: number): string {
   const view = getView();
-  const hostElement = editorHostRef.value;
+  const hostElement = overlayRootRef.value;
   if (!view || !hostElement) {
     return '';
   }
@@ -350,8 +402,9 @@ watch(
 );
 
 onMounted((): void => {
-  const parent = editorHostRef.value;
-  if (!parent) {
+  const parent = editorViewHostRef.value;
+  const overlayRoot = overlayRootRef.value;
+  if (!parent || !overlayRoot) {
     return;
   }
 
@@ -362,11 +415,33 @@ onMounted((): void => {
       extensions: createEditorExtensions()
     })
   });
+  cleanupSelectionOverlayPosition = (): void => {
+    editorView.value?.scrollDOM.removeEventListener('scroll', assistant.recomputeAllPositions);
+  };
+  editorView.value.scrollDOM.addEventListener('scroll', assistant.recomputeAllPositions);
+
+  // 创建 source adapter，注入文件上下文与浮层根容器
+  adapter.value = createSourceSelectionAssistantAdapter(
+    editorView.value,
+    {
+      editorState: props.editorState,
+      overlayRoot
+    },
+    () => props.editable
+  );
 });
 
 onBeforeUnmount((): void => {
+  cleanupSelectionOverlayPosition?.();
+  cleanupSelectionOverlayPosition = null;
+  adapter.value?.dispose?.();
+  adapter.value = null;
   editorView.value?.destroy();
   editorView.value = null;
+});
+
+useEventListener(window, 'resize', () => {
+  assistant.recomputeAllPositions();
 });
 
 const controller: EditorController = {
@@ -396,6 +471,11 @@ defineExpose(controller);
 .source-editor-pane {
   display: flex;
   flex-direction: column;
+  min-height: 100%;
+}
+
+.source-editor-content-host {
+  position: relative;
   min-height: 100%;
 }
 
@@ -443,7 +523,9 @@ defineExpose(controller);
 
   .cm-selectionBackground,
   .cm-focused .cm-selectionBackground,
-  ::selection {
+  .cm-content ::selection,
+  .cm-line::selection,
+  .cm-line *::selection {
     color: var(--selection-color);
     background: var(--selection-bg);
   }
@@ -463,6 +545,14 @@ defineExpose(controller);
 
   .cm-activeLine {
     background-color: var(--source-editor-markdown-line-highlight);
+  }
+
+  .source-ai-selection-highlight {
+    color: var(--selection-color);
+    background: var(--selection-bg);
+    box-shadow: 0 0.2em 0 0 var(--selection-bg), 0 -0.2em 0 0 var(--selection-bg);
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
   }
 
   .cm-placeholder {

@@ -80,18 +80,23 @@ describe('chat file reference insert event utilities', () => {
 
 describe('chat file reference insert wiring', () => {
   test('wires editor selection toolbar to chat sidebar through BChat insert API', () => {
-    const selectionToolbarSource = readSource('src/components/BEditor/components/SelectionToolbar.vue');
     const richEditorContentSource = readSource('src/components/BEditor/components/RichEditorContent.vue');
+    const selectionToolbarSource = readSource('src/components/BEditor/components/SelectionToolbar.vue');
+    const richToolbarHostSource = readSource('src/components/BEditor/components/SelectionToolbarRich.vue');
+    const selectionAssistantSource = readSource('src/components/BEditor/hooks/useSelectionAssistant.ts');
+    const richAdapterSource = readSource('src/components/BEditor/adapters/richSelectionAssistant.ts');
+    const sourceAdapterSource = readSource('src/components/BEditor/adapters/sourceSelectionAssistant.ts');
     const sidebarSource = readSource('src/components/BChatSidebar/index.vue');
     const fileReferenceHookSource = readSource('src/components/BChatSidebar/hooks/useFileReference.ts');
 
-    expect(selectionToolbarSource).toContain('insertSelectionReferenceToChat');
-    expect(selectionToolbarSource).toContain('emitChatFileReferenceInsert');
-    expect(selectionToolbarSource).toContain('getSelectionSourceLineRange');
-    expect(selectionToolbarSource).toContain('const { startLine = 0, endLine = 0 } = sourceLineRange || {}');
-    expect(selectionToolbarSource).toContain('renderStartLine');
-    expect(selectionToolbarSource).toContain('renderEndLine');
-    expect(richEditorContentSource).toContain('@selection-reference-insert="handleSelectionReferenceInsert"');
+    expect(selectionToolbarSource).toContain("$emit('reference')");
+    expect(selectionToolbarSource).toContain('插入对话');
+    expect(richToolbarHostSource).toContain('@reference="$emit(\'reference\')"');
+    expect(richEditorContentSource).toContain('@reference="assistant.insertReference()"');
+    expect(selectionAssistantSource).toContain('const payload = adapter.buildSelectionReference(range);');
+    expect(selectionAssistantSource).toContain('emitChatFileReferenceInsert(payload);');
+    expect(richAdapterSource).toContain('buildSelectionReference(range: SelectionAssistantRange): SelectionReferencePayload | null {');
+    expect(sourceAdapterSource).toContain('buildSelectionReference(range: SelectionAssistantRange): SelectionReferencePayload {');
     expect(sidebarSource).toContain('insertTextAtCursor');
     expect(sidebarSource).toContain('useFileReference');
     expect(fileReferenceHookSource).toContain('handleFileReferenceInsert');
