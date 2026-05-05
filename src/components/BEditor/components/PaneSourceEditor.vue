@@ -50,6 +50,7 @@ import { EditorView, keymap, placeholder } from '@codemirror/view';
 import { useEventListener } from '@vueuse/core';
 import { getRenderedSourceAnchorOffsetTop } from '../adapters/sourceEditorAnchorScroll';
 import { createSourceCodeBlockHighlightExtension } from '../adapters/sourceEditorCodeBlockHighlight';
+import { createSourceEditorDrawSelectionExtension } from '../adapters/sourceEditorDrawSelection';
 import { createSourceHeadingAnchorExtension, getSourceActiveHeadingId, getSourceHeadingLines } from '../adapters/sourceEditorHeadingAnchors';
 import { createSourceEditorLayoutTheme } from '../adapters/sourceEditorLayoutTheme';
 import { createSourceEditorMarkdownHighlightExtension } from '../adapters/sourceEditorMarkdownHighlight';
@@ -136,6 +137,7 @@ function createEditorExtensions(): Extension[] {
         editorContent.value = nextContent;
       }
     }),
+    createSourceEditorDrawSelectionExtension(),
     createSourceSelectionHighlightExtension()
   ];
 }
@@ -519,15 +521,6 @@ defineExpose(controller);
 
   .cm-lineNumbers .cm-gutterElement {
     padding: 0 12px 0 0;
-  }
-
-  .cm-selectionBackground,
-  .cm-focused .cm-selectionBackground,
-  .cm-content ::selection,
-  .cm-line::selection,
-  .cm-line *::selection {
-    color: var(--selection-color);
-    background: var(--selection-bg);
   }
 
   .cm-selectionMatch {

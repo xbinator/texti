@@ -14,6 +14,7 @@ import type { Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { EditorSelection, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, EditorView as EditorViewRef } from '@codemirror/view';
+import { restoreSourceEditorSelectionDraw, suppressSourceEditorSelectionDraw } from './sourceEditorDrawSelection';
 
 /**
  * 源码模式高亮 decoration 的 CSS class。
@@ -121,7 +122,7 @@ export function createSourceSelectionAssistantAdapter(
     },
 
     clearNativeSelection(): void {
-      // source 模式保留浏览器 / CodeMirror 原生选中态，不主动清理真实选区
+      suppressSourceEditorSelectionDraw(view);
     },
 
     getPanelPosition(range: SelectionAssistantRange): SelectionAssistantPosition | null {
@@ -184,6 +185,7 @@ export function createSourceSelectionAssistantAdapter(
       view.dispatch({
         effects: highlightRangeEffect.of(null)
       });
+      restoreSourceEditorSelectionDraw(view);
     },
 
     /**
