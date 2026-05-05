@@ -1,33 +1,16 @@
 <template>
   <div class="detail-container">
-    <div class="detail-header">
-      <!--  -->
-      <div class="flex flex-wrap gap-6 items-center cursor-pointer">
-        <h2 class="page-title">{{ headerTitle }}</h2>
-        <span v-if="provider" class="provider-type-tag">{{ providerTypeLabel }}</span>
-      </div>
-      <div class="flex flex-wrap gap-3 items-center">
-        <div v-if="provider?.isCustom" class="edit-btn" @click="handleEdit">
-          <Icon icon="lucide:settings" width="14" height="14" />
-        </div>
-
-        <ASwitch :checked="provider?.isEnabled ?? false" size="small" @change="(checked) => handleToggle(checked as boolean)" />
-      </div>
+    <div v-if="!provider" class="loading-state">
+      <Icon icon="lucide:loader-2" class="loading-icon" />
+      <p>加载中...</p>
     </div>
 
-    <div class="flex-1 p-4 overflow-y-auto">
-      <div v-if="!provider" class="loading-state">
-        <Icon icon="lucide:loader-2" class="loading-icon" />
-        <p>加载中...</p>
-      </div>
+    <div v-else class="flex flex-col gap-6">
+      <ProviderInfo :provider="provider" :provider-type-label="providerTypeLabel" @edit="handleEdit" @toggle="handleToggle" />
 
-      <div v-else class="flex flex-col gap-6">
-        <ProviderInfo :provider="provider" />
+      <ApiConfig v-model:value="provider" :models="models" />
 
-        <ApiConfig v-model:value="provider" :models="models" />
-
-        <ModelList :provider-id="provider.id" :models="models" @refresh="handleRefreshModels" />
-      </div>
+      <ModelList :provider-id="provider.id" :models="models" @refresh="handleRefreshModels" />
     </div>
 
     <ProviderModal v-model:open="modalVisible" :provider="provider" @success="handleModalSuccess" />
@@ -58,8 +41,6 @@ const provider: Ref<AIProvider | null> = ref(null);
 const models: Ref<AIProviderModel[]> = ref([]);
 const isLoadingProvider: Ref<boolean> = ref(false);
 const modalVisible: Ref<boolean> = ref(false);
-
-const headerTitle: ComputedRef<string> = computed(() => (provider.value ? `${provider.value.name} 配置` : '配置'));
 
 const providerTypeLabel: ComputedRef<string> = computed((): string => {
   if (!provider.value) {
@@ -136,78 +117,11 @@ async function handleRefreshModels(): Promise<void> {
 .detail-container {
   display: flex;
   flex-direction: column;
-  min-width: 500px;
+  width: 100%;
   height: 100%;
+  overflow: auto;
   background: var(--bg-primary);
   border-radius: 8px;
-}
-
-.detail-header {
-  display: flex;
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px;
-  margin-bottom: 16px;
-  border-bottom: 1px solid var(--border-primary);
-}
-
-.back-icon {
-  width: 20px;
-  height: 20px;
-  color: var(--text-primary);
-}
-
-.edit-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.2s ease;
-}
-
-.edit-btn:hover {
-  color: var(--text-primary);
-  background: var(--bg-secondary);
-}
-
-.delete-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.2s ease;
-}
-
-.delete-btn:hover {
-  color: #ff4d4f;
-  background: var(--bg-secondary);
-}
-
-.page-title {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.provider-type-tag {
-  padding: 2px 8px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--color-primary);
-  background: var(--color-primary-bg);
-  border-radius: 4px;
 }
 
 .loading-state {

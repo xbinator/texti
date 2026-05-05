@@ -1,7 +1,7 @@
 <template>
   <div class="model-section">
     <div class="section-header">
-      <h3 class="section-title">模型列表</h3>
+      <div><h3 class="section-title">模型列表</h3></div>
       <div class="section-actions">
         <AInput v-model:value="searchText" placeholder="搜索模型" class="search-input" />
         <BButton @click="handleCreateModel"> 创建 AI 模型 </BButton>
@@ -150,6 +150,8 @@ async function handleDeleteModel(modelId: string): Promise<void> {
 <style scoped lang="less">
 .model-section {
   padding: 20px;
+  container-name: model-section;
+  container-type: inline-size;
   background: var(--bg-secondary);
   border-radius: 10px;
 }
@@ -166,6 +168,12 @@ async function handleDeleteModel(modelId: string): Promise<void> {
   font-size: 16px;
   font-weight: 500;
   color: var(--text-primary);
+}
+
+@container model-section (max-width: 400px) {
+  .section-title {
+    display: none;
+  }
 }
 
 .section-actions {
