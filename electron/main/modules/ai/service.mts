@@ -3,7 +3,7 @@
  * @description AI 服务核心类，封装文本生成和流式文本生成能力
  */
 import type { AICreateOptions, AIRequestOptions, AIInvokeResult, AIStreamResult, AIServiceError } from 'types/ai';
-import { generateText, jsonSchema, streamText, tool } from 'ai';
+import { generateText, jsonSchema, Output, streamText, tool } from 'ai';
 import { log } from '../logger/service.mjs';
 import { AI_ERROR_CODE } from './errors/codes.mjs';
 import { AIProviderRegistry } from './providers/_index.mjs';
@@ -25,6 +25,21 @@ function toSdkTools(tools: AIRequestOptions['tools']) {
       })
     ])
   );
+}
+
+/**
+ * 将前端结构化输出配置转换为 AI SDK output 配置。
+ * @param output - 前端传入的结构化输出配置
+ * @returns AI SDK Output.object 配置
+ */
+function toOutput(output: AIRequestOptions['output']) {
+  if (!output) return undefined;
+
+  return Output.object({
+    schema: jsonSchema(output.schema),
+    name: output.name,
+    description: output.description
+  });
 }
 
 /**
@@ -101,11 +116,11 @@ class AIService {
   async generateText(createOptions: AICreateOptions, request: AIRequestOptions): Promise<[AIServiceError] | [undefined, AIInvokeResult]> {
     try {
       const model = this.createModel(createOptions, request.modelId);
-      const { prompt = '', system, temperature, messages } = request;
+      const { prompt = '', system, temperature, messages, output } = request;
 
       log.info(`[AIService] generateText request:`, request);
 
-      const baseOptions = { model, system, temperature, tools: toSdkTools(request.tools) };
+      const baseOptions = { model, system, temperature, tools: toSdkTools(request.tools), output: toOutput(output) };
 
       // 根据是否有 messages 选择不同的调用方式
       const result = messages ? await generateText({ ...baseOptions, messages }) : await generateText({ ...baseOptions, prompt });
@@ -114,7 +129,7 @@ class AIService {
 
       const { inputTokens = 0, outputTokens = 0, totalTokens = 0 } = result.usage || {};
 
-      return [undefined, { text: result.text, usage: { inputTokens, outputTokens, totalTokens } }];
+      return [undefined, { text: result.text, output: result.output, usage: { inputTokens, outputTokens, totalTokens } }];
     } catch (error: unknown) {
       const normalizedError = this.aiProvider.normalizeError(error, createOptions.providerType);
       logAIServiceError('generateText', error, normalizedError);
