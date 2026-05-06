@@ -11,7 +11,7 @@ import { nextTick, ref, shallowRef, type Ref } from 'vue';
 import { getModelToolSupport } from '@/ai/tools/policy';
 import { executeToolCall, toTransportTools, type ExecutedToolCall } from '@/ai/tools/stream';
 import { useChat } from '@/hooks/useChat';
-import { useServiceModelStore } from '@/stores/service-model';
+import { useServiceModelStore } from '@/stores/serviceModel';
 import { buildChatMessageReferences } from '../utils/fileReferenceContext';
 import { append, convert, create, userChoice, is } from '../utils/messageHelper';
 import { createToolCallTracker, type ToolCallTracker } from '../utils/toolCallTracker';

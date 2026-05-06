@@ -43,7 +43,7 @@
 import { computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import BButton from '@/components/BButton/index.vue';
-import type { SelectedModel } from '@/stores/service-model';
+import type { SelectedModel } from '@/stores/serviceModel';
 import ModelSelector from './InputToolbar/ModelSelector.vue';
 import VoiceInput from './InputToolbar/VoiceInput.vue';
 import VoiceWaveform from './InputToolbar/VoiceWaveform.vue';

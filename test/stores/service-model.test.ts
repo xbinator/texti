@@ -55,7 +55,7 @@ describe('service-model store — chatModel', () => {
     it('从 storage 读取 chat 配置并写入 store', async () => {
       mocks.getConfig.mockResolvedValue({ providerId: 'openai', modelId: 'gpt-4', updatedAt: 0 });
 
-      const { useServiceModelStore } = await import('@/stores/service-model');
+      const { useServiceModelStore } = await import('@/stores/serviceModel');
       const store = useServiceModelStore();
 
       await store.loadChatModel();
@@ -67,7 +67,7 @@ describe('service-model store — chatModel', () => {
     it('storage 无配置时 chatModel 为 undefined', async () => {
       mocks.getConfig.mockResolvedValue(null);
 
-      const { useServiceModelStore } = await import('@/stores/service-model');
+      const { useServiceModelStore } = await import('@/stores/serviceModel');
       const store = useServiceModelStore();
 
       await store.loadChatModel();
@@ -78,7 +78,7 @@ describe('service-model store — chatModel', () => {
     it('storage 配置缺少 providerId 时 chatModel 为 undefined', async () => {
       mocks.getConfig.mockResolvedValue({ modelId: 'gpt-4', updatedAt: 0 });
 
-      const { useServiceModelStore } = await import('@/stores/service-model');
+      const { useServiceModelStore } = await import('@/stores/serviceModel');
       const store = useServiceModelStore();
 
       await store.loadChatModel();
@@ -89,7 +89,7 @@ describe('service-model store — chatModel', () => {
 
   describe('setChatModel', () => {
     it('乐观更新 store 状态并持久化', async () => {
-      const { useServiceModelStore } = await import('@/stores/service-model');
+      const { useServiceModelStore } = await import('@/stores/serviceModel');
       const store = useServiceModelStore();
 
       await store.setChatModel({ providerId: 'deepseek', modelId: 'v4' });
@@ -103,7 +103,7 @@ describe('service-model store — chatModel', () => {
     });
 
     it('连续快速切换时只派发最后一次事件', async () => {
-      const { useServiceModelStore } = await import('@/stores/service-model');
+      const { useServiceModelStore } = await import('@/stores/serviceModel');
       const store = useServiceModelStore();
 
       // 第一次 save 延迟完成，第二次立即完成

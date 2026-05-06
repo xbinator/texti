@@ -30,7 +30,7 @@
 import type { SelectionToolbarAction } from '../adapters/selectionAssistant';
 import { ref, computed } from 'vue';
 import { Icon } from '@iconify/vue';
-import { useServiceModelStore } from '@/stores/service-model';
+import { useServiceModelStore } from '@/stores/serviceModel';
 
 /**
  * 格式按钮的定义（由 host 注入，含当前激活态）。

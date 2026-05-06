@@ -40,7 +40,7 @@ import BButton from '@/components/BButton/index.vue';
 import BDropdown from '@/components/BDropdown/index.vue';
 import BModelIcon from '@/components/BModelIcon/index.vue';
 import { useProviderStore } from '@/stores/provider';
-import type { SelectedModel } from '@/stores/service-model';
+import type { SelectedModel } from '@/stores/serviceModel';
 
 /**
  * 渲染到下拉菜单中的单个模型项。

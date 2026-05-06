@@ -6,7 +6,7 @@ import { ref } from 'vue';
 import type { Message } from '@/components/BChatSidebar/utils/types';
 import { useChat } from '@/hooks/useChat';
 import { useChatStore } from '@/stores/chat';
-import { useServiceModelStore } from '@/stores/service-model';
+import { useServiceModelStore } from '@/stores/serviceModel';
 import { asyncTo } from '@/utils/asyncTo';
 import { AUTONAME_DEFAULT_PROMPT } from '@/views/settings/service-model/constants';
 

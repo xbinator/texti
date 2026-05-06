@@ -5,7 +5,7 @@
  */
 import { computed } from 'vue';
 import { useProviderStore } from '@/stores/provider';
-import { useServiceModelStore } from '@/stores/service-model';
+import { useServiceModelStore } from '@/stores/serviceModel';
 
 /**
  * 模型选择状态管理 hook

@@ -42,8 +42,8 @@ import { useChat } from '@/hooks/useChat';
 import { useShortcuts } from '@/hooks/useShortcuts';
 import type { ServiceModelUpdatedDetail } from '@/shared/storage/service-models/events';
 import { SERVICE_MODEL_UPDATED_EVENT } from '@/shared/storage/service-models/events';
-import type { AvailableServiceModelConfig } from '@/stores/service-model';
-import { useServiceModelStore } from '@/stores/service-model';
+import type { AvailableServiceModelConfig } from '@/stores/serviceModel';
+import { useServiceModelStore } from '@/stores/serviceModel';
 
 interface Props {
   /** 面板是否可见 */
