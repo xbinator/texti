@@ -49,7 +49,7 @@ export function useSelectionAssistant(options: UseSelectionAssistantOptions) {
 
   // ---- 派生状态 ----
   /** 工具栏是否可见 */
-  const toolbarVisible = computed(() => status.value === 'toolbar-visible');
+  const toolbarVisible = computed(() => status.value === 'toolbar-visible' && !pointerSelectionActive.value);
 
   /** AI 输入面板是否可见（含流式生成中） */
   const aiInputVisible = computed<boolean>(() => status.value === 'ai-input-visible' || status.value === 'ai-streaming');
@@ -85,11 +85,11 @@ export function useSelectionAssistant(options: UseSelectionAssistantOptions) {
       onBlur() {
         handleBlur();
       },
-      onPointerSelectionStart(event) {
-        handlePointerSelectionStart(event);
+      onPointerSelectionStart() {
+        handlePointerSelectionStart();
       },
-      onPointerSelectionEnd(event) {
-        handlePointerSelectionEnd(event);
+      onPointerSelectionEnd() {
+        handlePointerSelectionEnd();
       },
       onPointerDownInsideEditor() {
         handlePointerDownInsideEditor();
@@ -155,7 +155,6 @@ export function useSelectionAssistant(options: UseSelectionAssistantOptions) {
 
     if (pointerSelectionActive.value) {
       adapter.showSelectionHighlight(selection);
-      recomputeToolbarPosition();
       return;
     }
 
@@ -216,36 +215,19 @@ export function useSelectionAssistant(options: UseSelectionAssistantOptions) {
    * 处理 source 模式拖拽选区开始。
    * 拖拽过程中保留高亮同步，但隐藏工具栏，避免 toolbar 在 selection 尚未完成时持续显示。
    */
-  function handlePointerSelectionStart(_event: PointerEvent): void {
+  function handlePointerSelectionStart(): void {
     pointerSelectionActive.value = true;
-
-    if (status.value === 'toolbar-visible') {
-      transitionTo('idle');
-      toolbarPosition.value = null;
-    }
+    transitionTo('idle');
+    toolbarPosition.value = null;
   }
 
   /**
    * 处理 source 模式拖拽选区结束。
    * 此时以最终真实选区为准决定是否显示 toolbar。
    */
-  function handlePointerSelectionEnd(_event: PointerEvent): void {
+  function handlePointerSelectionEnd(): void {
     pointerSelectionActive.value = false;
-
-    const adapter = options.adapter();
-    if (!adapter) {
-      return;
-    }
-
-    const selection = adapter.getSelection();
-    if (!selection) {
-      return;
-    }
-
-    cachedSelectionRange.value = { ...selection };
-    adapter.showSelectionHighlight(selection);
-    recomputeToolbarPosition();
-    transitionTo('toolbar-visible');
+    handleSelectionChange();
   }
 
   /**

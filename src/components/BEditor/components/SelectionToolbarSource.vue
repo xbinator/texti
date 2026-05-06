@@ -63,6 +63,8 @@ const TOOLBAR_PADDING = 8;
 const toolbarRef = ref<HTMLElement | null>(null);
 const style = ref<CSSProperties>({ display: 'none' });
 const hasMeasuredPosition = ref(false);
+const pointerPressActive = ref(false);
+let cleanupOverlayPointerListeners: (() => void) | null = null;
 
 /**
  * 计算工具栏定位约束所需的容器尺寸。
@@ -87,6 +89,12 @@ function resolveContainerRect(position: SelectionAssistantPosition): { top: numb
  * 顶部空间不足时会翻转到选区下方，左右位置则会被约束在容器内。
  */
 function syncStyle(): void {
+  if (pointerPressActive.value) {
+    hasMeasuredPosition.value = false;
+    style.value = { display: 'none' };
+    return;
+  }
+
   if (!props.visible || !props.position) {
     hasMeasuredPosition.value = false;
     style.value = { display: 'none' };
@@ -138,7 +146,7 @@ function syncStyle(): void {
  * 适用于显隐切换、锚点变化和内容尺寸变化后的重排。
  */
 function syncStyleOnNextTick(): void {
-  if (!props.visible || !props.position) {
+  if (pointerPressActive.value || !props.visible || !props.position) {
     style.value = { display: 'none' };
     hasMeasuredPosition.value = false;
     return;
@@ -159,9 +167,51 @@ function syncStyleOnNextTick(): void {
   });
 }
 
+/**
+ * 绑定 overlayRoot 上的指针按下/抬起监听。
+ * 按下编辑区时立即隐藏 toolbar，避免上一轮 toolbar 在拖拽开始瞬间闪现。
+ */
+function bindOverlayPointerListeners(): void {
+  cleanupOverlayPointerListeners?.();
+  const { overlayRoot } = props;
+  if (!overlayRoot) {
+    return;
+  }
+
+  const handlePointerDown = (event: PointerEvent): void => {
+    const target = event.target as Node | null;
+    const toolbarElement = toolbarRef.value;
+    if (toolbarElement?.contains(target)) {
+      return;
+    }
+
+    pointerPressActive.value = true;
+    hasMeasuredPosition.value = false;
+    style.value = { display: 'none' };
+  };
+
+  const handlePointerUp = (): void => {
+    if (!pointerPressActive.value) {
+      return;
+    }
+
+    pointerPressActive.value = false;
+    syncStyleOnNextTick();
+  };
+
+  overlayRoot.addEventListener('pointerdown', handlePointerDown, true);
+  document.addEventListener('pointerup', handlePointerUp, true);
+
+  cleanupOverlayPointerListeners = (): void => {
+    overlayRoot.removeEventListener('pointerdown', handlePointerDown, true);
+    document.removeEventListener('pointerup', handlePointerUp, true);
+  };
+}
+
 watch(() => props.visible, syncStyleOnNextTick, { immediate: true });
 watch(() => props.position, syncStyleOnNextTick, { deep: true });
 watch(() => props.formatButtons, syncStyleOnNextTick, { deep: true });
+watch(() => props.overlayRoot, bindOverlayPointerListeners, { immediate: true });
 
 useResizeObserver(toolbarRef, (): void => {
   syncStyle();
@@ -172,6 +222,8 @@ useEventListener(window, 'resize', (): void => {
 });
 
 onBeforeUnmount((): void => {
+  cleanupOverlayPointerListeners?.();
+  cleanupOverlayPointerListeners = null;
   style.value = { display: 'none' };
 });
 </script>

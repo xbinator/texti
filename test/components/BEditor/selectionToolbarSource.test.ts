@@ -130,6 +130,40 @@ describe('SelectionToolbarSource', () => {
     expect(toolbar.style.visibility).toBe('hidden');
   });
 
+  test('hides immediately on overlay pointerdown even before the visible prop changes', async () => {
+    const overlayRoot = document.createElement('div');
+    const editorSurface = document.createElement('div');
+    overlayRoot.appendChild(editorSurface);
+    document.body.appendChild(overlayRoot);
+
+    mount(SelectionToolbarSource, {
+      props: {
+        visible: true,
+        overlayRoot,
+        position: createPosition(80, 60)
+      },
+      global: {
+        stubs: {
+          SelectionToolbar: SelectionToolbarStub
+        }
+      }
+    });
+
+    await nextTick();
+
+    const toolbar = getToolbarElement();
+    mockToolbarSize(toolbar);
+
+    window.dispatchEvent(new Event('resize'));
+    await nextTick();
+    expect(toolbar.style.display).not.toBe('none');
+
+    editorSurface.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    await nextTick();
+
+    expect(toolbar.style.display).toBe('none');
+  });
+
   test('clamps horizontal position when the toolbar would overflow on the right', async () => {
     const overlayRoot = document.createElement('div');
     document.body.appendChild(overlayRoot);

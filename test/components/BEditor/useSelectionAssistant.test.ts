@@ -74,6 +74,7 @@ const adapter: SelectionAssistantAdapter = {
 };
 
 let latestStatus: SelectionAssistantStatus = 'idle';
+let latestToolbarVisible = false;
 
 /**
  * 挂载 useSelectionAssistant 的测试组件。
@@ -88,6 +89,7 @@ const HookHarness = defineComponent({
 
     watchEffect((): void => {
       latestStatus = assistant.status.value;
+      latestToolbarVisible = assistant.toolbarVisible.value;
     });
 
     return () => null;
@@ -99,6 +101,7 @@ describe('useSelectionAssistant', () => {
     currentSelection = null;
     boundHandlers = null;
     latestStatus = 'idle';
+    latestToolbarVisible = false;
     clearSelectionHighlight.mockReset();
     showSelectionHighlight.mockReset();
   });
@@ -143,12 +146,33 @@ describe('useSelectionAssistant', () => {
     await nextTick();
 
     expect(latestStatus).toBe('idle');
+    expect(latestToolbarVisible).toBe(false);
     expect(showSelectionHighlight).toHaveBeenCalledTimes(1);
 
     boundHandlers?.onPointerSelectionEnd?.(new PointerEvent('pointerup'));
     await nextTick();
 
     expect(latestStatus).toBe('toolbar-visible');
+    expect(latestToolbarVisible).toBe(true);
     expect(showSelectionHighlight).toHaveBeenCalledTimes(2);
+  });
+
+  test('keeps toolbar hidden on pointerdown even if selection updates immediately', async () => {
+    mount(HookHarness);
+    await nextTick();
+    clearSelectionHighlight.mockClear();
+    showSelectionHighlight.mockClear();
+
+    boundHandlers?.onPointerSelectionStart?.(new PointerEvent('pointerdown'));
+    currentSelection = {
+      from: 2,
+      to: 7,
+      text: 'llo w'
+    };
+    boundHandlers?.onSelectionChange();
+    await nextTick();
+
+    expect(latestToolbarVisible).toBe(false);
+    expect(showSelectionHighlight).toHaveBeenCalledTimes(1);
   });
 });
