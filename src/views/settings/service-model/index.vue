@@ -29,6 +29,14 @@
             :options="AUTONAME_SERVICE_CONFIG_OPTIONS"
             :default-prompt="AUTONAME_DEFAULT_PROMPT"
           />
+
+          <ServiceConfig
+            service-type="summarize"
+            title="会话历史压缩助理"
+            description="指定用于压缩和摘要会话历史的模型"
+            :options="CHAT_SERVICE_CONFIG_OPTIONS"
+            :show-prompt="false"
+          />
         </div>
       </BScrollbar>
     </div>

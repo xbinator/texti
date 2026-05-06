@@ -4,7 +4,7 @@ import Database from 'better-sqlite3';
 import { app } from 'electron';
 
 type DatabaseInstance = InstanceType<typeof Database>;
-type DatabaseTableName = 'chat_messages' | 'chat_sessions';
+type DatabaseTableName = 'chat_messages' | 'chat_sessions' | 'chat_session_summaries';
 
 interface DatabaseTableInfoRow {
   name: string;
@@ -118,11 +118,36 @@ export async function initDatabase(): Promise<void> {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS chat_session_summaries (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      build_mode TEXT NOT NULL,
+      derived_from_summary_id TEXT,
+      covered_start_message_id TEXT NOT NULL,
+      covered_end_message_id TEXT NOT NULL,
+      covered_until_message_id TEXT NOT NULL,
+      source_message_ids_json TEXT NOT NULL,
+      preserved_message_ids_json TEXT NOT NULL,
+      summary_text TEXT NOT NULL,
+      structured_summary_json TEXT NOT NULL,
+      trigger_reason TEXT NOT NULL,
+      message_count_snapshot INTEGER NOT NULL,
+      char_count_snapshot INTEGER NOT NULL,
+      schema_version INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      invalid_reason TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_chat_sessions_type_last_message_at
     ON chat_sessions(type, last_message_at DESC);
 
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id_created_at
     ON chat_messages(session_id, created_at ASC);
+
+    CREATE INDEX IF NOT EXISTS idx_chat_session_summaries_session_id_status
+    ON chat_session_summaries(session_id, status);
   `);
 
   migrateDatabase();

@@ -5,13 +5,16 @@
  */
 import type { CachedModelMessagesResult } from '../utils/messageHelper';
 import type { Message, ServiceConfig, ToolLoopGuardConfig } from '../utils/types';
+import type { ModelMessage } from 'ai';
 import type { AIToolExecutor, AIToolContext, AIServiceError, AIStreamFinishChunk, AIStreamToolCallChunk } from 'types/ai';
 import type { AIUserChoiceAnswerData, ChatMessageConfirmationAction } from 'types/chat';
 import { nextTick, ref, shallowRef, type Ref } from 'vue';
 import { getModelToolSupport } from '@/ai/tools/policy';
 import { executeToolCall, toTransportTools, type ExecutedToolCall } from '@/ai/tools/stream';
 import { useChat } from '@/hooks/useChat';
+import { chatSummariesStorage } from '@/shared/storage/chat-summaries';
 import { useServiceModelStore } from '@/stores/serviceModel';
+import { createCompressionCoordinator } from '../utils/compression/coordinator';
 import { buildChatMessageReferences } from '../utils/fileReferenceContext';
 import { append, convert, create, userChoice, is } from '../utils/messageHelper';
 import { createToolCallTracker, type ToolCallTracker } from '../utils/toolCallTracker';
@@ -24,6 +27,8 @@ export interface UseChatStreamOptions {
   tools?: AIToolExecutor[];
   /** 获取工具上下文 */
   getToolContext?: () => AIToolContext | undefined;
+  /** 获取会话 ID */
+  getSessionId?: () => string | undefined;
   /** 重新生成前回调 */
   onBeforeRegenerate?: (messages: Message[], triggerMessage: Message) => Promise<void> | void;
   /** 消息完成回调 */
@@ -64,7 +69,7 @@ const DEFAULT_TOOL_LOOP_GUARD_CONFIG: ToolLoopGuardConfig = {
 };
 
 export function useChatStream(options: UseChatStreamOptions): UseChatStreamReturns {
-  const { messages, tools, getToolContext, onBeforeRegenerate, onComplete } = options;
+  const { messages, tools, getToolContext, getSessionId, onBeforeRegenerate, onComplete } = options;
 
   const loading = ref(false);
   const pendingToolResults = shallowRef<ExecutedToolCall[]>([]);
@@ -73,6 +78,9 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
   const aborting = ref(false);
 
   const serviceModelStore = useServiceModelStore();
+
+  /** 压缩协调器 */
+  const compressionCoordinator = createCompressionCoordinator(chatSummariesStorage);
 
   let lastServiceConfig: ServiceConfig | null = null;
   let executedToolCallIds = new Set<string>();
@@ -325,9 +333,45 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
 
     // 处理文件引用
     const nextMessages = buildChatMessageReferences(sourceMessages);
-    currentModelMessageCache = convert.toCachedModelMessages(nextMessages, currentModelMessageCache);
 
-    const continuedMessages = [...currentModelMessageCache.modelMessages];
+    // 执行上下文压缩（仅在非复用助手消息时）
+    let continuedMessages: ModelMessage[];
+    if (!reuseLastAssistant && getSessionId) {
+      const sessionId = getSessionId();
+      if (sessionId) {
+        try {
+          const compressionResult = await compressionCoordinator.prepareMessagesBeforeSend({
+            sessionId,
+            messages: nextMessages,
+            currentUserMessage: nextMessages[nextMessages.length - 1]
+          });
+
+          if (compressionResult.compressed) {
+            // 使用压缩后的模型消息
+            continuedMessages = compressionResult.modelMessages;
+            // 清空模型消息缓存，因为消息结构已改变
+            currentModelMessageCache = undefined;
+          } else {
+            // 未压缩，继续原有流程
+            currentModelMessageCache = convert.toCachedModelMessages(nextMessages, currentModelMessageCache);
+            continuedMessages = [...currentModelMessageCache.modelMessages];
+          }
+        } catch (error) {
+          // 压缩失败时继续使用原始消息
+          console.error('[useChatStream] Compression failed, using original messages:', error);
+          currentModelMessageCache = convert.toCachedModelMessages(nextMessages, currentModelMessageCache);
+          continuedMessages = [...currentModelMessageCache.modelMessages];
+        }
+      } else {
+        // 无 sessionId，继续原有流程
+        currentModelMessageCache = convert.toCachedModelMessages(nextMessages, currentModelMessageCache);
+        continuedMessages = [...currentModelMessageCache.modelMessages];
+      }
+    } else {
+      // 复用助手消息或无 getSessionId，继续原有流程
+      currentModelMessageCache = convert.toCachedModelMessages(nextMessages, currentModelMessageCache);
+      continuedMessages = [...currentModelMessageCache.modelMessages];
+    }
 
     const transportTools = config.toolSupport.supported && Boolean(tools?.length) ? toTransportTools(tools ?? []) : undefined;
 

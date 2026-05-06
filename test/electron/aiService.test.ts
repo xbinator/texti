@@ -1,17 +1,22 @@
 /**
  * @file aiService.test.ts
- * @description 验证 Electron AI 服务错误日志分级，避免可预期的限流/过载错误输出冗长堆栈。
+ * @description 验证 Electron AI 服务的结构化输出接入与错误日志分级行为。
  */
 import type { AICreateOptions, AIRequestOptions } from 'types/ai';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const generateTextMock = vi.fn<() => Promise<never>>();
+const jsonSchemaMock = vi.fn();
+const outputObjectMock = vi.fn();
 const logErrorMock = vi.fn();
 const logWarnMock = vi.fn();
 
 vi.mock('ai', () => ({
+  Output: {
+    object: outputObjectMock
+  },
   generateText: generateTextMock,
-  jsonSchema: vi.fn(),
+  jsonSchema: jsonSchemaMock,
   streamText: vi.fn(),
   tool: vi.fn()
 }));
@@ -48,8 +53,54 @@ describe('aiService', () => {
   beforeEach(() => {
     vi.resetModules();
     generateTextMock.mockReset();
+    jsonSchemaMock.mockReset();
+    outputObjectMock.mockReset();
     logErrorMock.mockReset();
     logWarnMock.mockReset();
+  });
+
+  it('passes structured output schema to AI SDK when request asks for object output', async () => {
+    const { aiService } = await import('../../electron/main/modules/ai/service.mjs');
+    const createOptions: AICreateOptions = { providerType: 'openai', providerId: 'provider-1', providerName: 'OpenAI' };
+    const request: AIRequestOptions = {
+      modelId: 'model-1',
+      prompt: '生成结构化摘要',
+      output: {
+        schema: {
+          type: 'object',
+          properties: {
+            goal: { type: 'string' }
+          },
+          required: ['goal'],
+          additionalProperties: false
+        },
+        name: 'conversation_summary'
+      }
+    };
+
+    jsonSchemaMock.mockImplementation((schema) => schema);
+    outputObjectMock.mockReturnValue({ mocked: true });
+    generateTextMock.mockResolvedValue({
+      text: '{"goal":"整理需求"}',
+      output: { goal: '整理需求' },
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
+    });
+
+    const [error, result] = await aiService.generateText(createOptions, request);
+
+    expect(error).toBeUndefined();
+    expect(outputObjectMock).toHaveBeenCalledWith({
+      schema: request.output?.schema,
+      name: 'conversation_summary',
+      description: undefined
+    });
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: '生成结构化摘要',
+        output: { mocked: true }
+      })
+    );
+    expect(result?.text).toBe('{"goal":"整理需求"}');
   });
 
   it('logs rate limited invoke errors without dumping the original stack', async () => {

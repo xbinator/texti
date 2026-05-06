@@ -45,7 +45,7 @@ vi.mock('@/hooks/useChat', () => ({
   }
 }));
 
-vi.mock('@/stores/service-model', () => ({
+vi.mock('@/stores/serviceModel', () => ({
   /**
    * 模拟服务模型 store，避免测试初始化时依赖真实 store。
    */

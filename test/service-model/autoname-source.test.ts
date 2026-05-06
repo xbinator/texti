@@ -19,7 +19,7 @@ describe('autoname service integration source', () => {
   it('extends model service types with autoname', () => {
     const source = readSource('types/model.d.ts');
 
-    expect(source).toContain("export type ModelServiceType = 'polish' | 'chat' | 'autoname';");
+    expect(source).toContain("export type ModelServiceType = 'polish' | 'chat' | 'autoname' | 'summarize';");
   });
 
   it('defines autoname prompt constants and renders a service config card', () => {
