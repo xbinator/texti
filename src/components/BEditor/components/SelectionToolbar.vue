@@ -94,6 +94,7 @@ checkModelAvailability();
   padding: 0 8px;
   font-size: 13px;
   color: var(--color-primary);
+  white-space: nowrap;
   cursor: pointer;
   border: none;
   border-radius: 6px;

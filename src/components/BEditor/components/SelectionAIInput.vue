@@ -36,7 +36,7 @@ import type { SelectionAssistantAdapter, SelectionAssistantPosition, SelectionAs
 import type { CSSProperties } from 'vue';
 import { onBeforeUnmount, computed, nextTick, ref, watch } from 'vue';
 import { Icon } from '@iconify/vue';
-import { onClickOutside, useEventListener } from '@vueuse/core';
+import { onClickOutside, useEventListener, useResizeObserver } from '@vueuse/core';
 import { message } from 'ant-design-vue';
 import { useChat } from '@/hooks/useChat';
 import { useShortcuts } from '@/hooks/useShortcuts';
@@ -75,10 +75,26 @@ const loading = ref(false);
 const inputRef = ref<{ focus: (options?: FocusOptions) => void } | null>(null);
 const wrapperRef = ref<HTMLElement | null>(null);
 const wrapperStyle = ref<CSSProperties>({});
+const hasMeasuredPosition = ref(false);
 const modelConfig = ref<AvailableServiceModelConfig | null>(null);
 const serviceModelStore = useServiceModelStore();
 
 const providerId = computed(() => modelConfig.value?.providerId ?? '');
+
+/**
+ * AI 面板与锚点之间的垂直间距。
+ */
+const PANEL_GAP = 6;
+
+/**
+ * AI 面板相对容器的最小安全边距。
+ */
+const PANEL_PADDING = 16;
+
+/**
+ * AI 面板的期望宽度。
+ */
+const PREFERRED_PANEL_WIDTH = 240;
 
 const { agent } = useChat({
   providerId,
@@ -119,10 +135,50 @@ function scrollIntoViewIfObscured(): void {
  */
 function syncFloatPosition(): void {
   const { position } = props;
-  if (!position) return;
+  const wrapperElement = wrapperRef.value;
+  if (!position || !wrapperElement) {
+    return;
+  }
 
-  const top = position.anchorRect.top + position.lineHeight + 6;
-  wrapperStyle.value = { top: `${top}px` };
+  const containerRect = position.containerRect ?? {
+    top: 0,
+    left: 0,
+    width: wrapperElement.offsetParent instanceof HTMLElement ? wrapperElement.offsetParent.clientWidth : 0,
+    height: wrapperElement.offsetParent instanceof HTMLElement ? wrapperElement.offsetParent.clientHeight : 0
+  };
+  const maxWidth = Math.max(0, containerRect.width - PANEL_PADDING * 2);
+  const width = Math.min(PREFERRED_PANEL_WIDTH, maxWidth);
+  const wrapperRect = wrapperElement.getBoundingClientRect();
+  const wrapperWidth = wrapperRect.width || wrapperElement.offsetWidth || width;
+  const wrapperHeight = wrapperRect.height || wrapperElement.offsetHeight;
+  if (wrapperWidth <= 0 || wrapperHeight <= 0) {
+    hasMeasuredPosition.value = false;
+    wrapperStyle.value = {
+      top: '0px',
+      left: '0px',
+      visibility: 'hidden',
+      width: `${width}px`
+    };
+    return;
+  }
+
+  const anchorCenterX = position.anchorRect.left + position.anchorRect.width / 2;
+  const minLeft = containerRect.left + PANEL_PADDING;
+  const maxLeft = containerRect.left + containerRect.width - wrapperWidth - PANEL_PADDING;
+  const preferredLeft = anchorCenterX - wrapperWidth / 2;
+  const left = maxLeft >= minLeft ? Math.min(Math.max(preferredLeft, minLeft), maxLeft) : minLeft;
+  const preferredTop = position.anchorRect.top + position.lineHeight + PANEL_GAP;
+  const fallbackTop = position.anchorRect.top - wrapperHeight - PANEL_GAP;
+  const maxTop = containerRect.top + containerRect.height - wrapperHeight - PANEL_PADDING;
+  const top = preferredTop <= maxTop ? preferredTop : Math.max(containerRect.top + PANEL_PADDING, fallbackTop);
+
+  wrapperStyle.value = {
+    top: `${top}px`,
+    left: `${left}px`,
+    visibility: 'visible',
+    width: `${width}px`
+  };
+  hasMeasuredPosition.value = true;
 
   nextTick(scrollIntoViewIfObscured);
 }
@@ -190,16 +246,25 @@ watch(
   () => props.visible,
   (isVisible) => {
     if (isVisible) {
+      hasMeasuredPosition.value = false;
+      wrapperStyle.value = {
+        top: '0px',
+        left: '0px',
+        visibility: 'hidden',
+        width: `${PREFERRED_PANEL_WIDTH}px`
+      };
       fetchModelConfig();
       nextTick(syncFloatPosition);
       nextTick(() => inputRef.value?.focus({ preventScroll: true }));
       unregisterEscape = registerShortcut({ key: 'escape', handler: closePanel });
     } else {
+      hasMeasuredPosition.value = false;
       resetState();
       unregisterEscape?.();
       unregisterEscape = null;
     }
-  }
+  },
+  { immediate: true }
 );
 
 // 监听 position 变化，重新定位面板
@@ -207,10 +272,28 @@ watch(
   () => props.position,
   () => {
     if (props.visible) {
-      syncFloatPosition();
+      if (!hasMeasuredPosition.value) {
+        wrapperStyle.value = {
+          top: '0px',
+          left: '0px',
+          visibility: 'hidden',
+          width: `${PREFERRED_PANEL_WIDTH}px`
+        };
+      }
+      nextTick(syncFloatPosition);
     }
   }
 );
+
+useResizeObserver(wrapperRef, (): void => {
+  syncFloatPosition();
+});
+
+useEventListener(window, 'resize', (): void => {
+  if (props.visible) {
+    syncFloatPosition();
+  }
+});
 
 // ---- AI ----
 
@@ -275,12 +358,11 @@ onBeforeUnmount(() => {
 <style lang="less" scoped>
 .ai-input-wrapper {
   position: absolute;
-  left: 50px;
   z-index: 1000;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  width: calc(100% - 100px);
+  max-width: calc(100% - 32px);
 }
 
 // ---- 预览确认区 ----
