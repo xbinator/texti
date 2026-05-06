@@ -116,10 +116,15 @@ const customSelectionTheme = EditorView.theme({
   },
   // 自定义 selection decoration 样式，与 AI 高亮保持一致的 box-shadow 方案
   '& .cm-custom-selection': {
+    color: 'var(--selection-color)',
     background: 'var(--selection-bg)',
     boxShadow: '0 0.2em 0 0 var(--selection-bg), 0 -0.2em 0 0 var(--selection-bg)',
     WebkitBoxDecorationBreak: 'clone',
     boxDecorationBreak: 'clone'
+  },
+  // 覆盖 Markdown 与代码高亮 token 的显式颜色，确保普通选区内统一显示选区前景色
+  '& .cm-custom-selection, & .cm-custom-selection *': {
+    color: 'var(--selection-color) !important'
   }
 });
 

@@ -573,6 +573,12 @@ defineExpose(controller);
     box-shadow: 0 0.2em 0 0 var(--selection-bg), 0 -0.2em 0 0 var(--selection-bg);
     -webkit-box-decoration-break: clone;
     box-decoration-break: clone;
+
+    // 覆盖 Markdown 语法 token 的显式颜色，确保 AI 高亮范围内统一显示选区前景色。
+    &,
+    & * {
+      color: var(--selection-color) !important;
+    }
   }
 
   .cm-placeholder {

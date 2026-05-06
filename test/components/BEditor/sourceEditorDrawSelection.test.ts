@@ -3,6 +3,8 @@
  * @file sourceEditorDrawSelection.test.ts
  * @description Source 编辑器自定义 selection 绘制回归测试。
  */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { EditorSelection, EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, test } from 'vitest';
@@ -82,5 +84,14 @@ describe('sourceEditorDrawSelection', () => {
     // 4. 只有显式恢复后，普通 selection 才重新可见。
     restoreSourceEditorSelectionDraw(view);
     expect(getCustomSelectionCount(view)).toBe(1);
+  });
+
+  test('forces normal selection text inside custom selection decoration to use selection foreground color', (): void => {
+    const sourceEditorDrawSelectionSource = readFileSync(resolve(process.cwd(), 'src/components/BEditor/adapters/sourceEditorDrawSelection.ts'), 'utf-8');
+
+    expect(sourceEditorDrawSelectionSource).toContain("'& .cm-custom-selection':");
+    expect(sourceEditorDrawSelectionSource).toContain("color: 'var(--selection-color)'");
+    expect(sourceEditorDrawSelectionSource).toContain("'& .cm-custom-selection, & .cm-custom-selection *':");
+    expect(sourceEditorDrawSelectionSource).toContain("color: 'var(--selection-color) !important'");
   });
 });
