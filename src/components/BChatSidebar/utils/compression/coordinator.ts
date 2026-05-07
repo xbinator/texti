@@ -40,6 +40,25 @@ async function acquireSessionLock(sessionId: string): Promise<() => void> {
 }
 
 /**
+ * 计算增量压缩窗口：从上一条摘要的 coveredEndMessageId 之后开始，过滤当前用户消息。
+ * 这与设计文档中「真正增量摘要」对齐——增量压缩只摘要上次未覆盖的新消息。
+ * @param messages - 全量消息列表
+ * @param currentSummary - 当前有效摘要
+ * @param currentUserMessageId - 当前用户消息 ID（若提供则排除）
+ * @returns 增量窗口内的消息列表
+ */
+function resolveIncrementalWindow(messages: Message[], currentSummary: ConversationSummaryRecord | undefined, currentUserMessageId?: string): Message[] {
+  if (!currentSummary) {
+    return messages.filter((message) => message.id !== currentUserMessageId);
+  }
+
+  // 从上一条摘要覆盖的最后一条消息之后开始
+  const startIndex = messages.findIndex((message) => message.id === currentSummary.coveredEndMessageId);
+  const tailMessages = startIndex >= 0 ? messages.slice(startIndex + 1) : messages;
+  return tailMessages.filter((message) => message.id !== currentUserMessageId);
+}
+
+/**
  * 基于摘要边界拆分穿透消息和近期原文消息。
  * @param messages - 全量消息列表
  * @param currentUserMessageId - 当前用户消息 ID
@@ -96,7 +115,8 @@ async function buildSummaryRecord(
   triggerReason: 'message_count' | 'context_size' | 'manual',
   currentSummary?: ConversationSummaryRecord,
   currentUserMessageId?: string,
-  excludeMessageIds?: string[]
+  excludeMessageIds?: string[],
+  degradeReason?: 'degraded_to_incremental'
 ): Promise<
   | {
       summaryRecord: ConversationSummaryRecord;
@@ -104,20 +124,36 @@ async function buildSummaryRecord(
     }
   | undefined
 > {
-  const classification = planCompression(messages, RECENT_ROUND_PRESERVE, currentUserMessageId, excludeMessageIds);
+  // 增量模式或降级到增量的全量重建模式：只压缩上次摘要未覆盖的新消息
+  const useIncrementalWindow = buildMode === 'incremental' || degradeReason === 'degraded_to_incremental';
+  const windowMessages = useIncrementalWindow
+    ? resolveIncrementalWindow(messages, currentSummary, currentUserMessageId)
+    : messages.filter((message) => message.id !== currentUserMessageId);
+
+  const classification = planCompression(windowMessages, RECENT_ROUND_PRESERVE, currentUserMessageId, excludeMessageIds);
   if (classification.compressibleMessages.length === 0) {
     return undefined;
   }
 
-  const trimmed = ruleTrim(classification.compressibleMessages);
-  const structuredSummary = await generateStructuredSummary(trimmed.items);
+  // 合并文件语义消息和可压缩消息，按原始消息顺序排列以保证 coveredStart/EndMessageId 正确
+  const summarizedIdSet = new Set([...classification.fileSemanticMessages.map((m) => m.id), ...classification.compressibleMessages.map((m) => m.id)]);
+  const orderedSummarizedMessages = windowMessages.filter((m) => summarizedIdSet.has(m.id));
+  const trimInputMessages = orderedSummarizedMessages;
+  const trimmed = ruleTrim(trimInputMessages);
+  // 增量模式下传入上一条摘要作为上下文
+  const structuredSummary = await generateStructuredSummary({
+    items: trimmed.items,
+    previousSummary: useIncrementalWindow ? currentSummary : undefined
+  });
   const summaryText = truncateSummaryText(generateSummaryText(structuredSummary));
-  const compressibleIds = classification.compressibleMessages.map((message) => message.id);
-  const coveredStartMessageId = compressibleIds[0];
-  const coveredEndMessageId = compressibleIds[compressibleIds.length - 1];
+  // 所有进入摘要的消息 ID，保持原始顺序
+  const allSummarizedIds = orderedSummarizedMessages.map((m) => m.id);
+  // 增量模式下 coveredStartMessageId 从上一条摘要边界之后开始
+  const coveredStartMessageId = useIncrementalWindow ? allSummarizedIds[0] ?? currentSummary?.coveredEndMessageId ?? '' : allSummarizedIds[0] ?? '';
+  const coveredEndMessageId = allSummarizedIds[allSummarizedIds.length - 1];
 
   const preservedSet = new Set(classification.preservedMessageIds);
-  const lastNonPreserved = findLast(compressibleIds, (id) => !preservedSet.has(id));
+  const lastNonPreserved = findLast(allSummarizedIds, (id) => !preservedSet.has(id));
   const coveredUntilMessageId = lastNonPreserved ?? coveredEndMessageId;
 
   const summaryRecord = await storage.createSummary({
@@ -127,7 +163,7 @@ async function buildSummaryRecord(
     coveredStartMessageId,
     coveredEndMessageId,
     coveredUntilMessageId,
-    sourceMessageIds: compressibleIds.filter((id) => !preservedSet.has(id)),
+    sourceMessageIds: allSummarizedIds.filter((id) => !preservedSet.has(id)),
     preservedMessageIds: classification.preservedMessageIds,
     summaryText,
     structuredSummary,
@@ -136,7 +172,8 @@ async function buildSummaryRecord(
     charCountSnapshot: trimmed.charCount,
     schemaVersion: CURRENT_SCHEMA_VERSION,
     status: 'valid',
-    invalidReason: undefined
+    invalidReason: undefined,
+    degradeReason
   });
 
   if (currentSummary && currentSummary.id !== summaryRecord.id) {
@@ -195,8 +232,8 @@ export function createCompressionCoordinator(storage: SummaryStorage) {
       // 获取当前有效摘要
       const currentSummary = await storage.getValidSummary(sessionId);
 
-      // 判断是否需要压缩
-      const policyResult = evaluateCompression(messages, currentSummary);
+      // 判断是否需要压缩（当前用户消息纳入体积估算）
+      const policyResult = evaluateCompression(messages, currentSummary, currentUserMessage);
 
       // 如果不需要压缩，直接组装原始上下文
       if (!policyResult.shouldCompress) {
@@ -209,7 +246,7 @@ export function createCompressionCoordinator(storage: SummaryStorage) {
       try {
         // 再次检查是否需要压缩（可能在等待锁期间已被其他请求压缩）
         const latestSummary = await storage.getValidSummary(sessionId);
-        const latestPolicy = evaluateCompression(messages, latestSummary);
+        const latestPolicy = evaluateCompression(messages, latestSummary, currentUserMessage);
 
         if (!latestPolicy.shouldCompress) {
           return assembleAndReturn(messages, currentUserMessage, latestSummary, false);
@@ -255,7 +292,23 @@ export function createCompressionCoordinator(storage: SummaryStorage) {
 
       try {
         const currentSummary = await storage.getValidSummary(sessionId);
-        const summaryResult = await buildSummaryRecord(storage, sessionId, messages, 'full_rebuild', 'manual', currentSummary);
+
+        // 手动全量重建时检查输入是否被截断，若截断则降级为增量模式
+        // 设计规范：buildMode 仍记为 full_rebuild（用户意图是全量重算），通过 degradeReason 标记执行层降级
+        const fullRebuildTrim = ruleTrim(messages);
+        const degradeReason = fullRebuildTrim.truncated ? ('degraded_to_incremental' as const) : undefined;
+
+        const summaryResult = await buildSummaryRecord(
+          storage,
+          sessionId,
+          messages,
+          'full_rebuild',
+          'manual',
+          currentSummary,
+          undefined,
+          undefined,
+          degradeReason
+        );
         return summaryResult?.summaryRecord;
       } finally {
         releaseLock();

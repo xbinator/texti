@@ -2,7 +2,7 @@
  * @file summaryGenerator.ts
  * @description AI 摘要生成器，负责调用摘要模型生成结构化摘要。
  */
-import type { StructuredConversationSummary, TrimmedMessageItem } from './types';
+import type { GenerateStructuredSummaryInput, StructuredConversationSummary, TrimmedMessageItem } from './types';
 import type { JSONSchema7 } from 'json-schema';
 import { isEmpty } from 'lodash-es';
 import { getElectronAPI } from '@/shared/platform/electron-api';
@@ -86,16 +86,25 @@ const STRUCTURED_SUMMARY_SCHEMA: JSONSchema7 = {
 };
 
 /**
- * 构建摘要生成的用户提示词。
+ * 构建摘要生成的用户提示词，增量模式下包含上一条摘要上下文。
+ * @param input - 摘要生成输入
+ * @returns 用户提示词字符串
  */
-function buildSummaryUserPrompt(items: TrimmedMessageItem[]): string {
-  const conversationText = items.map((item) => `[${item.role}]: ${item.trimmedText}`).join('\n\n');
+function buildSummaryUserPrompt(input: GenerateStructuredSummaryInput): string {
+  const conversationText = input.items.map((item) => `[${item.role}]: ${item.trimmedText}`).join('\n\n');
+  const previousSummaryText = input.previousSummary
+    ? `${input.previousSummary.summaryText}\n${JSON.stringify(input.previousSummary.structuredSummary)}`
+    : '无';
 
-  return `以下是对话历史，请生成结构化摘要：
-
-${conversationText}
-
-请生成 JSON 格式的结构化摘要。`;
+  return [
+    'PREVIOUS_SUMMARY:',
+    previousSummaryText,
+    '',
+    'CONVERSATION_CONTENT:',
+    conversationText,
+    '',
+    '请生成 JSON 格式的结构化摘要。'
+  ].join('\n');
 }
 
 /**
@@ -152,23 +161,23 @@ function generateFallbackSummary(items: TrimmedMessageItem[]): StructuredConvers
 
 /**
  * 调用 AI 模型生成结构化摘要。
- * @param items - 规则裁剪后的消息项列表
+ * @param input - 摘要生成输入，包含裁剪后的消息项和可选的上一轮摘要
  * @returns 结构化摘要，失败时返回降级摘要
  */
-export async function generateStructuredSummary(items: TrimmedMessageItem[]): Promise<StructuredConversationSummary> {
+export async function generateStructuredSummary(input: GenerateStructuredSummaryInput): Promise<StructuredConversationSummary> {
   const config = await getSummaryModelConfig();
   if (!config) {
     console.warn('[摘要生成器] 没有可用的摘要模型，使用降级方案');
-    return generateFallbackSummary(items);
+    return generateFallbackSummary(input.items);
   }
 
   const provider = await providerStorage.getProvider(config.providerId);
   if (!provider) {
     console.warn('[摘要生成器] 未找到提供商，使用降级方案');
-    return generateFallbackSummary(items);
+    return generateFallbackSummary(input.items);
   }
 
-  const userPrompt = buildSummaryUserPrompt(items);
+  const userPrompt = buildSummaryUserPrompt(input);
 
   try {
     const electronAPI = getElectronAPI();
@@ -197,7 +206,7 @@ export async function generateStructuredSummary(items: TrimmedMessageItem[]): Pr
 
     if (error) {
       console.error('[摘要生成器] AI 调用失败，使用降级方案:', error);
-      return generateFallbackSummary(items);
+      return generateFallbackSummary(input.items);
     }
 
     if (result.output && typeof result.output === 'object') {
@@ -211,7 +220,7 @@ export async function generateStructuredSummary(items: TrimmedMessageItem[]): Pr
     const jsonMatch = result.text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       console.error('[摘要生成器] 响应中未找到 JSON，使用降级方案');
-      return generateFallbackSummary(items);
+      return generateFallbackSummary(input.items);
     }
 
     const summary = JSON.parse(jsonMatch[0]) as StructuredConversationSummary;
@@ -219,13 +228,13 @@ export async function generateStructuredSummary(items: TrimmedMessageItem[]): Pr
     // 验证必需字段
     if (isEmpty(summary.goal) || isEmpty(summary.recentTopic)) {
       console.error('[摘要生成器] 摘要结构无效，使用降级方案');
-      return generateFallbackSummary(items);
+      return generateFallbackSummary(input.items);
     }
 
     return summary;
   } catch (error) {
     console.error('[摘要生成器] 生成摘要失败，使用降级方案:', error);
-    return generateFallbackSummary(items);
+    return generateFallbackSummary(input.items);
   }
 }
 

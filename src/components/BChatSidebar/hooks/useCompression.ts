@@ -81,6 +81,10 @@ export function useCompression(options: CompressionOptions) {
       });
 
       if (result) {
+        // 如果是因体量过大而降级到增量模式，静默处理而非报错
+        if (result.degradeReason === 'degraded_to_incremental') {
+          error.value = undefined;
+        }
         // 重新加载摘要
         await loadSummary();
         return true;

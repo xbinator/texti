@@ -59,13 +59,15 @@ describe('summaryGenerator', () => {
       }
     ]);
 
-    const result = await generateStructuredSummary([
-      {
-        messageId: 'm1',
-        role: 'user',
-        trimmedText: '请总结这段会话'
-      }
-    ]);
+    const result = await generateStructuredSummary({
+      items: [
+        {
+          messageId: 'm1',
+          role: 'user',
+          trimmedText: '请总结这段会话'
+        }
+      ]
+    });
 
     expect(aiInvokeMock).toHaveBeenCalledWith(
       expect.any(Object),
@@ -85,5 +87,66 @@ describe('summaryGenerator', () => {
     );
     expect(result.goal).toBe('整理需求');
     expect(result.recentTopic).toBe('上下文压缩');
+  });
+
+  it('includes previous summary context in incremental summary prompts', async () => {
+    const { generateStructuredSummary } = await import('@/components/BChatSidebar/utils/compression/summaryGenerator');
+
+    getConfigMock.mockResolvedValue({ providerId: 'provider-1', modelId: 'model-1' });
+    getProviderMock.mockResolvedValue({
+      id: 'provider-1',
+      name: 'Provider',
+      type: 'openai',
+      isEnabled: true,
+      apiKey: 'key'
+    });
+    aiInvokeMock.mockResolvedValue([
+      undefined,
+      {
+        text: '{}',
+        output: {
+          goal: 'Updated goal',
+          recentTopic: 'Updated topic',
+          userPreferences: [],
+          constraints: [],
+          decisions: [],
+          importantFacts: [],
+          fileContext: [],
+          openQuestions: [],
+          pendingActions: []
+        }
+      }
+    ]);
+
+    await generateStructuredSummary({
+      items: [{ messageId: 'm1', role: 'user', trimmedText: 'new detail' }],
+      previousSummary: {
+        summaryText: 'previous summary',
+        structuredSummary: {
+          goal: 'Existing goal',
+          recentTopic: 'Existing topic',
+          userPreferences: [],
+          constraints: [],
+          decisions: [],
+          importantFacts: [],
+          fileContext: [],
+          openQuestions: [],
+          pendingActions: []
+        }
+      }
+    });
+
+    // 增量摘要的提示词应包含上一条摘要信息
+    expect(aiInvokeMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            role: 'user',
+            content: expect.stringContaining('previous summary')
+          })
+        ])
+      })
+    );
   });
 });

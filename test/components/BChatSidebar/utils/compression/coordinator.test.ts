@@ -401,4 +401,67 @@ describe('coordinator - prepareMessagesBeforeSend', () => {
     });
     expect(recentAssistant).toBeDefined();
   });
+
+  it('starts incremental summaries after the previous coveredEndMessageId', async () => {
+    const { createCompressionCoordinator } = await import('@/components/BChatSidebar/utils/compression/coordinator');
+
+    // 已有摘要覆盖 m1-m30
+    const existingSummary = makeSummary({
+      id: 'summary-prev',
+      coveredStartMessageId: 'm1',
+      coveredEndMessageId: 'm30',
+      coveredUntilMessageId: 'm30',
+      summaryText: 'previous summary',
+      structuredSummary: {
+        goal: 'Existing goal',
+        recentTopic: 'Existing topic',
+        userPreferences: [],
+        constraints: [],
+        decisions: [],
+        importantFacts: [],
+        fileContext: [],
+        openQuestions: [],
+        pendingActions: []
+      }
+    });
+    const mockStorage = createMockStorage(existingSummary);
+
+    const coordinator = createCompressionCoordinator(mockStorage);
+
+    // 创建 92 条消息（46 轮），使得 m31-m92（31 轮）足以触发压缩阈值
+    const messages: Message[] = [];
+    const totalMessages = 92;
+    for (let i = 1; i <= totalMessages; i += 1) {
+      const role = i % 2 === 1 ? 'user' : 'assistant';
+      messages.push(
+        makeMsg({
+          id: `m${i}`,
+          role,
+          content: `Message ${i} with some extra padding to push the character estimate over the compression threshold`,
+          parts: [{ type: 'text', text: `Message ${i} with some extra padding to push the character estimate over the compression threshold` } as never]
+        })
+      );
+    }
+    const currentUserMessage = makeMsg({
+      id: 'current',
+      role: 'user',
+      content: 'Current question',
+      parts: [{ type: 'text', text: 'Current question' } as never]
+    });
+
+    await coordinator.prepareMessagesBeforeSend({
+      sessionId: 'session-1',
+      messages,
+      currentUserMessage,
+      excludeMessageIds: [currentUserMessage.id]
+    });
+
+    // 增量模式下，新摘要应该从上一条摘要的边界之后开始（m31）
+    expect(mockStorage.createSummary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        derivedFromSummaryId: 'summary-prev',
+        coveredStartMessageId: 'm31'
+      })
+    );
+  });
 });

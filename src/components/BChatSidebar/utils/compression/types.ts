@@ -109,6 +109,8 @@ export interface ConversationSummaryRecord {
   status: SummaryRecordStatus;
   /** 失效原因 */
   invalidReason?: string;
+  /** 降级原因（手动压缩触发体量降级时记录） */
+  degradeReason?: 'degraded_to_incremental';
   /** 创建时间 */
   createdAt: string;
   /** 更新时间 */
@@ -161,6 +163,16 @@ export interface TrimmedMessageItem {
   role: 'user' | 'assistant';
   /** 裁剪后的文本内容 */
   trimmedText: string;
+}
+
+/**
+ * 结构化摘要生成器的输入参数。
+ */
+export interface GenerateStructuredSummaryInput {
+  /** 规则裁剪后的消息项列表 */
+  items: TrimmedMessageItem[];
+  /** 上一条摘要记录（增量模式下传入） */
+  previousSummary?: Pick<ConversationSummaryRecord, 'summaryText' | 'structuredSummary'>;
 }
 
 /**

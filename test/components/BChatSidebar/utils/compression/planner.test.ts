@@ -212,4 +212,33 @@ describe('planner - classifyMessages', () => {
     expect(result.preservedMessages).not.toContain(completedMsg);
     expect(result.compressibleMessages).toContain(completedMsg);
   });
+
+  it('moves historical file-reference messages into the file-semantic layer', async () => {
+    const { planCompression } = await import('@/components/BChatSidebar/utils/compression/planner');
+    const messages: Message[] = [
+      makeMsg({
+        id: 'm1',
+        role: 'user',
+        content: 'Check src/app.ts lines 1-20',
+        references: [
+          {
+            token: '{{#file:1-20}}',
+            path: '/project/src/app.ts',
+            selectedContent: 'const value = 1;',
+            fullContent: 'const value = 1;',
+            startLine: 1,
+            endLine: 20
+          }
+        ]
+      }),
+      makeMsg({ id: 'm2', role: 'assistant', content: 'Done', parts: [{ type: 'text', text: 'Done' } as never] }),
+      makeMsg({ id: 'm3', role: 'user', content: 'recent msg', parts: [{ type: 'text', text: 'recent msg' } as never] }),
+      makeMsg({ id: 'm4', role: 'assistant', content: 'recent reply', parts: [{ type: 'text', text: 'recent reply' } as never] })
+    ];
+
+    // 保留最近 1 轮（2 条），m1-m2 在旧消息区间
+    const result = planCompression(messages, 1);
+    expect(result.fileSemanticMessages.map((m) => m.id)).toContain('m1');
+    expect(result.compressibleMessages.map((m) => m.id)).not.toContain('m1');
+  });
 });

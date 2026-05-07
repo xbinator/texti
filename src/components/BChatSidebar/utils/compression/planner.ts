@@ -3,7 +3,6 @@
  * @description 消息保留规则切分：根据保留规则将消息分为保留原文、文件语义和可摘要三类。
  */
 import type { MessageClassificationResult } from './types';
-import { partition } from 'lodash-es';
 import type { Message } from '@/components/BChatSidebar/utils/types';
 
 /**
@@ -48,6 +47,14 @@ function mustPreserve(message: Message): boolean {
 }
 
 /**
+ * 判断消息是否应作为文件语义层保留。
+ * 含有文件引用（references）的历史消息不应被简单丢弃，而应作为轻量语义输入进入摘要。
+ */
+function shouldPreserveAsFileSemantic(message: Message): boolean {
+  return (message.references?.length ?? 0) > 0;
+}
+
+/**
  * 对用户消息和助手消息列表按保留规则切分。
  * @param messages - 全量消息列表
  * @param preserveRounds - 保留的最近消息轮数
@@ -77,10 +84,21 @@ export function planCompression(
   const olderMessages = preserveCount > 0 ? eligibleMessages.slice(0, -preserveCount) : eligibleMessages;
 
   // 先处理旧消息
-  const [toPreserve, toCompress] = partition(olderMessages, mustPreserve);
-  const preservedMessages: Message[] = [...toPreserve];
-  const preservedMessageIds: string[] = toPreserve.map((msg) => msg.id);
-  const compressibleMessages: Message[] = [...toCompress];
+  const preservedMessages: Message[] = [];
+  const preservedMessageIds: string[] = [];
+  const fileSemanticMessages: Message[] = [];
+  const compressibleMessages: Message[] = [];
+
+  for (const msg of olderMessages) {
+    if (mustPreserve(msg)) {
+      preservedMessages.push(msg);
+      preservedMessageIds.push(msg.id);
+    } else if (shouldPreserveAsFileSemantic(msg)) {
+      fileSemanticMessages.push(msg);
+    } else {
+      compressibleMessages.push(msg);
+    }
+  }
 
   // 最近窗口内的消息全部保留原文
   for (const msg of recentMessages) {
@@ -89,7 +107,7 @@ export function planCompression(
 
   return {
     preservedMessages,
-    fileSemanticMessages: [],
+    fileSemanticMessages,
     compressibleMessages,
     preservedMessageIds
   };

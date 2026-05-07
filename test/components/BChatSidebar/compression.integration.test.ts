@@ -133,7 +133,7 @@ describe('Compression Integration', () => {
 
       const success = await compression.compress();
       expect(success).toBe(false);
-      expect(compression.error.value).toBe('No active session');
+      expect(compression.error.value).toBe('没有活跃的会话');
     });
 
     it('handles compression with empty messages', async () => {
@@ -146,7 +146,7 @@ describe('Compression Integration', () => {
 
       const success = await compression.compress();
       expect(success).toBe(false);
-      expect(compression.error.value).toBe('No messages to compress');
+      expect(compression.error.value).toBe('没有可压缩的消息');
     });
 
     it('supports manual compression even when the last message is from the assistant', async () => {
@@ -262,6 +262,30 @@ describe('Compression Integration', () => {
       expect(result.compressed).toBe(false);
       // Model messages may include system message, so just check it's greater than 0
       expect(result.modelMessages.length).toBeGreaterThan(0);
+    });
+
+    it('degrades manual full rebuild to incremental when trim input exceeds the hard limit', async () => {
+      const { createCompressionCoordinator } = await import('@/components/BChatSidebar/utils/compression/coordinator');
+      const { chatSummariesStorage } = await import('@/shared/storage/chat-summaries');
+
+      const coordinator = createCompressionCoordinator(chatSummariesStorage);
+
+      // 创建大量超长消息，确保 ruleTrim 超过 COMPRESSION_INPUT_CHAR_LIMIT (32,000)
+      // 注意：每条消息内容需不同，否则 ruleTrim 的去重逻辑会合并连续相同内容
+      const messages: Message[] = [];
+      for (let i = 1; i <= 200; i += 1) {
+        const role = i % 2 === 1 ? 'user' : 'assistant';
+        messages.push(createTestMessage(`m${i}`, role, `Message ${i} `.padEnd(1000, 'X')));
+      }
+
+      const summary = await coordinator.compressSessionManually({
+        sessionId: 'session-1',
+        messages
+      });
+
+      // 手动压缩降级时 buildMode 仍为 full_rebuild（用户意图），通过 degradeReason 标记执行层降级
+      expect(summary?.buildMode).toBe('full_rebuild');
+      expect(summary?.degradeReason).toBe('degraded_to_incremental');
     });
   });
 });

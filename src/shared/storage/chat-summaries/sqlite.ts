@@ -3,6 +3,7 @@
  * @description 聊天会话摘要的 SQLite 存储实现。
  */
 import { cloneDeep, orderBy } from 'lodash-es';
+import { CURRENT_SCHEMA_VERSION } from '@/components/BChatSidebar/utils/compression/constant';
 import type {
   ConversationSummaryRecord,
   StructuredConversationSummary,
@@ -29,9 +30,9 @@ const INSERT_SUMMARY_SQL = `
     source_message_ids_json, preserved_message_ids_json,
     summary_text, structured_summary_json,
     trigger_reason, message_count_snapshot, char_count_snapshot,
-    schema_version, status, invalid_reason,
+    schema_version, status, invalid_reason, degrade_reason,
     created_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
 
 const UPDATE_SUMMARY_STATUS_SQL = `
@@ -65,14 +66,55 @@ interface ChatSessionSummaryRow {
   schema_version: number;
   status: string;
   invalid_reason: string | null;
+  degrade_reason: string | null;
   created_at: string;
   updated_at: string;
 }
 
 /**
- * 将数据库行映射为摘要记录对象。
+ * 解析并验证结构化摘要 JSON。
+ * schema_version 不匹配或 JSON 格式错误时返回 null。
  */
-function mapRowToSummary(row: ChatSessionSummaryRow): ConversationSummaryRecord {
+function parseStructuredSummary(row: ChatSessionSummaryRow): StructuredConversationSummary | null {
+  // schema 版本校验
+  if (row.schema_version !== CURRENT_SCHEMA_VERSION) {
+    return null;
+  }
+
+  const parsed = parseJson<StructuredConversationSummary>(row.structured_summary_json);
+  if (!parsed) {
+    return null;
+  }
+
+  // 验证必需字段存在且类型正确
+  if (typeof parsed.goal !== 'string' || typeof parsed.recentTopic !== 'string') {
+    return null;
+  }
+
+  // 验证数组字段类型（防止畸形数据导致后续运行时错误）
+  const arrayFields: (keyof StructuredConversationSummary)[] = [
+    'userPreferences', 'constraints', 'decisions',
+    'importantFacts', 'fileContext', 'openQuestions', 'pendingActions'
+  ];
+  for (const field of arrayFields) {
+    if (!Array.isArray(parsed[field])) {
+      return null;
+    }
+  }
+
+  return parsed;
+}
+
+/**
+ * 将数据库行映射为摘要记录对象，解析并验证结构化摘要。
+ * 返回 null 表示该行数据无效应被跳过。
+ */
+function mapRowToSummary(row: ChatSessionSummaryRow): ConversationSummaryRecord | null {
+  const parsedSummary = parseStructuredSummary(row);
+  if (!parsedSummary) {
+    return null;
+  }
+
   return {
     id: row.id,
     sessionId: row.session_id,
@@ -84,23 +126,14 @@ function mapRowToSummary(row: ChatSessionSummaryRow): ConversationSummaryRecord 
     sourceMessageIds: parseJson<string[]>(row.source_message_ids_json) ?? [],
     preservedMessageIds: parseJson<string[]>(row.preserved_message_ids_json) ?? [],
     summaryText: row.summary_text,
-    structuredSummary: parseJson<StructuredConversationSummary>(row.structured_summary_json) ?? {
-      goal: '',
-      recentTopic: '',
-      userPreferences: [],
-      constraints: [],
-      decisions: [],
-      importantFacts: [],
-      fileContext: [],
-      openQuestions: [],
-      pendingActions: []
-    },
+    structuredSummary: parsedSummary,
     triggerReason: row.trigger_reason as 'message_count' | 'context_size' | 'manual',
     messageCountSnapshot: row.message_count_snapshot,
     charCountSnapshot: row.char_count_snapshot,
     schemaVersion: row.schema_version,
     status: row.status as SummaryRecordStatus,
     invalidReason: row.invalid_reason ?? undefined,
+    degradeReason: (row.degrade_reason as 'degraded_to_incremental' | null) ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -116,12 +149,23 @@ export const chatSummariesStorage: SummaryStorage = {
   async getValidSummary(sessionId: string): Promise<ConversationSummaryRecord | undefined> {
     if (isDatabaseAvailable()) {
       const rows = await dbSelect<ChatSessionSummaryRow>(SELECT_VALID_SUMMARY_SQL, [sessionId]);
-      return rows.length > 0 ? mapRowToSummary(rows[0]) : undefined;
+      // 尝试解析每一行，解析失败则标记无效并跳过
+      for (const row of rows) {
+        const parsed = mapRowToSummary(row);
+        if (parsed) {
+          return parsed;
+        }
+        // 解析失败：标记该行为 invalid
+        await chatSummariesStorage.updateSummaryStatus(row.id, 'invalid', 'unsupported_schema_version');
+      }
+      return undefined;
     }
 
-    // 降级到本地存储
+    // 降级到本地存储，过滤 schema_version 不匹配的摘要
     const allSummaries = local.getItem<ConversationSummaryRecord[]>(CHAT_SUMMARIES_STORAGE_KEY) ?? [];
-    const validSummaries = allSummaries.filter((s: ConversationSummaryRecord) => s.sessionId === sessionId && s.status === 'valid');
+    const validSummaries = allSummaries.filter((s: ConversationSummaryRecord) => {
+      return s.sessionId === sessionId && s.status === 'valid' && s.schemaVersion === CURRENT_SCHEMA_VERSION;
+    });
     const [latestSummary] = orderBy(validSummaries, ['createdAt'], ['desc']);
     return latestSummary;
   },
@@ -157,6 +201,7 @@ export const chatSummariesStorage: SummaryStorage = {
         newRecord.schemaVersion,
         newRecord.status,
         newRecord.invalidReason ?? null,
+        newRecord.degradeReason ?? null,
         newRecord.createdAt,
         newRecord.updatedAt
       ]);
@@ -201,7 +246,7 @@ export const chatSummariesStorage: SummaryStorage = {
   async getAllSummaries(sessionId: string): Promise<ConversationSummaryRecord[]> {
     if (isDatabaseAvailable()) {
       const rows = await dbSelect<ChatSessionSummaryRow>(SELECT_ALL_SUMMARIES_SQL, [sessionId]);
-      return rows.map(mapRowToSummary);
+      return rows.map(mapRowToSummary).filter((s): s is ConversationSummaryRecord => s !== null);
     }
 
     // 降级到本地存储

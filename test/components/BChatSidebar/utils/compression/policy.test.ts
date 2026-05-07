@@ -4,6 +4,58 @@
  */
 import type { ModelMessage } from 'ai';
 import { describe, expect, it } from 'vitest';
+import type { ConversationSummaryRecord } from '@/components/BChatSidebar/utils/compression/types';
+import type { Message } from '@/components/BChatSidebar/utils/types';
+
+/**
+ * 创建测试用基础消息。
+ */
+function makeMsg(overrides: Partial<Message> & { id: string }): Message {
+  return {
+    role: 'user',
+    content: '',
+    parts: [],
+    loading: false,
+    createdAt: new Date().toISOString(),
+    ...overrides
+  };
+}
+
+/**
+ * 创建测试用摘要记录。
+ */
+function makeSummary(overrides: Partial<ConversationSummaryRecord> = {}): ConversationSummaryRecord {
+  return {
+    id: 'summary-1',
+    sessionId: 'session-1',
+    buildMode: 'incremental',
+    coveredStartMessageId: 'm1',
+    coveredEndMessageId: 'm10',
+    coveredUntilMessageId: 'm10',
+    sourceMessageIds: ['m1'],
+    preservedMessageIds: [],
+    summaryText: '',
+    structuredSummary: {
+      goal: 'Test',
+      recentTopic: 'Testing',
+      userPreferences: [],
+      constraints: [],
+      decisions: [],
+      importantFacts: [],
+      fileContext: [],
+      openQuestions: [],
+      pendingActions: []
+    },
+    triggerReason: 'message_count',
+    messageCountSnapshot: 10,
+    charCountSnapshot: 2000,
+    schemaVersion: 1,
+    status: 'valid',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides
+  };
+}
 
 describe('estimateContextSize', () => {
   /**
@@ -78,5 +130,51 @@ describe('estimateContextSize', () => {
     ];
     const size = estimateContextSize(modelMessages);
     expect(size).toBeGreaterThan(40); // 'System prompt here' + 'User question' + 'Assistant answer'
+  });
+});
+
+describe('evaluateCompression with effective context', () => {
+  it('counts summary overhead and preserved passthrough messages when evaluating compression', async () => {
+    const { evaluateCompression } = await import('@/components/BChatSidebar/utils/compression/policy');
+
+    // 摘要注入开销 + preserved passthrough 消息应被计入 charCount
+    const summary = makeSummary({
+      coveredUntilMessageId: 'm10',
+      preservedMessageIds: ['m11'],
+      summaryText: 'S'.repeat(5000)
+    });
+    const messages: Message[] = [
+      makeMsg({ id: 'm11', role: 'assistant', content: 'P'.repeat(10000), parts: [{ type: 'text', text: 'P'.repeat(10000) } as never] }),
+      makeMsg({ id: 'm12', role: 'user', content: 'recent', parts: [{ type: 'text', text: 'recent' } as never] })
+    ];
+
+    const result = evaluateCompression(messages, summary);
+    // 有效上下文包含：summary 系统消息(5000+) + preserved m11(10000+) + recent m12(6)
+    // 所以至少 15000
+    expect(result.charCount).toBeGreaterThanOrEqual(15000);
+    expect(result.shouldCompress).toBe(true);
+  });
+
+  it('includes summary overhead in charCount when summary exists', async () => {
+    const { evaluateCompression } = await import('@/components/BChatSidebar/utils/compression/policy');
+
+    const summary = makeSummary({
+      coveredUntilMessageId: 'm5',
+      preservedMessageIds: [],
+      summaryText: 'A'.repeat(3000)
+    });
+    const messages: Message[] = [
+      makeMsg({ id: 'm1', role: 'user', content: 'hello', parts: [{ type: 'text', text: 'hello' } as never] }),
+      makeMsg({ id: 'm2', role: 'assistant', content: 'hi', parts: [{ type: 'text', text: 'hi' } as never] }),
+      makeMsg({ id: 'm3', role: 'user', content: 'hello', parts: [{ type: 'text', text: 'hello' } as never] }),
+      makeMsg({ id: 'm4', role: 'assistant', content: 'hi', parts: [{ type: 'text', text: 'hi' } as never] }),
+      makeMsg({ id: 'm5', role: 'user', content: 'hello', parts: [{ type: 'text', text: 'hello' } as never] }),
+      makeMsg({ id: 'm6', role: 'assistant', content: 'R'.repeat(25000), parts: [{ type: 'text', text: 'R'.repeat(25000) } as never] })
+    ];
+
+    const result = evaluateCompression(messages, summary);
+    // summary 系统消息(~3000) + recent m6(25000)
+    expect(result.charCount).toBeGreaterThanOrEqual(28000);
+    expect(result.shouldCompress).toBe(true);
   });
 });
