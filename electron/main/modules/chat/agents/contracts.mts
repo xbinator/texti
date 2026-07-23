@@ -11,6 +11,7 @@ import type {
   AgentCriteriaResult,
   AgentDelegationContinuationSnapshot,
   AgentDelegationCreatedPayload,
+  AgentDelegationReadyPayload,
   AgentEvidenceReference,
   AgentExecutionPlanSnapshot,
   AgentModelSnapshot,
@@ -159,17 +160,32 @@ export interface ChatAgentEventValidationFailure {
 /** Event runtime 校验结果。 */
 export type ChatAgentEventValidation = ChatAgentEventValidationSuccess | ChatAgentEventValidationFailure;
 
-/** 基础 Outbox 信封。 */
-export interface FoundationOutboxEnvelope {
-  /** 当前唯一内部交付事件。 */
-  eventType: 'delegation.created';
-  /** allowlist payload。 */
-  payload: AgentDelegationCreatedPayload;
+/** 基础 Outbox 信封的共享字段。 */
+interface FoundationOutboxEnvelopeBase {
   /** payload 完整性 hash。 */
   payloadHash: string;
   /** Outbox payload Schema 版本。 */
   schemaVersion: number;
 }
+
+/** Runtime A 挂起后的 delegation.created Outbox 信封。 */
+export interface FoundationCreatedOutboxEnvelope extends FoundationOutboxEnvelopeBase {
+  /** 创建事件判别。 */
+  eventType: 'delegation.created';
+  /** allowlist 创建 payload。 */
+  payload: AgentDelegationCreatedPayload;
+}
+
+/** Child 结果全部汇合后的 delegation.ready Outbox 信封。 */
+export interface FoundationReadyOutboxEnvelope extends FoundationOutboxEnvelopeBase {
+  /** 就绪事件判别。 */
+  eventType: 'delegation.ready';
+  /** allowlist 就绪 payload。 */
+  payload: AgentDelegationReadyPayload;
+}
+
+/** 由 eventType 判别 payload 的基础 Outbox 信封。 */
+export type FoundationOutboxEnvelope = FoundationCreatedOutboxEnvelope | FoundationReadyOutboxEnvelope;
 
 /** Outbox 成功校验结果。 */
 export interface FoundationOutboxValidationSuccess {
@@ -1148,6 +1164,7 @@ const AGENT_EVENT_TYPES = new Set<ChatAgentEventType>([
   'commit.journal_created',
   'commit.mutation_applied',
   'commit.finalized',
+  'protocol.error',
   'child.result_recorded',
   'delegation.ready',
   'delegation.cancel_requested',
@@ -1335,6 +1352,14 @@ function normalizeEventPayload(type: ChatAgentEventType, input: unknown): ChatAg
         normalizeAgentIdentity(input.journalId) !== null &&
         isSha256(input.finalHash);
       break;
+    case 'protocol.error':
+      valid =
+        hasExactKeys(input, ['reason', 'expectedHash', 'actualHash']) &&
+        typeof input.reason === 'string' &&
+        normalizeAgentIdentity(input.reason) !== null &&
+        isSha256(input.expectedHash) &&
+        isSha256(input.actualHash);
+      break;
     case 'child.result_recorded':
       valid =
         hasExactKeys(input, ['toolCallId', 'resultHash']) &&
@@ -1496,13 +1521,16 @@ export function validateFoundationOutbox(input: unknown): FoundationOutboxValida
   if (
     !isPlainRecord(input) ||
     !hasExactKeys(input, ['eventType', 'payload', 'payloadHash', 'schemaVersion']) ||
-    input.eventType !== 'delegation.created' ||
+    (input.eventType !== 'delegation.created' && input.eventType !== 'delegation.ready') ||
     input.schemaVersion !== 1 ||
     !isSha256(input.payloadHash) ||
-    !isPlainRecord(input.payload) ||
-    !hasExactKeys(input.payload, ['checkpointId', 'sessionId', 'turnId'])
+    !isPlainRecord(input.payload)
   ) {
     return fail('outbox_schema_invalid', 'Foundation Outbox envelope is invalid');
+  }
+  const payloadKeys = input.eventType === 'delegation.ready' ? ['checkpointId', 'sessionId', 'turnId', 'resultCount'] : ['checkpointId', 'sessionId', 'turnId'];
+  if (!hasExactKeys(input.payload, payloadKeys)) {
+    return fail('outbox_schema_invalid', 'Foundation Outbox payload schema is invalid');
   }
   const checkpointId = normalizeAgentIdentity(input.payload.checkpointId);
   const sessionId = normalizeAgentIdentity(input.payload.sessionId);
@@ -1510,19 +1538,31 @@ export function validateFoundationOutbox(input: unknown): FoundationOutboxValida
   if (!checkpointId || !sessionId || !turnId) {
     return fail('outbox_payload_invalid', 'Foundation Outbox payload fields are invalid');
   }
-  const payload: AgentDelegationCreatedPayload = { checkpointId, sessionId, turnId };
+  if (input.eventType === 'delegation.ready' && (!Number.isInteger(input.payload.resultCount) || (input.payload.resultCount as number) <= 0)) {
+    return fail('outbox_payload_invalid', 'Foundation ready Outbox result count is invalid');
+  }
+  const payload: AgentDelegationCreatedPayload | AgentDelegationReadyPayload =
+    input.eventType === 'delegation.ready'
+      ? { checkpointId, sessionId, turnId, resultCount: input.payload.resultCount as number }
+      : { checkpointId, sessionId, turnId };
   if (hashAgentPayload(payload) !== input.payloadHash) {
     return fail('outbox_hash_mismatch', 'Foundation Outbox hash does not match its payload');
   }
-  return {
-    ok: true,
-    outbox: deepFreeze({
-      eventType: 'delegation.created',
-      payload,
-      payloadHash: input.payloadHash,
-      schemaVersion: 1
-    })
-  };
+  const outbox: FoundationOutboxEnvelope =
+    input.eventType === 'delegation.ready'
+      ? {
+          eventType: 'delegation.ready',
+          payload: payload as AgentDelegationReadyPayload,
+          payloadHash: input.payloadHash,
+          schemaVersion: 1
+        }
+      : {
+          eventType: 'delegation.created',
+          payload: payload as AgentDelegationCreatedPayload,
+          payloadHash: input.payloadHash,
+          schemaVersion: 1
+        };
+  return { ok: true, outbox: deepFreeze(outbox) };
 }
 
 /**

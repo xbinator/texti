@@ -16,8 +16,10 @@ import type {
   ChatRuntimeStreamAborter,
   ChatRuntimeStreamExecutor
 } from './types.mjs';
+import type { ChatAgentPrimaryContinuationInput, ChatAgentPrimaryContinuationResult } from '../agents/service.mjs';
 import type { AIServiceError, AIToolExecutionResult, AIUsage } from 'types/ai';
 import type { ChatMessageCompactionPart, ChatMessagePart, ChatMessageRecord, ChatPendingInteraction, CompactionModelSnapshot } from 'types/chat';
+import type { AgentTaskError } from 'types/chat-agent';
 import type {
   ChatRuntimeAbortInput,
   ChatRuntimeAbortResult,
@@ -47,6 +49,7 @@ import { AI_ERROR_CODE, createAIServiceError, isAIServiceError } from '../../ai/
 import { aiService } from '../../ai/service.mjs';
 import { getLoopStopReason, type ToolLoopStopReason, type ToolStepSnapshot } from '../../ai/tool-loop-policy.mjs';
 import { log } from '../../logger/service.mjs';
+import { hashAgentPayload } from '../agents/contracts.mjs';
 import { chatAgentDelegationService } from '../agents/service.mjs';
 import { chatSessionManager } from '../service.mjs';
 import { createArtifactRegistry } from './compaction/artifact-registry.mjs';
@@ -60,7 +63,7 @@ import { createRuntimeConfirmationRequests, type RuntimeConfirmationRequestInput
 import { createRuntimeRendererToolRequests } from './controllers/renderer-tool.mjs';
 import { ChatRuntimeError } from './errors.mjs';
 import { chatRuntimeLocks, createRuntimeLockRegistry, type RuntimeLockResult } from './infrastructure/locks.mjs';
-import { findLastRuntimeAssistantMessage, findLastRuntimeUserMessage, normalizeContinuationMessages } from './messages/continuation.mjs';
+import { findLastRuntimeAssistantMessage, findLastRuntimeUserMessage, injectAgentResults, normalizeContinuationMessages } from './messages/continuation.mjs';
 import { createRuntimeAssistantPlaceholder, createRuntimeInterruptMessage, createRuntimeUserMessage } from './messages/factory.mjs';
 import { materializeRuntimeFileParts } from './messages/file-parts.mjs';
 import {
@@ -73,7 +76,13 @@ import { applyRuntimeContext } from './messages/runtime-context.mjs';
 import { applyUserChoiceAnswer, cloneRuntimeMessage } from './messages/user-choice.mjs';
 import { createAutoNamePrompt, normalizeAutoNameTitle } from './model/auto-name.mjs';
 import { createDefaultChatModelResolver } from './model/resolver.mjs';
-import { createCompactRuntime, createContinuationRuntime, createSendRuntime, createUserChoiceRuntime } from './runners/factory.mjs';
+import {
+  createCompactRuntime,
+  createContinuationRuntime,
+  createPrimaryContinuationRuntime,
+  createSendRuntime,
+  createUserChoiceRuntime
+} from './runners/factory.mjs';
 import { createPersistableAssistant } from './stream/deferred-tools.mjs';
 import { createRuntimeStreamExecutor } from './stream/index.mjs';
 import { getRuntimeTaskDeadlineAt, getRuntimeTaskTimeout } from './task-clock.mjs';
@@ -111,16 +120,16 @@ function createDefaultEmitter(): ChatRuntimeServiceDependencies['emit'] {
  */
 function createDefaultMessageWriter(): ChatRuntimeMessageWriter {
   return {
-    addMessage(message: ChatMessageRecord): void {
-      chatSessionManager.addMessage(message);
+    addMessage(message: ChatMessageRecord, ownerCheckpointId?: string): void {
+      chatSessionManager.addMessage(message, ownerCheckpointId);
     },
 
-    updateMessage(message: ChatMessageRecord): void {
-      chatSessionManager.updateMessage(message);
+    updateMessage(message: ChatMessageRecord, ownerCheckpointId?: string): void {
+      chatSessionManager.updateMessage(message, ownerCheckpointId);
     },
 
-    deleteMessage(sessionId: string, messageId: string): void {
-      chatSessionManager.deleteMessage(sessionId, messageId);
+    deleteMessage(sessionId: string, messageId: string, ownerCheckpointId?: string): void {
+      chatSessionManager.deleteMessage(sessionId, messageId, ownerCheckpointId);
     }
   };
 }
@@ -195,6 +204,27 @@ function normalizeRuntimeStreamError(error: unknown): AIServiceError {
   if (error instanceof Error) return createAIServiceError(AI_ERROR_CODE.REQUEST_FAILED, error.message);
 
   return createAIServiceError(AI_ERROR_CODE.REQUEST_FAILED, 'ChatRuntime stream failed');
+}
+
+/**
+ * 创建 Primary continuation 安全失败后的持久化机器错误。
+ * @param runtime - continuation Runtime B
+ * @param phase - 启动或模型执行阶段
+ * @returns 可由 Coordinator 直接终态化的错误
+ */
+function createPrimaryError(runtime: ActiveChatRuntime, phase: 'starting' | 'runtime'): AgentTaskError {
+  return {
+    code: phase === 'starting' ? 'runtime_start_failed' : 'runtime_failed',
+    phase,
+    category: 'runtime',
+    retryable: false,
+    message: phase === 'starting' ? 'Primary continuation failed to start' : 'Primary continuation failed during execution',
+    details: {
+      reason: phase === 'starting' ? 'primary_continuation_start_failed' : 'primary_continuation_runtime_failed',
+      checkpointId: runtime.ownerCheckpointId,
+      runtimeId: runtime.runtimeId
+    }
+  };
 }
 
 /**
@@ -475,6 +505,28 @@ export function createChatRuntimeService(dependencies: Partial<ChatRuntimeServic
   }
 
   /**
+   * 在失败 assistant 已落盘后必达清理 Runtime，并尽力广播错误。
+   * completeRuntime 在任何 complete 事件前先删除活动状态并释放短写锁。
+   * @param runtime - 已安全持久化失败的 Runtime
+   * @param runtimeError - 对应 AI 错误
+   */
+  function completeFailedRuntime(runtime: ActiveChatRuntime, runtimeError: AIServiceError): void {
+    try {
+      completeRuntime(runtime);
+    } catch {
+      // Renderer 事件异常不能逆转已经完成的活动状态和短写锁清理。
+    }
+    try {
+      emit('chat:runtime:error', {
+        ...createRuntimeEventBase(runtime),
+        error: runtimeError
+      });
+    } catch {
+      // 错误广播是 best-effort；持久化失败 assistant 才是终态依据。
+    }
+  }
+
+  /**
    * 更新 assistant 草稿并发送 runtime 事件。
    * @param runtime - runtime 状态
    * @param message - assistant 草稿消息
@@ -483,7 +535,7 @@ export function createChatRuntimeService(dependencies: Partial<ChatRuntimeServic
     if (!activeRuntimes.has(runtime.runtimeId)) return;
 
     const safeCandidate = structuredClone(message);
-    await messageWriter.updateMessage(safeCandidate);
+    await messageWriter.updateMessage(safeCandidate, runtime.ownerCheckpointId);
     if (!activeRuntimes.has(runtime.runtimeId)) return;
 
     safeAssistantMessages.set(runtime.runtimeId, structuredClone(safeCandidate));
@@ -501,7 +553,7 @@ export function createChatRuntimeService(dependencies: Partial<ChatRuntimeServic
    * @param assistantMessage - assistant 占位消息
    */
   async function deleteAssistantMessage(runtime: ActiveChatRuntime, assistantMessage: ChatMessageRecord): Promise<void> {
-    await messageWriter.deleteMessage?.(assistantMessage.sessionId, assistantMessage.id);
+    await messageWriter.deleteMessage?.(assistantMessage.sessionId, assistantMessage.id, runtime.ownerCheckpointId);
     emit('chat:runtime:message-deleted', {
       ...createRuntimeEventBase(runtime),
       messageId: assistantMessage.id
@@ -781,7 +833,7 @@ export function createChatRuntimeService(dependencies: Partial<ChatRuntimeServic
     let currentSourceMessages = sourceMessages;
     let accumulatedUsage: AIUsage | undefined;
     let completedSteps = 0;
-    let forceFinal = false;
+    let forceFinal = runtime.forceFinal ?? false;
     let shouldRun = true;
     const toolSteps: ToolStepSnapshot[] = [];
 
@@ -863,29 +915,30 @@ export function createChatRuntimeService(dependencies: Partial<ChatRuntimeServic
     userMessage: ChatMessageRecord,
     assistantMessage: ChatMessageRecord,
     sourceMessageSnapshot?: ChatMessageRecord[]
-  ): Promise<void> {
+  ): Promise<ChatAgentPrimaryContinuationResult> {
     try {
       const sourceMessages = await readRuntimeSourceMessages(runtime, userMessage, assistantMessage, sourceMessageSnapshot);
       const result = await executeRuntimeStreamRounds(runtime, sourceMessages, userMessage, assistantMessage);
       if (result.checkpointId) {
         completeRuntime(runtime, result.usage, 'waiting_children', result.checkpointId);
-        return;
+        return { outcome: 'completed' };
       }
       completeRuntime(runtime, result.usage, isAssistantAwaitingUserInput(assistantMessage) ? 'awaiting_user_input' : 'completed');
+      return { outcome: 'completed' };
     } catch (error) {
-      if (!activeRuntimes.has(runtime.runtimeId)) return;
+      if (!activeRuntimes.has(runtime.runtimeId)) throw error;
 
       const runtimeError = normalizeRuntimeStreamError(error);
       const safeMessage = structuredClone(safeAssistantMessages.get(runtime.runtimeId) ?? assistantMessage);
       markAssistantMessageFailed(safeMessage, runtimeError);
       activeAssistantMessages.set(runtime.runtimeId, safeMessage);
-      await updateAssistantMessage(runtime, safeMessage);
-      if (!activeRuntimes.has(runtime.runtimeId)) return;
-      emit('chat:runtime:error', {
-        ...createRuntimeEventBase(runtime),
-        error: runtimeError
-      });
-      completeRuntime(runtime);
+      await messageWriter.updateMessage(structuredClone(safeMessage), runtime.ownerCheckpointId);
+      safeAssistantMessages.set(runtime.runtimeId, structuredClone(safeMessage));
+      if (!activeRuntimes.has(runtime.runtimeId)) {
+        return { outcome: 'failed', phase: 'runtime', error: createPrimaryError(runtime, 'runtime') };
+      }
+      completeFailedRuntime(runtime, runtimeError);
+      return { outcome: 'failed', phase: 'runtime', error: createPrimaryError(runtime, 'runtime') };
     }
   }
 
@@ -1066,6 +1119,113 @@ export function createChatRuntimeService(dependencies: Partial<ChatRuntimeServic
   }
 
   return {
+    /**
+     * 从已 claim Checkpoint 启动内部 Primary Runtime B。
+     * 此入口不接受 Renderer model/messages/tools 覆盖，且只使用 continuation fence owner 写入。
+     * @param input - claimed Checkpoint、Runtime ID 与冻结易失上下文
+     * @returns Runtime B 安全执行结果
+     */
+    async resumePrimary(input: ChatAgentPrimaryContinuationInput): Promise<ChatAgentPrimaryContinuationResult> {
+      const { checkpoint, context } = input;
+      if (
+        checkpoint.status !== 'resuming' ||
+        checkpoint.resumeRuntimeId !== input.runtimeId ||
+        checkpoint.recordState !== 'active' ||
+        checkpoint.continuationSnapshot.modelSnapshot.providerId !== context.modelSnapshot.providerId ||
+        checkpoint.continuationSnapshot.modelSnapshot.modelId !== context.modelSnapshot.modelId ||
+        checkpoint.continuationSnapshot.toolSchemaSnapshotHash !== hashAgentPayload(context.toolSchemaSnapshot)
+      ) {
+        throw new ChatRuntimeError('INVALID_CONTINUATION', 'Primary continuation snapshot failed integrity validation');
+      }
+      assertRuntimeIdAvailable(input.runtimeId);
+      const lock = locks.acquireContinuationWritingLock({
+        sessionId: checkpoint.sessionId,
+        runtimeId: input.runtimeId,
+        checkpointId: checkpoint.checkpointId
+      });
+      assertWritingLock(checkpoint.sessionId, lock);
+
+      const runtime = createPrimaryContinuationRuntime({
+        checkpointId: checkpoint.checkpointId,
+        runtimeId: input.runtimeId,
+        sessionId: checkpoint.sessionId,
+        turnId: checkpoint.turnId,
+        primaryAgentId: checkpoint.primaryAgentId,
+        rootRuntimeId: checkpoint.rootRuntimeId,
+        sourceRuntimeId: checkpoint.sourceRuntimeId,
+        context
+      });
+      activeRuntimes.set(runtime.runtimeId, runtime);
+      let sourceAssistant: ChatMessageRecord | undefined;
+      try {
+        const messages = (await messageReader.getMessages(checkpoint.sessionId)).map(cloneRuntimeMessage);
+        const userMessage = findLastRuntimeUserMessage(messages);
+        sourceAssistant = messages.find((message): boolean => message.id === checkpoint.assistantMessageId && message.role === 'assistant');
+        if (!sourceAssistant) {
+          throw new ChatRuntimeError('INVALID_CONTINUATION', 'Primary continuation source assistant is missing');
+        }
+        if (!userMessage || hashAgentPayload(sourceAssistant) !== checkpoint.continuationSnapshot.sourceMessageRevision) {
+          throw new ChatRuntimeError('INVALID_CONTINUATION', 'Primary continuation source message revision is stale');
+        }
+        const assistantMessage = injectAgentResults(sourceAssistant, checkpoint.continuationSnapshot.orderedToolCalls, checkpoint.terminalResults);
+        ensureRuntimeMessageCreatedAt(assistantMessage, now());
+        assistantMessage.runtimeId = runtime.runtimeId;
+        assistantMessage.agentId = runtime.agentId;
+        assistantMessage.parentRuntimeId = runtime.parentRuntimeId;
+        assistantMessage.loading = true;
+        assistantMessage.finished = false;
+        activeAssistantMessages.set(runtime.runtimeId, assistantMessage);
+        const sourceMessageSnapshot = messages.map(
+          (message): ChatMessageRecord => (message.id === assistantMessage.id ? structuredClone(assistantMessage) : message)
+        );
+
+        // 结构化 Child 结果在模型启动前先由 fence owner 原子投影到原 assistant。
+        await messageWriter.updateMessage(structuredClone(assistantMessage), checkpoint.checkpointId);
+        safeAssistantMessages.set(runtime.runtimeId, structuredClone(assistantMessage));
+        emit('chat:runtime:message-updated', {
+          ...createRuntimeEventBase(runtime),
+          message: structuredClone(assistantMessage)
+        });
+        return await runRuntimeStream(runtime, userMessage, assistantMessage, sourceMessageSnapshot);
+      } catch (error) {
+        if (sourceAssistant && activeRuntimes.has(runtime.runtimeId)) {
+          const runtimeError = normalizeRuntimeStreamError(error);
+          const failedMessage = structuredClone(activeAssistantMessages.get(runtime.runtimeId) ?? sourceAssistant);
+          ensureRuntimeMessageCreatedAt(failedMessage, now());
+          failedMessage.runtimeId = runtime.runtimeId;
+          failedMessage.agentId = runtime.agentId;
+          failedMessage.parentRuntimeId = runtime.parentRuntimeId;
+          markAssistantMessageFailed(failedMessage, runtimeError);
+          activeAssistantMessages.set(runtime.runtimeId, failedMessage);
+          try {
+            await messageWriter.updateMessage(structuredClone(failedMessage), runtime.ownerCheckpointId);
+            safeAssistantMessages.set(runtime.runtimeId, structuredClone(failedMessage));
+          } catch (persistError) {
+            activeRuntimes.delete(runtime.runtimeId);
+            activeAssistantMessages.delete(runtime.runtimeId);
+            safeAssistantMessages.delete(runtime.runtimeId);
+            rendererToolRequests.rejectRuntime(runtime.runtimeId, 'Primary continuation start failed');
+            confirmationRequests.rejectRuntime(runtime.runtimeId, 'Primary continuation start failed');
+            bridgeRequests.rejectRuntime(runtime.runtimeId, 'Primary continuation start failed');
+            locks.releaseWritingLock({ sessionId: runtime.sessionId, runtimeId: runtime.runtimeId });
+            throw persistError;
+          }
+          completeFailedRuntime(runtime, runtimeError);
+          return { outcome: 'failed', phase: 'starting', error: createPrimaryError(runtime, 'starting') };
+        }
+        if (activeRuntimes.has(runtime.runtimeId)) {
+          activeRuntimes.delete(runtime.runtimeId);
+          activeAssistantMessages.delete(runtime.runtimeId);
+          safeAssistantMessages.delete(runtime.runtimeId);
+          rendererToolRequests.rejectRuntime(runtime.runtimeId, 'Primary continuation start failed');
+          confirmationRequests.rejectRuntime(runtime.runtimeId, 'Primary continuation start failed');
+          bridgeRequests.rejectRuntime(runtime.runtimeId, 'Primary continuation start failed');
+          locks.releaseWritingLock({ sessionId: runtime.sessionId, runtimeId: runtime.runtimeId });
+        }
+        throw error;
+      }
+    },
+
     /**
      * 启动一轮 ChatRuntime。
      * @param input - 发送内容与 renderer 快照

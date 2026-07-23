@@ -646,19 +646,20 @@ function parseOutbox(row: OutboxRow): AgentOutboxRecord {
   if (deliveryStatus !== 'pending' && deliveryStatus !== 'delivered') {
     throw new AgentStoreProtocolError('outbox_status_invalid', 'Invalid persisted outbox status');
   }
-  return {
+  const base = {
     outboxId: requireString(row.outbox_id, 'outbox id'),
     dedupeKey: requireString(row.dedupe_key, 'outbox dedupe key'),
-    eventType: validation.outbox.eventType,
-    payload: validation.outbox.payload,
     payloadHash: validation.outbox.payloadHash,
     schemaVersion: validation.outbox.schemaVersion,
-    deliveryStatus,
+    deliveryStatus: deliveryStatus as 'pending' | 'delivered',
     attemptCount: requireInteger(row.attempt_count, 'outbox attempt count'),
     ...(optionalString(row.delivered_at, 'outbox delivered at') ? { deliveredAt: row.delivered_at as string } : {}),
     createdAt: requireString(row.created_at, 'outbox created at'),
     updatedAt: requireString(row.updated_at, 'outbox updated at')
   };
+  return validation.outbox.eventType === 'delegation.ready'
+    ? { ...base, eventType: 'delegation.ready', payload: validation.outbox.payload }
+    : { ...base, eventType: 'delegation.created', payload: validation.outbox.payload };
 }
 
 /**
@@ -1352,7 +1353,8 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
 
   /** @inheritdoc */
   recordTaskResult(input: RecordTaskResultInput): AgentCheckpointRecord {
-    return this.database.transaction((): AgentCheckpointRecord => {
+    let replayConflict: AgentStoreProtocolError | undefined;
+    const recordedCheckpoint = this.database.transaction((): AgentCheckpointRecord => {
       const task = this.getTask(input.taskId);
       const checkpoint = this.getCheckpoint(input.checkpointId);
       if (!task || !checkpoint) throw new AgentStoreProtocolError('result_target_missing', 'Task or Checkpoint does not exist');
@@ -1388,17 +1390,36 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       if (task.resultHash) {
         const envelope = checkpoint.terminalResults[task.toolCallId];
         if (
-          task.resultHash !== input.resultHash ||
           !task.result ||
-          hashAgentPayload(task.result) !== computedHash ||
+          hashAgentPayload(task.result) !== task.resultHash ||
           !envelope ||
-          envelope.resultHash !== computedHash ||
-          hashAgentPayload(envelope.result) !== computedHash ||
+          envelope.resultHash !== task.resultHash ||
+          hashAgentPayload(envelope.result) !== task.resultHash ||
           envelope.result.taskId !== task.taskId ||
           envelope.result.agentId !== task.agentId ||
           envelope.result.attemptId !== task.currentAttemptId
         ) {
           throw new AgentStoreProtocolError('result_replay_conflict', 'Task result replay conflicts with persisted Task or Checkpoint result');
+        }
+        if (task.resultHash !== computedHash) {
+          // 冲突审计必须在事务提交后再抛错，否则 append-only Event 会随 throw 回滚。
+          this.appendEvent(
+            'task',
+            task.taskId,
+            'protocol.error',
+            {
+              reason: 'result_replay_conflict',
+              expectedHash: task.resultHash,
+              actualHash: computedHash
+            },
+            input.occurredAt,
+            'coordinator'
+          );
+          replayConflict = new AgentStoreProtocolError(
+            'result_replay_conflict',
+            'Task result replay conflicts with the already persisted canonical result',
+            'result_validation'
+          );
         }
         return checkpoint;
       }
@@ -1512,11 +1533,37 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
           input.occurredAt,
           'coordinator'
         );
+        const readyPayload = {
+          checkpointId: checkpoint.checkpointId,
+          sessionId: checkpoint.sessionId,
+          turnId: checkpoint.turnId,
+          resultCount: Object.keys(terminalResults).length
+        };
+        this.database.execute(
+          `INSERT INTO chat_agent_outbox (
+            outbox_id, dedupe_key, event_type, payload_json, payload_hash, schema_version,
+            delivery_status, attempt_count, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            `delegation-ready-${checkpoint.checkpointId}`,
+            `delegation.ready:${checkpoint.checkpointId}`,
+            'delegation.ready',
+            JSON.stringify(readyPayload),
+            hashAgentPayload(readyPayload),
+            1,
+            'pending',
+            0,
+            input.occurredAt,
+            input.occurredAt
+          ]
+        );
       }
       const updated = this.getCheckpoint(checkpoint.checkpointId);
       if (!updated) throw new AgentStoreProtocolError('checkpoint_projection_missing', 'Updated Checkpoint is missing');
       return updated;
     });
+    if (replayConflict) throw replayConflict;
+    return recordedCheckpoint;
   }
 
   /** @inheritdoc */
@@ -1803,6 +1850,12 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       .map(parseEvent);
     this.validateEventHistory(aggregateKind, aggregateId, events);
     return events;
+  }
+
+  /** @inheritdoc */
+  getOutbox(dedupeKey: string): AgentOutboxRecord | null {
+    const row = this.database.select<OutboxRow>('SELECT * FROM chat_agent_outbox WHERE dedupe_key = ?', [dedupeKey])[0];
+    return row ? parseOutbox(row) : null;
   }
 
   /** @inheritdoc */

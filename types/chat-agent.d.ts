@@ -418,6 +418,18 @@ export interface AgentDelegationCreatedPayload {
   readonly turnId: string;
 }
 
+/** 全部 Child 结果已原子汇合后的 delegation.ready Outbox payload。 */
+export interface AgentDelegationReadyPayload {
+  /** 可由 Primary Runtime B claim 的 Checkpoint。 */
+  readonly checkpointId: string;
+  /** Checkpoint 所属会话。 */
+  readonly sessionId: string;
+  /** Checkpoint 所属 Turn。 */
+  readonly turnId: string;
+  /** 按冻结 tool-call 顺序汇合的结果数量。 */
+  readonly resultCount: number;
+}
+
 /** Agent 审计事件的稳定来源。 */
 export type ChatAgentEventSource = 'primary' | 'coordinator' | 'child' | 'runtime' | 'user' | 'system';
 
@@ -441,6 +453,7 @@ export type ChatAgentEventType =
   | 'commit.journal_created'
   | 'commit.mutation_applied'
   | 'commit.finalized'
+  | 'protocol.error'
   | 'child.result_recorded'
   | 'delegation.ready'
   | 'delegation.cancel_requested'
@@ -470,6 +483,7 @@ export type ChatAgentTaskEventType =
   | 'commit.journal_created'
   | 'commit.mutation_applied'
   | 'commit.finalized'
+  | 'protocol.error'
   | 'task.completed'
   | 'task.failed'
   | 'task.cancelled'
@@ -516,6 +530,8 @@ export interface ChatAgentEventPayloadMap {
   'commit.mutation_applied': { journalId: string; operationId: string; targetHash: string };
   /** commit journal 已验证并结束。 */
   'commit.finalized': { journalId: string; finalHash: string };
+  /** 幂等写入收到与已持久化事实冲突的协议输入。 */
+  'protocol.error': { reason: string; expectedHash: string; actualHash: string };
   /** Child 终态结果已按 tool-call ID 写入。 */
   'child.result_recorded': { toolCallId: string; resultHash: string };
   /** 所有结果已汇合。 */

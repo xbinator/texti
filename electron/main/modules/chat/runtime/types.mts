@@ -56,6 +56,10 @@ export interface ActiveChatRuntime extends ChatRuntimeAddress {
   skillContentHashes?: Record<string, string>;
   /** 当前生命周期内生效的临时 Runtime 上下文。 */
   runtimeContext?: ChatRuntimeContext;
+  /** 内部 continuation fence owner；Renderer 输入不能设置。 */
+  ownerCheckpointId?: string;
+  /** 内部续接是否必须禁用工具并在单轮生成最终回答。 */
+  forceFinal?: boolean;
   /** Tavily 运行时配置。 */
   tavily?: AITavilyRuntimeConfig;
   /** MCP 运行时配置。 */
@@ -115,18 +119,18 @@ export interface ChatRuntimeMessageWriter {
    * 新增聊天消息。
    * @param message - 聊天消息
    */
-  addMessage(message: ChatMessageRecord): Promise<void> | void;
+  addMessage(message: ChatMessageRecord, ownerCheckpointId?: string): Promise<void> | void;
   /**
    * 更新聊天消息。
    * @param message - 聊天消息
    */
-  updateMessage(message: ChatMessageRecord): Promise<void> | void;
+  updateMessage(message: ChatMessageRecord, ownerCheckpointId?: string): Promise<void> | void;
   /**
    * 删除聊天消息。
    * @param sessionId - 会话 ID
    * @param messageId - 消息 ID
    */
-  deleteMessage?(sessionId: string, messageId: string): Promise<void> | void;
+  deleteMessage?(sessionId: string, messageId: string, ownerCheckpointId?: string): Promise<void> | void;
 }
 
 /** Runtime 消息读取器。 */
@@ -191,6 +195,33 @@ export interface ChatRuntimeDelegationPrepareInput {
 export interface ChatRuntimeDelegationPrepareAck {
   /** 完整原子 prepare 已在当前调用栈内提交。 */
   readonly prepared: true;
+}
+
+/** Runtime B 续接允许保留的非敏感内存上下文。 */
+export interface ChatRuntimePrimaryContinuationContext {
+  /** Renderer 路由客户端。 */
+  readonly clientId: string;
+  /** 冻结模型身份，不含 Provider 凭据。 */
+  readonly modelSnapshot: {
+    /** Provider 注册标识。 */
+    readonly providerId: string;
+    /** 模型注册标识。 */
+    readonly modelId: string;
+  };
+  /** Runtime A 的工具 Schema 快照，仅用于恢复完整性校验。 */
+  readonly toolSchemaSnapshot: readonly AITransportTool[];
+  /** 可选上下文窗口。 */
+  readonly contextWindow?: number;
+  /** 可选系统提示。 */
+  readonly system?: string;
+  /** 可选工作区根目录。 */
+  readonly workspaceRoot?: string;
+  /** Renderer 能力描述符。 */
+  readonly capabilities?: ChatRuntimeCapabilityDescriptor;
+  /** 当前启用 Skill 的内容版本。 */
+  readonly skillContentHashes?: Readonly<Record<string, string>>;
+  /** 当前 Turn 的临时上下文。 */
+  readonly runtimeContext?: ChatRuntimeContext;
 }
 
 /**

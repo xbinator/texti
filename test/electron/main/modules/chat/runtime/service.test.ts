@@ -2,6 +2,8 @@
  * @file service.test.ts
  * @description ChatRuntime 主进程服务骨架测试。
  */
+import type { ChatAgentPrimaryContinuationInput } from '../../../../../../electron/main/modules/chat/agents/service.mjs';
+import type { AgentCheckpointRecord } from '../../../../../../electron/main/modules/chat/agents/types.mjs';
 import type {
   CompactionExecuteInput,
   CompactionExecuteResult,
@@ -25,6 +27,7 @@ import type {
   ChatRuntimeSendInput
 } from 'types/chat-runtime';
 import { describe, expect, it, vi } from 'vitest';
+import { hashAgentPayload } from '../../../../../../electron/main/modules/chat/agents/contracts.mjs';
 import { createRuntimeLockRegistry } from '../../../../../../electron/main/modules/chat/runtime/infrastructure/locks.mjs';
 import { createChatRuntimeService } from '../../../../../../electron/main/modules/chat/runtime/service.mjs';
 import { chatSessionManager } from '../../../../../../electron/main/modules/chat/service.mjs';
@@ -3861,5 +3864,294 @@ describe('chat runtime service shell', (): void => {
     });
 
     streamDeferred.resolve();
+  });
+
+  it('runs an internal Primary Runtime B from frozen input with ordered results and fence-owner writes', async (): Promise<void> => {
+    const locks = createRuntimeLockRegistry();
+    const fence = locks.acquireContinuationFence({
+      scope: 'session:session-1/history',
+      checkpointId: 'checkpoint-1'
+    });
+    if (!fence) throw new Error('Continuation fence fixture must be acquired');
+    const userMessage = createMessageRecord('user-1', 'user', 'delegate both tasks', '2026-07-23T00:00:00.000Z');
+    const assistantMessage: ChatMessageRecord = {
+      id: 'assistant-1',
+      sessionId: 'session-1',
+      role: 'assistant',
+      content: '',
+      parts: [
+        {
+          id: 'delegate-part-1',
+          type: 'tool',
+          toolCallId: 'call-1',
+          toolName: 'delegate_task',
+          status: 'executing',
+          input: { task: 'first' }
+        },
+        {
+          id: 'delegate-part-2',
+          type: 'tool',
+          toolCallId: 'call-2',
+          toolName: 'delegate_task',
+          status: 'executing',
+          input: { task: 'second' }
+        }
+      ],
+      runtimeId: 'runtime-a',
+      agentId: 'primary',
+      loading: true,
+      finished: false,
+      createdAt: '2026-07-23T00:00:00.000Z'
+    };
+    const createTerminalResult = (taskId: string, agentId: string, attemptId: string) => ({
+      taskId,
+      agentId,
+      attemptId,
+      executionStatus: 'completed' as const,
+      completion: { level: 'none' as const, criteria: [] },
+      summary: `Result for ${taskId}`,
+      warnings: [],
+      artifacts: [],
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        modelCalls: 0,
+        toolRounds: 0,
+        queueDurationMs: 0,
+        executionDurationMs: 0,
+        externalRequests: 0,
+        monetaryCost: {
+          currency: 'unknown' as const,
+          pricingVersion: 'unknown' as const,
+          estimated: 'unknown' as const,
+          actual: 'unknown' as const
+        }
+      }
+    });
+    const firstResult = createTerminalResult('task-1', 'child-1', 'attempt-1');
+    const secondResult = createTerminalResult('task-2', 'child-2', 'attempt-2');
+    const toolSchemaSnapshot = [{ name: 'delegate_task', description: 'deferred', parameters: { type: 'object' as const } }];
+    const continuationSnapshot = {
+      checkpointSchemaVersion: 1,
+      policyVersion: 'foundation-v1',
+      modelSnapshot: { providerId: 'provider-frozen', modelId: 'model-frozen' },
+      continuationContextReference: 'continuation-1',
+      continuationContextHash: 'a'.repeat(64),
+      sourceMessageRevision: hashAgentPayload(assistantMessage),
+      toolSchemaSnapshotHash: hashAgentPayload(toolSchemaSnapshot),
+      orderedToolCalls: [
+        {
+          toolCallId: 'call-1',
+          taskId: 'task-1',
+          required: true,
+          argumentsHash: 'b'.repeat(64),
+          providerMetadataHash: 'c'.repeat(64)
+        },
+        {
+          toolCallId: 'call-2',
+          taskId: 'task-2',
+          required: true,
+          argumentsHash: 'd'.repeat(64),
+          providerMetadataHash: 'e'.repeat(64)
+        }
+      ],
+      reservedResumeBudget: { tokenLimit: 100, costLimitUsd: 0, pricingVersion: 'unknown' },
+      absoluteTurnDeadline: '2026-07-23T01:00:00.000Z'
+    };
+    const checkpoint = {
+      checkpointId: 'checkpoint-1',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      primaryAgentId: 'primary',
+      rootRuntimeId: 'runtime-root',
+      sourceRuntimeId: 'runtime-a',
+      assistantMessageId: 'assistant-1',
+      continuationSnapshot,
+      continuationSnapshotHash: 'f'.repeat(64),
+      status: 'resuming',
+      version: 3,
+      terminalResults: {
+        'call-2': { result: secondResult, resultHash: '1'.repeat(64) },
+        'call-1': { result: firstResult, resultHash: '2'.repeat(64) }
+      },
+      resumeRuntimeId: 'runtime-b',
+      recordState: 'active',
+      createdAt: '2026-07-23T00:00:00.000Z',
+      updatedAt: '2026-07-23T00:00:01.000Z'
+    } satisfies AgentCheckpointRecord;
+    const ownerWrites: Array<string | undefined> = [];
+    const streamExecutor = vi.fn(async ({ runtime, assistantMessage: activeAssistant, forceFinal }) => {
+      expect(runtime).toMatchObject({
+        runtimeId: 'runtime-b',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        agentId: 'primary',
+        rootRuntimeId: 'runtime-root',
+        continuationOfRuntimeId: 'runtime-a',
+        model: { providerId: 'provider-frozen', modelId: 'model-frozen' },
+        tools: [],
+        ownerCheckpointId: 'checkpoint-1'
+      });
+      expect(forceFinal).toBe(true);
+      expect(activeAssistant.parts).toEqual([
+        expect.objectContaining({
+          toolCallId: 'call-1',
+          status: 'done',
+          result: expect.objectContaining({ data: firstResult })
+        }),
+        expect.objectContaining({
+          toolCallId: 'call-2',
+          status: 'done',
+          result: expect.objectContaining({ data: secondResult })
+        })
+      ]);
+      return {};
+    });
+    const service = createChatRuntimeService({
+      locks,
+      emit: vi.fn(),
+      messageReader: {
+        getMessages: (): ChatMessageRecord[] => structuredClone([userMessage, assistantMessage])
+      },
+      messageWriter: {
+        addMessage: (_message, ownerCheckpointId): void => {
+          ownerWrites.push(ownerCheckpointId);
+        },
+        updateMessage: (_message, ownerCheckpointId): void => {
+          ownerWrites.push(ownerCheckpointId);
+        }
+      },
+      streamExecutor
+    });
+    const internalInput: ChatAgentPrimaryContinuationInput & Record<string, unknown> = {
+      checkpoint,
+      runtimeId: 'runtime-b',
+      context: {
+        clientId: 'client-1',
+        modelSnapshot: { providerId: 'provider-frozen', modelId: 'model-frozen' },
+        toolSchemaSnapshot
+      },
+      model: { providerId: 'renderer-override', modelId: 'renderer-override' },
+      messages: [],
+      tools: [{ name: 'renderer-tool', description: 'must be ignored', parameters: {} }]
+    };
+
+    await expect(service.resumePrimary(internalInput)).resolves.toEqual({ outcome: 'completed' });
+
+    expect(streamExecutor).toHaveBeenCalledOnce();
+    expect(ownerWrites.length).toBeGreaterThan(0);
+    expect(ownerWrites.every((ownerCheckpointId): boolean => ownerCheckpointId === 'checkpoint-1')).toBe(true);
+    expect(locks.getWritingOwner('session-1')).toBeUndefined();
+    expect(locks.getContinuationFence('session:session-1/history')).toEqual({
+      scope: 'session:session-1/history',
+      checkpointId: 'checkpoint-1'
+    });
+    expect(assistantMessage.parts.every((part): boolean => part.type !== 'tool' || part.status === 'executing')).toBe(true);
+
+    const failureLocks = createRuntimeLockRegistry();
+    failureLocks.acquireContinuationFence({ scope: 'session:session-1/history', checkpointId: 'checkpoint-1' });
+    const failedWrites: ChatMessageRecord[] = [];
+    const failureEmit = vi.fn((name: string): void => {
+      if (name === 'chat:runtime:error') throw new Error('renderer error listener failed');
+    });
+    const failedService = createChatRuntimeService({
+      locks: failureLocks,
+      emit: failureEmit,
+      messageReader: { getMessages: (): ChatMessageRecord[] => structuredClone([userMessage, assistantMessage]) },
+      messageWriter: {
+        addMessage: (): void => undefined,
+        updateMessage: (message, ownerCheckpointId): void => {
+          expect(ownerCheckpointId).toBe('checkpoint-1');
+          failedWrites.push(structuredClone(message));
+        }
+      },
+      streamExecutor: async (): Promise<never> => {
+        throw new Error('model failed');
+      }
+    });
+
+    await expect(failedService.resumePrimary(internalInput)).resolves.toMatchObject({
+      outcome: 'failed',
+      phase: 'runtime',
+      error: { code: 'runtime_failed', phase: 'runtime' }
+    });
+    expect(failedWrites.at(-1)).toMatchObject({ loading: false, finished: true });
+    expect(failureEmit).toHaveBeenCalledWith('chat:runtime:error', expect.any(Object));
+    expect(failureLocks.getWritingOwner('session-1')).toBeUndefined();
+    expect(failureLocks.getContinuationFence('session:session-1/history')).toBeDefined();
+
+    const staleCheckpoint: AgentCheckpointRecord = {
+      ...checkpoint,
+      continuationSnapshot: {
+        ...checkpoint.continuationSnapshot,
+        sourceMessageRevision: '0'.repeat(64)
+      }
+    };
+    const startupLocks = createRuntimeLockRegistry();
+    startupLocks.acquireContinuationFence({ scope: 'session:session-1/history', checkpointId: 'checkpoint-1' });
+    const startupWrites: ChatMessageRecord[] = [];
+    const startupEmit = vi.fn((name: string): void => {
+      if (name === 'chat:runtime:error') throw new Error('renderer error listener failed');
+    });
+    const startupService = createChatRuntimeService({
+      locks: startupLocks,
+      emit: startupEmit,
+      messageReader: { getMessages: (): ChatMessageRecord[] => structuredClone([userMessage, assistantMessage]) },
+      messageWriter: {
+        addMessage: (): void => undefined,
+        updateMessage: (message, ownerCheckpointId): void => {
+          expect(ownerCheckpointId).toBe('checkpoint-1');
+          startupWrites.push(structuredClone(message));
+        }
+      },
+      streamExecutor: createNoopStreamExecutor()
+    });
+
+    await expect(startupService.resumePrimary({ ...internalInput, checkpoint: staleCheckpoint })).resolves.toMatchObject({
+      outcome: 'failed',
+      phase: 'starting',
+      error: { code: 'runtime_start_failed', phase: 'starting' }
+    });
+    expect(startupWrites.at(-1)).toMatchObject({ loading: false, finished: true });
+    expect(startupEmit).toHaveBeenCalledWith('chat:runtime:error', expect.any(Object));
+    expect(startupLocks.getWritingOwner('session-1')).toBeUndefined();
+    expect(startupLocks.getContinuationFence('session:session-1/history')).toBeDefined();
+
+    const unsafeLocks = createRuntimeLockRegistry();
+    unsafeLocks.acquireContinuationFence({ scope: 'session:session-1/history', checkpointId: 'checkpoint-1' });
+    const unsafeService = createChatRuntimeService({
+      locks: unsafeLocks,
+      emit: vi.fn(),
+      messageReader: { getMessages: (): ChatMessageRecord[] => structuredClone([userMessage, assistantMessage]) },
+      messageWriter: {
+        addMessage: (): void => undefined,
+        updateMessage: (): Promise<never> => Promise.reject(new Error('failure terminalization failed'))
+      },
+      streamExecutor: createNoopStreamExecutor()
+    });
+
+    await expect(unsafeService.resumePrimary({ ...internalInput, checkpoint: staleCheckpoint })).rejects.toThrow('failure terminalization failed');
+    expect(unsafeLocks.getWritingOwner('session-1')).toBeUndefined();
+    expect(unsafeLocks.getContinuationFence('session:session-1/history')).toBeDefined();
+
+    const missingLocks = createRuntimeLockRegistry();
+    missingLocks.acquireContinuationFence({ scope: 'session:session-1/history', checkpointId: 'checkpoint-1' });
+    const missingWriter = vi.fn();
+    const missingService = createChatRuntimeService({
+      locks: missingLocks,
+      emit: vi.fn(),
+      messageReader: { getMessages: (): ChatMessageRecord[] => structuredClone([userMessage]) },
+      messageWriter: {
+        addMessage: (): void => undefined,
+        updateMessage: missingWriter
+      },
+      streamExecutor: createNoopStreamExecutor()
+    });
+
+    await expect(missingService.resumePrimary(internalInput)).rejects.toMatchObject({ code: 'INVALID_CONTINUATION' });
+    expect(missingWriter).not.toHaveBeenCalled();
+    expect(missingLocks.getWritingOwner('session-1')).toBeUndefined();
+    expect(missingLocks.getContinuationFence('session:session-1/history')).toBeDefined();
   });
 });

@@ -946,7 +946,7 @@ git commit -m "feat(chat): 支持 Primary 挂起与续接栅栏"
 - Produces: normalized result injection by original `toolCallId`.
 - Guarantees: one Checkpoint creates at most one Runtime B.
 
-- [ ] **Step 1: Add failing result validation tests**
+- [x] **Step 1: Add failing result validation tests**
 
 Create `result.test.ts` and assert:
 
@@ -969,7 +969,7 @@ Reject:
 - unsupported error phase or machine logic that depends on `error.message`.
 - non-finite/negative usage and fake zero currency cost when pricing is unknown.
 
-- [ ] **Step 2: Add failing result identity and rendezvous tests**
+- [x] **Step 2: Add failing result identity and rendezvous tests**
 
 In `store.test.ts`:
 
@@ -995,7 +995,7 @@ expect(() => store.recordTaskResult({ taskId: 'task-1', toolCallId: 'call-1', re
 
 For two tool calls completed in reverse order, assert `ready_to_resume` occurs only after both are terminal and persisted order remains `call-1`, `call-2`.
 
-- [ ] **Step 3: Add failing single-resume tests**
+- [x] **Step 3: Add failing single-resume tests**
 
 Race two `claimPrimaryResume` calls with the same Checkpoint version:
 
@@ -1016,7 +1016,7 @@ Assert Runtime B:
 - uses the frozen model snapshot and `forceFinal`.
 - has an empty active tool set in this foundation phase.
 
-- [ ] **Step 4: Run Task 5 tests and verify RED**
+- [x] **Step 4: Run Task 5 tests and verify RED**
 
 ```bash
 pnpm exec vitest run \
@@ -1028,7 +1028,7 @@ pnpm exec vitest run \
 
 Expected: FAIL because result validation, terminal-result identity, CAS claim, and Runtime B continuation do not exist.
 
-- [ ] **Step 5: Implement terminal result validation**
+- [x] **Step 5: Implement terminal result validation**
 
 Validate claims separately from verification. Compute effective completion from criteria:
 
@@ -1043,7 +1043,7 @@ function deriveCompletion(criteria: readonly AgentCriteriaResult[]): AgentComple
 
 The main process overwrites an inconsistent Child-supplied level with the derived level and records a warning; contradicted evidence cannot count as completion.
 
-- [ ] **Step 6: Implement idempotent result recording**
+- [x] **Step 6: Implement idempotent result recording**
 
 `recordTaskResult` runs in one transaction:
 
@@ -1055,7 +1055,7 @@ The main process overwrites an inconsistent Child-supplied level with the derive
 6. If present with another hash, append `protocol_error` and reject.
 7. When every ordered tool call has a terminal result, CAS `waiting_children → ready_to_resume`, increment version, append `delegation.ready`, and enqueue a deduplicated `delegation.ready` Outbox event.
 
-- [ ] **Step 7: Implement CAS resume and exact tool-result injection**
+- [x] **Step 7: Implement CAS resume and exact tool-result injection**
 
 `claimPrimaryResume` accepts only `checkpointId`, `expectedVersion`, and a freshly allocated `resumeRuntimeId`. The Store update predicate includes status and version:
 
@@ -1069,7 +1069,7 @@ After a successful claim, read the immutable continuation snapshot and in-memory
 
 Start Runtime B using the fence-owner acquisition, frozen model, `forceFinal: true`, and no tools. On completion, transition `resuming → completed`, append `delegation.completed`, release the fence, and remove volatile continuation context. On validation/start failure, transition to `failed` or `interrupted`, persist the stable error, and release the fence only after the assistant is safely terminal.
 
-- [ ] **Step 8: Re-run Task 5 tests**
+- [x] **Step 8: Re-run Task 5 tests**
 
 ```bash
 pnpm exec vitest run \

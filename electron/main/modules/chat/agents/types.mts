@@ -6,6 +6,7 @@ import type {
   AgentCheckpointStatus,
   AgentDelegationCreatedPayload,
   AgentDelegationContinuationSnapshot,
+  AgentDelegationReadyPayload,
   AgentExecutionPlanSnapshot,
   AgentRecordState,
   AgentTaskContractSnapshot,
@@ -178,16 +179,12 @@ export interface AgentCheckpointRecord {
   updatedAt: string;
 }
 
-/** 持久化 Outbox 记录。 */
-export interface AgentOutboxRecord {
+/** 持久化 Outbox 记录的共享可变交付字段。 */
+interface AgentOutboxRecordBase {
   /** Outbox 稳定身份。 */
   outboxId: string;
   /** 业务幂等键。 */
   dedupeKey: string;
-  /** 交付事件名。 */
-  eventType: 'delegation.created';
-  /** 不可变 allowlist payload。 */
-  payload: AgentDelegationCreatedPayload;
   /** payload 完整性 hash。 */
   payloadHash: string;
   /** payload Schema 版本。 */
@@ -203,6 +200,25 @@ export interface AgentOutboxRecord {
   /** 投影更新时间。 */
   updatedAt: string;
 }
+
+/** Runtime A 挂起后交付的 delegation.created Outbox。 */
+export interface AgentDelegationCreatedOutboxRecord extends AgentOutboxRecordBase {
+  /** 交付事件名。 */
+  eventType: 'delegation.created';
+  /** 不可变创建 payload。 */
+  payload: AgentDelegationCreatedPayload;
+}
+
+/** 全部 Child 结果汇合后交付的 delegation.ready Outbox。 */
+export interface AgentDelegationReadyOutboxRecord extends AgentOutboxRecordBase {
+  /** 交付事件名。 */
+  eventType: 'delegation.ready';
+  /** 不可变就绪 payload。 */
+  payload: AgentDelegationReadyPayload;
+}
+
+/** 由 eventType 判别 payload 的持久化 Outbox 记录。 */
+export type AgentOutboxRecord = AgentDelegationCreatedOutboxRecord | AgentDelegationReadyOutboxRecord;
 
 /** 原子 prepare 中的单个 Task 事实。 */
 export interface PrepareAgentTaskInput {
@@ -457,6 +473,12 @@ export interface AgentDelegationStore {
    * @returns sequence 升序 Events
    */
   listEvents(aggregateKind: 'task' | 'checkpoint', aggregateId: string): ChatAgentEvent[];
+  /**
+   * 按稳定去重键读取 Outbox，包括已交付记录。
+   * @param dedupeKey - Outbox 去重键
+   * @returns Outbox，不存在时为 null
+   */
+  getOutbox(dedupeKey: string): AgentOutboxRecord | null;
   /** @returns 所有待交付 Outbox 记录。 */
   listPendingOutbox(): AgentOutboxRecord[];
   /**

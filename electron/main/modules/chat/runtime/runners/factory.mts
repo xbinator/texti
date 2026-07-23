@@ -2,11 +2,31 @@
  * @file factory.mts
  * @description ChatRuntime 活跃 runtime 状态创建工厂。
  */
-import type { ActiveChatRuntime } from '../types.mjs';
+import type { ActiveChatRuntime, ChatRuntimePrimaryContinuationContext } from '../types.mjs';
 import type { ChatRuntimeCompactInput, ChatRuntimeContinueInput, ChatRuntimeSendInput, ChatRuntimeSubmitUserChoiceInput } from 'types/chat-runtime';
 
 /** 支持创建 ActiveChatRuntime 的请求输入。 */
 type RuntimeFactoryInput = ChatRuntimeSendInput | ChatRuntimeContinueInput | ChatRuntimeCompactInput | ChatRuntimeSubmitUserChoiceInput;
+
+/** 内部 Primary Runtime B 工厂输入；Renderer 不能提供模型、消息或工具覆盖。 */
+export interface PrimaryContinuationFactoryInput {
+  /** continuation fence owner。 */
+  checkpointId: string;
+  /** 新 Runtime B 身份。 */
+  runtimeId: string;
+  /** 原 Session。 */
+  sessionId: string;
+  /** 原 Turn。 */
+  turnId: string;
+  /** Primary Actor。 */
+  primaryAgentId: string;
+  /** Turn 根 Runtime。 */
+  rootRuntimeId: string;
+  /** 挂起的 Runtime A。 */
+  sourceRuntimeId: string;
+  /** 经 Agent service 完整性校验的易失上下文。 */
+  context: ChatRuntimePrimaryContinuationContext;
+}
 
 /** ActiveChatRuntime 中由全部创建路径共享的基础状态。 */
 type RuntimeBaseState = Pick<
@@ -93,6 +113,39 @@ export function createContinuationRuntime(input: ChatRuntimeContinueInput, runti
     tavily: input.tavily,
     mcp: input.mcp,
     phase: 'streaming'
+  };
+}
+
+/**
+ * 从 Checkpoint 与冻结易失上下文创建内部 Primary Runtime B。
+ * 工厂固定 `tools=[]` 与 `forceFinal=true`，不存在 Renderer 覆盖入口。
+ * @param input - 已 claim 的 Checkpoint lineage 与上下文
+ * @returns 仅允许 fence owner 写入的 Active Runtime
+ */
+export function createPrimaryContinuationRuntime(input: PrimaryContinuationFactoryInput): ActiveChatRuntime {
+  const { context } = input;
+  return {
+    runtimeId: input.runtimeId,
+    sessionId: input.sessionId,
+    turnId: input.turnId,
+    clientId: context.clientId,
+    agentId: input.primaryAgentId,
+    rootRuntimeId: input.rootRuntimeId,
+    continuationOfRuntimeId: input.sourceRuntimeId,
+    model: structuredClone(context.modelSnapshot),
+    ...(context.capabilities ? { capabilities: structuredClone(context.capabilities) } : {}),
+    ...(context.contextWindow ? { contextWindow: context.contextWindow } : {}),
+    ...(context.system ? { system: context.system } : {}),
+    ...(context.workspaceRoot ? { workspaceRoot: context.workspaceRoot } : {}),
+    tools: [],
+    ...(context.skillContentHashes ? { skillContentHashes: structuredClone(context.skillContentHashes) } : {}),
+    ...(context.runtimeContext ? { runtimeContext: structuredClone(context.runtimeContext) } : {}),
+    ownerCheckpointId: input.checkpointId,
+    forceFinal: true,
+    status: 'running',
+    phase: 'streaming',
+    abortController: new AbortController(),
+    createdAt: Date.now()
   };
 }
 

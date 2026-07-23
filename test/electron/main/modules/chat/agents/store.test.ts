@@ -809,6 +809,58 @@ describeWithSqlite('agent delegation store', (): void => {
         occurredAt
       });
     }).toThrowError(expect.objectContaining({ code: 'protocol_error' }));
+    expect(store.listEvents('task', 'task-result').at(-1)).toMatchObject({
+      type: 'protocol.error',
+      source: 'coordinator',
+      payload: {
+        reason: 'result_replay_conflict',
+        expectedHash: resultHash,
+        actualHash: hashAgentPayload({ ...result, summary: 'Conflicting replay' })
+      }
+    });
+  });
+
+  it('enqueues one deduplicated delegation.ready outbox in the terminal-result transaction', (): void => {
+    const input = createPreparedInput('ready-outbox');
+    store.prepareDelegation(input, (): undefined => undefined);
+    startTask(store, input, adapter);
+    const result = createTaskResult('task-ready-outbox');
+
+    const ready = store.recordTaskResult({
+      taskId: 'task-ready-outbox',
+      checkpointId: 'checkpoint-ready-outbox',
+      toolCallId: 'tool-call-ready-outbox',
+      result,
+      resultHash: hashAgentPayload(result),
+      occurredAt
+    });
+
+    expect(ready.status).toBe('ready_to_resume');
+    expect(store.listPendingOutbox()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          dedupeKey: 'delegation.ready:checkpoint-ready-outbox',
+          eventType: 'delegation.ready',
+          payload: {
+            checkpointId: 'checkpoint-ready-outbox',
+            sessionId: 'session-ready-outbox',
+            turnId: 'turn-ready-outbox',
+            resultCount: 1
+          },
+          deliveryStatus: 'pending'
+        })
+      ])
+    );
+
+    store.recordTaskResult({
+      taskId: 'task-ready-outbox',
+      checkpointId: 'checkpoint-ready-outbox',
+      toolCallId: 'tool-call-ready-outbox',
+      result,
+      resultHash: hashAgentPayload(result),
+      occurredAt
+    });
+    expect(store.listPendingOutbox().filter((record): boolean => record.eventType === 'delegation.ready')).toHaveLength(1);
   });
 
   it('rejects result replay when the matching Checkpoint terminal envelope is missing', (): void => {

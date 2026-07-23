@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createCompactRuntime,
   createContinuationRuntime,
+  createPrimaryContinuationRuntime,
   createSendRuntime,
   createUserChoiceRuntime
 } from '../../../../../../electron/main/modules/chat/runtime/runners/factory.mjs';
@@ -71,6 +72,44 @@ describe('runtime factories', (): void => {
       rootRuntimeId: 'runtime-a',
       continuationOfRuntimeId: 'runtime-a'
     });
+  });
+
+  it('creates an internal Primary continuation from frozen lineage with no active tools', (): void => {
+    const runtime = createPrimaryContinuationRuntime({
+      checkpointId: 'checkpoint-1',
+      runtimeId: 'runtime-b',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      primaryAgentId: 'primary',
+      rootRuntimeId: 'runtime-root',
+      sourceRuntimeId: 'runtime-a',
+      context: {
+        clientId: 'client-1',
+        modelSnapshot: { providerId: 'provider-frozen', modelId: 'model-frozen' },
+        toolSchemaSnapshot: [{ name: 'delegate_task', description: 'must not execute', parameters: { type: 'object' } }],
+        system: 'frozen system',
+        workspaceRoot: '/workspace'
+      }
+    });
+
+    expect(runtime).toMatchObject({
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      agentId: 'primary',
+      runtimeId: 'runtime-b',
+      rootRuntimeId: 'runtime-root',
+      continuationOfRuntimeId: 'runtime-a',
+      model: { providerId: 'provider-frozen', modelId: 'model-frozen' },
+      tools: [],
+      forceFinal: true,
+      ownerCheckpointId: 'checkpoint-1'
+    });
+    expect(runtime).not.toEqual(
+      expect.objectContaining({
+        tavily: expect.anything(),
+        mcp: expect.anything()
+      })
+    );
   });
 
   it('copies compact and user-choice lineage without guessing missing identities', (): void => {
