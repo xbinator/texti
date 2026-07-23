@@ -13,6 +13,7 @@ import type {
 import { nanoid } from 'nanoid';
 import { ChatRuntimeError } from '../errors.mjs';
 import { pauseRuntimeTaskClock, resumeRuntimeTaskClock } from '../task-clock.mjs';
+import { createRuntimeEventBase } from '../types.mjs';
 
 /** 活跃 runtime 读取函数。 */
 export type RuntimeLookup = (runtimeId: string) => ActiveChatRuntime | undefined;
@@ -114,11 +115,7 @@ export function createRuntimeConfirmationRequests(dependencies: RuntimeConfirmat
       const confirmationId = input.confirmationId ?? `confirmation-${nanoid()}`;
       const key = createConfirmationRequestKey(input.runtimeId, confirmationId);
       const event: ChatRuntimeConfirmationRequestEvent = {
-        runtimeId: runtime.runtimeId,
-        sessionId: runtime.sessionId,
-        clientId: runtime.clientId,
-        agentId: runtime.agentId,
-        parentRuntimeId: runtime.parentRuntimeId,
+        ...createRuntimeEventBase(runtime),
         confirmationId,
         toolCallId: input.toolCallId,
         request: input.request

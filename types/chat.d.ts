@@ -442,6 +442,8 @@ export interface ChatMessageToolPart extends ChatMessagePartBase {
   status: 'inputting' | 'executing' | 'done';
   /** 工具输入参数（inputting 阶段可能不完整） */
   input: unknown;
+  /** Provider 返回的工具调用元数据，供精确续接和完整性校验使用。 */
+  providerMetadata?: unknown;
   /** 流式输入文本片段，仅 inputting 阶段使用 */
   inputText?: string;
   /** 工具执行结果，仅 status === 'done' 时存在 */

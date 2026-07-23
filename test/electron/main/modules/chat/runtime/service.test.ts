@@ -8,21 +8,35 @@ import type {
   CompactionExecutor
 } from '../../../../../../electron/main/modules/chat/runtime/compaction/executor.mjs';
 import type { ChatModelResolution } from '../../../../../../electron/main/modules/chat/runtime/model/resolver.mjs';
-import type { ChatRuntimeStreamExecutor } from '../../../../../../electron/main/modules/chat/runtime/types.mjs';
+import type {
+  ChatRuntimeDelegationPrepareAck,
+  ChatRuntimeDeferredToolCall,
+  ChatRuntimeDelegationPrepareInput,
+  ChatRuntimeDelegationPreparer,
+  ChatRuntimeStreamExecutor
+} from '../../../../../../electron/main/modules/chat/runtime/types.mjs';
 import type { AICreateOptions, AIInvokeResult, AIRequestOptions, AIServiceError } from 'types/ai';
 import type { ChatMessageCompactionPart, ChatMessagePart, ChatMessageRecord, StructuredContextSummary } from 'types/chat';
-import type { ChatRuntimeCompactInput, ChatRuntimeContinueInput, ChatRuntimeEventMap, ChatRuntimeModelSelection, ChatRuntimeSendInput } from 'types/chat-runtime';
+import type {
+  ChatRuntimeCompactInput,
+  ChatRuntimeContinueInput,
+  ChatRuntimeEventMap,
+  ChatRuntimeModelSelection,
+  ChatRuntimeSendInput
+} from 'types/chat-runtime';
 import { describe, expect, it, vi } from 'vitest';
 import { createChatRuntimeService } from '../../../../../../electron/main/modules/chat/runtime/service.mjs';
 import { chatSessionManager } from '../../../../../../electron/main/modules/chat/service.mjs';
 
-/** 已捕获的 runtime 事件。 */
+/** 已捕获的 runtime 事件，保留事件名与载荷之间的判别关系。 */
 type CapturedRuntimeEvent = {
-  /** 事件名。 */
-  name: keyof ChatRuntimeEventMap;
-  /** 事件载荷。 */
-  payload: ChatRuntimeEventMap[keyof ChatRuntimeEventMap];
-};
+  [TName in keyof ChatRuntimeEventMap]: {
+    /** 事件名。 */
+    name: TName;
+    /** 与事件名严格对应的载荷。 */
+    payload: ChatRuntimeEventMap[TName];
+  };
+}[keyof ChatRuntimeEventMap];
 
 /** Runtime 输入夹具序号，确保同一测试内 ID 不冲突。 */
 let runtimeInputSequence = 0;
@@ -33,13 +47,16 @@ let runtimeInputSequence = 0;
  * @returns runtime send 输入
  */
 function createInput(overrides: Partial<ChatRuntimeSendInput> = {}): ChatRuntimeSendInput {
+  const runtimeId = overrides.runtimeId ?? `runtime-test-${++runtimeInputSequence}`;
   return {
-    runtimeId: `runtime-test-${++runtimeInputSequence}`,
-    sessionId: 'session-1',
-    clientId: 'client-1',
-    agentId: 'agent-1',
-    content: 'hello',
-    ...overrides
+    ...overrides,
+    runtimeId,
+    sessionId: overrides.sessionId ?? 'session-1',
+    turnId: overrides.turnId ?? `turn-${runtimeId}`,
+    clientId: overrides.clientId ?? 'client-1',
+    agentId: overrides.agentId ?? 'agent-1',
+    rootRuntimeId: overrides.rootRuntimeId ?? runtimeId,
+    content: overrides.content ?? 'hello'
   };
 }
 
@@ -49,13 +66,16 @@ function createInput(overrides: Partial<ChatRuntimeSendInput> = {}): ChatRuntime
  * @returns runtime continue 输入
  */
 function createContinueInput(overrides: Partial<ChatRuntimeContinueInput> = {}): ChatRuntimeContinueInput {
+  const runtimeId = overrides.runtimeId ?? `runtime-continue-test-${++runtimeInputSequence}`;
   return {
-    runtimeId: `runtime-continue-test-${++runtimeInputSequence}`,
-    sessionId: 'session-1',
-    clientId: 'client-1',
-    agentId: 'agent-1',
-    messages: [],
-    ...overrides
+    ...overrides,
+    runtimeId,
+    sessionId: overrides.sessionId ?? 'session-1',
+    turnId: overrides.turnId ?? `turn-${runtimeId}`,
+    clientId: overrides.clientId ?? 'client-1',
+    agentId: overrides.agentId ?? 'agent-1',
+    rootRuntimeId: overrides.rootRuntimeId ?? runtimeId,
+    messages: overrides.messages ?? []
   };
 }
 
@@ -118,7 +138,7 @@ function createEventCollector(): {
   return {
     events,
     emit: <TName extends keyof ChatRuntimeEventMap>(name: TName, payload: ChatRuntimeEventMap[TName]): void => {
-      events.push({ name, payload });
+      events.push({ name, payload } as CapturedRuntimeEvent);
     }
   };
 }
@@ -150,6 +170,49 @@ function createNoopMessageReader(): { getMessages: () => [] } {
  */
 function createNoopStreamExecutor(): ChatRuntimeStreamExecutor {
   return async (): Promise<{}> => ({});
+}
+
+/**
+ * 创建测试用合法延迟工具调用。
+ * @returns 延迟工具调用
+ */
+function createDeferredToolCall(): ChatRuntimeDeferredToolCall {
+  return {
+    toolCallId: 'delegate-call-1',
+    toolName: 'delegate_task',
+    input: {
+      task: '浏览上下文',
+      acceptanceCriteria: ['返回摘要'],
+      mode: 'read',
+      resources: [{ kind: 'file', reference: 'CONTEXT.md' }],
+      requestedTools: ['read_file'],
+      required: true,
+      priority: 'normal'
+    },
+    argumentsHash: 'a'.repeat(64)
+  };
+}
+
+/**
+ * 创建返回委派 suspension 的流执行器替身。
+ * @returns 仅向普通持久化边界暴露过滤快照的流执行器
+ */
+function createSuspendingExecutor(): ChatRuntimeStreamExecutor {
+  return async ({ assistantMessage }, updateAssistant): Promise<ReturnType<ChatRuntimeStreamExecutor> extends Promise<infer TResult> ? TResult : never> => {
+    assistantMessage.parts.push({
+      id: 'delegate-part-1',
+      type: 'tool',
+      toolCallId: 'delegate-call-1',
+      toolName: 'delegate_task',
+      status: 'executing',
+      input: createDeferredToolCall().input
+    });
+    await updateAssistant({ ...structuredClone(assistantMessage), parts: [] });
+    return {
+      shouldContinue: false,
+      suspension: { toolCalls: [createDeferredToolCall()] }
+    };
+  };
 }
 
 /**
@@ -223,6 +286,463 @@ function createCompactionSummary(sourcePartId: string): StructuredContextSummary
 }
 
 describe('chat runtime service shell', (): void => {
+  it('keeps deferred parts private when delegation prepare fails', async (): Promise<void> => {
+    const collector = createEventCollector();
+    const persistedUpdates: ChatMessageRecord[] = [];
+    let stagedAssistant: ChatMessageRecord | undefined;
+    const storePrepareDelegation = vi.fn((persistAssistant: () => undefined): void => {
+      persistAssistant();
+      stagedAssistant = undefined;
+      throw new Error('prepare failed');
+    });
+    const prepareDelegation = vi.fn((input: ChatRuntimeDelegationPrepareInput): ChatRuntimeDelegationPrepareAck => {
+      storePrepareDelegation((): undefined => {
+        stagedAssistant = structuredClone(input.assistantMessage);
+        return undefined;
+      });
+      return { prepared: true };
+    });
+    const service = createChatRuntimeService({
+      emit: collector.emit,
+      messageReader: createNoopMessageReader(),
+      messageWriter: {
+        addMessage: (): void => undefined,
+        updateMessage: (message): void => {
+          persistedUpdates.push(structuredClone(message));
+        }
+      },
+      streamExecutor: createSuspendingExecutor(),
+      prepareDelegation
+    });
+
+    await service.send(createInput({ content: 'delegate safely' }));
+    await vi.waitFor((): void => {
+      expect(collector.events.some((event): boolean => event.name === 'chat:runtime:error')).toBe(true);
+    });
+
+    expect(prepareDelegation).toHaveBeenCalledOnce();
+    expect(storePrepareDelegation).toHaveBeenCalledOnce();
+    expect(stagedAssistant).toBeUndefined();
+    expect(
+      persistedUpdates.every((message): boolean => message.parts.every((part): boolean => part.type !== 'tool' || part.toolCallId !== 'delegate-call-1'))
+    ).toBe(true);
+  });
+
+  it('fails closed without a configured delegation prepare boundary', async (): Promise<void> => {
+    const collector = createEventCollector();
+    const persistedUpdates: ChatMessageRecord[] = [];
+    const service = createChatRuntimeService({
+      emit: collector.emit,
+      messageReader: createNoopMessageReader(),
+      messageWriter: {
+        addMessage: (): void => undefined,
+        updateMessage: (message): void => {
+          persistedUpdates.push(structuredClone(message));
+        }
+      },
+      streamExecutor: createSuspendingExecutor()
+    });
+
+    await service.send(createInput({ content: 'delegate without coordinator' }));
+    await vi.waitFor((): void => {
+      expect(collector.events.some((event): boolean => event.name === 'chat:runtime:error')).toBe(true);
+    });
+
+    expect(
+      persistedUpdates.every((message): boolean => message.parts.every((part): boolean => part.type !== 'tool' || part.toolCallId !== 'delegate-call-1'))
+    ).toBe(true);
+    expect(collector.events).toContainEqual({
+      name: 'chat:runtime:error',
+      payload: expect.objectContaining({
+        error: expect.objectContaining({ message: '委派协调器尚未配置' })
+      })
+    });
+  });
+
+  it('fails closed when delegation prepare returns an inexact acknowledgement', async (): Promise<void> => {
+    const collector = createEventCollector();
+    const invalidPreparer = vi.fn(() => ({ prepared: true, checkpointId: 'unexpected-field' }));
+    const prepareDelegation = invalidPreparer as unknown as ChatRuntimeDelegationPreparer;
+    const service = createChatRuntimeService({
+      emit: collector.emit,
+      messageReader: createNoopMessageReader(),
+      messageWriter: createNoopMessageWriter(),
+      streamExecutor: createSuspendingExecutor(),
+      prepareDelegation
+    });
+
+    await service.send(createInput({ content: 'delegate with invalid ack' }));
+    await vi.waitFor((): void => {
+      expect(collector.events.some((event): boolean => event.name === 'chat:runtime:error')).toBe(true);
+    });
+
+    expect(collector.events).toContainEqual({
+      name: 'chat:runtime:error',
+      payload: expect.objectContaining({
+        error: expect.objectContaining({ code: 'DELEGATION_PREPARE_ACK_INVALID' })
+      })
+    });
+  });
+
+  it('fails closed when delegation prepare returns a Promise', async (): Promise<void> => {
+    const collector = createEventCollector();
+    const asyncPreparer = vi.fn(async (): Promise<{ prepared: true }> => ({ prepared: true }));
+    const prepareDelegation = asyncPreparer as unknown as ChatRuntimeDelegationPreparer;
+    const service = createChatRuntimeService({
+      emit: collector.emit,
+      messageReader: createNoopMessageReader(),
+      messageWriter: createNoopMessageWriter(),
+      streamExecutor: createSuspendingExecutor(),
+      prepareDelegation
+    });
+
+    await service.send(createInput({ content: 'delegate with async prepare' }));
+    await vi.waitFor((): void => {
+      expect(collector.events.some((event): boolean => event.name === 'chat:runtime:error')).toBe(true);
+    });
+
+    expect(collector.events).toContainEqual({
+      name: 'chat:runtime:error',
+      payload: expect.objectContaining({
+        error: expect.objectContaining({ code: 'DELEGATION_PREPARE_ASYNC' })
+      })
+    });
+  });
+
+  it('fails closed when delegation prepare returns a custom thenable', async (): Promise<void> => {
+    const collector = createEventCollector();
+    const thenablePreparer = vi.fn(() => ({
+      prepared: true,
+      then: (): void => undefined
+    }));
+    const prepareDelegation = thenablePreparer as unknown as ChatRuntimeDelegationPreparer;
+    const service = createChatRuntimeService({
+      emit: collector.emit,
+      messageReader: createNoopMessageReader(),
+      messageWriter: createNoopMessageWriter(),
+      streamExecutor: createSuspendingExecutor(),
+      prepareDelegation
+    });
+
+    await service.send(createInput({ content: 'delegate with thenable prepare' }));
+    await vi.waitFor((): void => {
+      expect(collector.events.some((event): boolean => event.name === 'chat:runtime:error')).toBe(true);
+    });
+
+    expect(collector.events).toContainEqual({
+      name: 'chat:runtime:error',
+      payload: expect.objectContaining({
+        error: expect.objectContaining({ code: 'DELEGATION_PREPARE_ASYNC' })
+      })
+    });
+  });
+
+  it('attaches a rejection sink before rejecting an async delegation prepare', async (): Promise<void> => {
+    const collector = createEventCollector();
+    let rejectAck: (reason?: unknown) => void = (): void => undefined;
+    const rejectedAck = new Promise<{ prepared: true }>((_resolve, reject) => {
+      rejectAck = reject;
+    });
+    const catchSpy = vi.spyOn(rejectedAck, 'catch');
+    const asyncPreparer = vi.fn(() => rejectedAck);
+    const prepareDelegation = asyncPreparer as unknown as ChatRuntimeDelegationPreparer;
+    const service = createChatRuntimeService({
+      emit: collector.emit,
+      messageReader: createNoopMessageReader(),
+      messageWriter: createNoopMessageWriter(),
+      streamExecutor: createSuspendingExecutor(),
+      prepareDelegation
+    });
+
+    await service.send(createInput({ content: 'delegate with rejected async prepare' }));
+    await vi.waitFor((): void => {
+      expect(collector.events.some((event): boolean => event.name === 'chat:runtime:error')).toBe(true);
+    });
+    const sinkAttached = catchSpy.mock.calls.length > 0;
+    if (!sinkAttached) {
+      // RED 阶段也先挂测试清理器，避免故意触发的 rejection 污染 Vitest 进程。
+      rejectedAck.catch((): void => undefined);
+    }
+    rejectAck(new Error('prepare rejected after fail-closed'));
+    await flushRuntimeTasks();
+
+    expect(sinkAttached).toBe(true);
+    expect(collector.events).toContainEqual({
+      name: 'chat:runtime:error',
+      payload: expect.objectContaining({
+        error: expect.objectContaining({ code: 'DELEGATION_PREPARE_ASYNC' })
+      })
+    });
+  });
+
+  it('consumes a rejecting custom thenable before failing closed', async (): Promise<void> => {
+    const collector = createEventCollector();
+    let thenInvoked = false;
+    const rejectingThenable = {
+      then: (_resolve: (value: unknown) => void, reject: (reason?: unknown) => void): void => {
+        thenInvoked = true;
+        reject(new Error('custom thenable rejected'));
+      }
+    };
+    const thenablePreparer = vi.fn(() => rejectingThenable);
+    const prepareDelegation = thenablePreparer as unknown as ChatRuntimeDelegationPreparer;
+    const service = createChatRuntimeService({
+      emit: collector.emit,
+      messageReader: createNoopMessageReader(),
+      messageWriter: createNoopMessageWriter(),
+      streamExecutor: createSuspendingExecutor(),
+      prepareDelegation
+    });
+
+    await service.send(createInput({ content: 'delegate with rejecting thenable' }));
+    await vi.waitFor((): void => {
+      expect(collector.events.some((event): boolean => event.name === 'chat:runtime:error')).toBe(true);
+    });
+    await flushRuntimeTasks();
+
+    expect(thenInvoked).toBe(true);
+    expect(collector.events).toContainEqual({
+      name: 'chat:runtime:error',
+      payload: expect.objectContaining({
+        error: expect.objectContaining({ code: 'DELEGATION_PREPARE_ASYNC' })
+      })
+    });
+  });
+
+  it('normalizes throwing then accessors and calls as async prepare failures', async (): Promise<void> => {
+    const cases: Array<{ label: string; value: object; wasInvoked: () => boolean }> = [];
+    let getterInvoked = false;
+    let callInvoked = false;
+    cases.push({
+      label: 'getter',
+      value: Object.defineProperty({}, 'then', {
+        get: (): never => {
+          getterInvoked = true;
+          throw new Error('malicious then getter');
+        }
+      }),
+      wasInvoked: (): boolean => getterInvoked
+    });
+    cases.push({
+      label: 'call',
+      value: {
+        then: (): never => {
+          callInvoked = true;
+          throw new Error('malicious then call');
+        }
+      },
+      wasInvoked: (): boolean => callInvoked
+    });
+
+    for (const testCase of cases) {
+      const collector = createEventCollector();
+      const thenablePreparer = vi.fn(() => testCase.value);
+      const prepareDelegation = thenablePreparer as unknown as ChatRuntimeDelegationPreparer;
+      const service = createChatRuntimeService({
+        emit: collector.emit,
+        messageReader: createNoopMessageReader(),
+        messageWriter: createNoopMessageWriter(),
+        streamExecutor: createSuspendingExecutor(),
+        prepareDelegation
+      });
+
+      // eslint-disable-next-line no-await-in-loop
+      await service.send(createInput({ content: `delegate with malicious then ${testCase.label}` }));
+      // eslint-disable-next-line no-await-in-loop
+      await vi.waitFor((): void => {
+        expect(collector.events.some((event): boolean => event.name === 'chat:runtime:error')).toBe(true);
+      });
+      // eslint-disable-next-line no-await-in-loop
+      await flushRuntimeTasks();
+
+      expect(testCase.wasInvoked()).toBe(true);
+      expect(collector.events).toContainEqual({
+        name: 'chat:runtime:error',
+        payload: expect.objectContaining({
+          error: expect.objectContaining({ code: 'DELEGATION_PREPARE_ASYNC' })
+        })
+      });
+    }
+  });
+
+  it('finalizes only the last persisted safe snapshot after a deferred provider failure', async (): Promise<void> => {
+    const collector = createEventCollector();
+    const persistedUpdates: ChatMessageRecord[] = [];
+    const prepareDelegation = vi.fn();
+    const streamExecutor: ChatRuntimeStreamExecutor = async ({ assistantMessage }, updateAssistant) => {
+      assistantMessage.parts.push({
+        id: 'delegate-part-1',
+        type: 'tool',
+        toolCallId: 'delegate-call-1',
+        toolName: 'delegate_task',
+        status: 'inputting',
+        input: null,
+        inputText: '{"task":"'
+      });
+      await updateAssistant({ ...structuredClone(assistantMessage), parts: [] });
+      throw new Error('provider failed after deferred start');
+    };
+    const service = createChatRuntimeService({
+      emit: collector.emit,
+      messageReader: createNoopMessageReader(),
+      messageWriter: {
+        addMessage: (): void => undefined,
+        updateMessage: (message): void => {
+          persistedUpdates.push(structuredClone(message));
+        }
+      },
+      streamExecutor,
+      prepareDelegation
+    });
+
+    await service.send(createInput({ content: 'delegate then fail' }));
+    await vi.waitFor((): void => {
+      expect(collector.events.some((event): boolean => event.name === 'chat:runtime:error')).toBe(true);
+    });
+
+    const updatedMessages = collector.events.flatMap((event): ChatMessageRecord[] =>
+      event.name === 'chat:runtime:message-updated' ? [structuredClone(event.payload.message)] : []
+    );
+    expect(prepareDelegation).not.toHaveBeenCalled();
+    expect([...persistedUpdates, ...updatedMessages]).not.toHaveLength(0);
+    expect(
+      [...persistedUpdates, ...updatedMessages].every((message): boolean =>
+        message.parts.every((part): boolean => part.type !== 'tool' || part.toolCallId !== 'delegate-call-1')
+      )
+    ).toBe(true);
+  });
+
+  it('aborts from the last persisted safe snapshot while a deferred update is pending', async (): Promise<void> => {
+    const collector = createEventCollector();
+    const persistedUpdates: ChatMessageRecord[] = [];
+    const pendingUpdate = createDeferred();
+    const updateStarted = createDeferred();
+    const prepareDelegation = vi.fn();
+    let updateCount = 0;
+    const streamExecutor: ChatRuntimeStreamExecutor = async ({ assistantMessage }, updateAssistant) => {
+      assistantMessage.content = 'analysis';
+      assistantMessage.parts.push({ id: 'analysis-part', type: 'text', text: 'analysis' });
+      await updateAssistant(structuredClone(assistantMessage));
+      assistantMessage.parts.push({
+        id: 'delegate-part-1',
+        type: 'tool',
+        toolCallId: 'delegate-call-1',
+        toolName: 'delegate_task',
+        status: 'inputting',
+        input: null,
+        inputText: '{"task":"'
+      });
+      await updateAssistant({ ...structuredClone(assistantMessage), parts: [structuredClone(assistantMessage.parts[0])] });
+      throw new Error('stream aborted');
+    };
+    const service = createChatRuntimeService({
+      emit: collector.emit,
+      messageReader: createNoopMessageReader(),
+      messageWriter: {
+        addMessage: (): void => undefined,
+        updateMessage: async (message): Promise<void> => {
+          persistedUpdates.push(structuredClone(message));
+          updateCount += 1;
+          if (updateCount === 2) {
+            updateStarted.resolve();
+            await pendingUpdate.promise;
+          }
+        },
+        deleteMessage: vi.fn()
+      },
+      streamExecutor,
+      streamAbort: (): void => undefined,
+      prepareDelegation
+    });
+    const input = createInput({ content: 'delegate then abort' });
+
+    await service.send(input);
+    await updateStarted.promise;
+    const abortResult = await service.abort({ runtimeId: input.runtimeId });
+    pendingUpdate.resolve();
+    await flushRuntimeTasks();
+
+    const updatedMessages = collector.events.flatMap((event): ChatMessageRecord[] =>
+      event.name === 'chat:runtime:message-updated' ? [structuredClone(event.payload.message)] : []
+    );
+    expect(prepareDelegation).not.toHaveBeenCalled();
+    expect(abortResult.assistantMessage).toMatchObject({
+      content: 'analysis',
+      finished: true
+    });
+    expect(
+      [...persistedUpdates, ...updatedMessages, ...(abortResult.assistantMessage ? [abortResult.assistantMessage] : [])].every((message): boolean =>
+        message.parts.every((part): boolean => part.type !== 'tool' || part.toolCallId !== 'delegate-call-1')
+      )
+    ).toBe(true);
+  });
+
+  it('makes the full assistant and delegation facts visible at one prepare boundary', async (): Promise<void> => {
+    const persistedUpdates: ChatMessageRecord[] = [];
+    let visibleTransaction:
+      | {
+          assistant: ChatMessageRecord;
+          taskIds: string[];
+          checkpointId: string;
+          outboxIds: string[];
+        }
+      | undefined;
+    let stagedAssistant: ChatMessageRecord | undefined;
+    const storePrepareDelegation = vi.fn((persistAssistant: () => undefined): void => {
+      persistAssistant();
+      if (!stagedAssistant) throw new Error('assistant callback did not run synchronously');
+      visibleTransaction = {
+        assistant: stagedAssistant,
+        taskIds: ['task-1'],
+        checkpointId: 'checkpoint-1',
+        outboxIds: ['outbox-1']
+      };
+    });
+    const prepareDelegation = vi.fn((input: ChatRuntimeDelegationPrepareInput): ChatRuntimeDelegationPrepareAck => {
+      storePrepareDelegation((): undefined => {
+        stagedAssistant = structuredClone(input.assistantMessage);
+        return undefined;
+      });
+      return { prepared: true };
+    });
+    const service = createChatRuntimeService({
+      emit: vi.fn(),
+      messageReader: createNoopMessageReader(),
+      messageWriter: {
+        addMessage: (): void => undefined,
+        updateMessage: (message): void => {
+          persistedUpdates.push(structuredClone(message));
+        }
+      },
+      streamExecutor: createSuspendingExecutor(),
+      prepareDelegation
+    });
+
+    await service.send(createInput({ content: 'delegate safely' }));
+    await vi.waitFor((): void => {
+      expect(prepareDelegation).toHaveBeenCalledOnce();
+    });
+
+    expect(
+      persistedUpdates.every((message): boolean => message.parts.every((part): boolean => part.type !== 'tool' || part.toolCallId !== 'delegate-call-1'))
+    ).toBe(true);
+    expect(storePrepareDelegation).toHaveBeenCalledOnce();
+    expect(visibleTransaction).toMatchObject({
+      assistant: {
+        parts: [
+          expect.objectContaining({
+            type: 'tool',
+            toolCallId: 'delegate-call-1',
+            status: 'executing'
+          })
+        ]
+      },
+      taskIds: ['task-1'],
+      checkpointId: 'checkpoint-1',
+      outboxIds: ['outbox-1']
+    });
+  });
+
   it('uses the runtime id allocated by the renderer', async (): Promise<void> => {
     const service = createChatRuntimeService({
       emit: vi.fn(),
@@ -681,7 +1201,7 @@ describe('chat runtime service shell', (): void => {
           updatedMessages.push({ ...message, parts: [...message.parts] });
         }
       },
-      streamExecutor: async ({ assistantMessage }) => {
+      streamExecutor: async ({ assistantMessage }, updateAssistant) => {
         assistantMessage.parts.push({
           id: 'part-open-widget',
           type: 'tool',
@@ -700,6 +1220,7 @@ describe('chat runtime service shell', (): void => {
             }
           }
         });
+        await updateAssistant(structuredClone(assistantMessage));
         await streamDeferred.promise;
         assistantMessage.content = '继续输出';
         assistantMessage.parts.push({ id: 'part-stream-text', type: 'text', text: '继续输出' });
@@ -741,7 +1262,15 @@ describe('chat runtime service shell', (): void => {
     streamDeferred.resolve();
     await flushRuntimeTasks();
 
-    expect(updatedMessages[0]).toMatchObject({
+    const submittedMessage = updatedMessages.find((message): boolean => {
+      const part = message.parts[0];
+      if (part?.type !== 'tool' || part.result?.status !== 'success' || typeof part.result.data !== 'object' || part.result.data === null) {
+        return false;
+      }
+      const { renderContext } = part.result.data as { renderContext?: unknown };
+      return typeof renderContext === 'object' && renderContext !== null && (renderContext as { isMounted?: unknown }).isMounted === true;
+    });
+    expect(submittedMessage).toMatchObject({
       id: 'assistant-message-1',
       parts: [
         {
@@ -788,6 +1317,94 @@ describe('chat runtime service shell', (): void => {
         })
       })
     );
+  });
+
+  it('merges renderer part updates through the safe snapshot without leaking hidden deferred parts', async (): Promise<void> => {
+    const collector = createEventCollector();
+    const hiddenReady = createDeferred();
+    const inspectWorking = createDeferred();
+    const workingInspected = createDeferred();
+    const holdStream = createDeferred();
+    const persistedUpdates: ChatMessageRecord[] = [];
+    let workingVisibleText: string | undefined;
+    const service = createChatRuntimeService({
+      emit: collector.emit,
+      createMessageId: (role) => `${role}-message-safe-part`,
+      now: () => '2026-06-19T00:00:00.000Z',
+      messageReader: createNoopMessageReader(),
+      messageWriter: {
+        addMessage: (): void => undefined,
+        updateMessage: (message): void => {
+          persistedUpdates.push(structuredClone(message));
+        }
+      },
+      streamExecutor: async ({ assistantMessage }, updateAssistant) => {
+        const visiblePart: ChatMessagePart = { id: 'visible-part', type: 'text', text: 'initial' };
+        assistantMessage.parts.push(visiblePart);
+        await updateAssistant(structuredClone(assistantMessage));
+        assistantMessage.parts.push({
+          id: 'hidden-delegate-part',
+          type: 'tool',
+          toolCallId: 'delegate-call-hidden',
+          toolName: 'delegate_task',
+          status: 'inputting',
+          input: null,
+          inputText: '{"task":"secret'
+        });
+        await updateAssistant({
+          ...structuredClone(assistantMessage),
+          parts: [structuredClone(visiblePart)]
+        });
+        hiddenReady.resolve();
+        await inspectWorking.promise;
+        const currentVisiblePart = assistantMessage.parts.find((part): boolean => part.id === 'visible-part');
+        workingVisibleText = currentVisiblePart?.type === 'text' ? currentVisiblePart.text : undefined;
+        workingInspected.resolve();
+        await holdStream.promise;
+        return {};
+      }
+    });
+
+    const result = await service.send(createInput({ content: 'update visible part safely' }));
+    await hiddenReady.promise;
+
+    await service.submitMessagePart({
+      runtimeId: result.runtimeId,
+      messageId: 'assistant-message-safe-part',
+      part: { id: 'visible-part', type: 'text', text: 'renderer updated' }
+    });
+    inspectWorking.resolve();
+    await workingInspected.promise;
+
+    await expect(
+      service.submitMessagePart({
+        runtimeId: result.runtimeId,
+        messageId: 'assistant-message-safe-part',
+        part: {
+          id: 'hidden-delegate-part',
+          type: 'tool',
+          toolCallId: 'delegate-call-hidden',
+          toolName: 'delegate_task',
+          status: 'inputting',
+          input: null,
+          inputText: '{"task":"changed'
+        }
+      })
+    ).rejects.toMatchObject({ code: 'MESSAGE_PART_NOT_ACTIVE' });
+    expect(workingVisibleText).toBe('renderer updated');
+    expect(
+      persistedUpdates.every((message): boolean => message.parts.every((part): boolean => part.type !== 'tool' || part.toolCallId !== 'delegate-call-hidden'))
+    ).toBe(true);
+    const updatedEvents = collector.events.filter((event) => event.name === 'chat:runtime:message-updated');
+    expect(
+      updatedEvents.every((event): boolean =>
+        event.payload.message.parts.every((part): boolean => part.type !== 'tool' || part.toolCallId !== 'delegate-call-hidden')
+      )
+    ).toBe(true);
+
+    await service.abort({ runtimeId: result.runtimeId });
+    holdStream.resolve();
+    await flushRuntimeTasks();
   });
 
   it('returns the runtime start result before the stream executor finishes', async (): Promise<void> => {
@@ -1762,8 +2379,10 @@ describe('chat runtime service shell', (): void => {
     const input: ChatRuntimeCompactInput = {
       runtimeId: 'runtime-manual-compact',
       sessionId: 'session-1',
+      turnId: 'turn-manual-compact',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: 'runtime-manual-compact',
       model: { providerId: 'provider-1', modelId: 'model-2' },
       contextWindow: 12_000
     };
@@ -1804,8 +2423,10 @@ describe('chat runtime service shell', (): void => {
       service.compact({
         runtimeId: 'runtime-busy-compact',
         sessionId: 'session-1',
+        turnId: 'turn-busy-compact',
         clientId: 'bchat',
         agentId: 'primary',
+        rootRuntimeId: 'runtime-busy-compact',
         contextWindow: 12_000
       })
     ).rejects.toMatchObject({ code: 'SESSION_BUSY' });
@@ -1845,8 +2466,10 @@ describe('chat runtime service shell', (): void => {
     await service.compact({
       runtimeId: 'runtime-early-compact-cancel',
       sessionId: 'session-1',
+      turnId: 'turn-early-compact-cancel',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: 'runtime-early-compact-cancel',
       contextWindow: 12_000
     });
     await service.abort({ runtimeId: 'runtime-early-compact-cancel' });
@@ -1918,8 +2541,10 @@ describe('chat runtime service shell', (): void => {
     await service.compact({
       runtimeId: 'runtime-cancel-existing',
       sessionId: 'session-1',
+      turnId: 'turn-cancel-existing',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: 'runtime-cancel-existing',
       contextWindow: 12_000
     });
     await executionStarted.promise;
@@ -1969,8 +2594,10 @@ describe('chat runtime service shell', (): void => {
     await service.compact({
       runtimeId: 'runtime-abort-lock',
       sessionId: 'session-1',
+      turnId: 'turn-abort-lock',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: 'runtime-abort-lock',
       contextWindow: 12_000
     });
     await executionStarted.promise;
@@ -2628,8 +3255,10 @@ describe('chat runtime service shell', (): void => {
     const result = await service.submitUserChoice({
       runtimeId: 'runtime-choice-answer',
       sessionId: 'session-1',
+      turnId: 'turn-choice-answer',
       clientId: 'client-1',
       agentId: 'agent-1',
+      rootRuntimeId: 'runtime-choice-answer',
       contextWindow: 200_000,
       answer: {
         questionId: 'question-1',
@@ -2744,8 +3373,10 @@ describe('chat runtime service shell', (): void => {
     const result = await service.submitUserChoice({
       runtimeId: 'runtime-choice-cancelled',
       sessionId: 'session-1',
+      turnId: 'turn-choice-cancelled',
       clientId: 'client-1',
       agentId: 'agent-1',
+      rootRuntimeId: 'runtime-choice-cancelled',
       contextWindow: 200_000,
       answer: {
         questionId: 'question-1',
@@ -3023,9 +3654,10 @@ describe('chat runtime service shell', (): void => {
           updatedMessages.push({ ...message, parts: [...message.parts] });
         }
       },
-      streamExecutor: async ({ assistantMessage }) => {
+      streamExecutor: async ({ assistantMessage }, updateAssistant) => {
         assistantMessage.content = 'partial answer';
         assistantMessage.parts.push({ id: 'part0117', type: 'text', text: 'partial answer' });
+        await updateAssistant(structuredClone(assistantMessage));
         await streamDeferred.promise;
         return {};
       }

@@ -117,11 +117,13 @@ export const sessionMachine = setup({
         }
 
         const turnSequence = context.turnSequence + 1;
+        // 主进程恢复快照已经冻结 Turn 身份；Renderer 重载时不得生成新的逻辑 Turn。
+        const turnId = event.type === 'session.recoverRuntime' ? event.snapshot.turnId : `${context.sessionId}:turn:${turnSequence}`;
         const turnRef = spawn('turnMachine', {
           id: `turn-${turnSequence}`,
           input: {
             sessionId: context.sessionId,
-            turnId: `${context.sessionId}:turn:${turnSequence}`,
+            turnId,
             intent
           }
         });

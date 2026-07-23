@@ -36,7 +36,13 @@ describe('supervisorMachine', (): void => {
     expect(turnId).toBeTruthy();
     actor.send({
       type: 'runtime.register',
-      address: { sessionId: 'session-a', turnId: turnId as string, agentId: 'primary', runtimeId: 'runtime-a' }
+      address: {
+        sessionId: 'session-a',
+        turnId: turnId as string,
+        agentId: 'primary',
+        runtimeId: 'runtime-a',
+        rootRuntimeId: 'runtime-a'
+      }
     });
     actor.send({ type: 'runtime.event', runtimeId: 'runtime-a', event: { type: 'runtime.started', runtimeId: 'runtime-a' } });
 

@@ -18,8 +18,10 @@ describe('runtime-event-test-utils', (): void => {
     emitRuntimeEvent(listeners, 'messageUpdated', {
       runtimeId: 'runtime-1',
       sessionId: 'session-1',
+      turnId: 'turn-1',
       clientId: 'bchat',
       agentId: 'default',
+      rootRuntimeId: 'runtime-1',
       message: {
         id: 'message-1',
         sessionId: 'session-1',
@@ -32,8 +34,10 @@ describe('runtime-event-test-utils', (): void => {
     emitRuntimeEvent(listeners, 'complete', {
       runtimeId: 'runtime-1',
       sessionId: 'session-1',
+      turnId: 'turn-1',
       clientId: 'bchat',
       agentId: 'default',
+      rootRuntimeId: 'runtime-1',
       reason: 'completed'
     });
 
@@ -44,8 +48,10 @@ describe('runtime-event-test-utils', (): void => {
     emitRuntimeEvent(listeners, 'messageUpdated', {
       runtimeId: 'runtime-2',
       sessionId: 'session-1',
+      turnId: 'turn-2',
       clientId: 'bchat',
       agentId: 'default',
+      rootRuntimeId: 'runtime-2',
       message: {
         id: 'message-2',
         sessionId: 'session-1',
@@ -57,5 +63,24 @@ describe('runtime-event-test-utils', (): void => {
     });
 
     expect(onMessageUpdated).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards the exact complete event without synthesizing identity fields', (): void => {
+    const listeners = createRuntimeEventListeners();
+    const onComplete = vi.fn<(event: ChatRuntimeEventMap['chat:runtime:complete']) => void>();
+    const event: ChatRuntimeEventMap['chat:runtime:complete'] = {
+      runtimeId: 'runtime-1',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: 'runtime-1',
+      reason: 'completed'
+    };
+    listeners.complete = onComplete;
+
+    emitRuntimeEvent(listeners, 'complete', event);
+
+    expect(onComplete.mock.calls[0]?.[0]).toBe(event);
   });
 });

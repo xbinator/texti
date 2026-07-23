@@ -25,7 +25,14 @@ vi.mock('@/shared/platform/electron-api', () => ({
 
 /** 创建包含三类待处理请求的恢复快照。 */
 function createSnapshot(): ChatRuntimeRecoverySnapshot {
-  const base = { runtimeId: 'runtime-1', sessionId: 'session-1', clientId: 'bchat', agentId: 'primary' };
+  const base = {
+    runtimeId: 'runtime-1',
+    sessionId: 'session-1',
+    turnId: 'turn-1',
+    clientId: 'bchat',
+    agentId: 'primary',
+    rootRuntimeId: 'runtime-1'
+  };
   return {
     ...base,
     phase: 'streaming',

@@ -97,6 +97,8 @@ export interface RuntimeToolCallChunk {
   toolName: string;
   /** 工具输入。 */
   input: unknown;
+  /** Provider 返回的工具调用元数据。 */
+  providerMetadata?: unknown;
 }
 
 /** AI SDK 工具输入开始 chunk。 */
@@ -107,6 +109,8 @@ export interface RuntimeToolInputStartChunk {
   toolCallId: string;
   /** 工具名称。 */
   toolName: string;
+  /** Provider 返回的工具调用元数据。 */
+  providerMetadata?: unknown;
 }
 
 /** AI SDK 工具输入增量 chunk。 */

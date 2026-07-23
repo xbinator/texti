@@ -2,7 +2,7 @@
  * @file agentMachine.ts
  * @description 单个 Chat Agent 的 XState 生命周期定义。
  */
-import type { ChatActorAddress, ChatWorkflowError } from '../types';
+import type { ChatAgentAddress, ChatWorkflowError } from '../types';
 import { assign, setup } from 'xstate';
 
 /**
@@ -15,7 +15,7 @@ export type AgentWaitingInteraction = 'userChoice' | 'confirmation';
  */
 export interface AgentMachineInput {
   /** 不含 Runtime ID 的稳定 Actor 地址 */
-  address: Omit<ChatActorAddress, 'runtimeId'>;
+  address: ChatAgentAddress;
 }
 
 /**
@@ -23,7 +23,7 @@ export interface AgentMachineInput {
  */
 export interface AgentMachineContext {
   /** 不含 Runtime ID 的稳定 Actor 地址 */
-  address: Omit<ChatActorAddress, 'runtimeId'>;
+  address: ChatAgentAddress;
   /** 主进程 Runtime ID */
   runtimeId?: string;
   /** 当前等待交互类型 */

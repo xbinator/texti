@@ -13,8 +13,13 @@ type RuntimeBaseState = Pick<
   ActiveChatRuntime,
   | 'runtimeId'
   | 'sessionId'
+  | 'turnId'
   | 'clientId'
   | 'agentId'
+  | 'parentAgentId'
+  | 'parentRuntimeId'
+  | 'rootRuntimeId'
+  | 'continuationOfRuntimeId'
   | 'model'
   | 'capabilities'
   | 'contextWindow'
@@ -39,8 +44,13 @@ function createRuntimeBase(input: RuntimeFactoryInput, runtimeId: string, sessio
   return {
     runtimeId,
     sessionId,
+    turnId: input.turnId,
     clientId: input.clientId,
     agentId: input.agentId,
+    parentAgentId: input.parentAgentId,
+    parentRuntimeId: input.parentRuntimeId,
+    rootRuntimeId: input.rootRuntimeId,
+    continuationOfRuntimeId: input.continuationOfRuntimeId,
     model: input.model,
     capabilities: input.capabilities,
     contextWindow: input.contextWindow,
@@ -65,7 +75,6 @@ function createRuntimeBase(input: RuntimeFactoryInput, runtimeId: string, sessio
 export function createSendRuntime(input: ChatRuntimeSendInput, runtimeId: string, sessionId: string): ActiveChatRuntime {
   return {
     ...createRuntimeBase(input, runtimeId, sessionId),
-    parentRuntimeId: input.parentRuntimeId,
     tavily: input.tavily,
     mcp: input.mcp,
     phase: 'streaming'
@@ -81,7 +90,6 @@ export function createSendRuntime(input: ChatRuntimeSendInput, runtimeId: string
 export function createContinuationRuntime(input: ChatRuntimeContinueInput, runtimeId: string): ActiveChatRuntime {
   return {
     ...createRuntimeBase(input, runtimeId, input.sessionId),
-    parentRuntimeId: input.parentRuntimeId,
     tavily: input.tavily,
     mcp: input.mcp,
     phase: 'streaming'
@@ -111,7 +119,6 @@ export function createCompactRuntime(input: ChatRuntimeCompactInput, runtimeId: 
 export function createUserChoiceRuntime(input: ChatRuntimeSubmitUserChoiceInput, runtimeId: string): ActiveChatRuntime {
   return {
     ...createRuntimeBase(input, runtimeId, input.sessionId),
-    parentRuntimeId: input.parentRuntimeId,
     tavily: input.tavily,
     mcp: input.mcp,
     phase: 'streaming'

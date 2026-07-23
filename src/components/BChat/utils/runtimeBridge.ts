@@ -3,13 +3,16 @@
  * @description BChat ChatRuntime renderer bridge 请求处理。
  */
 import type { AIToolContext, AIToolExecutionError } from 'types/ai';
-import type { ChatRuntimeBridgeRequestEvent } from 'types/chat-runtime';
+import type { ChatRuntimeBridgeRequestEvent, ChatRuntimeEventBase } from 'types/chat-runtime';
 import type { WebviewOperateInput, WebviewPressKey, WebviewToolContext } from '@/ai/tools/context/webview';
 import type { OpenDraftInput, OpenDraftResult } from '@/ai/tools/shared/types';
 import { isDocumentRecord } from '@/shared/storage';
 import type { StoredDocumentRecord } from '@/shared/storage/files/types';
 import { isUnsavedPath, parseUnsavedPath } from '@/utils/file/unsaved';
 import { workspace } from '@/utils/file/workspace';
+
+/** Bridge handler 实际消费的事件字段。 */
+type BChatRuntimeBridgeRequest = Pick<ChatRuntimeBridgeRequestEvent, 'requestId' | 'kind' | 'payload'> & Partial<ChatRuntimeEventBase>;
 
 /** Bridge settings domain types. */
 /** 可通过 ChatRuntime 暴露给模型的设置键。 */
@@ -279,7 +282,7 @@ function resolveEditorFilePath(filePath: string, workspaceRoot: string | null | 
  * @returns 文件内容快照
  */
 async function readFileContentSnapshot(
-  event: ChatRuntimeBridgeRequestEvent,
+  event: BChatRuntimeBridgeRequest,
   dependencies: BChatRuntimeBridgeDependencies
 ): Promise<BChatRuntimeFileContentSnapshot> {
   const payload = isRecord(event.payload) ? event.payload : {};
@@ -327,7 +330,7 @@ async function readFileContentSnapshot(
  * @param dependencies - bridge 依赖
  * @returns 写入结果
  */
-async function writeFileContent(event: ChatRuntimeBridgeRequestEvent, dependencies: BChatRuntimeBridgeDependencies): Promise<BChatRuntimeFileContentSnapshot> {
+async function writeFileContent(event: BChatRuntimeBridgeRequest, dependencies: BChatRuntimeBridgeDependencies): Promise<BChatRuntimeFileContentSnapshot> {
   const payload = isRecord(event.payload) ? event.payload : {};
   const filePath = typeof payload.path === 'string' ? payload.path.trim() : '';
   const content = typeof payload.content === 'string' ? payload.content : '';
@@ -400,7 +403,7 @@ function isSettingKey(value: unknown): value is BChatRuntimeSettingKey {
  * @param dependencies - bridge 依赖
  * @returns 设置修改结果
  */
-function applySetting(event: ChatRuntimeBridgeRequestEvent, dependencies: BChatRuntimeBridgeDependencies): BChatRuntimeApplySettingResult {
+function applySetting(event: BChatRuntimeBridgeRequest, dependencies: BChatRuntimeBridgeDependencies): BChatRuntimeApplySettingResult {
   if (!dependencies.applySetting) {
     throw createBridgeError('EDITOR_UNAVAILABLE', '当前环境不支持修改设置');
   }
@@ -423,7 +426,7 @@ function applySetting(event: ChatRuntimeBridgeRequestEvent, dependencies: BChatR
  * @param dependencies - bridge 依赖
  * @returns 未保存草稿结果
  */
-async function openDraft(event: ChatRuntimeBridgeRequestEvent, dependencies: BChatRuntimeBridgeDependencies): Promise<OpenDraftResult> {
+async function openDraft(event: BChatRuntimeBridgeRequest, dependencies: BChatRuntimeBridgeDependencies): Promise<OpenDraftResult> {
   if (!dependencies.openDraft) {
     throw createBridgeError('EXECUTION_FAILED', '当前环境不支持创建未保存草稿');
   }
@@ -453,7 +456,7 @@ function isOpenResourceType(value: unknown): value is BChatRuntimeOpenResourceTy
  * @param dependencies - bridge 依赖
  * @returns 打开结果
  */
-async function openResource(event: ChatRuntimeBridgeRequestEvent, dependencies: BChatRuntimeBridgeDependencies): Promise<BChatRuntimeOpenResourceResult> {
+async function openResource(event: BChatRuntimeBridgeRequest, dependencies: BChatRuntimeBridgeDependencies): Promise<BChatRuntimeOpenResourceResult> {
   const payload = isRecord(event.payload) ? event.payload : {};
   const path = typeof payload.path === 'string' ? payload.path.trim() : '';
   const resourceType = isOpenResourceType(payload.resourceType) ? payload.resourceType : null;
@@ -498,7 +501,7 @@ async function openResource(event: ChatRuntimeBridgeRequestEvent, dependencies: 
  * @param dependencies - bridge 依赖
  * @returns bridge 响应数据
  */
-export async function handleBChatRuntimeBridgeRequest(event: ChatRuntimeBridgeRequestEvent, dependencies: BChatRuntimeBridgeDependencies): Promise<unknown> {
+export async function handleBChatRuntimeBridgeRequest(event: BChatRuntimeBridgeRequest, dependencies: BChatRuntimeBridgeDependencies): Promise<unknown> {
   if (event.kind === 'document-snapshot') {
     return readDocumentSnapshot(dependencies);
   }

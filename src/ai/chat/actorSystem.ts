@@ -12,6 +12,60 @@ import { createRuntimeCapabilityRegistry, type RuntimeExecutionCapabilities } fr
 import { createChatSessionEventBus, type ChatSessionUIEvent, type ChatSessionUIEventListener } from './sessionEvents';
 
 /**
+ * Runtime 恢复协议错误。
+ */
+export class ChatActorProtocolError extends Error {
+  /** 稳定错误码。 */
+  readonly code = 'protocol_error';
+
+  /**
+   * 创建恢复协议错误。
+   * @param message - 协议错误详情
+   */
+  constructor(message: string) {
+    super(`protocol_error: ${message}`);
+    this.name = 'ChatActorProtocolError';
+  }
+}
+
+/**
+ * 从主进程恢复快照提取不可变 Runtime 地址。
+ * @param snapshot - 主进程恢复快照
+ * @returns 完整 Runtime 地址
+ */
+function createRecoveryAddress(snapshot: ChatRuntimeRecoverySnapshot): ChatActorAddress {
+  return {
+    sessionId: snapshot.sessionId,
+    turnId: snapshot.turnId,
+    agentId: snapshot.agentId,
+    runtimeId: snapshot.runtimeId,
+    parentAgentId: snapshot.parentAgentId,
+    parentRuntimeId: snapshot.parentRuntimeId,
+    rootRuntimeId: snapshot.rootRuntimeId,
+    continuationOfRuntimeId: snapshot.continuationOfRuntimeId
+  };
+}
+
+/**
+ * 判断两个 Runtime 地址是否属于完全相同的不可变身份。
+ * @param left - 已注册地址
+ * @param right - 恢复地址
+ * @returns 所有身份字段是否一致
+ */
+function isSameRuntimeAddress(left: ChatActorAddress, right: ChatActorAddress): boolean {
+  return (
+    left.sessionId === right.sessionId &&
+    left.turnId === right.turnId &&
+    left.agentId === right.agentId &&
+    left.runtimeId === right.runtimeId &&
+    left.parentAgentId === right.parentAgentId &&
+    left.parentRuntimeId === right.parentRuntimeId &&
+    left.rootRuntimeId === right.rootRuntimeId &&
+    left.continuationOfRuntimeId === right.continuationOfRuntimeId
+  );
+}
+
+/**
  * 应用级 Chat Actor system。
  */
 export interface ChatActorSystem {
@@ -92,31 +146,34 @@ export function createChatActorSystem(): ChatActorSystem {
       capabilityRegistry.register(address.runtimeId, capabilities);
     },
     recoverRuntime(snapshot: ChatRuntimeRecoverySnapshot, capabilities: RuntimeExecutionCapabilities): void {
+      const recoveryAddress = createRecoveryAddress(snapshot);
+      const sessionRef = this.ensureSession(snapshot.sessionId);
+      const sessionSnapshot = sessionRef.getSnapshot();
+      const activeTurnId = sessionSnapshot.context.turnRef?.getSnapshot().context.turnId;
+      if (!sessionSnapshot.matches('idle') && activeTurnId !== snapshot.turnId) {
+        throw new ChatActorProtocolError(`Session ${snapshot.sessionId} already owns active Turn ${activeTurnId ?? 'unknown'} instead of ${snapshot.turnId}`);
+      }
       const existingAddress = actor.getSnapshot().context.runtimeRoutes.get(snapshot.runtimeId);
       if (existingAddress) {
-        capabilityRegistry.register(snapshot.runtimeId, capabilities);
+        if (!isSameRuntimeAddress(existingAddress, recoveryAddress)) {
+          throw new ChatActorProtocolError(`Runtime ${snapshot.runtimeId} recovery address does not match the registered route`);
+        }
         return;
       }
 
-      const sessionRef = this.ensureSession(snapshot.sessionId);
-      if (sessionRef.getSnapshot().matches('idle')) {
+      if (sessionSnapshot.matches('idle')) {
         sessionRef.send({ type: 'session.recoverRuntime', snapshot });
       }
       const { turnRef } = sessionRef.getSnapshot().context;
       const turnId = turnRef?.getSnapshot().context.turnId;
       if (!turnId) {
-        throw new Error(`Failed to recover chat runtime actor: ${snapshot.runtimeId}`);
+        throw new ChatActorProtocolError(`Runtime ${snapshot.runtimeId} recovery did not create a Turn`);
+      }
+      if (turnId !== snapshot.turnId) {
+        throw new ChatActorProtocolError(`Runtime ${snapshot.runtimeId} recovery resolved unexpected Turn ${turnId}`);
       }
 
-      this.registerRuntime(
-        {
-          sessionId: snapshot.sessionId,
-          turnId,
-          agentId: 'primary',
-          runtimeId: snapshot.runtimeId
-        },
-        capabilities
-      );
+      this.registerRuntime(recoveryAddress, capabilities);
     },
     unregisterRuntime(runtimeId: string): void {
       actor.send({ type: 'runtime.unregister', runtimeId });

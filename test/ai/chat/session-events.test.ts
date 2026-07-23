@@ -15,8 +15,10 @@ function createDeletedEvent(sessionId: string): ChatRuntimeMessageDeletedEvent {
   return {
     runtimeId: `runtime-${sessionId}`,
     sessionId,
+    turnId: `turn-${sessionId}`,
     clientId: 'bchat',
     agentId: 'primary',
+    rootRuntimeId: `runtime-${sessionId}`,
     messageId: `message-${sessionId}`
   };
 }
@@ -26,8 +28,10 @@ function createConfirmationEvent(sessionId: string): ChatRuntimeConfirmationRequ
   return {
     runtimeId: `runtime-${sessionId}`,
     sessionId,
+    turnId: `turn-${sessionId}`,
     clientId: 'bchat',
     agentId: 'primary',
+    rootRuntimeId: `runtime-${sessionId}`,
     confirmationId: `confirmation-${sessionId}`,
     request: {
       toolName: 'write_file',

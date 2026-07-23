@@ -1,5 +1,11 @@
 import type { ChatMessageCompactionPart, ChatMessageFilePart, ChatMessageFilePartInput, ChatMessagePart } from 'types/chat';
-import type { ChatRuntimeCompactInput, ChatRuntimeRecoverySnapshot, ChatRuntimeSendInput } from 'types/chat-runtime';
+import type {
+  ChatRuntimeAddress,
+  ChatRuntimeCompactInput,
+  ChatRuntimeRecoverySnapshot,
+  ChatRuntimeSendInput,
+  ChatRuntimeSubmitUserChoiceInput
+} from 'types/chat-runtime';
 import { describe, expect, it } from 'vitest';
 
 describe('chat runtime shared types', (): void => {
@@ -37,8 +43,10 @@ describe('chat runtime shared types', (): void => {
     const snapshot: ChatRuntimeRecoverySnapshot = {
       runtimeId: 'runtime-1',
       sessionId: 'session-1',
+      turnId: 'turn-1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: 'runtime-1',
       phase: 'streaming',
       createdAt: 1,
       capabilities: {
@@ -51,8 +59,10 @@ describe('chat runtime shared types', (): void => {
           event: {
             runtimeId: 'runtime-1',
             sessionId: 'session-1',
+            turnId: 'turn-1',
             clientId: 'bchat',
             agentId: 'primary',
+            rootRuntimeId: 'runtime-1',
             confirmationId: 'confirmation-1',
             request: {
               toolName: 'write_file',
@@ -72,8 +82,10 @@ describe('chat runtime shared types', (): void => {
     const input: ChatRuntimeCompactInput = {
       runtimeId: 'runtime-compact',
       sessionId: 'session-1',
+      turnId: 'turn-compact',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: 'runtime-compact',
       contextWindow: 128_000
     };
     const part: ChatMessageCompactionPart = {
@@ -86,13 +98,59 @@ describe('chat runtime shared types', (): void => {
     const snapshot: ChatRuntimeRecoverySnapshot = {
       runtimeId: input.runtimeId,
       sessionId: input.sessionId,
+      turnId: 'turn-compact',
       clientId: input.clientId,
       agentId: input.agentId,
+      rootRuntimeId: input.runtimeId,
       phase: 'compacting',
       createdAt: 1,
       pendingRequests: []
     };
 
     expect(structuredClone({ input, part, snapshot })).toEqual({ input, part, snapshot });
+  });
+
+  it('shares one complete runtime address across commands and renderer routes', (): void => {
+    const address: ChatRuntimeAddress = {
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      agentId: 'primary',
+      runtimeId: 'runtime-b',
+      parentAgentId: 'coordinator',
+      parentRuntimeId: 'runtime-a',
+      rootRuntimeId: 'runtime-a',
+      continuationOfRuntimeId: 'runtime-a'
+    };
+    const sendInput: ChatRuntimeSendInput = {
+      ...address,
+      clientId: 'bchat',
+      content: 'continue'
+    };
+
+    expect(structuredClone({ address, sendInput })).toEqual({ address, sendInput });
+  });
+
+  it('requires compact and user-choice commands to satisfy the complete runtime address', (): void => {
+    const compactInput: ChatRuntimeCompactInput = {
+      runtimeId: 'runtime-compact',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: 'runtime-a'
+    };
+    const choiceInput: ChatRuntimeSubmitUserChoiceInput = {
+      runtimeId: 'runtime-choice',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: 'runtime-a',
+      continuationOfRuntimeId: 'runtime-a',
+      answer: { questionId: 'question-1', toolCallId: 'tool-1', answers: ['yes'] }
+    };
+    const addresses: ChatRuntimeAddress[] = [compactInput, choiceInput];
+
+    expect(addresses.map((address) => address.rootRuntimeId)).toEqual(['runtime-a', 'runtime-a']);
   });
 });

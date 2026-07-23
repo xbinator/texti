@@ -7,7 +7,7 @@ import type { PreparedRuntimeRequest } from './useRuntimeRequestConfig';
 import type { AdaptedUserMessageInput, MessagePartUpdateInput, SubmitAction } from '../utils/submitAction';
 import type { Message } from '../utils/types';
 import type { AIUserChoiceAnswerData } from 'types/chat';
-import type { ChatRuntimeModelSelection, ChatRuntimeStartResult } from 'types/chat-runtime';
+import type { ChatRuntimeAddress, ChatRuntimeModelSelection, ChatRuntimeStartResult } from 'types/chat-runtime';
 import type { Ref } from 'vue';
 import { cloneDeep } from 'lodash-es';
 import type { ChatRuntimeRequestConfig } from '@/ai/chat/policies/runtimeRequest';
@@ -32,8 +32,8 @@ interface UseChatSubmitterOptions {
   ensureSessionModel: (sessionId: string, model: ChatRuntimeModelSelection) => Promise<void>;
   /** 用户选择开始续跑回调。 */
   onContinueStarted?: (answer: AIUserChoiceAnswerData) => void;
-  /** 在 IPC 前注册 Runtime 并返回 renderer 分配的 ID。 */
-  startRuntime?: (prepared: PreparedRuntimeRequest) => string;
+  /** 在 IPC 前注册 Runtime 并返回完整地址。 */
+  startRuntime?: (prepared: PreparedRuntimeRequest) => ChatRuntimeAddress;
   /** Runtime IPC 返回后的收尾回调。 */
   finishRuntimeStart?: (result: ChatRuntimeStartResult, runtimeId: string) => void;
   /** 用户选择续跑准备失败回调。 */
@@ -92,11 +92,11 @@ export function useChatSubmitter(options: UseChatSubmitterOptions): UseChatSubmi
       }
 
       await options.ensureSessionModel(sessionId, prepared.config.model);
-      runtimeId = options.startRuntime(prepared);
+      const runtimeAddress = options.startRuntime(prepared);
+      runtimeId = runtimeAddress.runtimeId;
 
       const result = await options.submitUserChoice({
-        runtimeId,
-        sessionId,
+        ...runtimeAddress,
         answer,
         ...runtimeConfig
       });

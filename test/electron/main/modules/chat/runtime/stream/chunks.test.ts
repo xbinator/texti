@@ -17,6 +17,41 @@ describe('runtime stream chunks', (): void => {
     expect(toRuntimeStreamChunk(end)).toEqual({ type: 'tool-input-end', toolCallId: 'call-1' });
   });
 
+  it.each([
+    ['null', null],
+    ['false', false],
+    ['zero', 0],
+    ['empty string', '']
+  ])('preserves defined falsey Provider metadata: %s', (_label: string, providerMetadata: unknown): void => {
+    const start = {
+      type: 'tool-input-start',
+      id: 'call-start',
+      toolName: 'search',
+      providerMetadata
+    } as unknown as TextStreamPart<ToolSet>;
+    const call = {
+      type: 'tool-call',
+      toolCallId: 'call-complete',
+      toolName: 'search',
+      input: {},
+      providerMetadata
+    } as unknown as TextStreamPart<ToolSet>;
+
+    expect(toRuntimeStreamChunk(start)).toEqual({
+      type: 'tool-input-start',
+      toolCallId: 'call-start',
+      toolName: 'search',
+      providerMetadata
+    });
+    expect(toRuntimeStreamChunk(call)).toEqual({
+      type: 'tool-call',
+      toolCallId: 'call-complete',
+      toolName: 'search',
+      input: {},
+      providerMetadata
+    });
+  });
+
   it('maps v7 tool output without a legacy result fallback', (): void => {
     const toolResult = {
       type: 'tool-result',

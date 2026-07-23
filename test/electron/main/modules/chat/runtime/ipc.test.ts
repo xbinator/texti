@@ -46,8 +46,10 @@ describe('chat runtime recovery IPC', (): void => {
       {
         runtimeId: 'runtime-1',
         sessionId: 'session-1',
+        turnId: 'turn-1',
         clientId: 'bchat',
         agentId: 'primary',
+        rootRuntimeId: 'runtime-1',
         phase: 'streaming',
         createdAt: 1,
         pendingRequests: []

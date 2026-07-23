@@ -185,6 +185,7 @@ export interface AIToolExecutionError {
     | 'PROCESS_CLEANUP_FAILED'
     | 'UNSUPPORTED_PROVIDER'
     | 'CONFIRMATION_DISMISSED'
+    | 'protocol_error'
     | 'EXECUTION_FAILED';
   /** 错误消息。 */
   message: string;

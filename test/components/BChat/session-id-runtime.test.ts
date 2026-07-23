@@ -106,6 +106,9 @@ const electronAPIMock = vi.hoisted(() => ({
     return vi.fn();
   })
 }));
+const actorSystemMockState = vi.hoisted(() => ({
+  registerRuntime: vi.fn()
+}));
 
 const autoNameMockState = vi.hoisted(() => ({
   options: undefined as
@@ -222,6 +225,23 @@ vi.mock('vue-router', () => ({
     push: vi.fn()
   }))
 }));
+
+vi.mock('@/hooks/useChat/useActorSystem', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/useChat/useActorSystem')>();
+
+  return {
+    ...actual,
+    useActorSystem: () => {
+      const actorSystem = actual.useActorSystem();
+      const registerRuntime = actorSystem.registerRuntime.bind(actorSystem);
+      actorSystem.registerRuntime = (address, capabilities): void => {
+        actorSystemMockState.registerRuntime(address, capabilities);
+        registerRuntime(address, capabilities);
+      };
+      return actorSystem;
+    }
+  };
+});
 
 vi.mock('@/components/BButton/index.vue', () => ({
   default: {
@@ -720,6 +740,7 @@ describe('BChat sessionId runtime', (): void => {
     recentStoreMock.getFileByPath.mockReset();
     resetRuntimeEventListeners(runtimeListeners);
     conversationViewMockState.scrollToBottom.mockReset();
+    actorSystemMockState.registerRuntime.mockReset();
     chatStoreMock.getSessionMessages.mockResolvedValue([]);
     chatStoreMock.loadSessionById.mockResolvedValue(undefined);
     chatStoreMock.findSession.mockReturnValue(undefined);
@@ -843,6 +864,33 @@ describe('BChat sessionId runtime', (): void => {
     expect(wrapper.emitted('loading-change')).toContainEqual([true]);
   });
 
+  it('registers a complete runtime address before sending the request', async (): Promise<void> => {
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+
+    await submitTextAndReadRuntimeId(wrapper, 'addressed request');
+
+    expect(actorSystemMockState.registerRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'session-active',
+        turnId: expect.any(String),
+        agentId: 'primary',
+        runtimeId: expect.any(String),
+        rootRuntimeId: expect.any(String)
+      }),
+      expect.any(Object)
+    );
+    expect(actorSystemMockState.registerRuntime.mock.invocationCallOrder[0]).toBeLessThan(electronAPIMock.chatRuntimeSend.mock.invocationCallOrder[0]);
+    expect(electronAPIMock.chatRuntimeSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        turnId: expect.any(String),
+        rootRuntimeId: expect.any(String)
+      })
+    );
+
+    wrapper.unmount();
+  });
+
   it('publishes runtime status and completion through one event from the existing workflow', async (): Promise<void> => {
     const wrapper = mountBChat('session-active');
     await flushPromises();
@@ -854,8 +902,10 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'messageCreated', {
       runtimeId,
       sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: runtimeId,
       message: {
         id: 'assistant-complete',
         sessionId: 'session-active',
@@ -871,8 +921,10 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'complete', {
       runtimeId,
       sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: runtimeId,
       reason: 'completed'
     });
     await flushPromises();
@@ -890,8 +942,10 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'confirmationRequest', {
       runtimeId,
       sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: runtimeId,
       confirmationId: 'confirmation-status',
       request: {
         toolName: 'write_file',
@@ -906,8 +960,10 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'error', {
       runtimeId,
       sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: runtimeId,
       error: { code: 'REQUEST_FAILED', message: 'failed' }
     });
     await flushPromises();
@@ -1085,8 +1141,10 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'contextUsage', {
       runtimeId,
       sessionId: 'session-1',
+      turnId: 'session-1:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: runtimeId,
       snapshot: {
         usedTokens: 54_700,
         contextWindow: 200_000
@@ -1106,12 +1164,17 @@ describe('BChat sessionId runtime', (): void => {
     electronAPIMock.chatRuntimeSend.mockImplementation((input: ChatRuntimeSendInput): Promise<ChatRuntimeHandlerResult<ChatRuntimeStartResult>> => {
       runtimeListeners.messageCreated?.({
         runtimeId: input.runtimeId,
-        sessionId: input.sessionId ?? 'session-active',
+        sessionId: input.sessionId,
+        turnId: input.turnId,
         clientId: input.clientId,
         agentId: input.agentId,
+        parentAgentId: input.parentAgentId,
+        parentRuntimeId: input.parentRuntimeId,
+        rootRuntimeId: input.rootRuntimeId,
+        continuationOfRuntimeId: input.continuationOfRuntimeId,
         message: {
           id: input.userMessageId ?? 'user-early',
-          sessionId: input.sessionId ?? 'session-active',
+          sessionId: input.sessionId,
           role: 'user',
           content: input.content,
           parts: [{ id: 'part-early', type: 'text', text: input.content }],
@@ -1145,8 +1208,10 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'confirmationRequest', {
       runtimeId,
       sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: runtimeId,
       confirmationId: 'confirmation-1',
       request: {
         toolName: 'write_file',
@@ -1432,8 +1497,10 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'error', {
       runtimeId,
       sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: runtimeId,
       error: { code: 'REQUEST_FAILED', message: '模型调用失败' }
     });
     await flushPromises();
@@ -1482,8 +1549,10 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'error', {
       runtimeId: 'runtime-1',
       sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: 'runtime-1',
       error: { code: 'REQUEST_FAILED', message: '模型调用失败' }
     });
     await flushPromises();
@@ -1550,8 +1619,10 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'messageCreated', {
       runtimeId,
       sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: runtimeId,
       message: emptyAssistantMessage
     });
     electronAPIMock.chatRuntimeAbort.mockResolvedValueOnce({
@@ -1599,16 +1670,20 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'messageUpdated', {
       runtimeId,
       sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: runtimeId,
       message: partialMessage
     });
     electronAPIMock.chatRuntimeAbort.mockImplementationOnce(async () => {
       emitRuntimeEvent(runtimeListeners, 'messageCreated', {
         runtimeId,
         sessionId: 'session-active',
+        turnId: 'session-active:turn:1',
         clientId: 'bchat',
         agentId: 'primary',
+        rootRuntimeId: runtimeId,
         message: interruptMessage
       });
       return { ok: true, data: { assistantMessage: finishedMessage, interruptMessage } };
@@ -1727,8 +1802,10 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'messageUpdated', {
       runtimeId: 'runtime-1',
       sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: 'runtime-1',
       message: {
         ...createAssistantMessage({
           id: 'assistant-streaming',

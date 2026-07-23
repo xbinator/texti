@@ -21,8 +21,10 @@ function createRecoverySnapshot(waiting = false): ChatRuntimeRecoverySnapshot {
   return {
     runtimeId: 'runtime-recovered',
     sessionId: 'session-1',
+    turnId: 'turn-recovered',
     clientId: 'bchat',
     agentId: 'primary',
+    rootRuntimeId: 'runtime-recovered',
     phase: 'streaming',
     createdAt: 1,
     pendingRequests: waiting
@@ -32,8 +34,10 @@ function createRecoverySnapshot(waiting = false): ChatRuntimeRecoverySnapshot {
             event: {
               runtimeId: 'runtime-recovered',
               sessionId: 'session-1',
+              turnId: 'turn-recovered',
               clientId: 'bchat',
               agentId: 'primary',
+              rootRuntimeId: 'runtime-recovered',
               confirmationId: 'confirmation-1',
               request: { toolName: 'write_file', title: '写入文件', description: '是否写入？', riskLevel: 'write' }
             }

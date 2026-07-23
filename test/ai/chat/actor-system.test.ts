@@ -20,33 +20,141 @@ describe('chat actor system', (): void => {
     expect(system.actor.getSnapshot().status).toBe('stopped');
   });
 
-  it('recovers a runtime idempotently and upgrades its capabilities', (): void => {
+  it('recovers the persisted address and capabilities idempotently', (): void => {
     const system = createChatActorSystem();
     system.start();
     const snapshot: ChatRuntimeRecoverySnapshot = {
       runtimeId: 'runtime-1',
       sessionId: 'session-1',
+      turnId: 'turn-1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: 'runtime-1',
       phase: 'streaming',
       createdAt: 1,
       pendingRequests: []
     };
-    const degradedCapabilities = {
+    const persistedCapabilities = {
       tools: [],
+      descriptor: { rendererToolNames: ['read_current_document'], documentId: 'document-1' },
+      documentId: 'document-1',
       getToolContext: (): undefined => undefined,
       handleBridgeRequest: async (): Promise<unknown> => undefined
     };
 
-    system.recoverRuntime(snapshot, degradedCapabilities);
+    system.recoverRuntime(snapshot, persistedCapabilities);
     const firstSession = system.getSession('session-1');
     const firstTurn = firstSession?.getSnapshot().context.turnRef;
-    system.recoverRuntime(snapshot, { ...degradedCapabilities, documentId: 'document-1' });
+    const frozenCapabilities = system.getRuntimeCapabilities('runtime-1');
+    system.recoverRuntime(snapshot, { ...persistedCapabilities, documentId: 'document-current' });
 
     expect(system.getSession('session-1')).toBe(firstSession);
     expect(firstSession?.getSnapshot().context.turnRef).toBe(firstTurn);
-    expect(system.actor.getSnapshot().context.runtimeRoutes.get('runtime-1')).toMatchObject({ sessionId: 'session-1' });
+    expect(firstTurn?.getSnapshot().context.turnId).toBe(snapshot.turnId);
+    expect(system.actor.getSnapshot().context.runtimeRoutes.get('runtime-1')).toMatchObject({
+      sessionId: 'session-1',
+      turnId: snapshot.turnId,
+      rootRuntimeId: snapshot.rootRuntimeId
+    });
+    expect(system.getRuntimeCapabilities('runtime-1')).toBe(frozenCapabilities);
     expect(system.getRuntimeCapabilities('runtime-1')?.documentId).toBe('document-1');
+    system.stop();
+  });
+
+  it('rejects recovery when an existing runtime route has different lineage', (): void => {
+    const system = createChatActorSystem();
+    system.start();
+    const snapshot: ChatRuntimeRecoverySnapshot = {
+      runtimeId: 'runtime-1',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: 'runtime-1',
+      phase: 'streaming',
+      createdAt: 1,
+      pendingRequests: []
+    };
+    const capabilities = {
+      tools: [],
+      getToolContext: (): undefined => undefined,
+      handleBridgeRequest: async (): Promise<unknown> => undefined
+    };
+    system.recoverRuntime(snapshot, capabilities);
+
+    expect(() => system.recoverRuntime({ ...snapshot, rootRuntimeId: 'runtime-other' }, capabilities)).toThrow(/protocol_error/);
+    system.stop();
+  });
+
+  it('rejects recovery into a session that already owns a different active turn', (): void => {
+    const system = createChatActorSystem();
+    system.start();
+    const session = system.ensureSession('session-1');
+    session.send({
+      type: 'session.submit',
+      input: { messageId: 'user-1', createdAt: '2026-07-23T00:00:00.000Z', content: 'hello', parts: [] }
+    });
+    const activeTurnId = session.getSnapshot().context.turnRef?.getSnapshot().context.turnId;
+    const snapshot: ChatRuntimeRecoverySnapshot = {
+      runtimeId: 'runtime-recovered',
+      sessionId: 'session-1',
+      turnId: 'turn-recovered',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: 'runtime-recovered',
+      phase: 'streaming',
+      createdAt: 1,
+      pendingRequests: []
+    };
+
+    expect(() =>
+      system.recoverRuntime(snapshot, {
+        tools: [],
+        getToolContext: (): undefined => undefined,
+        handleBridgeRequest: async (): Promise<unknown> => undefined
+      })
+    ).toThrow(/protocol_error/);
+    expect(session.getSnapshot().context.turnRef?.getSnapshot().context.turnId).toBe(activeTurnId);
+    expect(system.actor.getSnapshot().context.runtimeRoutes.has(snapshot.runtimeId)).toBe(false);
+    system.stop();
+  });
+
+  it('does not let an idempotent route hide a conflicting active turn', (): void => {
+    const system = createChatActorSystem();
+    system.start();
+    const snapshot: ChatRuntimeRecoverySnapshot = {
+      runtimeId: 'runtime-recovered',
+      sessionId: 'session-1',
+      turnId: 'turn-recovered',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: 'runtime-recovered',
+      phase: 'streaming',
+      createdAt: 1,
+      pendingRequests: []
+    };
+    const capabilities = {
+      tools: [],
+      getToolContext: (): undefined => undefined,
+      handleBridgeRequest: async (): Promise<unknown> => undefined
+    };
+    system.registerRuntime(
+      {
+        runtimeId: snapshot.runtimeId,
+        sessionId: snapshot.sessionId,
+        turnId: snapshot.turnId,
+        agentId: snapshot.agentId,
+        rootRuntimeId: snapshot.rootRuntimeId
+      },
+      capabilities
+    );
+    const session = system.ensureSession(snapshot.sessionId);
+    session.send({
+      type: 'session.submit',
+      input: { messageId: 'user-1', createdAt: '2026-07-23T00:00:00.000Z', content: 'hello', parts: [] }
+    });
+
+    expect(() => system.recoverRuntime(snapshot, capabilities)).toThrow(/protocol_error/);
     system.stop();
   });
 });

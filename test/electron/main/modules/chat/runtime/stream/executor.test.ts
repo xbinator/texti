@@ -3,23 +3,69 @@
  * @description ChatRuntime 主进程流式执行器测试。
  */
 import type { ActiveChatRuntime, ChatRuntimeMainToolExecutionInput } from '../../../../../../../electron/main/modules/chat/runtime/types.mjs';
-import type { AIToolExecutionResult } from 'types/ai';
+import type { AIMCPRequestConfig, AIToolExecutionResult, AITransportTool } from 'types/ai';
 import type { ChatMessageRecord } from 'types/chat';
+import type { DelegateTaskInput } from 'types/chat-agent';
 import { cloneDeep } from 'lodash-es';
 import { describe, expect, it, vi } from 'vitest';
+import { hashAgentPayload, validateFoundationContract } from '../../../../../../../electron/main/modules/chat/agents/contracts.mjs';
 import { createRuntimeStreamExecutor } from '../../../../../../../electron/main/modules/chat/runtime/stream/index.mjs';
 
 /** 测试 runtime 状态。 */
 const runtime: ActiveChatRuntime = {
   runtimeId: 'runtime-1',
   sessionId: 'session-1',
+  turnId: 'turn-1',
   clientId: 'client-1',
   agentId: 'agent-1',
+  rootRuntimeId: 'runtime-1',
   status: 'running',
   phase: 'streaming',
   abortController: new AbortController(),
   createdAt: 0
 };
+
+/** 委派工具必须显式出现在当前 Runtime 的工具快照中。 */
+const delegateTool: AITransportTool = {
+  name: 'delegate_task',
+  description: 'Delegate one bounded task.',
+  parameters: { type: 'object', properties: {} }
+};
+
+/** 可由 AI SDK 发现并执行工具的 MCP 请求配置。 */
+const executableMcp: AIMCPRequestConfig = {
+  servers: [
+    {
+      id: 'mcp-enabled',
+      name: 'Enabled MCP',
+      enabled: true,
+      transport: 'stdio',
+      command: 'mcp-server',
+      args: [],
+      env: {},
+      headers: {},
+      toolAllowlist: ['search'],
+      connectTimeoutMs: 20_000,
+      toolCallTimeoutMs: 30_000
+    }
+  ],
+  enabledServerIds: ['mcp-enabled'],
+  enabledTools: [{ serverId: 'mcp-enabled', toolName: 'search' }],
+  toolInstructions: ''
+};
+
+/**
+ * 创建显式暴露委派工具的 Runtime。
+ * @param overrides - Runtime 局部覆盖
+ * @returns 暴露 delegate_task 的 Runtime
+ */
+function createDelegateRuntime(overrides: Partial<ActiveChatRuntime> = {}): ActiveChatRuntime {
+  return {
+    ...runtime,
+    ...overrides,
+    tools: overrides.tools ?? [delegateTool]
+  };
+}
 
 /** ChatRuntime 默认传给 AI 服务的内部续轮策略。 */
 const RUNTIME_CALL_OPTIONS = {
@@ -54,6 +100,303 @@ function createAssistantMessage(): ChatMessageRecord {
     loading: true,
     finished: false
   };
+}
+
+/** 延迟委派测试流中的单个调用。 */
+interface DelegateStreamCall {
+  /** 工具调用 ID。 */
+  toolCallId: string;
+  /** 委派契约输入。 */
+  input: DelegateTaskInput;
+  /** 可选 Provider 元数据。 */
+  providerMetadata?: Record<string, unknown>;
+}
+
+/**
+ * 创建合法的只读委派契约。
+ * @param task - 子任务描述
+ * @returns 最小只读委派输入
+ */
+function createDelegateInput(task: string): DelegateTaskInput {
+  return {
+    task,
+    acceptanceCriteria: [`完成 ${task}`],
+    mode: 'read',
+    resources: [{ kind: 'file', reference: 'CONTEXT.md' }],
+    requestedTools: ['read_file'],
+    required: true,
+    priority: 'normal'
+  };
+}
+
+/**
+ * 创建仅包含延迟委派调用的 Provider 流。
+ * @param calls - 有序委派调用
+ * @returns AI stream chunk 序列
+ */
+async function* createDelegateStream(calls: readonly DelegateStreamCall[]): AsyncGenerator<unknown> {
+  for (const call of calls) {
+    yield {
+      type: 'tool-input-start',
+      id: call.toolCallId,
+      toolName: 'delegate_task',
+      ...(call.providerMetadata ? { providerMetadata: call.providerMetadata } : {})
+    };
+    yield { type: 'tool-input-delta', id: call.toolCallId, delta: JSON.stringify(call.input) };
+    yield { type: 'tool-input-end', id: call.toolCallId };
+    yield {
+      type: 'tool-call',
+      toolCallId: call.toolCallId,
+      toolName: 'delegate_task',
+      input: call.input,
+      ...(call.providerMetadata ? { providerMetadata: call.providerMetadata } : {})
+    };
+  }
+  yield { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 12, outputTokens: 6, totalTokens: 18 } };
+}
+
+/**
+ * 创建仅在 input-start 携带 Provider 元数据的委派流。
+ * @param input - 委派契约输入
+ * @param providerMetadata - 仅由 start chunk 提供的元数据
+ * @returns AI stream chunk 序列
+ */
+async function* createStartMetadataStream(input: DelegateTaskInput, providerMetadata: unknown): AsyncGenerator<unknown> {
+  yield {
+    type: 'tool-input-start',
+    id: 'delegate-call-1',
+    toolName: 'delegate_task',
+    providerMetadata
+  };
+  yield { type: 'tool-input-delta', id: 'delegate-call-1', delta: JSON.stringify(input) };
+  yield { type: 'tool-input-end', id: 'delegate-call-1' };
+  yield {
+    type: 'tool-call',
+    toolCallId: 'delegate-call-1',
+    toolName: 'delegate_task',
+    input
+  };
+  yield { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 12, outputTokens: 6, totalTokens: 18 } };
+}
+
+/**
+ * 创建 direct 与 deferred 交错的 Provider 流。
+ * @param deferredFirst - 是否先完成延迟调用
+ * @returns AI stream chunk 序列
+ */
+async function* createMixedDelegateStream(deferredFirst: boolean): AsyncGenerator<unknown> {
+  const delegateInput = createDelegateInput('浏览上下文');
+  if (deferredFirst) {
+    yield { type: 'tool-input-start', id: 'delegate-call-1', toolName: 'delegate_task' };
+    yield { type: 'tool-input-delta', id: 'delegate-call-1', delta: JSON.stringify(delegateInput) };
+    yield { type: 'tool-input-end', id: 'delegate-call-1' };
+    yield { type: 'tool-call', toolCallId: 'delegate-call-1', toolName: 'delegate_task', input: delegateInput };
+    yield { type: 'tool-call', toolCallId: 'direct-call-1', toolName: 'read_file', input: { path: 'CONTEXT.md' } };
+  } else {
+    yield { type: 'tool-call', toolCallId: 'direct-call-1', toolName: 'read_file', input: { path: 'CONTEXT.md' } };
+    yield { type: 'tool-input-start', id: 'delegate-call-1', toolName: 'delegate_task' };
+    yield { type: 'tool-input-delta', id: 'delegate-call-1', delta: JSON.stringify(delegateInput) };
+    yield { type: 'tool-input-end', id: 'delegate-call-1' };
+    yield { type: 'tool-call', toolCallId: 'delegate-call-1', toolName: 'delegate_task', input: delegateInput };
+  }
+  yield { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 12, outputTokens: 6, totalTokens: 18 } };
+}
+
+/**
+ * 创建两个普通 direct 工具调用的 Provider 流。
+ * @returns AI stream chunk 序列
+ */
+async function* createDirectPairStream(): AsyncGenerator<unknown> {
+  yield { type: 'tool-call', toolCallId: 'direct-call-1', toolName: 'read_file', input: { path: 'CONTEXT.md' } };
+  yield { type: 'tool-call', toolCallId: 'direct-call-2', toolName: 'read_file', input: { path: 'AGENTS.md' } };
+  yield { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 12, outputTokens: 6, totalTokens: 18 } };
+}
+
+/**
+ * 创建一个 start-only 定义与另一个完整调用混合的流。
+ * @param deferredStartOnly - start-only 定义是否属于 deferred
+ * @returns AI stream chunk 序列
+ */
+async function* createStartOnlyStream(deferredStartOnly: boolean): AsyncGenerator<unknown> {
+  if (deferredStartOnly) {
+    yield { type: 'tool-input-start', id: 'start-only-call', toolName: 'delegate_task' };
+    yield { type: 'tool-call', toolCallId: 'complete-call', toolName: 'read_file', input: { path: 'CONTEXT.md' } };
+  } else {
+    yield { type: 'tool-input-start', id: 'start-only-call', toolName: 'read_file' };
+    yield {
+      type: 'tool-call',
+      toolCallId: 'complete-call',
+      toolName: 'delegate_task',
+      input: createDelegateInput('浏览上下文')
+    };
+  }
+  yield { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 12, outputTokens: 6, totalTokens: 18 } };
+}
+
+/**
+ * 创建携带敏感输入但缺少完整 call 定义的 deferred 流。
+ * @returns AI stream chunk 序列
+ */
+async function* createIncompleteDelegateStream(): AsyncGenerator<unknown> {
+  yield {
+    type: 'tool-input-start',
+    id: 'delegate-call-1',
+    toolName: 'delegate_task',
+    providerMetadata: { secretSignature: 'incomplete-provider-secret' }
+  };
+  yield {
+    type: 'tool-input-delta',
+    id: 'delegate-call-1',
+    delta: '{"task":"incomplete-contract-secret"'
+  };
+  yield { type: 'tool-input-end', id: 'delegate-call-1' };
+  yield { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 12, outputTokens: 6, totalTokens: 18 } };
+}
+
+/**
+ * 创建同一 ID 的 start/call 定义冲突流。
+ * @param startName - start 阶段工具名称
+ * @param callName - call 阶段工具名称
+ * @returns AI stream chunk 序列
+ */
+async function* createConflictStream(startName: string, callName: string): AsyncGenerator<unknown> {
+  yield { type: 'tool-input-start', id: 'conflict-call', toolName: startName };
+  yield {
+    type: 'tool-call',
+    toolCallId: 'conflict-call',
+    toolName: callName,
+    input: callName === 'delegate_task' ? createDelegateInput('浏览上下文') : { path: 'CONTEXT.md' }
+  };
+  yield { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 12, outputTokens: 6, totalTokens: 18 } };
+}
+
+/**
+ * 创建重复完整调用 ID 的流。
+ * @returns AI stream chunk 序列
+ */
+async function* createDuplicateCallStream(): AsyncGenerator<unknown> {
+  yield { type: 'tool-call', toolCallId: 'duplicate-call', toolName: 'read_file', input: { path: 'CONTEXT.md' } };
+  yield { type: 'tool-call', toolCallId: 'duplicate-call', toolName: 'read_file', input: { path: 'AGENTS.md' } };
+  yield { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 12, outputTokens: 6, totalTokens: 18 } };
+}
+
+/**
+ * 创建停止类 Provider result 后仍出现 deferred 定义的流。
+ * @param finishBeforeResult - finish 是否先于停止结果
+ * @returns AI stream chunk 序列
+ */
+async function* createLateDeferredStream(finishBeforeResult: boolean): AsyncGenerator<unknown> {
+  yield { type: 'tool-call', toolCallId: 'direct-call-1', toolName: 'read_file', input: { path: 'CONTEXT.md' } };
+  if (finishBeforeResult) {
+    yield { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 12, outputTokens: 6, totalTokens: 18 } };
+  }
+  yield {
+    type: 'tool-result',
+    toolCallId: 'direct-call-1',
+    toolName: 'read_file',
+    output: {
+      toolName: 'read_file',
+      status: 'cancelled',
+      error: { code: 'USER_CANCELLED', message: 'provider cancelled' }
+    }
+  };
+  if (!finishBeforeResult) {
+    yield { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 12, outputTokens: 6, totalTokens: 18 } };
+  }
+  yield { type: 'tool-input-start', id: 'delegate-call-1', toolName: 'delegate_task' };
+  yield {
+    type: 'tool-call',
+    toolCallId: 'delegate-call-1',
+    toolName: 'delegate_task',
+    input: createDelegateInput('浏览上下文')
+  };
+}
+
+/**
+ * 创建停止类 Provider result 后仍出现 pure-direct 调用的流。
+ * @returns AI stream chunk 序列
+ */
+async function* createStoppedDirectStream(): AsyncGenerator<unknown> {
+  yield { type: 'tool-call', toolCallId: 'direct-call-1', toolName: 'read_file', input: { path: 'CONTEXT.md' } };
+  yield {
+    type: 'tool-result',
+    toolCallId: 'direct-call-1',
+    toolName: 'read_file',
+    output: {
+      toolName: 'read_file',
+      status: 'awaiting_user_input',
+      data: {
+        questionId: 'question-1',
+        toolCallId: 'direct-call-1',
+        question: '继续吗？',
+        mode: 'single',
+        options: [{ label: '继续', value: 'yes' }]
+      }
+    }
+  };
+  yield { type: 'tool-call', toolCallId: 'direct-call-2', toolName: 'read_file', input: { path: 'AGENTS.md' } };
+  yield { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 12, outputTokens: 6, totalTokens: 18 } };
+}
+
+/**
+ * 创建 Provider result 早于 deferred start/call 的非法流。
+ * @param results - 同一调用 ID 的 Provider 工具结果
+ * @returns AI stream chunk 序列
+ */
+async function* createEarlyResultStream(results: readonly AIToolExecutionResult[]): AsyncGenerator<unknown> {
+  for (const result of results) {
+    yield {
+      type: 'tool-result',
+      toolCallId: 'delegate-call-1',
+      toolName: result.toolName,
+      output: result
+    };
+  }
+  yield { type: 'tool-input-start', id: 'delegate-call-1', toolName: 'delegate_task' };
+  yield {
+    type: 'tool-call',
+    toolCallId: 'delegate-call-1',
+    toolName: 'delegate_task',
+    input: createDelegateInput('浏览上下文')
+  };
+  yield { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 12, outputTokens: 6, totalTokens: 18 } };
+}
+
+/**
+ * 创建停止类 Provider result 后仍发出内容、错误及可选 deferred 定义的流。
+ * @param terminalType - 停止点后的错误事件类型
+ * @param includeDeferred - 是否在 late error 后追加 deferred 定义
+ * @returns AI stream chunk 序列
+ */
+async function* createPostStopNoiseStream(terminalType: 'error' | 'abort', includeDeferred: boolean): AsyncGenerator<unknown> {
+  yield { type: 'tool-call', toolCallId: 'direct-call-1', toolName: 'read_file', input: { path: 'CONTEXT.md' } };
+  yield {
+    type: 'tool-result',
+    toolCallId: 'direct-call-1',
+    toolName: 'read_file',
+    output: {
+      toolName: 'read_file',
+      status: 'cancelled',
+      error: { code: 'PROVIDER_CANCELLED', message: 'provider stopped' }
+    }
+  };
+  yield { type: 'text-delta', text: 'post-stop-text-secret' };
+  yield { type: 'reasoning-delta', text: 'post-stop-reasoning-secret' };
+  if (terminalType === 'error') {
+    yield { type: 'error', error: new Error('late provider error') };
+  } else {
+    yield { type: 'abort', reason: 'late provider abort' };
+  }
+  if (includeDeferred) {
+    yield { type: 'tool-input-start', id: 'delegate-call-1', toolName: 'delegate_task' };
+    yield {
+      type: 'tool-call',
+      toolCallId: 'delegate-call-1',
+      toolName: 'delegate_task',
+      input: createDelegateInput('浏览上下文')
+    };
+  }
+  yield { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 12, outputTokens: 6, totalTokens: 18 } };
 }
 
 /**
@@ -325,6 +668,795 @@ async function* createMainEditFileToolStream(): AsyncGenerator<unknown> {
 }
 
 describe('runtime stream executor', (): void => {
+  it('returns one deferred suspension without exposing or executing the tool part', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const persistedUpdates: ChatMessageRecord[] = [];
+    const executeMainTool = vi.fn();
+    const executeRendererTool = vi.fn();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([
+      undefined,
+      {
+        stream: createDelegateStream([
+          {
+            toolCallId: 'delegate-call-1',
+            input: createDelegateInput('浏览上下文'),
+            providerMetadata: { anthropic: { signature: 'provider-signature' } }
+          }
+        ])
+      }
+    ]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool, executeRendererTool });
+
+    const result = await executor({ runtime: createDelegateRuntime(), userMessage, assistantMessage }, async (message) => {
+      persistedUpdates.push(structuredClone(message));
+    });
+
+    expect(result).toMatchObject({
+      shouldContinue: false,
+      suspension: {
+        toolCalls: [
+          {
+            toolCallId: 'delegate-call-1',
+            toolName: 'delegate_task',
+            input: createDelegateInput('浏览上下文'),
+            argumentsHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+            providerMetadataHash: expect.stringMatching(/^[a-f0-9]{64}$/)
+          }
+        ]
+      }
+    });
+    expect(executeMainTool).not.toHaveBeenCalled();
+    expect(executeRendererTool).not.toHaveBeenCalled();
+    expect(persistedUpdates.every((message): boolean => message.parts.every((part): boolean => part.type !== 'tool'))).toBe(true);
+    expect(assistantMessage.parts).toEqual([
+      expect.objectContaining({
+        type: 'tool',
+        toolCallId: 'delegate-call-1',
+        toolName: 'delegate_task',
+        status: 'executing',
+        input: createDelegateInput('浏览上下文'),
+        providerMetadata: { anthropic: { signature: 'provider-signature' } }
+      })
+    ]);
+  });
+
+  it('inherits Provider metadata from tool-input-start into the deferred suspension', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const providerMetadata = { anthropic: { signature: 'start-only-signature' } };
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createStartMetadataStream(createDelegateInput('浏览上下文'), providerMetadata) }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText });
+
+    const result = await executor({ runtime: createDelegateRuntime(), userMessage, assistantMessage }, async () => undefined);
+
+    expect(result.suspension?.toolCalls).toEqual([
+      expect.objectContaining({
+        toolCallId: 'delegate-call-1',
+        providerMetadataHash: hashAgentPayload(providerMetadata)
+      })
+    ]);
+    expect(assistantMessage.parts).toEqual([
+      expect.objectContaining({
+        toolCallId: 'delegate-call-1',
+        providerMetadata
+      })
+    ]);
+  });
+
+  it('hashes the normalized delegation contract carried by the suspension', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const rawInput: DelegateTaskInput = {
+      task: '  浏览上下文  ',
+      acceptanceCriteria: ['  返回摘要  '],
+      mode: 'read',
+      resources: [{ kind: 'file', reference: '  CONTEXT.md  ' }],
+      requestedTools: ['search_web', 'read_file'],
+      required: true,
+      priority: 'normal'
+    };
+    const validation = validateFoundationContract(rawInput);
+    if (!validation.ok) throw new Error('expected normalized delegation fixture to be valid');
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createDelegateStream([{ toolCallId: 'delegate-call-1', input: rawInput }]) }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText });
+
+    const result = await executor({ runtime: createDelegateRuntime(), userMessage, assistantMessage }, async () => undefined);
+    const suspendedCall = result.suspension?.toolCalls[0];
+
+    expect(suspendedCall?.input).toEqual(validation.contract);
+    expect(suspendedCall?.argumentsHash).toBe(hashAgentPayload(validation.contract));
+    expect(suspendedCall?.argumentsHash).not.toBe(hashAgentPayload(rawInput));
+  });
+
+  it.each<[string, AIToolExecutionResult]>([
+    [
+      'success',
+      {
+        toolName: 'delegate_task',
+        status: 'success',
+        data: { unexpected: true }
+      }
+    ],
+    [
+      'stopping cancellation',
+      {
+        toolName: 'delegate_task',
+        status: 'cancelled',
+        error: { code: 'USER_CANCELLED', message: 'provider stopped' }
+      }
+    ]
+  ])(
+    'rejects a deferred Provider result before its definition without leaking it: %s',
+    async (_label: string, providerResult: AIToolExecutionResult): Promise<void> => {
+      const assistantMessage = createAssistantMessage();
+      const persistedUpdates: ChatMessageRecord[] = [];
+      const executeMainTool = vi.fn();
+      const executeRendererTool = vi.fn();
+      const resolve = vi.fn().mockResolvedValue({
+        createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+        modelId: 'gpt-test'
+      });
+      const streamText = vi.fn().mockResolvedValue([undefined, { stream: createEarlyResultStream([providerResult]) }]);
+      const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool, executeRendererTool });
+
+      const result = await executor({ runtime: createDelegateRuntime(), userMessage, assistantMessage }, async (message) => {
+        persistedUpdates.push(structuredClone(message));
+      });
+
+      expect(result.suspension).toBeUndefined();
+      expect(result.shouldContinue).toBeUndefined();
+      expect(executeMainTool).not.toHaveBeenCalled();
+      expect(executeRendererTool).not.toHaveBeenCalled();
+      expect(
+        persistedUpdates.every((message): boolean => message.parts.every((part): boolean => part.type !== 'tool' || part.toolCallId !== 'delegate-call-1'))
+      ).toBe(true);
+      expect(assistantMessage.parts).toEqual([
+        expect.objectContaining({
+          toolCallId: 'delegate-call-1',
+          status: 'done',
+          result: expect.objectContaining({
+            status: 'failure',
+            error: expect.objectContaining({ code: 'protocol_error' })
+          })
+        })
+      ]);
+    }
+  );
+
+  it('rejects a deferred Provider result with a conflicting tool name without leaking it', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const persistedUpdates: ChatMessageRecord[] = [];
+    const executeMainTool = vi.fn();
+    const executeRendererTool = vi.fn();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([
+      undefined,
+      {
+        stream: createEarlyResultStream([
+          {
+            toolName: 'read_file',
+            status: 'success',
+            data: { content: 'must stay private' }
+          }
+        ])
+      }
+    ]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool, executeRendererTool });
+
+    const result = await executor({ runtime: createDelegateRuntime(), userMessage, assistantMessage }, async (message) => {
+      persistedUpdates.push(structuredClone(message));
+    });
+
+    expect(result.suspension).toBeUndefined();
+    expect(executeMainTool).not.toHaveBeenCalled();
+    expect(executeRendererTool).not.toHaveBeenCalled();
+    expect(
+      persistedUpdates.every((message): boolean => message.parts.every((part): boolean => part.type !== 'tool' || part.toolCallId !== 'delegate-call-1'))
+    ).toBe(true);
+    expect(assistantMessage.parts).toEqual([
+      expect.objectContaining({
+        toolCallId: 'delegate-call-1',
+        status: 'done',
+        result: expect.objectContaining({ error: expect.objectContaining({ code: 'protocol_error' }) })
+      })
+    ]);
+  });
+
+  it('rejects duplicate deferred Provider results without leaking them', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const persistedUpdates: ChatMessageRecord[] = [];
+    const executeMainTool = vi.fn();
+    const executeRendererTool = vi.fn();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const duplicateResult: AIToolExecutionResult = {
+      toolName: 'delegate_task',
+      status: 'success',
+      data: { unexpected: true }
+    };
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createEarlyResultStream([duplicateResult, structuredClone(duplicateResult)]) }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool, executeRendererTool });
+
+    const result = await executor({ runtime: createDelegateRuntime(), userMessage, assistantMessage }, async (message) => {
+      persistedUpdates.push(structuredClone(message));
+    });
+
+    expect(result.suspension).toBeUndefined();
+    expect(executeMainTool).not.toHaveBeenCalled();
+    expect(executeRendererTool).not.toHaveBeenCalled();
+    expect(
+      persistedUpdates.every((message): boolean => message.parts.every((part): boolean => part.type !== 'tool' || part.toolCallId !== 'delegate-call-1'))
+    ).toBe(true);
+    expect(assistantMessage.parts).toEqual([
+      expect.objectContaining({
+        toolCallId: 'delegate-call-1',
+        status: 'done',
+        result: expect.objectContaining({ error: expect.objectContaining({ code: 'protocol_error' }) })
+      })
+    ]);
+  });
+
+  it('collects multiple deferred calls into one ordered suspension', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const executeMainTool = vi.fn();
+    const executeRendererTool = vi.fn();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([
+      undefined,
+      {
+        stream: createDelegateStream([
+          { toolCallId: 'delegate-call-1', input: createDelegateInput('浏览上下文') },
+          { toolCallId: 'delegate-call-2', input: createDelegateInput('浏览工具指南') }
+        ])
+      }
+    ]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool, executeRendererTool });
+
+    const result = await executor({ runtime: createDelegateRuntime(), userMessage, assistantMessage }, async () => undefined);
+
+    expect(result).toMatchObject({
+      shouldContinue: false,
+      suspension: {
+        toolCalls: [
+          { toolCallId: 'delegate-call-1', toolName: 'delegate_task', input: createDelegateInput('浏览上下文') },
+          { toolCallId: 'delegate-call-2', toolName: 'delegate_task', input: createDelegateInput('浏览工具指南') }
+        ]
+      }
+    });
+    expect(executeMainTool).not.toHaveBeenCalled();
+    expect(executeRendererTool).not.toHaveBeenCalled();
+  });
+
+  it('rejects exposed deferred tools with executable Tavily before starting the model stream', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createTextStream() }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText });
+
+    await expect(
+      executor(
+        {
+          runtime: createDelegateRuntime({ tavily: { enabled: true, apiKey: 'tvly-enabled' } }),
+          userMessage,
+          assistantMessage
+        },
+        async () => undefined
+      )
+    ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    expect(streamText).not.toHaveBeenCalled();
+  });
+
+  it('rejects exposed deferred tools with executable MCP before starting the model stream', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createTextStream() }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText });
+
+    await expect(
+      executor(
+        {
+          runtime: createDelegateRuntime({ mcp: executableMcp }),
+          userMessage,
+          assistantMessage
+        },
+        async () => undefined
+      )
+    ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    expect(streamText).not.toHaveBeenCalled();
+  });
+
+  it('allows deferred tools when MCP enables no tool on a runnable server', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createTextStream() }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText });
+    const mcpWithoutTools: AIMCPRequestConfig = {
+      ...executableMcp,
+      enabledTools: [{ serverId: 'another-server', toolName: 'search' }]
+    };
+
+    await executor(
+      {
+        runtime: createDelegateRuntime({ mcp: mcpWithoutTools }),
+        userMessage,
+        assistantMessage
+      },
+      async () => undefined
+    );
+
+    expect(streamText).toHaveBeenCalledOnce();
+  });
+
+  it('treats an unexposed delegate_task call as a protocol error instead of suspending', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const persistedUpdates: ChatMessageRecord[] = [];
+    const secretInput = createDelegateInput('unexposed-contract-secret');
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([
+      undefined,
+      {
+        stream: createDelegateStream([
+          {
+            toolCallId: 'delegate-call-1',
+            input: secretInput,
+            providerMetadata: { secretSignature: 'unexposed-provider-secret' }
+          }
+        ])
+      }
+    ]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText });
+
+    const result = await executor({ runtime: { ...runtime }, userMessage, assistantMessage }, async (message) => {
+      persistedUpdates.push(structuredClone(message));
+    });
+
+    expect(result.suspension).toBeUndefined();
+    expect(JSON.stringify(persistedUpdates)).not.toContain('unexposed-contract-secret');
+    expect(JSON.stringify(persistedUpdates)).not.toContain('unexposed-provider-secret');
+    expect(assistantMessage.parts).toEqual([
+      expect.objectContaining({
+        toolCallId: 'delegate-call-1',
+        status: 'done',
+        input: null,
+        result: expect.objectContaining({
+          status: 'failure',
+          error: expect.objectContaining({ code: 'protocol_error' })
+        })
+      })
+    ]);
+    expect(assistantMessage.parts[0]).not.toHaveProperty('inputText');
+    expect(assistantMessage.parts[0]).not.toHaveProperty('providerMetadata');
+  });
+
+  it('scrubs an invalid deferred contract before persisting its protocol error', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const persistedUpdates: ChatMessageRecord[] = [];
+    const invalidInput: DelegateTaskInput = {
+      ...createDelegateInput('invalid-contract-secret'),
+      acceptanceCriteria: []
+    };
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([
+      undefined,
+      {
+        stream: createDelegateStream([
+          {
+            toolCallId: 'delegate-call-1',
+            input: invalidInput,
+            providerMetadata: { secretSignature: 'invalid-provider-secret' }
+          }
+        ])
+      }
+    ]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText });
+
+    const result = await executor({ runtime: createDelegateRuntime(), userMessage, assistantMessage }, async (message) => {
+      persistedUpdates.push(structuredClone(message));
+    });
+
+    expect(result.suspension).toBeUndefined();
+    expect(JSON.stringify(persistedUpdates)).not.toContain('invalid-contract-secret');
+    expect(JSON.stringify(persistedUpdates)).not.toContain('invalid-provider-secret');
+    expect(persistedUpdates.at(-1)?.parts).toEqual([
+      expect.objectContaining({
+        toolCallId: 'delegate-call-1',
+        toolName: 'delegate_task',
+        status: 'done',
+        input: null,
+        result: expect.objectContaining({ error: expect.objectContaining({ code: 'protocol_error' }) })
+      })
+    ]);
+    expect(persistedUpdates.at(-1)?.parts[0]).not.toHaveProperty('inputText');
+    expect(persistedUpdates.at(-1)?.parts[0]).not.toHaveProperty('providerMetadata');
+  });
+
+  it('preserves executable Tavily and MCP requests when no deferred tool is exposed', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createTextStream() }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText });
+    const directRuntime: ActiveChatRuntime = {
+      ...runtime,
+      tools: [{ name: 'read_file', description: 'Read a file.', parameters: { type: 'object', properties: {} } }],
+      tavily: { enabled: true, apiKey: 'tvly-enabled' },
+      mcp: executableMcp
+    };
+
+    await executor({ runtime: directRuntime, userMessage, assistantMessage }, async () => undefined);
+
+    expect(streamText).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['direct before deferred', false],
+    ['deferred before direct', true]
+  ])('rejects mixed execution classes before side effects: %s', async (_label: string, deferredFirst: boolean): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const executeMainTool = vi.fn().mockResolvedValue({
+      toolName: 'read_file',
+      status: 'success',
+      data: { content: 'must not run' }
+    });
+    const executeRendererTool = vi.fn();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createMixedDelegateStream(deferredFirst) }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool, executeRendererTool });
+
+    const result = await executor({ runtime: createDelegateRuntime(), userMessage, assistantMessage }, async () => undefined);
+
+    expect(executeMainTool).not.toHaveBeenCalled();
+    expect(executeRendererTool).not.toHaveBeenCalled();
+    expect(result.suspension).toBeUndefined();
+    expect(result.shouldContinue).toBe(true);
+    expect(assistantMessage.parts).toHaveLength(2);
+    expect(assistantMessage.parts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'tool',
+          toolCallId: 'delegate-call-1',
+          status: 'done',
+          result: expect.objectContaining({
+            status: 'failure',
+            error: expect.objectContaining({ code: 'protocol_error' })
+          })
+        }),
+        expect.objectContaining({
+          type: 'tool',
+          toolCallId: 'direct-call-1',
+          status: 'done',
+          result: expect.objectContaining({
+            status: 'failure',
+            error: expect.objectContaining({ code: 'protocol_error' })
+          })
+        })
+      ])
+    );
+  });
+
+  it('scrubs only deferred control data when a mixed step becomes a protocol error', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const persistedUpdates: ChatMessageRecord[] = [];
+    const executeMainTool = vi.fn();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createMixedDelegateStream(true) }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool });
+
+    await executor({ runtime: createDelegateRuntime(), userMessage, assistantMessage }, async (message) => {
+      persistedUpdates.push(structuredClone(message));
+    });
+
+    const finalParts = persistedUpdates.at(-1)?.parts ?? [];
+    const deferredPart = finalParts.find((part): boolean => part.type === 'tool' && part.toolCallId === 'delegate-call-1');
+    const directPart = finalParts.find((part): boolean => part.type === 'tool' && part.toolCallId === 'direct-call-1');
+    expect(executeMainTool).not.toHaveBeenCalled();
+    expect(deferredPart).toMatchObject({
+      type: 'tool',
+      toolCallId: 'delegate-call-1',
+      status: 'done',
+      input: null,
+      result: expect.objectContaining({ error: expect.objectContaining({ code: 'protocol_error' }) })
+    });
+    expect(deferredPart).not.toHaveProperty('inputText');
+    expect(deferredPart).not.toHaveProperty('providerMetadata');
+    expect(directPart).toMatchObject({
+      type: 'tool',
+      toolCallId: 'direct-call-1',
+      input: { path: 'CONTEXT.md' },
+      result: expect.objectContaining({ error: expect.objectContaining({ code: 'protocol_error' }) })
+    });
+  });
+
+  it('preserves ordinary direct execution after full-step classification', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const executeMainTool = vi.fn(
+      async (input: ChatRuntimeMainToolExecutionInput): Promise<AIToolExecutionResult> => ({
+        toolName: input.toolName,
+        status: 'success',
+        data: { input: input.input }
+      })
+    );
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createDirectPairStream() }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool });
+
+    const result = await executor({ runtime: createDelegateRuntime(), userMessage, assistantMessage }, async () => undefined);
+
+    expect(executeMainTool).toHaveBeenCalledTimes(2);
+    expect(result.shouldContinue).toBe(true);
+    expect(assistantMessage.parts).toEqual([
+      expect.objectContaining({ toolCallId: 'direct-call-1', status: 'done' }),
+      expect.objectContaining({ toolCallId: 'direct-call-2', status: 'done' })
+    ]);
+  });
+
+  it.each([
+    ['deferred start-only with complete direct', true],
+    ['direct start-only with complete deferred', false]
+  ])('rejects incomplete mixed definitions before side effects: %s', async (_label: string, deferredStartOnly: boolean): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const executeMainTool = vi.fn();
+    const executeRendererTool = vi.fn();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createStartOnlyStream(deferredStartOnly) }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool, executeRendererTool });
+
+    const result = await executor({ runtime: createDelegateRuntime(), userMessage, assistantMessage }, async () => undefined);
+
+    expect(executeMainTool).not.toHaveBeenCalled();
+    expect(executeRendererTool).not.toHaveBeenCalled();
+    expect(result.suspension).toBeUndefined();
+    expect(assistantMessage.parts).toHaveLength(2);
+    expect(assistantMessage.parts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          toolCallId: 'start-only-call',
+          status: 'done',
+          result: expect.objectContaining({ error: expect.objectContaining({ code: 'protocol_error' }) })
+        }),
+        expect.objectContaining({
+          toolCallId: 'complete-call',
+          status: 'done',
+          result: expect.objectContaining({ error: expect.objectContaining({ code: 'protocol_error' }) })
+        })
+      ])
+    );
+  });
+
+  it('scrubs incomplete deferred input before persisting its protocol error', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const persistedUpdates: ChatMessageRecord[] = [];
+    const executeMainTool = vi.fn();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createIncompleteDelegateStream() }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool });
+
+    await executor({ runtime: createDelegateRuntime(), userMessage, assistantMessage }, async (message) => {
+      persistedUpdates.push(structuredClone(message));
+    });
+
+    expect(executeMainTool).not.toHaveBeenCalled();
+    expect(JSON.stringify(persistedUpdates)).not.toContain('incomplete-contract-secret');
+    expect(JSON.stringify(persistedUpdates)).not.toContain('incomplete-provider-secret');
+    expect(persistedUpdates.at(-1)?.parts).toEqual([
+      expect.objectContaining({
+        toolCallId: 'delegate-call-1',
+        toolName: 'delegate_task',
+        status: 'done',
+        input: null,
+        result: expect.objectContaining({ error: expect.objectContaining({ code: 'protocol_error' }) })
+      })
+    ]);
+    expect(persistedUpdates.at(-1)?.parts[0]).not.toHaveProperty('inputText');
+    expect(persistedUpdates.at(-1)?.parts[0]).not.toHaveProperty('providerMetadata');
+  });
+
+  it.each([
+    ['name conflict', 'read_file', 'write_file'],
+    ['execution class conflict', 'read_file', 'delegate_task']
+  ])('rejects a reused toolCallId with a %s', async (_label: string, startName: string, callName: string): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const executeMainTool = vi.fn();
+    const executeRendererTool = vi.fn();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createConflictStream(startName, callName) }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool, executeRendererTool });
+
+    const result = await executor({ runtime: createDelegateRuntime(), userMessage, assistantMessage }, async () => undefined);
+
+    expect(executeMainTool).not.toHaveBeenCalled();
+    expect(executeRendererTool).not.toHaveBeenCalled();
+    expect(result.suspension).toBeUndefined();
+    expect(assistantMessage.parts).toEqual([
+      expect.objectContaining({
+        toolCallId: 'conflict-call',
+        status: 'done',
+        result: expect.objectContaining({ error: expect.objectContaining({ code: 'protocol_error' }) })
+      })
+    ]);
+  });
+
+  it('rejects duplicate completed tool-call IDs before execution', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const executeMainTool = vi.fn();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createDuplicateCallStream() }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool });
+
+    const result = await executor({ runtime: createDelegateRuntime(), userMessage, assistantMessage }, async () => undefined);
+
+    expect(executeMainTool).not.toHaveBeenCalled();
+    expect(result.suspension).toBeUndefined();
+    expect(assistantMessage.parts).toEqual([
+      expect.objectContaining({
+        toolCallId: 'duplicate-call',
+        status: 'done',
+        result: expect.objectContaining({ error: expect.objectContaining({ code: 'protocol_error' }) })
+      })
+    ]);
+  });
+
+  it.each([
+    ['result before finish', false],
+    ['finish before result', true]
+  ])('reads deferred definitions after a stopping Provider result: %s', async (_label: string, finishBeforeResult: boolean): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const executeMainTool = vi.fn();
+    const executeRendererTool = vi.fn();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createLateDeferredStream(finishBeforeResult) }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool, executeRendererTool });
+
+    const result = await executor({ runtime: createDelegateRuntime(), userMessage, assistantMessage }, async () => undefined);
+
+    expect(executeMainTool).not.toHaveBeenCalled();
+    expect(executeRendererTool).not.toHaveBeenCalled();
+    expect(result.suspension).toBeUndefined();
+    expect(assistantMessage.parts).toHaveLength(2);
+    expect(assistantMessage.parts.every((part): boolean => part.type === 'tool' && part.result?.error?.code === 'protocol_error')).toBe(true);
+  });
+
+  it('does not execute a pure-direct call after a stopping Provider result', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const executeMainTool = vi.fn();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createStoppedDirectStream() }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool });
+
+    await executor({ runtime: { ...runtime }, userMessage, assistantMessage }, async () => undefined);
+
+    expect(executeMainTool).not.toHaveBeenCalled();
+    expect(assistantMessage.parts).toEqual([
+      expect.objectContaining({
+        toolCallId: 'direct-call-1',
+        result: expect.objectContaining({ status: 'awaiting_user_input' })
+      })
+    ]);
+  });
+
+  it.each<[string, 'error' | 'abort']>([
+    ['late error', 'error'],
+    ['late abort', 'abort']
+  ])(
+    'keeps a pure-direct stopping result authoritative over post-stop content and %s',
+    async (_label: string, terminalType: 'error' | 'abort'): Promise<void> => {
+      const assistantMessage = createAssistantMessage();
+      const persistedUpdates: ChatMessageRecord[] = [];
+      const executeMainTool = vi.fn();
+      const resolve = vi.fn().mockResolvedValue({
+        createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+        modelId: 'gpt-test'
+      });
+      const streamText = vi.fn().mockResolvedValue([undefined, { stream: createPostStopNoiseStream(terminalType, false) }]);
+      const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool });
+
+      const result = await executor({ runtime: { ...runtime }, userMessage, assistantMessage }, async (message) => {
+        persistedUpdates.push(structuredClone(message));
+      });
+
+      expect(result.suspension).toBeUndefined();
+      expect(executeMainTool).not.toHaveBeenCalled();
+      expect(assistantMessage.content).toBe('');
+      expect(assistantMessage.thinking).toBeUndefined();
+      expect(JSON.stringify(persistedUpdates)).not.toContain('post-stop-text-secret');
+      expect(JSON.stringify(persistedUpdates)).not.toContain('post-stop-reasoning-secret');
+      expect(assistantMessage.parts).toEqual([
+        expect.objectContaining({
+          toolCallId: 'direct-call-1',
+          status: 'done',
+          result: expect.objectContaining({ status: 'cancelled' })
+        })
+      ]);
+    }
+  );
+
+  it('prioritizes a late deferred definition over post-stop content and errors', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const persistedUpdates: ChatMessageRecord[] = [];
+    const executeMainTool = vi.fn();
+    const executeRendererTool = vi.fn();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createPostStopNoiseStream('error', true) }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool, executeRendererTool });
+
+    const result = await executor({ runtime: createDelegateRuntime(), userMessage, assistantMessage }, async (message) => {
+      persistedUpdates.push(structuredClone(message));
+    });
+
+    expect(result.suspension).toBeUndefined();
+    expect(executeMainTool).not.toHaveBeenCalled();
+    expect(executeRendererTool).not.toHaveBeenCalled();
+    expect(JSON.stringify(persistedUpdates)).not.toContain('post-stop-text-secret');
+    expect(JSON.stringify(persistedUpdates)).not.toContain('post-stop-reasoning-secret');
+    expect(assistantMessage.parts).toHaveLength(2);
+    expect(assistantMessage.parts.every((part): boolean => part.type === 'tool' && part.result?.error?.code === 'protocol_error')).toBe(true);
+  });
+
   it('streams model chunks into the assistant message and returns usage', async (): Promise<void> => {
     const assistantMessage = createAssistantMessage();
     const updates: ChatMessageRecord[] = [];

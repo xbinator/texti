@@ -16,8 +16,10 @@ function createRuntime(): ActiveChatRuntime {
   return {
     runtimeId: 'runtime-skill-1',
     sessionId: 'session-1',
+    turnId: 'turn-1',
     clientId: 'bchat',
     agentId: 'primary',
+    rootRuntimeId: 'runtime-skill-1',
     status: 'running',
     phase: 'streaming',
     abortController: new AbortController(),

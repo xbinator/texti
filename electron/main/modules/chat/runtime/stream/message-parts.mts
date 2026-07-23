@@ -83,7 +83,10 @@ function ensureToolPart(message: ChatMessageRecord, toolCallId: string, toolName
  * @param chunk - 工具输入开始 chunk
  */
 export function appendToolInputStart(message: ChatMessageRecord, chunk: RuntimeToolInputStartChunk): void {
-  ensureToolPart(message, chunk.toolCallId, chunk.toolName);
+  const toolPart = ensureToolPart(message, chunk.toolCallId, chunk.toolName);
+  if (chunk.providerMetadata !== undefined) {
+    toolPart.providerMetadata = chunk.providerMetadata;
+  }
   message.loading = false;
   message.finished = false;
 }
@@ -131,6 +134,9 @@ export function appendToolCall(message: ChatMessageRecord, chunk: RuntimeToolCal
   const toolPart = ensureToolPart(message, chunk.toolCallId, chunk.toolName);
   toolPart.status = 'executing';
   toolPart.input = chunk.input;
+  if (chunk.providerMetadata !== undefined) {
+    toolPart.providerMetadata = chunk.providerMetadata;
+  }
   message.loading = false;
   message.finished = false;
 }

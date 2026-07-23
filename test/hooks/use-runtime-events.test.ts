@@ -92,14 +92,18 @@ vi.mock('@/shared/platform/electron-api', () => ({
 function createEventBase(): {
   runtimeId: string;
   sessionId: string;
+  turnId: string;
   clientId: string;
   agentId: string;
+  rootRuntimeId: string;
 } {
   return {
     runtimeId: 'runtime-1',
     sessionId: 'session-1',
+    turnId: 'turn-1',
     clientId: 'bchat',
-    agentId: 'primary'
+    agentId: 'primary',
+    rootRuntimeId: 'runtime-1'
   };
 }
 
@@ -123,7 +127,13 @@ describe('useRuntimeEvents', (): void => {
     session.send({ type: 'session.prepared' });
     const turn = session.getSnapshot().context.turnRef;
     system.registerRuntime(
-      { sessionId: 'session-1', turnId: turn?.getSnapshot().context.turnId as string, agentId: 'primary', runtimeId: 'runtime-1' },
+      {
+        sessionId: 'session-1',
+        turnId: turn?.getSnapshot().context.turnId as string,
+        agentId: 'primary',
+        runtimeId: 'runtime-1',
+        rootRuntimeId: 'runtime-1'
+      },
       { tools: [], getToolContext: () => undefined, handleBridgeRequest: async (): Promise<unknown> => undefined }
     );
     system.send({ type: 'runtime.event', runtimeId: 'runtime-1', event: { type: 'runtime.started', runtimeId: 'runtime-1' } });
@@ -169,7 +179,7 @@ describe('useRuntimeEvents', (): void => {
     const agent = turn?.getSnapshot().context.primaryAgentRef;
     const turnId = turn?.getSnapshot().context.turnId;
     system.registerRuntime(
-      { sessionId: 'session-1', turnId: turnId as string, agentId: 'primary', runtimeId: 'runtime-1' },
+      { sessionId: 'session-1', turnId: turnId as string, agentId: 'primary', runtimeId: 'runtime-1', rootRuntimeId: 'runtime-1' },
       { tools: [], getToolContext: () => undefined, handleBridgeRequest: async (): Promise<unknown> => undefined }
     );
     system.send({ type: 'runtime.event', runtimeId: 'runtime-1', event: { type: 'runtime.started', runtimeId: 'runtime-1' } });
@@ -224,7 +234,7 @@ describe('useRuntimeEvents', (): void => {
     const turn = session.getSnapshot().context.turnRef;
     const turnId = turn?.getSnapshot().context.turnId;
     system.registerRuntime(
-      { sessionId: 'session-1', turnId: turnId as string, agentId: 'primary', runtimeId: 'runtime-1' },
+      { sessionId: 'session-1', turnId: turnId as string, agentId: 'primary', runtimeId: 'runtime-1', rootRuntimeId: 'runtime-1' },
       { tools: [], getToolContext: () => undefined, handleBridgeRequest: async (): Promise<unknown> => undefined }
     );
     system.send({ type: 'runtime.event', runtimeId: 'runtime-1', event: { type: 'runtime.started', runtimeId: 'runtime-1' } });
@@ -257,7 +267,13 @@ describe('useRuntimeEvents', (): void => {
     const turn = session.getSnapshot().context.turnRef;
     const agent = turn?.getSnapshot().context.primaryAgentRef;
     system.registerRuntime(
-      { sessionId: 'session-1', turnId: turn?.getSnapshot().context.turnId as string, agentId: 'primary', runtimeId: 'runtime-1' },
+      {
+        sessionId: 'session-1',
+        turnId: turn?.getSnapshot().context.turnId as string,
+        agentId: 'primary',
+        runtimeId: 'runtime-1',
+        rootRuntimeId: 'runtime-1'
+      },
       { tools: [], getToolContext: () => undefined, handleBridgeRequest: async (): Promise<unknown> => undefined }
     );
     system.send({ type: 'runtime.event', runtimeId: 'runtime-1', event: { type: 'runtime.started', runtimeId: 'runtime-1' } });
@@ -341,7 +357,13 @@ describe('useRuntimeEvents', (): void => {
       session.send({ type: 'session.prepared' });
       const turnId = session.getSnapshot().context.turnRef?.getSnapshot().context.turnId;
       system.registerRuntime(
-        { sessionId: route.sessionId, turnId: turnId as string, agentId: 'primary', runtimeId: route.runtimeId },
+        {
+          sessionId: route.sessionId,
+          turnId: turnId as string,
+          agentId: 'primary',
+          runtimeId: route.runtimeId,
+          rootRuntimeId: route.runtimeId
+        },
         { tools: [tool], getToolContext: () => undefined, handleBridgeRequest: async (): Promise<unknown> => undefined }
       );
       system.send({ type: 'runtime.event', runtimeId: route.runtimeId, event: { type: 'runtime.started', runtimeId: route.runtimeId } });
@@ -354,6 +376,7 @@ describe('useRuntimeEvents', (): void => {
       ...createEventBase(),
       runtimeId: 'runtime-a',
       sessionId: 'session-a',
+      rootRuntimeId: 'runtime-a',
       toolCallId: 'same-call',
       toolName: 'run_shell_command',
       input: { interactionMode: 'auto-default' }
@@ -362,6 +385,7 @@ describe('useRuntimeEvents', (): void => {
       ...createEventBase(),
       runtimeId: 'runtime-b',
       sessionId: 'session-b',
+      rootRuntimeId: 'runtime-b',
       toolCallId: 'same-call',
       toolName: 'run_shell_command',
       input: { interactionMode: 'auto-default' }

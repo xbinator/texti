@@ -4,7 +4,13 @@
  * @vitest-environment jsdom
  */
 import type { ChatMessageRecord } from 'types/chat';
-import type { ChatRuntimeCompactInput, ChatRuntimeContinueInput, ChatRuntimeSendInput, ChatRuntimeSubmitUserChoiceInput } from 'types/chat-runtime';
+import type {
+  ChatRuntimeAddress,
+  ChatRuntimeCompactInput,
+  ChatRuntimeContinueInput,
+  ChatRuntimeSendInput,
+  ChatRuntimeSubmitUserChoiceInput
+} from 'types/chat-runtime';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatRuntime } from '@/components/BChat/hooks/useChatRuntime';
 import type { Message } from '@/components/BChat/utils/types';
@@ -20,6 +26,20 @@ const electronAPIMock = vi.hoisted(() => ({
 
 /** 每类 Runtime 命令共享的模型快照。 */
 const RUNTIME_MODEL = { providerId: 'provider-1', modelId: 'model-2' };
+
+/**
+ * 创建 renderer 命令使用的完整 Runtime 地址。
+ * @param runtimeId - Runtime ID
+ * @returns 不含固定 Agent ID 的地址
+ */
+function createRuntimeAddress(runtimeId: string): Omit<ChatRuntimeAddress, 'agentId'> {
+  return {
+    runtimeId,
+    sessionId: 'session-1',
+    turnId: 'turn-1',
+    rootRuntimeId: runtimeId
+  };
+}
 
 vi.mock('@/shared/platform/electron-api', () => ({
   getElectronAPI: (): typeof electronAPIMock => electronAPIMock
@@ -62,7 +82,7 @@ describe('useChatRuntime', (): void => {
   it('sends the renderer-allocated runtime id with stable client and agent ids', async (): Promise<void> => {
     const runtime = useChatRuntime();
 
-    await runtime.send({ runtimeId: 'runtime-send', sessionId: 'session-1', content: 'hello', model: RUNTIME_MODEL });
+    await runtime.send({ ...createRuntimeAddress('runtime-send'), content: 'hello', model: RUNTIME_MODEL });
 
     const [input] = electronAPIMock.chatRuntimeSend.mock.calls[0] as [ChatRuntimeSendInput];
     expect(input).toMatchObject({
@@ -79,7 +99,7 @@ describe('useChatRuntime', (): void => {
   it('converts continuation messages to cloneable runtime snapshots', async (): Promise<void> => {
     const runtime = useChatRuntime();
 
-    await runtime.continueTurn({ runtimeId: 'runtime-continue', sessionId: 'session-1', messages: [createMessage()], model: RUNTIME_MODEL });
+    await runtime.continueTurn({ ...createRuntimeAddress('runtime-continue'), messages: [createMessage()], model: RUNTIME_MODEL });
 
     const [input] = electronAPIMock.chatRuntimeContinue.mock.calls[0] as [ChatRuntimeContinueInput];
     expect(input.runtimeId).toBe('runtime-continue');
@@ -93,7 +113,7 @@ describe('useChatRuntime', (): void => {
     const runtime = useChatRuntime();
     const answer = { questionId: 'question-1', toolCallId: 'tool-1', answers: ['yes'] };
 
-    await runtime.submitUserChoice({ runtimeId: 'runtime-choice', sessionId: 'session-1', answer, model: RUNTIME_MODEL });
+    await runtime.submitUserChoice({ ...createRuntimeAddress('runtime-choice'), answer, model: RUNTIME_MODEL });
 
     const [input] = electronAPIMock.chatRuntimeSubmitUserChoice.mock.calls[0] as [ChatRuntimeSubmitUserChoiceInput];
     expect(input).toMatchObject({ runtimeId: 'runtime-choice', clientId: 'bchat', agentId: 'primary', answer, model: RUNTIME_MODEL });
@@ -102,12 +122,18 @@ describe('useChatRuntime', (): void => {
   it('starts manual compaction without a user message payload', async (): Promise<void> => {
     const runtime = useChatRuntime();
 
-    await runtime.compact({ runtimeId: 'runtime-compact', sessionId: 'session-1', contextWindow: 12_000, model: RUNTIME_MODEL });
+    await runtime.compact({
+      ...createRuntimeAddress('runtime-compact'),
+      contextWindow: 12_000,
+      model: RUNTIME_MODEL
+    });
 
     const [input] = electronAPIMock.chatRuntimeCompact.mock.calls[0] as [ChatRuntimeCompactInput];
     expect(input).toEqual({
       runtimeId: 'runtime-compact',
       sessionId: 'session-1',
+      turnId: 'turn-1',
+      rootRuntimeId: 'runtime-compact',
       contextWindow: 12_000,
       model: RUNTIME_MODEL,
       clientId: 'bchat',

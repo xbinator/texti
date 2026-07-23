@@ -6,6 +6,7 @@ import type { ActiveChatRuntime, ChatRuntimeEventEmitter, ChatRuntimeRendererToo
 import type { AIToolExecutionResult } from 'types/ai';
 import type { ChatRuntimeRecoveryPendingRequest, ChatRuntimeSubmitToolResultInput, ChatRuntimeToolRequestEvent } from 'types/chat-runtime';
 import { ChatRuntimeError } from '../errors.mjs';
+import { createRuntimeEventBase } from '../types.mjs';
 
 /** 活跃 runtime 读取函数。 */
 export type RuntimeLookup = (runtimeId: string) => ActiveChatRuntime | undefined;
@@ -83,9 +84,13 @@ export function createRuntimeRendererToolRequests(dependencies: RuntimeRendererT
     dependencies.emit('chat:runtime:tool-cancelled', {
       runtimeId: event.runtimeId,
       sessionId: event.sessionId,
+      turnId: event.turnId,
       clientId: event.clientId,
       agentId: event.agentId,
+      parentAgentId: event.parentAgentId,
       parentRuntimeId: event.parentRuntimeId,
+      rootRuntimeId: event.rootRuntimeId,
+      continuationOfRuntimeId: event.continuationOfRuntimeId,
       toolCallId: event.toolCallId
     });
   }
@@ -110,11 +115,7 @@ export function createRuntimeRendererToolRequests(dependencies: RuntimeRendererT
 
       const key = createToolRequestKey(input.runtime.runtimeId, input.toolCallId);
       const event: ChatRuntimeToolRequestEvent = {
-        runtimeId: input.runtime.runtimeId,
-        sessionId: input.runtime.sessionId,
-        clientId: input.runtime.clientId,
-        agentId: input.runtime.agentId,
-        parentRuntimeId: input.runtime.parentRuntimeId,
+        ...createRuntimeEventBase(input.runtime),
         toolCallId: input.toolCallId,
         toolName: input.toolName,
         input: input.input
@@ -141,9 +142,7 @@ export function createRuntimeRendererToolRequests(dependencies: RuntimeRendererT
             error: { code: 'TOOL_TIMEOUT', message: 'Renderer tool request timed out' }
           });
         }, dependencies.timeoutMs);
-        const removeAbortListener = input.signal
-          ? (): void => input.signal?.removeEventListener('abort', resolveAborted)
-          : undefined;
+        const removeAbortListener = input.signal ? (): void => input.signal?.removeEventListener('abort', resolveAborted) : undefined;
         input.signal?.addEventListener('abort', resolveAborted, { once: true });
         pendingRendererToolRequests.set(key, { event, resolve, reject, timeoutId, removeAbortListener });
         dependencies.emit('chat:runtime:tool-request', event);

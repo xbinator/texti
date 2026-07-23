@@ -10,8 +10,10 @@ import { executeRendererToolSafely } from '../../../../../../../electron/main/mo
 const runtime: ActiveChatRuntime = {
   runtimeId: 'runtime-timeout',
   sessionId: 'session-timeout',
+  turnId: 'turn-timeout',
   clientId: 'client-timeout',
   agentId: 'agent-timeout',
+  rootRuntimeId: 'runtime-timeout',
   status: 'running',
   phase: 'streaming',
   abortController: new AbortController(),
@@ -28,14 +30,12 @@ describe('runtime tool timeout', (): void => {
     let receivedSignal: AbortSignal | undefined;
     const executeTool: ChatRuntimeRendererToolExecutor = async (input) => {
       receivedSignal = input.signal;
-      return new Promise(() => undefined);
+      return new Promise((): void => {
+        // 本测试保留未完成任务，直到超时控制器中止执行。
+      });
     };
 
-    const resultPromise = executeRendererToolSafely(
-      executeTool,
-      { runtime, toolCallId: 'tool-call-timeout', toolName: 'slow_tool', input: {} },
-      100
-    );
+    const resultPromise = executeRendererToolSafely(executeTool, { runtime, toolCallId: 'tool-call-timeout', toolName: 'slow_tool', input: {} }, 100);
     await vi.advanceTimersByTimeAsync(100);
     const result = await resultPromise;
 
