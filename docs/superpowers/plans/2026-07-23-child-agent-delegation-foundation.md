@@ -23,7 +23,8 @@
 - 不使用 `any`；所有新增函数、类型、接口、状态迁移和复杂逻辑均按 `AGENTS.md` 添加文件头及准确 JSDoc。
 - Renderer 异步调用统一使用 `src/utils/asyncTo.ts` 的 `asyncTo`。
 - 文档内只使用仓库相对路径；每个行为提交同步更新测试，最终更新 `changelog/2026-07-23.md`。
-- 当前工作区可能包含用户的并行改动。每次只暂存任务列出的精确文件；若 changelog 同时被修改，使用交互式暂存只选择本任务条目。
+- 本次执行位于 `codex/child-agent-delegation` 功能分支，由执行 Agent 按已完成的功能边界提交；不使用 `git commit --amend`，后续 Task 继续保持写入串行、只读审查并行。
+- 当前工作区可能包含用户的并行改动。只修改任务列出的精确文件；不得覆盖、暂存或整理无关变更。
 - 每个 Task 严格执行 RED → GREEN → REFACTOR；在对应 RED 命令未出现预期失败前不写实现。
 
 ---
@@ -154,7 +155,7 @@ cancelling → cancelled | interrupted
 - Produces: schema-only `delegateTaskToolRegistryEntry` with `exposure: 'internal'`.
 - Preserves: existing tool ownership and current BChat tool list.
 
-- [ ] **Step 1: Add failing Runtime lineage tests**
+- [x] **Step 1: Add failing Runtime lineage tests**
 
 In `test/electron/main/modules/chat/runtime/factory.test.ts`, update the Runtime fixture and assert:
 
@@ -185,7 +186,7 @@ expect(registerRuntime).toHaveBeenCalledWith(
 expect(registerRuntime.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0]);
 ```
 
-- [ ] **Step 2: Add failing registry metadata tests**
+- [x] **Step 2: Add failing registry metadata tests**
 
 In `test/ai/tools/tool-registry.test.ts`, assert:
 
@@ -207,7 +208,7 @@ expect(TOOL_REGISTRY.every((entry) => entry.executionClass && entry.effect)).toB
 
 Add a Schema assertion for required `task`, `acceptanceCriteria`, `mode`, `resources`, `requestedTools`, `required`, and `priority`, plus optional ISO `deadlineAt`.
 
-- [ ] **Step 3: Run Task 1 tests and verify RED**
+- [x] **Step 3: Run Task 1 tests and verify RED**
 
 ```bash
 pnpm exec vitest run \
@@ -219,7 +220,7 @@ pnpm exec vitest run \
 
 Expected: FAIL because complete Runtime lineage, `internal` exposure, execution class, effect metadata, and `delegate_task` do not exist.
 
-- [ ] **Step 4: Add complete Runtime address types**
+- [x] **Step 4: Add complete Runtime address types**
 
 Add `ChatRuntimeAddress` from Shared Contracts to `types/chat-runtime.d.ts`. Make send/continue inputs and `ChatRuntimeEventBase` carry the address fields. Replace the duplicate renderer shape with:
 
@@ -230,7 +231,7 @@ export type ChatActorAddress = ChatRuntimeAddress;
 
 Update `ActiveChatRuntime`, Runtime factory inputs, fixtures, and launcher return type to use the same address. For an initial Primary Runtime, set `rootRuntimeId = runtimeId`; for Runtime B, retain Runtime A's `rootRuntimeId` and set `continuationOfRuntimeId = sourceRuntimeId`.
 
-- [ ] **Step 5: Add execution/effect metadata to every registry entry**
+- [x] **Step 5: Add execution/effect metadata to every registry entry**
 
 Extend `shared/ai/tools/types.ts`:
 
@@ -255,7 +256,7 @@ Add `'coordinator'` to `ToolRuntimeOwner`, `'agent'` to `ToolRuntimeGroup`, and 
 
 Classify existing local reads as `pure_read`, external reads as `external_read`, file edit/write as `staged_file_write`, and existing direct settings/MCP/document/WebView mutations as `immediate_side_effect`. This metadata describes safety facts; it does not change current Primary execution behavior in this task.
 
-- [ ] **Step 6: Add the internal delegate_task schema**
+- [x] **Step 6: Add the internal delegate_task schema**
 
 Create `shared/ai/tools/DelegateTaskTool/index.ts`:
 
@@ -308,7 +309,7 @@ export const delegateTaskToolRegistryEntry = {
 
 Export registry-entry lookup by name so the stream can inspect `executionClass` without relying on name-only branching. Keep catalog generation from returning `internal` tools to normal chat exposure.
 
-- [ ] **Step 7: Re-run Task 1 tests**
+- [x] **Step 7: Re-run Task 1 tests**
 
 ```bash
 pnpm exec vitest run \
@@ -320,7 +321,7 @@ pnpm exec vitest run \
 
 Expected: PASS; existing active chat tool snapshots remain unchanged.
 
-- [ ] **Step 8: Commit Task 1**
+- [x] **Step 8: Commit Task 1**
 
 ```bash
 git add types/chat-runtime.d.ts src/ai/chat/types.ts electron/main/modules/chat/runtime/types.mts electron/main/modules/chat/runtime/runners/factory.mts src/components/BChat/hooks/useChatRuntimeLauncher.ts shared/ai/tools/types.ts shared/ai/tools/DelegateTaskTool/index.ts shared/ai/tools/index.ts src/ai/tools/catalog/runtimeTools.ts test/electron/main/modules/chat/runtime/shared-types.test.ts test/electron/main/modules/chat/runtime/factory.test.ts test/ai/tools/tool-registry.test.ts test/components/BChat/session-id-runtime.test.ts
@@ -351,7 +352,7 @@ git commit -m "refactor(chat): 补全运行时地址与工具执行元数据"
 - Produces: synchronous `AgentDelegationStore` over the existing better-sqlite3 transaction domain.
 - Consumes later: a synchronous `persistAssistant(): void` callback so message tail and delegation facts commit together.
 
-- [ ] **Step 1: Add failing contract validation tests**
+- [x] **Step 1: Add failing contract validation tests**
 
 Create `test/electron/main/modules/chat/agents/contracts.test.ts`:
 
@@ -386,7 +387,7 @@ it.each([
 
 Also test invalid deadlines, unknown keys, duplicate requested tools, and structured-clone serialization.
 
-- [ ] **Step 2: Add failing legal-transition tests**
+- [x] **Step 2: Add failing legal-transition tests**
 
 Create `test/electron/main/modules/chat/agents/state.test.ts`. Cover every legal transition in the design and representative illegal shortcuts:
 
@@ -406,7 +407,7 @@ expect(canTransitionCheckpoint('cancelled', 'resuming')).toBe(false);
 
 Assert `planning → authorized` requires a complete immutable Execution Plan Snapshot, `recordTaskResult` accepts only `running` or stable cancellation/commit terminalization paths, and all Task/Checkpoint terminal states have no outgoing transitions.
 
-- [ ] **Step 3: Add failing migration and immutable-store tests**
+- [x] **Step 3: Add failing migration and immutable-store tests**
 
 Create `test/electron/main/modules/database/agent-task-migration.test.ts`. Initialize a legacy database and assert the five additive tables and indexes exist without changing existing chat rows:
 
@@ -442,7 +443,7 @@ Tombstone tests must prove:
 - an eligible terminal Task changes only `recordState: active → tombstoned`, preserves snapshots/result/events, and appends `task.tombstoned`.
 - no Store method physically deletes a Task.
 
-- [ ] **Step 4: Run Task 2 tests and verify RED**
+- [x] **Step 4: Run Task 2 tests and verify RED**
 
 ```bash
 pnpm exec vitest run \
@@ -454,7 +455,7 @@ pnpm run test:database
 
 Expected: FAIL because Agent contracts, legal transition guards, tables, Store, and the second database migration test are absent.
 
-- [ ] **Step 5: Define shared immutable contracts**
+- [x] **Step 5: Define shared immutable contracts**
 
 Add `types/chat-agent.d.ts` with documented types. Keep execution status separate from completion:
 
@@ -513,7 +514,7 @@ export interface ChatAgentEvent<TType extends ChatAgentEventType> {
 
 Each payload is a discriminated, structured-clone-safe allowlist. Task Events require `taskId`, Checkpoint Events require `checkpointId`, and cross-aggregate links contain stable IDs only.
 
-- [ ] **Step 6: Add additive SQLite schema**
+- [x] **Step 6: Add additive SQLite schema**
 
 In `electron/main/modules/database/service.mts`, create:
 
@@ -555,7 +556,7 @@ Add `chat_agent_attempts`, `chat_agent_delegation_checkpoints`, `chat_agent_even
 
 Update `DatabaseTableName` and `package.json` so `pnpm run test:database` runs both database migration test files under Electron's Node ABI.
 
-- [ ] **Step 7: Implement canonical validation and hashes**
+- [x] **Step 7: Implement canonical validation and hashes**
 
 In `contracts.mts`, parse unknown input field-by-field, trim human text, reject unknown keys and recursion, sort only set-like fields, preserve acceptance-criteria and resource order, then deep-freeze the normalized clone. Hash a versioned canonical JSON envelope:
 
@@ -568,7 +569,7 @@ const hashInput = {
 
 Do not include mutable status, timestamps, result, available capability, or display messages in snapshot hashes.
 
-- [ ] **Step 8: Implement explicit state guards**
+- [x] **Step 8: Implement explicit state guards**
 
 In `state.mts`, encode legal transitions as exhaustive typed maps rather than scattered conditionals. The full Task transition set is:
 
@@ -590,7 +591,7 @@ cancelling → cancelled | failed
 
 `queued` transitions require an explicit `queuePhase`. Store mutations call these guards inside the same transaction as status projection and Event append. `planning → authorized` atomically writes the Execution Plan Snapshot and hash for the first and only time. A later Attempt may reference that plan hash but cannot replace the snapshot.
 
-- [ ] **Step 9: Implement the transactional Store**
+- [x] **Step 9: Implement the transactional Store**
 
 Expose:
 
@@ -623,7 +624,7 @@ export interface AgentDelegationStore {
 
 Any error rolls back all seven operations. Store methods parse persisted JSON using validators and return `protocol_error` instead of unsafe type assertions.
 
-- [ ] **Step 10: Re-run Task 2 tests**
+- [x] **Step 10: Re-run Task 2 tests**
 
 ```bash
 pnpm exec vitest run \
@@ -635,7 +636,7 @@ pnpm run test:database
 
 Expected: PASS, including transaction rollback and immutable snapshot mismatch cases.
 
-- [ ] **Step 11: Commit Task 2**
+- [x] **Step 11: Commit Task 2**
 
 ```bash
 git add types/chat-agent.d.ts electron/main/modules/database/service.mts electron/main/modules/chat/agents/contracts.mts electron/main/modules/chat/agents/state.mts electron/main/modules/chat/agents/store.mts electron/main/modules/chat/agents/types.mts test/electron/main/modules/database/agent-task-migration.test.ts test/electron/main/modules/chat/agents/contracts.test.ts test/electron/main/modules/chat/agents/state.test.ts test/electron/main/modules/chat/agents/store.test.ts package.json
@@ -664,7 +665,7 @@ git commit -m "feat(chat): 增加委派任务持久化模型"
 - Produces: filtered assistant snapshots that exclude uncommitted deferred parts.
 - Consumes: registry `executionClass`, not a hard-coded renderer timeout exception.
 
-- [ ] **Step 1: Add failing deferred-part visibility tests**
+- [x] **Step 1: Add failing deferred-part visibility tests**
 
 Create `test/electron/main/modules/chat/runtime/stream/deferred-tools.test.ts`:
 
@@ -679,7 +680,7 @@ it('keeps deferred input private until the delegation transaction commits', (): 
 
 Add tests for input streaming, provider metadata preservation in the working clone, immutable cloning, and multiple deferred IDs.
 
-- [ ] **Step 2: Add failing stream control tests**
+- [x] **Step 2: Add failing stream control tests**
 
 In `stream/executor.test.ts`, emit a `delegate_task` call and assert:
 
@@ -701,11 +702,11 @@ Add deterministic mixed-step cases:
 - A direct call before or after a deferred call makes the whole delegation set invalid with `protocol_error`; no deferred Task is persisted.
 - No tool call after the first deferred call executes.
 
-- [ ] **Step 3: Add a failing service atomicity test**
+- [x] **Step 3: Add a failing service atomicity test**
 
 In `service.test.ts`, inject a delegation `prepare` failure and assert the persisted assistant does not contain the deferred tool part. Then let `prepare` succeed and assert the full part, Tasks, Checkpoint, and outbox become visible together.
 
-- [ ] **Step 4: Run Task 3 tests and verify RED**
+- [x] **Step 4: Run Task 3 tests and verify RED**
 
 ```bash
 pnpm exec vitest run \
@@ -716,7 +717,7 @@ pnpm exec vitest run \
 
 Expected: FAIL because stream rounds cannot return a suspension and currently persist/execute tool parts immediately.
 
-- [ ] **Step 5: Add deferred stream result types**
+- [x] **Step 5: Add deferred stream result types**
 
 Add:
 
@@ -738,7 +739,7 @@ export interface ChatRuntimeDelegationSuspension {
 
 Extend `ChatRuntimeStreamExecutorResult` with optional `suspension`. This is internal control data and never becomes `output` for the model.
 
-- [ ] **Step 6: Buffer and filter deferred parts**
+- [x] **Step 6: Buffer and filter deferred parts**
 
 At `tool-input-start`, resolve the registry entry. Track `deferredToolCallIds` for `deferred-coordination`; continue mutating the in-memory assistant so the final atomic callback has exact input/provider metadata, but call `updateAssistant` with:
 
@@ -750,7 +751,7 @@ The helper must use `structuredClone`, remove only matching tool-call parts, and
 
 At `tool-call`, parse the full contract through `validateFoundationContract`, collect the suspension, and skip main/renderer execution. At the end of the round, do not rewrite deferred parts into unknown tool failures.
 
-- [ ] **Step 7: Enforce the mixed-step policy before side effects**
+- [x] **Step 7: Enforce the mixed-step policy before side effects**
 
 Before dispatching any tool call in a step, inspect all completed calls once their definitions are available. If direct and deferred execution classes coexist:
 
@@ -761,7 +762,7 @@ Before dispatching any tool call in a step, inspect all completed calls once the
 
 This conservative rule prevents a model step from committing unrelated effects before its delegation boundary. A later plan may support an explicit ordered multi-boundary protocol; this phase does not infer one.
 
-- [ ] **Step 8: Re-run Task 3 tests**
+- [x] **Step 8: Re-run Task 3 tests**
 
 ```bash
 pnpm exec vitest run \
@@ -772,7 +773,7 @@ pnpm exec vitest run \
 
 Expected: PASS; ordinary direct main/renderer tools retain existing behavior.
 
-- [ ] **Step 9: Commit Task 3**
+- [x] **Step 9: Commit Task 3**
 
 ```bash
 git add electron/main/modules/chat/runtime/stream/deferred-tools.mts electron/main/modules/chat/runtime/stream/types.mts electron/main/modules/chat/runtime/types.mts electron/main/modules/chat/runtime/stream/message-parts.mts electron/main/modules/chat/runtime/stream/index.mts electron/main/modules/chat/runtime/service.mts test/electron/main/modules/chat/runtime/stream/deferred-tools.test.ts test/electron/main/modules/chat/runtime/stream/executor.test.ts test/electron/main/modules/chat/runtime/service.test.ts
