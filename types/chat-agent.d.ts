@@ -1,0 +1,582 @@
+/**
+ * @file chat-agent.d.ts
+ * @description Child Agent 委派契约、持久化快照、结果信封与审计事件的共享类型。
+ */
+
+/** 委派任务优先级；调度器只能在该固定集合内比较。 */
+export type AgentTaskPriority = 'low' | 'normal' | 'high';
+
+/** 委派任务执行模式。 */
+export type AgentTaskMode = 'read' | 'write';
+
+/** Task 可变执行状态，与 tombstone 记录状态正交。 */
+export type AgentTaskStatus =
+  | 'created'
+  | 'planning'
+  | 'authorized'
+  | 'queued'
+  | 'starting'
+  | 'running'
+  | 'waiting_confirmation'
+  | 'committing'
+  | 'cancelling'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'deadline_exceeded'
+  | 'commit_failed';
+
+/** queued 状态对应的执行阶段。 */
+export type AgentTaskQueuePhase = 'start' | 'commit';
+
+/** Delegation Checkpoint 的可变执行状态。 */
+export type AgentCheckpointStatus =
+  | 'preparing'
+  | 'waiting_children'
+  | 'ready_to_resume'
+  | 'resuming'
+  | 'cancelling'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted';
+
+/** 持久化记录的逻辑删除状态。 */
+export type AgentRecordState = 'active' | 'tombstoned';
+
+/** 显式资源引用，仅保存授权范围内的稳定标识。 */
+export interface AgentResourceReference {
+  /** 资源域，由注册的 scope resolver 解释。 */
+  readonly kind: 'file' | 'directory' | 'document' | 'webview' | 'resource';
+  /** 仓库相对路径或稳定的资源域标识。 */
+  readonly reference: string;
+  /** 调用方观察到的可选修订，用于后续完整性验证。 */
+  readonly revision?: string;
+}
+
+/** Primary 提交给 Coordinator 的受限任务契约。 */
+export interface DelegateTaskInput {
+  /** 单一、具体且无需聊天上下文补全的任务描述。 */
+  task: string;
+  /** 按原始顺序保存的验收标准。 */
+  acceptanceCriteria: string[];
+  /** 只读或受控写入模式。 */
+  mode: AgentTaskMode;
+  /** 任务可以访问的最小资源集合。 */
+  resources: AgentResourceReference[];
+  /** Primary 请求、但仍需策略收缩的工具名称集合。 */
+  requestedTools: string[];
+  /** 失败时是否阻止 Primary 正常完成当前 Turn。 */
+  required: boolean;
+  /** 任务调度优先级。 */
+  priority: AgentTaskPriority;
+  /** 可选绝对 ISO-8601 截止时间。 */
+  deadlineAt?: string;
+}
+
+/** 不可变 Task Contract Snapshot。 */
+export interface AgentTaskContractSnapshot {
+  /** 契约 Schema 版本。 */
+  readonly contractSchemaVersion: number;
+  /** 规范化任务描述。 */
+  readonly task: string;
+  /** 有序验收标准。 */
+  readonly acceptanceCriteria: readonly string[];
+  /** 冻结的任务模式。 */
+  readonly mode: AgentTaskMode;
+  /** 有序资源引用。 */
+  readonly resources: readonly AgentResourceReference[];
+  /** 规范化并排序后的请求工具集合。 */
+  readonly requestedTools: readonly string[];
+  /** 任务是否为必需任务。 */
+  readonly required: boolean;
+}
+
+/** 冻结模型选择，不包含密钥或完整 Provider 配置。 */
+export interface AgentModelSnapshot {
+  /** Provider 注册标识。 */
+  readonly providerId: string;
+  /** 模型注册标识。 */
+  readonly modelId: string;
+}
+
+/** 冻结权限范围，只保存已解析的稳定 scope ID。 */
+export interface AgentPermissionSnapshot {
+  /** 任务授权时已存在的权限 scope。 */
+  readonly scopeIds: readonly string[];
+}
+
+/** 执行计划中单个工具的副作用事实。 */
+export interface AgentPlanToolEffect {
+  /** 工具注册名。 */
+  readonly toolName: string;
+  /** 授权时冻结的副作用分类。 */
+  readonly effect: 'pure_read' | 'external_read' | 'staged_file_write' | 'transactional_write' | 'immediate_side_effect' | 'unknown';
+}
+
+/** 执行计划的提交策略。 */
+export interface AgentCommitPolicy {
+  /** 无写入或受控提交协议。 */
+  readonly mode: 'none' | 'staged';
+  /** 写入协议使用的可选 adapter 注册名。 */
+  readonly adapter?: string;
+}
+
+/** 任务或续接预留的预算快照。 */
+export interface AgentBudgetSnapshot {
+  /** 最大 token 数。 */
+  readonly tokenLimit: number;
+  /** 最大美元成本。 */
+  readonly costLimitUsd: number;
+  /** 计算成本时使用的定价版本。 */
+  readonly pricingVersion: string;
+}
+
+/** Coordinator 冻结的不可变 Execution Plan Snapshot。 */
+export interface AgentExecutionPlanSnapshot {
+  /** 对规范化计划内容计算的完整性 hash。 */
+  readonly planHash: string;
+  /** 执行计划 Schema 版本。 */
+  readonly planSchemaVersion: number;
+  /** 授权时使用的策略版本。 */
+  readonly policyVersion: string;
+  /** 已冻结且只能在恢复时收缩的能力集合。 */
+  readonly capabilitySet: readonly string[];
+  /** 不含敏感配置的模型快照。 */
+  readonly modelSnapshot: AgentModelSnapshot;
+  /** 不含令牌的权限快照。 */
+  readonly permissionSnapshot: AgentPermissionSnapshot;
+  /** 规范化资源门禁范围。 */
+  readonly resourceScopes: readonly string[];
+  /** 计划内工具的副作用事实。 */
+  readonly toolEffectSet: readonly AgentPlanToolEffect[];
+  /** 写入提交策略。 */
+  readonly commitPolicy: AgentCommitPolicy;
+  /** Task 级预算预留。 */
+  readonly budget: AgentBudgetSnapshot;
+}
+
+/** Checkpoint 中按 Provider tool-call 顺序冻结的任务链接。 */
+export interface AgentOrderedToolCallSnapshot {
+  /** 原始 Provider tool-call ID。 */
+  readonly toolCallId: string;
+  /** 对应的稳定 Task ID。 */
+  readonly taskId: string;
+  /** 该工具调用是否必须成功。 */
+  readonly required: boolean;
+  /** 规范化工具参数 hash。 */
+  readonly argumentsHash: string;
+  /** 经 allowlist 裁剪的 Provider metadata hash。 */
+  readonly providerMetadataHash: string;
+}
+
+/** Runtime A 挂起时冻结的不可变 Continuation Snapshot。 */
+export interface AgentDelegationContinuationSnapshot {
+  /** Checkpoint Schema 版本。 */
+  readonly checkpointSchemaVersion: number;
+  /** 创建快照时的安全策略版本。 */
+  readonly policyVersion: string;
+  /** Runtime B 必须继承的模型选择。 */
+  readonly modelSnapshot: AgentModelSnapshot;
+  /** 主进程内部 continuation context 的不透明引用。 */
+  readonly continuationContextReference: string;
+  /** 规范化 continuation context hash。 */
+  readonly continuationContextHash: string;
+  /** Runtime A assistant 消息的精确修订。 */
+  readonly sourceMessageRevision: string;
+  /** 委派工具 Schema 集合 hash。 */
+  readonly toolSchemaSnapshotHash: string;
+  /** 按原 tool-call 顺序冻结的 Task 关联。 */
+  readonly orderedToolCalls: readonly AgentOrderedToolCallSnapshot[];
+  /** 为 Primary Runtime B 预留的预算。 */
+  readonly reservedResumeBudget: AgentBudgetSnapshot;
+  /** 当前 Turn 的绝对截止时间。 */
+  readonly absoluteTurnDeadline: string;
+}
+
+/** AgentTaskError.details 允许持久化的稳定机器键。 */
+export type AgentTaskErrorDetailKey =
+  | 'reason'
+  | 'resourceReference'
+  | 'resourceScope'
+  | 'toolName'
+  | 'expectedHash'
+  | 'actualHash'
+  | 'expectedVersion'
+  | 'actualVersion'
+  | 'status'
+  | 'limit'
+  | 'observed'
+  | 'deadlineAt'
+  | 'taskId'
+  | 'checkpointId'
+  | 'attemptId'
+  | 'runtimeId'
+  | 'operationId';
+
+/** 机器可判断的 Agent 错误阶段。 */
+export type AgentTaskErrorPhase =
+  | 'contract_validation'
+  | 'plan_validation'
+  | 'resource_validation'
+  | 'queue'
+  | 'starting'
+  | 'runtime'
+  | 'result_validation'
+  | 'confirmation'
+  | 'commit_validation'
+  | 'commit'
+  | 'recovery';
+
+/** 稳定机器错误码。 */
+export type AgentTaskErrorCode =
+  | 'invalid_contract'
+  | 'capability_denied'
+  | 'resource_scope_invalid'
+  | 'plan_version_unsupported'
+  | 'deadline_exceeded'
+  | 'budget_exceeded'
+  | 'runtime_start_failed'
+  | 'runtime_failed'
+  | 'runtime_interrupted'
+  | 'result_evidence_invalid'
+  | 'confirmation_denied'
+  | 'stale_context'
+  | 'commit_failed'
+  | 'manual_recovery_required'
+  | 'cancelled'
+  | 'protocol_error';
+
+/** 结构化 Agent 错误；message 仅用于展示。 */
+export interface AgentTaskError {
+  /** 稳定机器错误码。 */
+  code: AgentTaskErrorCode;
+  /** 失败发生的协议阶段。 */
+  phase: AgentTaskErrorPhase;
+  /** 机器可聚合的错误类别。 */
+  category: 'policy' | 'resource' | 'runtime' | 'protocol' | 'user' | 'integrity';
+  /** 同一不可变契约是否允许重试。 */
+  retryable: boolean;
+  /** 用户可读说明，不参与控制流。 */
+  message?: string;
+  /** 经 allowlist 裁剪的机器细节。 */
+  details?: Partial<Record<AgentTaskErrorDetailKey, string | number | boolean | null>>;
+}
+
+/** 验收证据引用。 */
+export interface AgentEvidenceReference {
+  /** 证据存储域。 */
+  kind: 'tool_event' | 'artifact' | 'resource_snapshot' | 'commit_journal' | 'task_result';
+  /** 稳定证据标识或授权资源引用。 */
+  referenceId: string;
+  /** 可选证据内容 hash。 */
+  contentHash?: string;
+}
+
+/** 单条验收标准的结构化结论。 */
+export interface AgentCriteriaResult {
+  /** 对应 acceptanceCriteria 的稳定数组索引。 */
+  criterionIndex: number;
+  /** Child 提交但不能自行升级为 verified 的声明。 */
+  claim: {
+    /** Child 对验收标准的判断。 */
+    status: 'satisfied' | 'unsatisfied' | 'unknown';
+    /** 紧凑声明摘要。 */
+    summary: string;
+    /** Child 声明引用的证据。 */
+    evidence: AgentEvidenceReference[];
+  };
+  /** 独立验证层，不直接信任 Child 声明。 */
+  verification: {
+    /** 验证器的最终判断。 */
+    status: 'verified' | 'unverified' | 'contradicted';
+    /** 产生验证结论的可信主体。 */
+    verifier: 'tool' | 'coordinator' | 'primary' | 'policy';
+    /** 验证器实际检查的证据。 */
+    evidence: AgentEvidenceReference[];
+  };
+}
+
+/** 非终止性任务警告。 */
+export interface AgentTaskWarning {
+  /** 稳定警告码。 */
+  code: string;
+  /** 用户可读警告说明。 */
+  message: string;
+}
+
+/** Task 产物所有权和可见性。 */
+export interface AgentArtifactReference {
+  /** 稳定产物标识。 */
+  artifactId: string;
+  /** 所有权域，避免 Child 越权转移产物。 */
+  owner: {
+    /** 产物来源 Task。 */
+    taskId: string;
+    /** 产物来源 Child Actor。 */
+    agentId: string;
+    /** 产物来源 Attempt。 */
+    attemptId: string;
+  };
+  /** 可见性层级。 */
+  visibility: 'internal' | 'primary' | 'user';
+  /** 产物种类。 */
+  kind: string;
+  /** 稳定产物引用。 */
+  reference: string;
+  /** 可选产物内容或清单 hash。 */
+  contentHash?: string;
+  /** 产物创建时间。 */
+  createdAt: string;
+}
+
+/** 受控写入结果的完整性引用。 */
+export interface AgentChangesetResult {
+  /** changeset 稳定标识。 */
+  changesetId: string;
+  /** 写入前基础修订。 */
+  baseRevision: string;
+  /** 用户确认和提交共同绑定的 diff hash。 */
+  diffHash: string;
+  /** 规范化操作集合 hash。 */
+  operationSetHash: string;
+  /** 生成 changeset 的执行计划 hash。 */
+  planHash: string;
+}
+
+/** Task 实际资源与成本记账。 */
+export interface AgentUsageAccounting {
+  /** Provider 输入 token。 */
+  inputTokens: number;
+  /** Provider 输出 token。 */
+  outputTokens: number;
+  /** 输入与输出 token 合计。 */
+  totalTokens: number;
+  /** Provider 模型调用次数。 */
+  modelCalls: number;
+  /** Agent 工具执行轮次。 */
+  toolRounds: number;
+  /** 排队耗时。 */
+  queueDurationMs: number;
+  /** 实际执行耗时。 */
+  executionDurationMs: number;
+  /** 外部请求次数。 */
+  externalRequests: number;
+  /** 可显式表达未知值的货币成本。 */
+  monetaryCost: {
+    /** ISO-4217 货币代码；Provider 未提供时为 unknown。 */
+    currency: string | 'unknown';
+    /** 成本计算使用的定价版本；不可用时为 unknown。 */
+    pricingVersion: string | 'unknown';
+    /** 预估成本；没有可靠价格时为 unknown。 */
+    estimated: number | 'unknown';
+    /** Provider 返回的实际成本；不可用时为 unknown。 */
+    actual: number | 'unknown';
+  };
+}
+
+/** Primary Runtime B 消费的结构化终态结果。 */
+export interface ChatAgentResult {
+  /** 结果所属 Task。 */
+  taskId: string;
+  /** 稳定 Child Actor ID。 */
+  agentId: string;
+  /** 产生结果的 Attempt ID。 */
+  attemptId: string;
+  /** 机器执行终态。 */
+  executionStatus: 'completed' | 'failed' | 'cancelled' | 'deadline_exceeded' | 'commit_failed';
+  /** 与执行状态分离的验收完成度。 */
+  completion: {
+    /** 整体完成度。 */
+    level: 'full' | 'partial' | 'none';
+    /** 每条验收标准的证据结论。 */
+    criteria: AgentCriteriaResult[];
+  };
+  /** 面向 Primary 的紧凑结果摘要。 */
+  summary: string;
+  /** 经 allowlist 裁剪的可选结构化输出。 */
+  output?: unknown;
+  /** 不改变执行终态的警告。 */
+  warnings: AgentTaskWarning[];
+  /** 有明确所有权和可见性的产物。 */
+  artifacts: AgentArtifactReference[];
+  /** 受控写任务的可选 changeset 完整性信息。 */
+  changeset?: AgentChangesetResult;
+  /** Task/Attempt 实际成本。 */
+  usage: AgentUsageAccounting;
+  /** 失败终态的结构化错误。 */
+  error?: AgentTaskError;
+}
+
+/** 基础阶段 delegation.created Outbox 的唯一 payload。 */
+export interface AgentDelegationCreatedPayload {
+  /** 已原子持久化的 Checkpoint。 */
+  readonly checkpointId: string;
+  /** Checkpoint 所属会话。 */
+  readonly sessionId: string;
+  /** Checkpoint 所属 Turn。 */
+  readonly turnId: string;
+}
+
+/** Agent 审计事件的稳定来源。 */
+export type ChatAgentEventSource = 'primary' | 'coordinator' | 'child' | 'runtime' | 'user' | 'system';
+
+/** 当前基础阶段可持久化的 Agent Event 类型。 */
+export type ChatAgentEventType =
+  | 'task.created'
+  | 'task.status_changed'
+  | 'plan.authorized'
+  | 'task.queued'
+  | 'delegation.checkpoint_created'
+  | 'primary.suspended'
+  | 'runtime.starting'
+  | 'runtime.started'
+  | 'runtime.replaced'
+  | 'confirmation.requested'
+  | 'confirmation.resolved'
+  | 'confirmation.invalidated'
+  | 'tool.started'
+  | 'tool.completed'
+  | 'changeset.prepared'
+  | 'commit.journal_created'
+  | 'commit.mutation_applied'
+  | 'commit.finalized'
+  | 'child.result_recorded'
+  | 'delegation.ready'
+  | 'delegation.cancel_requested'
+  | 'delegation.interrupted'
+  | 'primary.resume_started'
+  | 'delegation.completed'
+  | 'task.completed'
+  | 'task.failed'
+  | 'task.cancelled'
+  | 'task.tombstoned';
+
+/** 以 Task 作为历史聚合根的 Event。 */
+export type ChatAgentTaskEventType =
+  | 'task.created'
+  | 'task.status_changed'
+  | 'plan.authorized'
+  | 'task.queued'
+  | 'runtime.starting'
+  | 'runtime.started'
+  | 'runtime.replaced'
+  | 'confirmation.requested'
+  | 'confirmation.resolved'
+  | 'confirmation.invalidated'
+  | 'tool.started'
+  | 'tool.completed'
+  | 'changeset.prepared'
+  | 'commit.journal_created'
+  | 'commit.mutation_applied'
+  | 'commit.finalized'
+  | 'task.completed'
+  | 'task.failed'
+  | 'task.cancelled'
+  | 'task.tombstoned';
+
+/** 以 Delegation Checkpoint 作为历史聚合根的 Event。 */
+export type ChatAgentCheckpointEventType = Exclude<ChatAgentEventType, ChatAgentTaskEventType>;
+
+/** Agent Event 的结构化 payload 映射。 */
+export interface ChatAgentEventPayloadMap {
+  /** Task 创建事件。 */
+  'task.created': { checkpointId: string; toolCallId: string };
+  /** 通用 Task 状态投影变化。 */
+  'task.status_changed': { from: AgentTaskStatus; to: AgentTaskStatus; queuePhase?: AgentTaskQueuePhase };
+  /** Execution Plan 首次冻结。 */
+  'plan.authorized': { planHash: string; planSchemaVersion: number; policyVersion: string };
+  /** Task 进入指定排队阶段。 */
+  'task.queued': { queuePhase: AgentTaskQueuePhase };
+  /** Checkpoint 创建。 */
+  'delegation.checkpoint_created': { taskIds: readonly string[]; sourceRuntimeId: string };
+  /** Primary Runtime A 已安全挂起。 */
+  'primary.suspended': { sourceRuntimeId: string };
+  /** Runtime 即将启动。 */
+  'runtime.starting': { runtimeId: string };
+  /** Runtime 已启动。 */
+  'runtime.started': { runtimeId: string };
+  /** 同一 Attempt 的 Runtime 被替换。 */
+  'runtime.replaced': { previousRuntimeId: string; nextRuntimeId: string; reason: string };
+  /** 用户确认请求已创建。 */
+  'confirmation.requested': { requestId: string; diffHash: string };
+  /** 用户确认已决议。 */
+  'confirmation.resolved': { requestId: string; decision: 'approved' | 'rejected'; diffHash: string };
+  /** 基础修订变化使确认失效。 */
+  'confirmation.invalidated': { requestId: string; reason: string };
+  /** Child 工具开始执行。 */
+  'tool.started': { toolCallId: string; toolName: string };
+  /** Child 工具执行完成。 */
+  'tool.completed': { toolCallId: string; toolName: string; resultHash: string };
+  /** changeset 已准备。 */
+  'changeset.prepared': { changesetId: string; diffHash: string };
+  /** commit journal 已创建。 */
+  'commit.journal_created': { journalId: string; changesetId: string };
+  /** 单个外部变更已应用。 */
+  'commit.mutation_applied': { journalId: string; operationId: string; targetHash: string };
+  /** commit journal 已验证并结束。 */
+  'commit.finalized': { journalId: string; finalHash: string };
+  /** Child 终态结果已按 tool-call ID 写入。 */
+  'child.result_recorded': { toolCallId: string; resultHash: string };
+  /** 所有结果已汇合。 */
+  'delegation.ready': { resultCount: number };
+  /** cooperative cancellation 请求已持久化。 */
+  'delegation.cancel_requested': { reason: string };
+  /** 恢复校验失败或主进程重启造成中断。 */
+  'delegation.interrupted': { error: AgentTaskError };
+  /** Primary Runtime B 的 CAS claim 已成功。 */
+  'primary.resume_started': { runtimeId: string };
+  /** Delegation Checkpoint 已终止。 */
+  'delegation.completed': { outcome: 'completed' | 'failed' | 'cancelled' };
+  /** Task 完成。 */
+  'task.completed': { resultHash: string };
+  /** Task 失败。 */
+  'task.failed': { error?: AgentTaskError; resultHash?: string };
+  /** Task 已合作式取消。 */
+  'task.cancelled': { resultHash?: string };
+  /** Task 被逻辑删除。 */
+  'task.tombstoned': { reason: string };
+}
+
+/** 追加写、带 Schema 版本的 Agent 审计事件。 */
+export interface ChatAgentEventBase<TType extends ChatAgentEventType> {
+  /** 全局唯一 Event ID。 */
+  eventId: string;
+  /** 聚合内严格递增序号。 */
+  sequence: number;
+  /** 可选 Attempt 稳定链接。 */
+  attemptId?: string;
+  /** 可选 Runtime 稳定链接。 */
+  runtimeId?: string;
+  /** 判别 Event 类型。 */
+  type: TType;
+  /** ISO-8601 发生时间。 */
+  occurredAt: string;
+  /** 可信事件来源。 */
+  source: ChatAgentEventSource;
+  /** Event payload Schema 版本。 */
+  schemaVersion: number;
+  /** 与 type 对应的结构化 payload。 */
+  payload: ChatAgentEventPayloadMap[TType];
+}
+
+/** Task Event 强制携带匹配的 Task 聚合身份。 */
+export type ChatAgentTaskEvent<TType extends ChatAgentTaskEventType = ChatAgentTaskEventType> = ChatAgentEventBase<TType> & {
+  aggregate: { kind: 'task'; id: string };
+  taskId: string;
+  checkpointId?: string;
+};
+
+/** Checkpoint Event 强制携带匹配的 Checkpoint 聚合身份。 */
+export type ChatAgentCheckpointEvent<TType extends ChatAgentCheckpointEventType = ChatAgentCheckpointEventType> = ChatAgentEventBase<TType> & {
+  aggregate: { kind: 'checkpoint'; id: string };
+  taskId?: string;
+  checkpointId: string;
+};
+
+/** 由 Event type 判别并强制聚合身份一致的审计事件。 */
+export type ChatAgentEvent<TType extends ChatAgentEventType = ChatAgentEventType> = TType extends ChatAgentTaskEventType
+  ? ChatAgentTaskEvent<TType>
+  : TType extends ChatAgentCheckpointEventType
+  ? ChatAgentCheckpointEvent<TType>
+  : never;
