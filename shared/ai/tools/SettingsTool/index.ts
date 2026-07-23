@@ -18,6 +18,12 @@ export const getSettingsToolRegistryEntry = {
   runtime: 'main',
   group: 'settings',
   exposure: 'default-readonly',
+  executionClass: 'direct',
+  effect: {
+    effect: 'pure_read',
+    resourceScopeResolver: 'application-settings',
+    reversible: true
+  },
   definition: {
     name: GET_SETTINGS_TOOL_NAME,
     description: '获取应用设置。可获取主题外观、主题色、源码模式和编辑器页宽等设置项的当前值。支持传入单个 key、key 数组或不传（返回所有设置）。',
@@ -47,6 +53,12 @@ export const updateSettingsToolRegistryEntry = {
   runtime: 'main',
   group: 'settings',
   exposure: 'default-writable',
+  executionClass: 'direct',
+  effect: {
+    effect: 'immediate_side_effect',
+    resourceScopeResolver: 'application-settings',
+    reversible: false
+  },
   definition: {
     name: UPDATE_SETTINGS_TOOL_NAME,
     description: '修改应用设置。可根据自然语言请求设置主题外观、主题色、源码模式和编辑器页宽。',

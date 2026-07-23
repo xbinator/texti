@@ -21,6 +21,12 @@ export const readFileToolRegistryEntry = {
   runtime: 'main',
   group: 'file',
   exposure: 'default-readonly',
+  executionClass: 'direct',
+  effect: {
+    effect: 'pure_read',
+    resourceScopeResolver: 'file-path',
+    reversible: true
+  },
   definition: {
     name: READ_FILE_TOOL_NAME,
     description: '读取一个本地文本文件或未保存草稿的内容，支持通过 offset 和 limit 分段读取。需要局部修改文件时，先用此工具获取 edit_file 所需的精确原文。',
@@ -49,6 +55,12 @@ export const readDirectoryToolRegistryEntry = {
   runtime: 'main',
   group: 'file',
   exposure: 'conditional-readonly',
+  executionClass: 'direct',
+  effect: {
+    effect: 'pure_read',
+    resourceScopeResolver: 'directory-path',
+    reversible: true
+  },
   definition: {
     name: READ_DIRECTORY_TOOL_NAME,
     description: '列出一个本地目录的直接子项，包括文件和子目录；不递归且不读取文件内容。需要递归查找文件时使用 glob，需要读取正文时使用 read_file。',
@@ -72,6 +84,12 @@ export const globToolRegistryEntry = {
   runtime: 'main',
   group: 'file',
   exposure: 'conditional-readonly',
+  executionClass: 'direct',
+  effect: {
+    effect: 'pure_read',
+    resourceScopeResolver: 'glob-root',
+    reversible: true
+  },
   definition: {
     name: GLOB_TOOL_NAME,
     description:
@@ -97,6 +115,12 @@ export const grepToolRegistryEntry = {
   runtime: 'main',
   group: 'file',
   exposure: 'conditional-readonly',
+  executionClass: 'direct',
+  effect: {
+    effect: 'pure_read',
+    resourceScopeResolver: 'grep-root',
+    reversible: true
+  },
   definition: {
     name: GREP_TOOL_NAME,
     description:

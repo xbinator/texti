@@ -12,6 +12,12 @@ export const queryLogsToolRegistryEntry = {
   runtime: 'main',
   group: 'read',
   exposure: 'default-readonly',
+  executionClass: 'direct',
+  effect: {
+    effect: 'pure_read',
+    resourceScopeResolver: 'application-logs',
+    reversible: true
+  },
   definition: {
     name: QUERY_LOGS_TOOL_NAME,
     description:

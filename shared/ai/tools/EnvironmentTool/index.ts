@@ -12,6 +12,12 @@ export const getCurrentTimeToolRegistryEntry = {
   runtime: 'main',
   group: 'read',
   exposure: 'default-readonly',
+  executionClass: 'direct',
+  effect: {
+    effect: 'pure_read',
+    resourceScopeResolver: 'system-clock',
+    reversible: true
+  },
   definition: {
     name: GET_CURRENT_TIME_TOOL_NAME,
     description: '获取当前系统时间，返回 ISO、时间戳和本地格式化字符串。',

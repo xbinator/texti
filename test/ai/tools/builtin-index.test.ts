@@ -12,7 +12,7 @@ import {
   OPERATE_WEBPAGE_TOOL_NAME,
   READ_CURRENT_WEBPAGE_TOOL_NAME
 } from '@/ai/tools/builtin';
-import { GLOB_TOOL_NAME, GREP_TOOL_NAME } from '@/ai/tools/catalog/runtimeTools';
+import { DELEGATE_TASK_TOOL_NAME, GLOB_TOOL_NAME, GREP_TOOL_NAME } from '@/ai/tools/catalog/runtimeTools';
 import { getToolNamesByExposure } from '../../../shared/ai/tools/index.js';
 
 describe('builtin tools index', (): void => {
@@ -21,6 +21,13 @@ describe('builtin tools index', (): void => {
     expect(DEFAULT_BUILTIN_WRITABLE_TOOL_NAMES).toEqual(expect.arrayContaining(getToolNamesByExposure('default-writable')));
     expect(CONDITIONAL_BUILTIN_READONLY_TOOL_NAMES).toEqual(expect.arrayContaining(getToolNamesByExposure('conditional-readonly')));
     expect(CONDITIONAL_BUILTIN_WRITABLE_TOOL_NAMES).toEqual(getToolNamesByExposure('conditional-writable'));
+  });
+
+  it('keeps delegate_task out of every production chat tool-name list', (): void => {
+    expect(DEFAULT_BUILTIN_READONLY_TOOL_NAMES).not.toContain(DELEGATE_TASK_TOOL_NAME);
+    expect(DEFAULT_BUILTIN_WRITABLE_TOOL_NAMES).not.toContain(DELEGATE_TASK_TOOL_NAME);
+    expect(CONDITIONAL_BUILTIN_READONLY_TOOL_NAMES).not.toContain(DELEGATE_TASK_TOOL_NAME);
+    expect(CONDITIONAL_BUILTIN_WRITABLE_TOOL_NAMES).not.toContain(DELEGATE_TASK_TOOL_NAME);
   });
 
   it('keeps WebView schema-only tools available for runtime filtering', (): void => {

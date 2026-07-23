@@ -2,7 +2,8 @@
  * @file index.ts
  * @description ChatRuntime 跨进程工具 registry 聚合出口。
  */
-import type { SharedToolDefinition, ToolExposure, ToolRegistryEntry, ToolRuntimeGroup, ToolRuntimeOwner } from './types.js';
+import type { SharedToolDefinition, ToolExposureQuery, ToolRegistryEntry, ToolRuntimeGroup, ToolRuntimeOwner } from './types.js';
+import { delegateTaskToolRegistryEntry } from './DelegateTaskTool/index.js';
 import { createDocumentToolRegistryEntry, readCurrentDocumentToolRegistryEntry } from './DocumentTool/index.js';
 import { getCurrentTimeToolRegistryEntry } from './EnvironmentTool/index.js';
 import { editFileToolRegistryEntry } from './FileEditTool/index.js';
@@ -21,16 +22,20 @@ import { getSettingsToolRegistryEntry, updateSettingsToolRegistryEntry } from '.
 import { operateWebpageToolRegistryEntry, readCurrentWebpageToolRegistryEntry } from './WebviewTool/index.js';
 
 export type {
+  AgentToolEffectMetadata,
   SharedToolDefinition,
   SharedToolParameterSchema,
   SharedToolRiskLevel,
   SharedToolSource,
   ToolExposure,
+  ToolExposureQuery,
+  ToolExecutionClass,
   ToolJsonSchema,
   ToolRegistryEntry,
   ToolRuntimeGroup,
   ToolRuntimeOwner
 } from './types.js';
+export { DELEGATE_TASK_TOOL_NAME } from './DelegateTaskTool/index.js';
 export { CREATE_DOCUMENT_TOOL_NAME, READ_CURRENT_DOCUMENT_TOOL_NAME } from './DocumentTool/index.js';
 export { GET_CURRENT_TIME_TOOL_NAME } from './EnvironmentTool/index.js';
 export { EDIT_FILE_TOOL_NAME } from './FileEditTool/index.js';
@@ -69,8 +74,18 @@ export const TOOL_REGISTRY = [
   refreshMcpDiscoveryToolRegistryEntry,
   openResourceToolRegistryEntry,
   readCurrentWebpageToolRegistryEntry,
-  operateWebpageToolRegistryEntry
+  operateWebpageToolRegistryEntry,
+  delegateTaskToolRegistryEntry
 ] as const satisfies ToolRegistryEntry[];
+
+/**
+ * 按名称读取完整工具 registry 条目。
+ * @param toolName - 工具名称
+ * @returns registry 条目
+ */
+export function getToolRegistryEntry(toolName: string): ToolRegistryEntry | undefined {
+  return TOOL_REGISTRY.find((entry) => entry.definition.name === toolName);
+}
 
 /**
  * 按名称读取工具定义。
@@ -78,7 +93,7 @@ export const TOOL_REGISTRY = [
  * @returns 工具定义
  */
 export function getToolDefinitionByName(toolName: string): SharedToolDefinition | undefined {
-  return TOOL_REGISTRY.find((entry) => entry.definition.name === toolName)?.definition;
+  return getToolRegistryEntry(toolName)?.definition;
 }
 
 /**
@@ -96,6 +111,11 @@ export function getToolNamesByRuntimeGroup(runtime: ToolRuntimeOwner, group: Too
  * @param exposure - 工具暴露策略
  * @returns 工具名称列表
  */
-export function getToolNamesByExposure(exposure: ToolExposure): string[] {
+export function getToolNamesByExposure(exposure: ToolExposureQuery): string[] {
+  if (exposure === 'chat-default') {
+    return TOOL_REGISTRY.filter((entry) => entry.exposure === 'default-readonly' || entry.exposure === 'default-writable').map(
+      (entry) => entry.definition.name
+    );
+  }
   return TOOL_REGISTRY.filter((entry) => entry.exposure === exposure).map((entry) => entry.definition.name);
 }

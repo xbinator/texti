@@ -96,6 +96,12 @@ export const readCurrentWebpageToolRegistryEntry = {
   runtime: 'main',
   group: 'webview',
   exposure: 'conditional-readonly',
+  executionClass: 'direct',
+  effect: {
+    effect: 'external_read',
+    resourceScopeResolver: 'active-webview',
+    reversible: true
+  },
   definition: {
     name: READ_CURRENT_WEBPAGE_TOOL_NAME,
     description:
@@ -114,6 +120,12 @@ export const operateWebpageToolRegistryEntry = {
   runtime: 'main',
   group: 'webview',
   exposure: 'conditional-writable',
+  executionClass: 'direct',
+  effect: {
+    effect: 'immediate_side_effect',
+    resourceScopeResolver: 'active-webview',
+    reversible: false
+  },
   definition: {
     name: OPERATE_WEBPAGE_TOOL_NAME,
     description:

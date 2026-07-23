@@ -15,6 +15,12 @@ export const readCurrentDocumentToolRegistryEntry = {
   runtime: 'main',
   group: 'read',
   exposure: 'default-readonly',
+  executionClass: 'direct',
+  effect: {
+    effect: 'pure_read',
+    resourceScopeResolver: 'active-document',
+    reversible: true
+  },
   definition: {
     name: READ_CURRENT_DOCUMENT_TOOL_NAME,
     description: '读取当前编辑器文档的标题、路径、Markdown 内容和用户选中的内容。',
@@ -29,6 +35,12 @@ export const createDocumentToolRegistryEntry = {
   runtime: 'main',
   group: 'file',
   exposure: 'default-writable',
+  executionClass: 'direct',
+  effect: {
+    effect: 'immediate_side_effect',
+    resourceScopeResolver: 'document-session',
+    reversible: false
+  },
   definition: {
     name: CREATE_DOCUMENT_TOOL_NAME,
     description: '创建新的编辑器文档（未保存草稿）。提供标题和初始内容，将在编辑器中打开新标签页供用户编辑。',

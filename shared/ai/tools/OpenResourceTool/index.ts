@@ -12,6 +12,12 @@ export const openResourceToolRegistryEntry = {
   runtime: 'main',
   group: 'resource',
   exposure: 'default-readonly',
+  executionClass: 'direct',
+  effect: {
+    effect: 'immediate_side_effect',
+    resourceScopeResolver: 'resource-reference',
+    reversible: false
+  },
   definition: {
     name: OPEN_RESOURCE_TOOL_NAME,
     description:
