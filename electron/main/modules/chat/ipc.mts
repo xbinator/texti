@@ -2,16 +2,10 @@
  * @file ipc.mts
  * @description 聊天模块 IPC handler 注册。
  */
-import type {
-  ChatMessageHistoryCursor,
-  ChatMessageRecord,
-  ChatSession,
-  ChatSessionModelMetadata,
-  ChatSessionType,
-  SessionPaginationParams
-} from 'types/chat';
+import type { ChatMessageHistoryCursor, ChatMessageRecord, ChatSession, ChatSessionModelMetadata, ChatSessionType, SessionPaginationParams } from 'types/chat';
 import type { ChatHandlerResult } from 'types/electron-api';
 import { ipcMain } from 'electron';
+import { assertSessionHistoryWritable } from './runtime/infrastructure/locks.mjs';
 import { chatSessionManager } from './service.mjs';
 
 function wrapHandler<T>(fn: (...args: unknown[]) => T): (...args: unknown[]) => ChatHandlerResult<T> {
@@ -50,6 +44,7 @@ export function registerChatHandlers(): void {
   ipcMain.handle(
     'chat:session:branch',
     wrapHandler((_event, sourceSessionId, targetMessageId) => {
+      assertSessionHistoryWritable(sourceSessionId as string);
       return chatSessionManager.branchSession(sourceSessionId as string, targetMessageId as string);
     })
   );
@@ -68,6 +63,7 @@ export function registerChatHandlers(): void {
   ipcMain.handle(
     'chat:session:delete',
     wrapHandler((_event, sessionId) => {
+      assertSessionHistoryWritable(sessionId as string);
       chatSessionManager.deleteSession(sessionId as string);
     })
   );
@@ -88,18 +84,21 @@ export function registerChatHandlers(): void {
   ipcMain.handle(
     'chat:message:add',
     wrapHandler((_event, message) => {
+      assertSessionHistoryWritable((message as ChatMessageRecord).sessionId);
       chatSessionManager.addMessage(message as ChatMessageRecord);
     })
   );
   ipcMain.handle(
     'chat:message:update',
     wrapHandler((_event, message) => {
+      assertSessionHistoryWritable((message as ChatMessageRecord).sessionId);
       chatSessionManager.updateMessage(message as ChatMessageRecord);
     })
   );
   ipcMain.handle(
     'chat:message:setAll',
     wrapHandler((_event, sessionId, messages) => {
+      assertSessionHistoryWritable(sessionId as string);
       chatSessionManager.setSessionMessages(sessionId as string, messages as ChatMessageRecord[]);
     })
   );

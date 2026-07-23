@@ -374,6 +374,16 @@ export interface DeliverAgentOutboxInput {
   deliveredAt: string;
 }
 
+/** 定向中断单个已提交 Checkpoint 的补偿输入。 */
+export interface InterruptAgentCheckpointInput {
+  /** 唯一目标 Checkpoint。 */
+  checkpointId: string;
+  /** 已通过 allowlist 的恢复错误。 */
+  error: AgentTaskError;
+  /** 补偿发生时间。 */
+  occurredAt: string;
+}
+
 /** Renderer 重载恢复所需的持久化投影。 */
 export interface AgentDelegationRecoverySnapshot {
   /** 非终态 Checkpoint。 */
@@ -455,6 +465,12 @@ export interface AgentDelegationStore {
    * @returns 更新后的 Outbox
    */
   markOutboxDelivered(input: DeliverAgentOutboxInput): AgentOutboxRecord;
+  /**
+   * 定向中断一个无法取得 continuation fence 的已提交 Checkpoint。
+   * @param input - Checkpoint、恢复错误与时间
+   * @returns 中断后的 Checkpoint
+   */
+  interruptCheckpoint(input: InterruptAgentCheckpointInput): AgentCheckpointRecord;
   /**
    * 把主进程重启时的非终态 Checkpoint 收敛为 interrupted。
    * @param reason - 恢复错误

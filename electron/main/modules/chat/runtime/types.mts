@@ -5,6 +5,7 @@
 import type { ArtifactRegistry } from './compaction/artifact-registry.mjs';
 import type { CompactionExecutor } from './compaction/executor.mjs';
 import type { SummaryGeneratorDependencies } from './compaction/summary-generator.mjs';
+import type { RuntimeLockRegistry } from './infrastructure/locks.mjs';
 import type { RuntimeFilePartMaterializer } from './messages/file-parts.mjs';
 import type { ChatModelResolution } from './model/resolver.mjs';
 import type { ToolStepSnapshot } from '../../ai/tool-loop-policy.mjs';
@@ -176,6 +177,8 @@ export interface ChatRuntimeDelegationSuspension {
 
 /** Runtime 交给 Coordinator 原子 prepare 边界的完整输入。 */
 export interface ChatRuntimeDelegationPrepareInput {
+  /** Runtime 在调用同步 prepare 边界前预分配的 Checkpoint ID。 */
+  checkpointId: string;
   /** 产生委派调用的 Primary Runtime。 */
   runtime: ActiveChatRuntime;
   /** 含完整延迟工具片段的 working assistant 快照。 */
@@ -292,6 +295,8 @@ export interface ChatRuntimeServiceDependencies {
   messageReader: ChatRuntimeMessageReader;
   /** runtime 流式执行器。 */
   streamExecutor: ChatRuntimeStreamExecutor;
+  /** 可选共享 Runtime/Chat resource-scope 锁注册表。 */
+  locks?: RuntimeLockRegistry;
   /** 原子提交完整 assistant 与委派事实的 Coordinator prepare 边界。 */
   prepareDelegation?: ChatRuntimeDelegationPreparer;
   /** 解析指定 Runtime 模型，缺失时回退全局默认模型。 */

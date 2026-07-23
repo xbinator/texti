@@ -118,7 +118,8 @@ export function createRuntimeStreamExecutor(dependencies: RuntimeStreamExecutorD
     if (!resolution) {
       throw createAIServiceError(AI_ERROR_CODE.MODEL_NOT_FOUND, '没有可用的聊天模型');
     }
-
+    // 冻结本次 Provider 实际使用的默认或显式模型，供 suspension prepare 构造不可变快照。
+    runtime.resolvedModel = resolution;
     const [error, result] = await dependencies.streamText(
       resolution.createOptions,
       createRuntimeStreamRequest(resolution.modelId, runtime, userMessage, sourceMessages),

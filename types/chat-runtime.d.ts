@@ -512,7 +512,7 @@ export interface ChatRuntimeErrorEvent extends ChatRuntimeEventBase {
 }
 
 /** Runtime 完成原因。 */
-export type ChatRuntimeCompletionReason = 'completed' | 'awaiting_user_input';
+export type ChatRuntimeCompletionReason = 'completed' | 'awaiting_user_input' | 'waiting_children';
 
 /** Runtime complete event. */
 export type ChatRuntimeCompleteEvent = ChatRuntimeEventBase &
@@ -530,6 +530,16 @@ export type ChatRuntimeCompleteEvent = ChatRuntimeEventBase &
         reason: Extract<ChatRuntimeCompletionReason, 'awaiting_user_input'>;
         /** 等待中的持久化交互。 */
         interaction: ChatPendingInteraction;
+        /** Optional usage reported by provider. */
+        usage?: AIUsage;
+      }
+    | {
+        /** Runtime A 已持久化委派并释放普通写锁。 */
+        reason: Extract<ChatRuntimeCompletionReason, 'waiting_children'>;
+        /** 持有逻辑 Turn fence 的 Checkpoint。 */
+        checkpointId: string;
+        /** Child 等待态不携带用户交互。 */
+        interaction?: never;
         /** Optional usage reported by provider. */
         usage?: AIUsage;
       }

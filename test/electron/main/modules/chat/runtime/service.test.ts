@@ -25,6 +25,7 @@ import type {
   ChatRuntimeSendInput
 } from 'types/chat-runtime';
 import { describe, expect, it, vi } from 'vitest';
+import { createRuntimeLockRegistry } from '../../../../../../electron/main/modules/chat/runtime/infrastructure/locks.mjs';
 import { createChatRuntimeService } from '../../../../../../electron/main/modules/chat/runtime/service.mjs';
 import { chatSessionManager } from '../../../../../../electron/main/modules/chat/service.mjs';
 
@@ -743,6 +744,100 @@ describe('chat runtime service shell', (): void => {
     });
   });
 
+  it('completes Runtime A as waiting_children after synchronous prepare and preserves the resolved model', async (): Promise<void> => {
+    const collector = createEventCollector();
+    const locks = createRuntimeLockRegistry();
+    const waitingMessageLockOwners: Array<string | undefined> = [];
+    const emit = vi.fn(<TName extends keyof ChatRuntimeEventMap>(name: TName, payload: ChatRuntimeEventMap[TName]): void => {
+      if (name === 'chat:runtime:message-updated') {
+        const messageEvent = payload as ChatRuntimeEventMap['chat:runtime:message-updated'];
+        if (messageEvent.message.parts.some((part: ChatMessagePart): boolean => part.type === 'tool' && part.toolCallId === 'delegate-call-1')) {
+          waitingMessageLockOwners.push(locks.getWritingOwner(messageEvent.sessionId));
+        }
+      }
+      collector.emit(name, payload);
+    });
+    const prepareDelegation = vi.fn((input: ChatRuntimeDelegationPrepareInput): ChatRuntimeDelegationPrepareAck => {
+      if (!input.checkpointId) throw new Error('Checkpoint ID must be allocated before prepare');
+      return { prepared: true };
+    });
+    const streamExecutor: ChatRuntimeStreamExecutor = async ({ runtime, assistantMessage }, updateAssistant) => {
+      runtime.resolvedModel = createModelResolution();
+      assistantMessage.parts.push({
+        id: 'delegate-part-1',
+        type: 'tool',
+        toolCallId: 'delegate-call-1',
+        toolName: 'delegate_task',
+        status: 'executing',
+        input: createDeferredToolCall().input
+      });
+      await updateAssistant({ ...structuredClone(assistantMessage), parts: [] });
+      return {
+        shouldContinue: false,
+        suspension: { toolCalls: [createDeferredToolCall()] }
+      };
+    };
+    const service = createChatRuntimeService({
+      emit,
+      locks,
+      messageReader: createNoopMessageReader(),
+      messageWriter: createNoopMessageWriter(),
+      streamExecutor,
+      prepareDelegation
+    });
+    const input = createInput({
+      sessionId: 'session-waiting-children',
+      agentId: 'primary',
+      rootRuntimeId: 'runtime-waiting-children'
+    });
+
+    await service.send(input);
+    await vi.waitFor((): void => {
+      expect(collector.events.some((event): boolean => event.name === 'chat:runtime:complete')).toBe(true);
+    });
+
+    const prepared = prepareDelegation.mock.calls[0]?.[0];
+    if (!prepared) throw new Error('Delegation prepare must run before Runtime A completes');
+    expect(prepared).toMatchObject({
+      checkpointId: expect.stringMatching(/^checkpoint-/),
+      runtime: {
+        runtimeId: input.runtimeId,
+        resolvedModel: {
+          createOptions: { providerId: 'provider-1' },
+          modelId: 'model-1'
+        }
+      }
+    });
+    expect(collector.events).toContainEqual({
+      name: 'chat:runtime:complete',
+      payload: expect.objectContaining({
+        runtimeId: input.runtimeId,
+        reason: 'waiting_children',
+        checkpointId: prepared?.checkpointId
+      })
+    });
+    const waitingMessageEvent = collector.events.findLast(
+      (event): boolean =>
+        event.name === 'chat:runtime:message-updated' &&
+        event.payload.runtimeId === input.runtimeId &&
+        event.payload.message.parts.some((part): boolean => part.type === 'tool' && part.toolCallId === 'delegate-call-1')
+    );
+    expect(waitingMessageEvent).toMatchObject({
+      name: 'chat:runtime:message-updated',
+      payload: {
+        message: {
+          loading: true,
+          finished: false,
+          parts: [expect.objectContaining({ toolCallId: 'delegate-call-1', status: 'executing' })]
+        }
+      }
+    });
+    expect(waitingMessageLockOwners).toEqual([undefined]);
+    expect(prepareDelegation.mock.invocationCallOrder[0]).toBeLessThan(emit.mock.invocationCallOrder.at(-1) ?? Number.MAX_SAFE_INTEGER);
+    expect(service.getActiveRuntime(input.runtimeId)).toBeUndefined();
+    expect(locks.getWritingOwner('session-waiting-children')).toBeUndefined();
+  });
+
   it('uses the runtime id allocated by the renderer', async (): Promise<void> => {
     const service = createChatRuntimeService({
       emit: vi.fn(),
@@ -757,6 +852,28 @@ describe('chat runtime service shell', (): void => {
 
     expect(result.runtimeId).toBe('runtime-renderer-owned');
     expect(service.getActiveRuntime('runtime-renderer-owned')).toBeDefined();
+  });
+
+  it('rejects a normal Runtime writer with TURN_WAITING_CHILDREN while a shared fence exists', async (): Promise<void> => {
+    const locks = createRuntimeLockRegistry();
+    const fence = locks.acquireContinuationFence({
+      scope: 'session:session-fenced/history',
+      checkpointId: 'checkpoint-fenced'
+    });
+    if (!fence) throw new Error('Test continuation fence must be acquired');
+    const service = createChatRuntimeService({
+      locks,
+      emit: vi.fn(),
+      messageWriter: createNoopMessageWriter(),
+      messageReader: createNoopMessageReader(),
+      streamExecutor: createNoopStreamExecutor()
+    });
+
+    await expect(service.send(createInput({ sessionId: 'session-fenced' }))).rejects.toMatchObject({
+      code: 'TURN_WAITING_CHILDREN'
+    });
+    expect(service.getActiveRuntime('session-fenced')).toBeUndefined();
+    fence.release();
   });
 
   it('auto-names a session through the main process model path', async (): Promise<void> => {

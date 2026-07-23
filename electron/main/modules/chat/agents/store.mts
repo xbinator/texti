@@ -41,6 +41,7 @@ import {
   type ClaimCheckpointInput,
   type DeliverAgentOutboxInput,
   type FinalizeCheckpointInput,
+  type InterruptAgentCheckpointInput,
   type PrepareDelegationInput,
   type RecordTaskResultInput,
   type TombstoneAgentTaskInput,
@@ -1838,6 +1839,97 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       const updatedRow = this.database.select<OutboxRow>('SELECT * FROM chat_agent_outbox WHERE outbox_id = ?', [input.outboxId])[0];
       if (!updatedRow) throw new AgentStoreProtocolError('outbox_projection_missing', 'Delivered Outbox is missing');
       return parseOutbox(updatedRow);
+    });
+  }
+
+  /** @inheritdoc */
+  interruptCheckpoint(input: InterruptAgentCheckpointInput): AgentCheckpointRecord {
+    const validatedReason = validateAgentTaskError(input.error);
+    if (!validatedReason || validatedReason.phase !== 'recovery') {
+      throw new AgentStoreProtocolError('interrupt_reason_invalid', 'Checkpoint interruption requires a recovery error');
+    }
+    if (!Number.isFinite(Date.parse(input.occurredAt))) {
+      throw new AgentStoreProtocolError('interrupt_time_invalid', 'Checkpoint interruption time is invalid');
+    }
+    return this.database.transaction((): AgentCheckpointRecord => {
+      const aggregate = this.loadValidatedAggregate(input.checkpointId);
+      if (!aggregate) {
+        throw new AgentStoreProtocolError('checkpoint_not_found', 'Checkpoint does not exist');
+      }
+      const { checkpoint, tasks: aggregateTasks } = aggregate;
+      if (checkpoint.status === 'interrupted') return checkpoint;
+      if (checkpoint.status === 'preparing' || !canTransitionCheckpoint(checkpoint.status, 'interrupted')) {
+        throw new AgentStoreProtocolError('interrupt_checkpoint_state_invalid', 'Checkpoint cannot transition to interrupted');
+      }
+      if (aggregateTasks.some((task): boolean => task.status === 'committing' || task.unfinishedJournalCount > 0)) {
+        throw new AgentStoreProtocolError('interrupt_checkpoint_journal_blocked', 'Checkpoint interruption requires commit journal recovery');
+      }
+
+      this.database.execute(
+        `UPDATE chat_agent_attempts
+         SET status = ?, finished_at = ?, error_json = ?
+         WHERE task_id IN (
+           SELECT task_id FROM chat_agent_tasks WHERE checkpoint_id = ? AND record_state = ?
+         ) AND status NOT IN (?, ?, ?, ?, ?, ?)`,
+        [
+          'interrupted',
+          input.occurredAt,
+          JSON.stringify(validatedReason),
+          checkpoint.checkpointId,
+          'active',
+          'completed',
+          'failed',
+          'cancelled',
+          'deadline_exceeded',
+          'commit_failed',
+          'interrupted'
+        ]
+      );
+      aggregateTasks.forEach((task): void => {
+        if (isTaskTerminal(task.status)) return;
+        let sourceStatus = task.status;
+        if (sourceStatus !== 'cancelling') {
+          if (!canTransitionTask(sourceStatus, 'cancelling', { mode: task.contractSnapshot.mode })) {
+            throw new AgentStoreProtocolError('interrupt_task_state_invalid', 'Checkpoint Task cannot cooperate with cancellation');
+          }
+          const requestUpdate = this.database.execute(
+            `UPDATE chat_agent_tasks
+             SET status = ?, queue_phase = NULL, cancel_requested_at = ?, updated_at = ?
+             WHERE task_id = ? AND status = ? AND record_state = ?`,
+            ['cancelling', input.occurredAt, input.occurredAt, task.taskId, sourceStatus, 'active']
+          );
+          if (requestUpdate.changes !== 1) {
+            throw new AgentStoreProtocolError('interrupt_task_conflict', 'Checkpoint Task cancellation changed concurrently');
+          }
+          this.appendEvent('task', task.taskId, 'task.status_changed', { from: sourceStatus, to: 'cancelling' }, input.occurredAt, 'system');
+          sourceStatus = 'cancelling';
+        }
+        const finalUpdate = this.database.execute(
+          `UPDATE chat_agent_tasks
+           SET status = ?, queue_phase = NULL, updated_at = ?
+           WHERE task_id = ? AND status = ? AND record_state = ?`,
+          ['cancelled', input.occurredAt, task.taskId, sourceStatus, 'active']
+        );
+        if (finalUpdate.changes !== 1) {
+          throw new AgentStoreProtocolError('interrupt_task_finalize_conflict', 'Checkpoint Task cancellation finalization changed concurrently');
+        }
+        this.appendEvent('task', task.taskId, 'task.cancelled', {}, input.occurredAt, 'system');
+      });
+      const update = this.database.execute(
+        `UPDATE chat_agent_delegation_checkpoints
+         SET status = ?, version = version + 1, error_json = ?, updated_at = ?
+         WHERE checkpoint_id = ? AND status = ? AND version = ? AND record_state = ?`,
+        ['interrupted', JSON.stringify(validatedReason), input.occurredAt, checkpoint.checkpointId, checkpoint.status, checkpoint.version, 'active']
+      );
+      if (update.changes !== 1) {
+        throw new AgentStoreProtocolError('interrupt_checkpoint_conflict', 'Checkpoint interruption changed concurrently');
+      }
+      this.appendEvent('checkpoint', checkpoint.checkpointId, 'delegation.interrupted', { error: validatedReason }, input.occurredAt, 'system');
+      const interrupted = this.getCheckpoint(checkpoint.checkpointId);
+      if (!interrupted) {
+        throw new AgentStoreProtocolError('checkpoint_projection_missing', 'Interrupted Checkpoint is missing');
+      }
+      return interrupted;
     });
   }
 

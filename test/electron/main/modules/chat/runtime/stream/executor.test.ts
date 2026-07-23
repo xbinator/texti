@@ -670,6 +670,7 @@ async function* createMainEditFileToolStream(): AsyncGenerator<unknown> {
 describe('runtime stream executor', (): void => {
   it('returns one deferred suspension without exposing or executing the tool part', async (): Promise<void> => {
     const assistantMessage = createAssistantMessage();
+    const delegateRuntime = createDelegateRuntime();
     const persistedUpdates: ChatMessageRecord[] = [];
     const executeMainTool = vi.fn();
     const executeRendererTool = vi.fn();
@@ -691,7 +692,7 @@ describe('runtime stream executor', (): void => {
     ]);
     const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool, executeRendererTool });
 
-    const result = await executor({ runtime: createDelegateRuntime(), userMessage, assistantMessage }, async (message) => {
+    const result = await executor({ runtime: delegateRuntime, userMessage, assistantMessage }, async (message) => {
       persistedUpdates.push(structuredClone(message));
     });
 
@@ -711,6 +712,10 @@ describe('runtime stream executor', (): void => {
     });
     expect(executeMainTool).not.toHaveBeenCalled();
     expect(executeRendererTool).not.toHaveBeenCalled();
+    expect(delegateRuntime.resolvedModel).toMatchObject({
+      createOptions: { providerId: 'openai' },
+      modelId: 'gpt-test'
+    });
     expect(persistedUpdates.every((message): boolean => message.parts.every((part): boolean => part.type !== 'tool'))).toBe(true);
     expect(assistantMessage.parts).toEqual([
       expect.objectContaining({

@@ -1703,6 +1703,46 @@ describeWithSqlite('agent delegation store', (): void => {
     expect(store.listEvents('checkpoint', 'checkpoint-interrupt').at(-1)?.type).toBe('delegation.interrupted');
   });
 
+  it('interrupts only the targeted committed checkpoint during fence compensation', (): void => {
+    const targetInput = createPreparedInput('targeted-interrupt');
+    const neighborInput = createPreparedInput('targeted-neighbor');
+    store.prepareDelegation(targetInput, (): undefined => undefined);
+    store.prepareDelegation(neighborInput, (): undefined => undefined);
+    const error = {
+      code: 'protocol_error' as const,
+      phase: 'recovery' as const,
+      category: 'protocol' as const,
+      retryable: false,
+      details: {
+        checkpointId: targetInput.checkpoint.checkpointId,
+        reason: 'continuation_fence_unavailable'
+      }
+    };
+
+    const interrupted = store.interruptCheckpoint({
+      checkpointId: targetInput.checkpoint.checkpointId,
+      error,
+      occurredAt
+    });
+
+    expect(interrupted).toMatchObject({
+      checkpointId: targetInput.checkpoint.checkpointId,
+      status: 'interrupted',
+      error
+    });
+    expect(store.getTask(targetInput.tasks[0].taskId)).toMatchObject({
+      status: 'cancelled',
+      cancelRequestedAt: occurredAt
+    });
+    expect(store.listEvents('checkpoint', targetInput.checkpoint.checkpointId).at(-1)).toMatchObject({
+      type: 'delegation.interrupted',
+      occurredAt,
+      payload: { error }
+    });
+    expect(store.getCheckpoint(neighborInput.checkpoint.checkpointId)?.status).toBe('waiting_children');
+    expect(store.getTask(neighborInput.tasks[0].taskId)?.status).toBe('created');
+  });
+
   it('leaves a journal-blocked recovery aggregate completely unchanged', (): void => {
     const input = createPreparedInput('interrupt-journal');
     store.prepareDelegation(input, (): undefined => undefined);

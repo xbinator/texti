@@ -787,12 +787,19 @@ git commit -m "feat(chat): 增加延迟委派流边界"
 **Files:**
 
 - Create: `electron/main/modules/chat/agents/service.mts`
+- Modify: `electron/main/modules/chat/agents/store.mts`
+- Modify: `electron/main/modules/chat/agents/types.mts`
+- Modify: `electron/main/modules/chat/ipc.mts`
+- Modify: `electron/main/modules/chat/service.mts`
 - Modify: `electron/main/modules/chat/runtime/infrastructure/locks.mts`
 - Modify: `electron/main/modules/chat/runtime/service.mts`
+- Modify: `electron/main/modules/chat/runtime/stream/index.mts`
 - Modify: `electron/main/modules/chat/runtime/ipc.mts`
+- Modify: `electron/main/index.mts`
 - Modify: `electron/main/modules/index.mts`
 - Modify: `types/chat-runtime.d.ts`
 - Create: `test/electron/main/modules/chat/agents/service.test.ts`
+- Modify: `test/electron/main/modules/chat/agents/store.test.ts`
 - Modify: `test/electron/main/modules/chat/runtime/locks.test.ts`
 - Modify: `test/electron/main/modules/chat/runtime/service.test.ts`
 - Modify: `test/electron/main/modules/chat/runtime/ipc.test.ts`
@@ -804,7 +811,7 @@ git commit -m "feat(chat): 增加延迟委派流边界"
 - Produces: resource-scoped lock registry API for a Session history continuation fence.
 - Preserves: Runtime A cleanup and writing-lock release.
 
-- [ ] **Step 1: Add failing continuation-fence tests**
+- [x] **Step 1: Add failing continuation-fence tests**
 
 In `locks.test.ts`:
 
@@ -824,7 +831,7 @@ expect(locks.acquireWritingLock('session-1')).not.toBeNull();
 
 Also assert compact, rollback, branch/history mutation guards reject the fenced Session with a stable `TURN_WAITING_CHILDREN` code.
 
-- [ ] **Step 2: Add failing suspend-order tests**
+- [x] **Step 2: Add failing suspend-order tests**
 
 In `service.test.ts`, capture call order:
 
@@ -836,7 +843,7 @@ expect(releaseWritingLock).toHaveBeenCalledAfter(prepareDelegation);
 
 Inject a Store failure and assert Runtime A does not emit `waiting_children`, the fence is not acquired, and its assistant does not expose the deferred part.
 
-- [ ] **Step 3: Run Task 4 tests and verify RED**
+- [x] **Step 3: Run Task 4 tests and verify RED**
 
 ```bash
 pnpm exec vitest run \
@@ -848,13 +855,13 @@ pnpm exec vitest run \
 
 Expected: FAIL because the service, completion reason, and continuation fence do not exist.
 
-- [ ] **Step 4: Implement resource-scoped continuation fences**
+- [x] **Step 4: Implement resource-scoped continuation fences**
 
-Extend the lock registry with a normalized `session:<sessionId>/history` scope and owner `checkpointId`. A normal write acquisition fails while a fence exists. A continuation acquisition succeeds only when the supplied `checkpointId` equals the fence owner.
+Extend the lock registry with a normalized `session:<sessionId>/history` scope and owner `checkpointId`. A normal write acquisition fails while an active fence exists. A continuation acquisition and internal history mutation succeed only when the supplied `checkpointId` equals the fence owner; Renderer IPC never accepts or forwards this owner.
 
-Keep the ordinary Session writing lock short-lived and separate. Runtime A never retains it while waiting for Child results.
+Use a two-phase reservation before persistence. An inactive reservation wins the resource-scope race without blocking history; Store failure releases it, while Store success synchronously promotes the same token to an active fence. Keep the ordinary Session writing lock short-lived and separate. Runtime A never retains it while waiting for Child results.
 
-- [ ] **Step 5: Implement the delegation service preparation boundary**
+- [x] **Step 5: Implement the delegation service preparation boundary**
 
 `ChatAgentDelegationService.prepareDelegation` must:
 
@@ -862,13 +869,13 @@ Keep the ordinary Session writing lock short-lived and separate. Runtime A never
 2. Validate every contract and assign stable `taskId`, `agentId`, and one `checkpointId`.
 3. Build the immutable continuation snapshot with schema/policy version, model snapshot, exact source message revision, context/tool-schema hashes, ordered tool-call references, reserved resume budget, and Turn deadline.
 4. Store only an in-memory, allowlisted `ContinuationRuntimeContext` keyed by checkpoint. Do not persist credentials or full runtime configuration.
-5. Call `store.prepareDelegation` with `chatSessionManager.updateMessage` as the synchronous message callback.
-6. Acquire the logical fence only after the transaction commits.
-7. Publish the persisted Outbox event to the app event emitter.
+5. Reserve the logical fence before Store mutation; an active or reserved scope conflict must fail before creating persistent facts.
+6. Call `store.prepareDelegation` with `chatSessionManager.updateMessage` as the synchronous message callback; release the inactive reservation if the transaction fails.
+7. Promote the reservation to an active fence after commit, then publish the persisted Outbox event to the app event emitter.
 
-If step 6 fails, transition the committed checkpoint to `interrupted` and persist a protocol error. Do not expose an unowned continuation.
+Reservation promotion is a synchronous token transfer without a second acquisition race, so a committed checkpoint cannot be left without its fence. Keep targeted `interruptCheckpoint` recovery for other committed-checkpoint repair paths, not normal prepare compensation.
 
-- [ ] **Step 6: End Runtime A with waiting_children**
+- [x] **Step 6: End Runtime A with waiting_children**
 
 When a stream round returns `suspension`:
 
@@ -886,7 +893,7 @@ await completeRuntime(runtime.runtimeId, 'waiting_children', checkpoint.checkpoi
 
 Expose `waiting_children` in main/preload event types but do not start Runtime B in this task.
 
-- [ ] **Step 7: Add startup interruption recovery**
+- [x] **Step 7: Add startup interruption recovery**
 
 After database initialization and before normal IPC traffic, call:
 
@@ -894,9 +901,9 @@ After database initialization and before normal IPC traffic, call:
 delegationService.interruptUnrecoverableCheckpoints();
 ```
 
-This moves persisted `waiting_children`, `ready_to_resume`, and `resuming` checkpoints from a prior main process to terminal `interrupted`, appends Events, and leaves results auditable. It never recreates Runtime B.
+This moves recoverable persisted `waiting_children`, `ready_to_resume`, and `resuming` checkpoints from a prior main process to terminal `interrupted`, appends Events, and leaves results auditable. After interruption, read `listActive()` again: journal-blocked survivors must retain or rebuild their resource-scope fence without restoring volatile continuation context. A survivor fence conflict aborts startup before IPC registration. Recovery never recreates Runtime B.
 
-- [ ] **Step 8: Re-run Task 4 tests**
+- [x] **Step 8: Re-run Task 4 tests**
 
 ```bash
 pnpm exec vitest run \

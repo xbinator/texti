@@ -13,6 +13,7 @@ import {
   initStore,
   initLogger,
   initMainErrorCollector,
+  chatAgentDelegationService,
   cleanOldLogs,
   startLogMaintenanceTimer,
   setupAppMenu,
@@ -134,6 +135,8 @@ async function bootstrap(): Promise<void> {
   await initStore();
   // 初始化数据库
   await initDatabase();
+  // Runtime 事实只保留进程内 continuation context；IPC 开放前中断旧进程遗留的活动 Checkpoint。
+  chatAgentDelegationService.interruptUnrecoverableCheckpoints();
   registerAllIpcHandlers();
   ipcMain.handle('app:consume-open-files', () => pendingOpenFileQueue.consume());
 

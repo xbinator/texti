@@ -64,6 +64,8 @@ export {
 
 export { aiService } from './ai/service.mjs';
 
+export { chatAgentDelegationService } from './chat/agents/service.mjs';
+
 export { initLogger, initMainErrorCollector, log, cleanOldLogs, startLogMaintenanceTimer } from './logger/service.mjs';
 
 export { initDatabase, closeDatabase, dbExecute, dbSelect, transaction, getDbPath } from './database/service.mjs';
