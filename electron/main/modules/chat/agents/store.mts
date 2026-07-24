@@ -30,6 +30,9 @@ import {
 import { canTransitionCheckpoint, canTransitionTask, isCheckpointTerminal, isTaskTerminal } from './state.mjs';
 import {
   AgentStoreProtocolError,
+  type AgentAttemptProjection,
+  type AgentAttemptRecord,
+  type AgentAttemptStatus,
   type AgentCheckpointRecord,
   type AgentDelegationStore,
   type AgentDelegationRecoverySnapshot,
@@ -37,11 +40,13 @@ import {
   type AgentStoreDatabase,
   type AgentTaskRecord,
   type AgentTerminalResultEnvelope,
+  type BeginAgentAttemptInput,
   type CancelCheckpointInput,
   type ClaimCheckpointInput,
   type DeliverAgentOutboxInput,
   type FinalizeCheckpointInput,
   type InterruptAgentCheckpointInput,
+  type MarkAgentAttemptInput,
   type PrepareDelegationInput,
   type RecordTaskResultInput,
   type TombstoneAgentTaskInput,
@@ -49,9 +54,6 @@ import {
 } from './types.mjs';
 
 export type { AgentDelegationStore, AgentStoreDatabase, PrepareDelegationInput } from './types.mjs';
-
-/** Attempt 状态为 Task 状态加恢复专用 interrupted。 */
-type AgentAttemptStatus = AgentTaskStatus | 'interrupted';
 
 /** SQLite Task 查询行。 */
 interface TaskRow {
@@ -152,42 +154,28 @@ interface AttemptRow {
   created_at: unknown;
 }
 
-/** Store 内部使用的可信 Attempt 投影。 */
-interface AgentAttemptRecord {
-  /** Attempt 稳定身份。 */
-  attemptId: string;
-  /** Attempt 所属 Task。 */
-  taskId: string;
-  /** Task 内单调递增序号。 */
-  attemptNumber: number;
-  /** 创建 Attempt 的父 Runtime。 */
-  parentRuntimeId: string;
-  /** Attempt 绑定的冻结计划 hash。 */
-  planHash: string;
-  /** 首个 Child Runtime。 */
-  initialRuntimeId: string;
-  /** 当前可替换 Child Runtime。 */
-  currentRuntimeId: string;
-  /** Runtime 替换序号。 */
-  runtimeSequence: number;
-  /** Attempt 当前状态。 */
-  status: AgentAttemptStatus;
-  /** 可选启动时间。 */
-  startedAt?: string;
-  /** 可选终止时间。 */
-  finishedAt?: string;
-  /** 可选结构化错误。 */
-  error?: NonNullable<ReturnType<typeof validateAgentTaskError>>;
-  /** 不可变创建时间。 */
-  createdAt: string;
-}
-
 /** 经 Checkpoint、Task 和终态结果交叉校验的委派聚合。 */
 interface ValidatedAgentAggregate {
   /** 聚合根 Checkpoint。 */
   checkpoint: AgentCheckpointRecord;
   /** 与冻结 tool-call 一一对应的 Tasks。 */
   tasks: AgentTaskRecord[];
+}
+
+/** Event 可选 Attempt 与 Runtime 谱系链接。 */
+interface AgentEventLinks {
+  /** Event 关联的 Attempt。 */
+  attemptId?: string;
+  /** Event 关联的 Runtime。 */
+  runtimeId?: string;
+}
+
+/** 单个 Attempt 在 Task 历史中的 Runtime 生命周期 Event。 */
+interface AttemptRuntimeEvents {
+  /** Runtime 启动准备 Event。 */
+  starting?: ChatAgentEvent;
+  /** Runtime 启动确认 Event。 */
+  started?: ChatAgentEvent;
 }
 
 /** Task 状态 allowlist。 */
@@ -209,16 +197,19 @@ const TASK_STATUSES = new Set<AgentTaskStatus>([
 ]);
 
 /** Attempt 持久化状态 allowlist。 */
-const ATTEMPT_STATUSES = new Set<AgentAttemptStatus>([...TASK_STATUSES, 'interrupted']);
+const ATTEMPT_STATUSES = new Set<AgentAttemptStatus>(['starting', 'running', 'completed', 'failed', 'cancelled', 'deadline_exceeded', 'interrupted']);
 
 /** Attempt 终态 allowlist。 */
-const ATTEMPT_TERMINAL_STATUSES = new Set<AgentAttemptStatus>(['completed', 'failed', 'cancelled', 'deadline_exceeded', 'commit_failed', 'interrupted']);
+const ATTEMPT_TERMINAL_STATUSES = new Set<AgentAttemptStatus>(['completed', 'failed', 'cancelled', 'deadline_exceeded', 'interrupted']);
 
 /** 必须绑定当前 Attempt 身份的 Task 执行态。 */
 const TASK_ATTEMPT_REQUIRED_STATUSES = new Set<AgentTaskStatus>(['starting', 'running', 'waiting_confirmation', 'committing']);
 
+/** 必须与 running Attempt 同步的 Task 执行态。 */
+const TASK_RUNNING_ATTEMPT_STATUSES = new Set<AgentTaskStatus>(['running', 'waiting_confirmation', 'committing']);
+
 /** 必须持有结构化错误的 Attempt 失败终态。 */
-const ATTEMPT_ERROR_REQUIRED_STATUSES = new Set<AgentAttemptStatus>(['failed', 'deadline_exceeded', 'commit_failed', 'interrupted']);
+const ATTEMPT_ERROR_REQUIRED_STATUSES = new Set<AgentAttemptStatus>(['failed', 'deadline_exceeded', 'interrupted']);
 
 /** 由 task.failed Event 表达的 Task 失败终态。 */
 const TASK_FAILURE_STATUSES = new Set<AgentTaskStatus>(['failed', 'deadline_exceeded', 'commit_failed']);
@@ -494,6 +485,9 @@ function parseAttempt(row: AttemptRow): AgentAttemptRecord {
   const startedAt = optionalString(row.started_at, 'attempt started at');
   const finishedAt = optionalString(row.finished_at, 'attempt finished at');
   const attemptStatus = status as AgentAttemptStatus;
+  if ((attemptStatus === 'starting' && startedAt !== undefined) || (attemptStatus === 'running' && startedAt === undefined)) {
+    throw new AgentStoreProtocolError('attempt_started_projection_invalid', 'Attempt status and started time do not describe the same projection');
+  }
   if (ATTEMPT_TERMINAL_STATUSES.has(attemptStatus) !== (finishedAt !== undefined)) {
     throw new AgentStoreProtocolError('attempt_finished_projection_invalid', 'Attempt terminal status and finished time must coexist');
   }
@@ -920,6 +914,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
    * @param payload - 与类型匹配的 allowlist payload
    * @param occurredAt - Event 时间
    * @param source - 可信来源
+   * @param links - 可选 Attempt 与 Runtime 谱系
    */
   private appendEvent<TType extends ChatAgentEventType>(
     aggregateKind: 'task' | 'checkpoint',
@@ -927,7 +922,8 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
     type: TType,
     payload: ChatAgentEventPayloadMap[TType],
     occurredAt: string,
-    source: ChatAgentEventSource
+    source: ChatAgentEventSource,
+    links: AgentEventLinks = {}
   ): ChatAgentEvent {
     const maxRow = this.database.select<{ max_sequence: unknown }>(
       `SELECT MAX(sequence) AS max_sequence
@@ -941,6 +937,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       aggregate: { kind: aggregateKind, id: aggregateId },
       ...(aggregateKind === 'task' ? { taskId: aggregateId } : { checkpointId: aggregateId }),
       sequence,
+      ...links,
       type,
       occurredAt,
       source,
@@ -973,6 +970,62 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       ]
     );
     return event;
+  }
+
+  /**
+   * 交叉校验 Attempt 投影与 Runtime 生命周期 Event。
+   * @param task - Event 聚合所属 Task
+   * @param events - Task 的完整有序历史
+   */
+  private validateRuntimeHistory(task: AgentTaskRecord, events: readonly ChatAgentEvent[]): void {
+    const attempts = this.listTaskAttempts(task.taskId);
+    const attemptById = new Map(attempts.map((attempt): [string, AgentAttemptRecord] => [attempt.attemptId, attempt]));
+    const eventsByAttempt = new Map<string, AttemptRuntimeEvents>();
+
+    events.forEach((event, index): void => {
+      if (event.type !== 'runtime.starting' && event.type !== 'runtime.started') return;
+      const attempt = event.attemptId ? attemptById.get(event.attemptId) : undefined;
+      const payload = event.payload as ChatAgentEventPayloadMap['runtime.starting' | 'runtime.started'];
+      const previous = events[index - 1];
+      const previousPayload = previous?.type === 'task.status_changed' ? (previous.payload as ChatAgentEventPayloadMap['task.status_changed']) : undefined;
+      const isStarting = event.type === 'runtime.starting';
+      const expectedSource: ChatAgentEventSource = isStarting ? 'coordinator' : 'runtime';
+      const expectedFrom: AgentTaskStatus = isStarting ? 'queued' : 'starting';
+      const expectedTo: AgentTaskStatus = isStarting ? 'starting' : 'running';
+      if (
+        !attempt ||
+        !event.runtimeId ||
+        event.runtimeId !== payload.runtimeId ||
+        event.runtimeId !== attempt.initialRuntimeId ||
+        event.source !== expectedSource ||
+        previous?.type !== 'task.status_changed' ||
+        previous.attemptId !== attempt.attemptId ||
+        previous.runtimeId !== event.runtimeId ||
+        previousPayload?.from !== expectedFrom ||
+        previousPayload.to !== expectedTo
+      ) {
+        throw new AgentStoreProtocolError('task_runtime_history_invalid', 'Runtime lifecycle Event does not match its Attempt or Task transition');
+      }
+      const runtimeEvents = eventsByAttempt.get(attempt.attemptId) ?? {};
+      if ((isStarting && runtimeEvents.starting) || (!isStarting && runtimeEvents.started)) {
+        throw new AgentStoreProtocolError('task_runtime_history_invalid', 'Runtime lifecycle Event is duplicated for one Attempt');
+      }
+      if (isStarting) runtimeEvents.starting = event;
+      else runtimeEvents.started = event;
+      eventsByAttempt.set(attempt.attemptId, runtimeEvents);
+    });
+
+    attempts.forEach((attempt): void => {
+      const runtimeEvents = eventsByAttempt.get(attempt.attemptId);
+      if (
+        !runtimeEvents?.starting ||
+        runtimeEvents.starting.occurredAt !== attempt.createdAt ||
+        (attempt.startedAt === undefined) !== (runtimeEvents.started === undefined) ||
+        (attempt.startedAt !== undefined && runtimeEvents.started?.occurredAt !== attempt.startedAt)
+      ) {
+        throw new AgentStoreProtocolError('task_runtime_history_invalid', 'Attempt projection and Runtime lifecycle history are not an exact pair');
+      }
+    });
   }
 
   /**
@@ -1126,6 +1179,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
     if (projectedStatus !== task.status) {
       throw new AgentStoreProtocolError('task_event_projection_invalid', 'Task Event projection does not match the persisted Task status');
     }
+    this.validateRuntimeHistory(task, events);
   }
 
   /**
@@ -1202,14 +1256,20 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         throw new AgentStoreProtocolError('delegation_attempt_missing', 'Task current Attempt does not exist');
       }
       const attempt = parseAttempt(attemptRow);
+      const attemptStateMatches =
+        (task.status === 'starting' && attempt.status === 'starting') ||
+        (TASK_RUNNING_ATTEMPT_STATUSES.has(task.status) && attempt.status === 'running') ||
+        (task.status === 'cancelling' && (attempt.status === 'starting' || attempt.status === 'running')) ||
+        (isTaskTerminal(task.status) && ATTEMPT_TERMINAL_STATUSES.has(attempt.status));
       if (
         attempt.attemptId !== task.currentAttemptId ||
         attempt.taskId !== task.taskId ||
         task.executionPlanSnapshotHash === undefined ||
         attempt.planHash !== task.executionPlanSnapshotHash ||
+        !attemptStateMatches ||
         (task.result !== undefined && attempt.status !== task.result.executionStatus)
       ) {
-        throw new AgentStoreProtocolError('delegation_attempt_invalid', 'Task current Attempt does not match its identity, plan, or result');
+        throw new AgentStoreProtocolError('delegation_attempt_state_invalid', 'Task current Attempt does not match its identity, plan, state, or result');
       }
     });
 
@@ -1352,6 +1412,162 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
   }
 
   /** @inheritdoc */
+  beginAttempt(input: BeginAgentAttemptInput): AgentAttemptProjection {
+    return this.database.transaction((): AgentAttemptProjection => {
+      const task = this.getTask(input.taskId);
+      if (!task) throw new AgentStoreProtocolError('task_not_found', 'Task does not exist');
+      if (task.recordState !== 'active') throw new AgentStoreProtocolError('task_tombstoned', 'Task is tombstoned');
+
+      const existingAttempt = this.getAttempt(input.attemptId);
+      if (
+        task.status === 'starting' &&
+        task.currentAttemptId === input.attemptId &&
+        existingAttempt?.taskId === task.taskId &&
+        existingAttempt.parentRuntimeId === input.parentRuntimeId &&
+        existingAttempt.initialRuntimeId === input.runtimeId &&
+        existingAttempt.currentRuntimeId === input.runtimeId &&
+        existingAttempt.status === 'starting' &&
+        existingAttempt.planHash === task.executionPlanSnapshotHash
+      ) {
+        this.listEvents('task', task.taskId);
+        return Object.freeze({ task, attempt: existingAttempt });
+      }
+      if (task.status !== 'queued' || task.queuePhase !== 'start' || task.currentAttemptId !== undefined) {
+        throw new AgentStoreProtocolError('attempt_start_state_invalid', 'Task is not eligible to begin an Attempt', 'starting');
+      }
+      if (!task.executionPlanSnapshotHash || !task.executionPlanSnapshot) {
+        throw new AgentStoreProtocolError('attempt_plan_missing', 'Task has no frozen Execution Plan', 'starting');
+      }
+      const checkpoint = this.getCheckpoint(task.checkpointId);
+      if (!checkpoint || checkpoint.recordState !== 'active') {
+        throw new AgentStoreProtocolError('attempt_checkpoint_missing', 'Attempt checkpoint is unavailable', 'starting');
+      }
+      if (checkpoint.sourceRuntimeId !== input.parentRuntimeId) {
+        throw new AgentStoreProtocolError('attempt_parent_runtime_mismatch', 'Attempt parent Runtime does not match its checkpoint', 'starting');
+      }
+      if (existingAttempt) {
+        throw new AgentStoreProtocolError('attempt_identity_conflict', 'Attempt identity is already bound', 'starting');
+      }
+
+      const maxAttemptRow = this.database.select<{ max_attempt_number: unknown }>(
+        'SELECT MAX(attempt_number) AS max_attempt_number FROM chat_agent_attempts WHERE task_id = ?',
+        [task.taskId]
+      )[0];
+      const attemptNumber =
+        maxAttemptRow === undefined || maxAttemptRow.max_attempt_number === null
+          ? 1
+          : requireInteger(maxAttemptRow.max_attempt_number, 'attempt number cursor') + 1;
+      this.database.execute(
+        `INSERT INTO chat_agent_attempts (
+          attempt_id, task_id, attempt_number, parent_runtime_id, plan_hash,
+          initial_runtime_id, current_runtime_id, runtime_sequence, status, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          input.attemptId,
+          task.taskId,
+          attemptNumber,
+          input.parentRuntimeId,
+          task.executionPlanSnapshotHash,
+          input.runtimeId,
+          input.runtimeId,
+          1,
+          'starting',
+          input.occurredAt
+        ]
+      );
+      const taskUpdate = this.database.execute(
+        `UPDATE chat_agent_tasks
+         SET status = ?, queue_phase = NULL, current_attempt_id = ?, updated_at = ?
+         WHERE task_id = ? AND status = ? AND queue_phase = ? AND current_attempt_id IS NULL
+           AND execution_plan_snapshot_hash = ? AND record_state = ?`,
+        ['starting', input.attemptId, input.occurredAt, task.taskId, 'queued', 'start', task.executionPlanSnapshotHash, 'active']
+      );
+      if (taskUpdate.changes !== 1) {
+        throw new AgentStoreProtocolError('attempt_start_conflict', 'Task changed while beginning its Attempt', 'starting');
+      }
+      const links = { attemptId: input.attemptId, runtimeId: input.runtimeId };
+      this.appendEvent('task', task.taskId, 'task.status_changed', { from: 'queued', to: 'starting' }, input.occurredAt, 'coordinator', links);
+      this.appendEvent('task', task.taskId, 'runtime.starting', { runtimeId: input.runtimeId }, input.occurredAt, 'coordinator', links);
+
+      const updatedTask = this.getTask(task.taskId);
+      const attempt = this.getAttempt(input.attemptId);
+      if (!updatedTask || !attempt) {
+        throw new AgentStoreProtocolError('attempt_projection_missing', 'Started Attempt projection is missing', 'starting');
+      }
+      return Object.freeze({ task: updatedTask, attempt });
+    });
+  }
+
+  /** @inheritdoc */
+  markAttemptRunning(input: MarkAgentAttemptInput): AgentAttemptProjection {
+    return this.database.transaction((): AgentAttemptProjection => {
+      const task = this.getTask(input.taskId);
+      const attempt = this.getAttempt(input.attemptId);
+      if (!task || !attempt) {
+        throw new AgentStoreProtocolError('attempt_target_missing', 'Task or Attempt does not exist', 'starting');
+      }
+      if (task.recordState !== 'active') throw new AgentStoreProtocolError('task_tombstoned', 'Task is tombstoned');
+      if (
+        task.status === 'running' &&
+        task.currentAttemptId === attempt.attemptId &&
+        attempt.taskId === task.taskId &&
+        attempt.currentRuntimeId === input.runtimeId &&
+        attempt.status === 'running' &&
+        attempt.planHash === task.executionPlanSnapshotHash
+      ) {
+        this.listEvents('task', task.taskId);
+        return Object.freeze({ task, attempt });
+      }
+      if (attempt.taskId !== task.taskId) {
+        throw new AgentStoreProtocolError('attempt_task_mismatch', 'Attempt does not belong to Task', 'starting');
+      }
+      if (task.currentAttemptId !== attempt.attemptId) {
+        throw new AgentStoreProtocolError('attempt_current_mismatch', 'Task current Attempt identity does not match', 'starting');
+      }
+      if (attempt.currentRuntimeId !== input.runtimeId || attempt.initialRuntimeId !== input.runtimeId) {
+        throw new AgentStoreProtocolError('attempt_runtime_mismatch', 'Attempt Runtime identity does not match', 'starting');
+      }
+      if (
+        task.status !== 'starting' ||
+        attempt.status !== 'starting' ||
+        !task.executionPlanSnapshotHash ||
+        attempt.planHash !== task.executionPlanSnapshotHash
+      ) {
+        throw new AgentStoreProtocolError('attempt_running_state_invalid', 'Attempt is not eligible to enter running', 'starting');
+      }
+
+      const attemptUpdate = this.database.execute(
+        `UPDATE chat_agent_attempts
+         SET status = ?, started_at = ?
+         WHERE attempt_id = ? AND task_id = ? AND current_runtime_id = ? AND status = ? AND started_at IS NULL`,
+        ['running', input.occurredAt, attempt.attemptId, task.taskId, input.runtimeId, 'starting']
+      );
+      if (attemptUpdate.changes !== 1) {
+        throw new AgentStoreProtocolError('attempt_running_conflict', 'Attempt changed while acknowledging Runtime start', 'starting');
+      }
+      const taskUpdate = this.database.execute(
+        `UPDATE chat_agent_tasks
+         SET status = ?, updated_at = ?
+         WHERE task_id = ? AND current_attempt_id = ? AND status = ? AND record_state = ?`,
+        ['running', input.occurredAt, task.taskId, attempt.attemptId, 'starting', 'active']
+      );
+      if (taskUpdate.changes !== 1) {
+        throw new AgentStoreProtocolError('attempt_task_running_conflict', 'Task changed while acknowledging Runtime start', 'starting');
+      }
+      const links = { attemptId: attempt.attemptId, runtimeId: input.runtimeId };
+      this.appendEvent('task', task.taskId, 'task.status_changed', { from: 'starting', to: 'running' }, input.occurredAt, 'runtime', links);
+      this.appendEvent('task', task.taskId, 'runtime.started', { runtimeId: input.runtimeId }, input.occurredAt, 'runtime', links);
+
+      const updatedTask = this.getTask(task.taskId);
+      const updatedAttempt = this.getAttempt(attempt.attemptId);
+      if (!updatedTask || !updatedAttempt) {
+        throw new AgentStoreProtocolError('attempt_projection_missing', 'Running Attempt projection is missing', 'starting');
+      }
+      return Object.freeze({ task: updatedTask, attempt: updatedAttempt });
+    });
+  }
+
+  /** @inheritdoc */
   recordTaskResult(input: RecordTaskResultInput): AgentCheckpointRecord {
     let replayConflict: AgentStoreProtocolError | undefined;
     const recordedCheckpoint = this.database.transaction((): AgentCheckpointRecord => {
@@ -1442,8 +1658,20 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       }
 
       const targetStatus: AgentTaskStatus = result.executionStatus;
+      const isStartFailureResult = targetStatus === 'failed' && result.error?.code === 'runtime_start_failed' && result.error.phase === 'starting';
+      const isStartFailure = task.status === 'starting' && attempt.status === 'starting' && isStartFailureResult;
+      const attemptSourceMatches =
+        isStartFailure ||
+        ((task.status === 'running' || task.status === 'committing') && attempt.status === 'running') ||
+        (task.status === 'cancelling' && (attempt.status === 'starting' || attempt.status === 'running'));
+      if (isStartFailureResult && !isStartFailure) {
+        throw new AgentStoreProtocolError('result_attempt_state_invalid', 'Runtime start failure requires a starting Task and Attempt', 'starting');
+      }
+      if (!attemptSourceMatches || targetStatus === 'commit_failed') {
+        throw new AgentStoreProtocolError('result_attempt_state_invalid', 'Task result does not match the current Attempt state');
+      }
       if (
-        !['running', 'cancelling', 'committing'].includes(task.status) ||
+        (!isStartFailure && !['running', 'cancelling', 'committing'].includes(task.status)) ||
         !canTransitionTask(task.status, targetStatus, { mode: task.contractSnapshot.mode })
       ) {
         throw new AgentStoreProtocolError('result_source_state_invalid', 'Task cannot terminalize from its current state');
@@ -1815,6 +2043,24 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
   getTask(taskId: string): AgentTaskRecord | null {
     const row = this.database.select<TaskRow>('SELECT * FROM chat_agent_tasks WHERE task_id = ?', [taskId])[0];
     return row ? parseTask(row) : null;
+  }
+
+  /** @inheritdoc */
+  getAttempt(attemptId: string): AgentAttemptRecord | null {
+    const row = this.database.select<AttemptRow>('SELECT * FROM chat_agent_attempts WHERE attempt_id = ?', [attemptId])[0];
+    return row ? Object.freeze(parseAttempt(row)) : null;
+  }
+
+  /** @inheritdoc */
+  listTaskAttempts(taskId: string): AgentAttemptRecord[] {
+    return this.database
+      .select<AttemptRow>(
+        `SELECT * FROM chat_agent_attempts
+         WHERE task_id = ?
+         ORDER BY attempt_number ASC`,
+        [taskId]
+      )
+      .map((row): AgentAttemptRecord => Object.freeze(parseAttempt(row)));
   }
 
   /** @inheritdoc */

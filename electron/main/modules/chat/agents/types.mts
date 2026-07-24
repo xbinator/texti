@@ -133,6 +133,47 @@ export interface AgentTaskRecord {
   updatedAt: string;
 }
 
+/** Attempt 自身的执行生命周期状态。 */
+export type AgentAttemptStatus = 'starting' | 'running' | 'completed' | 'failed' | 'cancelled' | 'deadline_exceeded' | 'interrupted';
+
+/** 持久化 Attempt 当前投影。 */
+export interface AgentAttemptRecord {
+  /** Attempt 稳定身份。 */
+  attemptId: string;
+  /** Attempt 所属 Task。 */
+  taskId: string;
+  /** Task 内单调递增序号。 */
+  attemptNumber: number;
+  /** 创建 Attempt 的父 Runtime。 */
+  parentRuntimeId: string;
+  /** Attempt 绑定的冻结计划 hash。 */
+  planHash: string;
+  /** 首个 Child Runtime。 */
+  initialRuntimeId: string;
+  /** 当前可替换 Child Runtime。 */
+  currentRuntimeId: string;
+  /** Runtime 替换序号。 */
+  runtimeSequence: number;
+  /** Attempt 当前状态。 */
+  status: AgentAttemptStatus;
+  /** 可选启动时间。 */
+  startedAt?: string;
+  /** 可选终止时间。 */
+  finishedAt?: string;
+  /** 可选结构化错误。 */
+  error?: AgentTaskError;
+  /** 不可变创建时间。 */
+  createdAt: string;
+}
+
+/** Task 与当前 Attempt 的同事务投影。 */
+export interface AgentAttemptProjection {
+  /** Attempt 迁移后的 Task。 */
+  task: AgentTaskRecord;
+  /** Attempt 迁移后的执行记录。 */
+  attempt: AgentAttemptRecord;
+}
+
 /** Checkpoint 按 tool-call ID 保存的终态结果信封。 */
 export interface AgentTerminalResultEnvelope {
   /** 结构化 Child 结果。 */
@@ -316,6 +357,32 @@ export interface TransitionAgentTaskInput {
   source: ChatAgentEventSource;
 }
 
+/** 原子创建一个 Child Attempt 的输入。 */
+export interface BeginAgentAttemptInput {
+  /** 已冻结计划并处于 queued(start) 的 Task。 */
+  taskId: string;
+  /** 新 Attempt 稳定身份。 */
+  attemptId: string;
+  /** 创建 Attempt 的 Primary Runtime。 */
+  parentRuntimeId: string;
+  /** 首个 Child Runtime 身份。 */
+  runtimeId: string;
+  /** Attempt 创建时间。 */
+  occurredAt: string;
+}
+
+/** 确认 Child Runtime 已启动的输入。 */
+export interface MarkAgentAttemptInput {
+  /** Attempt 所属 Task。 */
+  taskId: string;
+  /** 已创建的 Attempt。 */
+  attemptId: string;
+  /** 已由 Actor registry 绑定的 Runtime。 */
+  runtimeId: string;
+  /** Runtime 启动时间。 */
+  occurredAt: string;
+}
+
 /** 写入单个 Child 终态结果的输入。 */
 export interface RecordTaskResultInput {
   /** 结果所属 Task。 */
@@ -425,6 +492,18 @@ export interface AgentDelegationStore {
    */
   transitionTask(input: TransitionAgentTaskInput): AgentTaskRecord;
   /**
+   * 原子创建 Attempt、绑定 Task 并进入 starting。
+   * @param input - 冻结 Task 与预注册 Runtime 身份
+   * @returns 同事务更新后的 Task 与 Attempt
+   */
+  beginAttempt(input: BeginAgentAttemptInput): AgentAttemptProjection;
+  /**
+   * 原子确认 Attempt Runtime 已启动并进入 running。
+   * @param input - Task、Attempt 与 Runtime 身份
+   * @returns 同事务更新后的 Task 与 Attempt
+   */
+  markAttemptRunning(input: MarkAgentAttemptInput): AgentAttemptProjection;
+  /**
    * 幂等写入单个终态结果并推进 Checkpoint。
    * @param input - Child 结果
    * @returns 更新后的 Checkpoint
@@ -460,6 +539,18 @@ export interface AgentDelegationStore {
    * @returns Task，不存在时为 null
    */
   getTask(taskId: string): AgentTaskRecord | null;
+  /**
+   * 读取单个 Attempt。
+   * @param attemptId - Attempt ID
+   * @returns Attempt，不存在时为 null
+   */
+  getAttempt(attemptId: string): AgentAttemptRecord | null;
+  /**
+   * 按序读取 Task 的全部 Attempt 历史。
+   * @param taskId - Task ID
+   * @returns attemptNumber 升序 Attempts
+   */
+  listTaskAttempts(taskId: string): AgentAttemptRecord[];
   /**
    * 读取单个 Checkpoint。
    * @param checkpointId - Checkpoint ID

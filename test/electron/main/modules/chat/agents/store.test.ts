@@ -293,12 +293,31 @@ function createFailedResult(taskId: string): ChatAgentResult {
 }
 
 /**
+ * 创建 Attempt 启动阶段失败的结构化结果。
+ * @param taskId - 结果所属 Task
+ * @returns 可从 starting 安全终态化的失败结果
+ */
+function createStartFailedResult(taskId: string): ChatAgentResult {
+  return {
+    ...createTaskResult(taskId),
+    executionStatus: 'failed',
+    summary: 'Child runtime did not start.',
+    error: {
+      code: 'runtime_start_failed',
+      phase: 'starting',
+      category: 'runtime',
+      retryable: true,
+      details: { reason: 'test_runtime_start_failure' }
+    }
+  };
+}
+
+/**
  * 把基础只读 Task 推进到 running。
  * @param store - 待操作 Store
  * @param input - Task 初始委派事实
- * @param databaseAdapter - 用于建立显式 Attempt 身份的数据库边界
  */
-function startTask(store: AgentDelegationStore, input: PrepareDelegationInput, databaseAdapter: AgentStoreDatabase): void {
+function startTask(store: AgentDelegationStore, input: PrepareDelegationInput): void {
   const { taskId } = input.tasks[0];
   const plan = createExecutionPlan(input);
   store.transitionTask({ taskId, toStatus: 'planning', occurredAt, source: 'coordinator' });
@@ -312,28 +331,15 @@ function startTask(store: AgentDelegationStore, input: PrepareDelegationInput, d
   });
   store.transitionTask({ taskId, toStatus: 'queued', queuePhase: 'start', occurredAt, source: 'coordinator' });
   const attemptId = `attempt-${taskId}`;
-  databaseAdapter.execute(
-    `INSERT INTO chat_agent_attempts (
-      attempt_id, task_id, attempt_number, parent_runtime_id, plan_hash, initial_runtime_id,
-      current_runtime_id, runtime_sequence, status, started_at, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      attemptId,
-      taskId,
-      1,
-      input.checkpoint.sourceRuntimeId,
-      plan.planHash,
-      `runtime-${attemptId}`,
-      `runtime-${attemptId}`,
-      1,
-      'running',
-      occurredAt,
-      occurredAt
-    ]
-  );
-  databaseAdapter.execute('UPDATE chat_agent_tasks SET current_attempt_id = ? WHERE task_id = ?', [attemptId, taskId]);
-  store.transitionTask({ taskId, toStatus: 'starting', occurredAt, source: 'coordinator' });
-  store.transitionTask({ taskId, toStatus: 'running', occurredAt, source: 'runtime' });
+  const runtimeId = `runtime-${attemptId}`;
+  store.beginAttempt({
+    taskId,
+    attemptId,
+    parentRuntimeId: input.checkpoint.sourceRuntimeId,
+    runtimeId,
+    occurredAt
+  });
+  store.markAttemptRunning({ taskId, attemptId, runtimeId, occurredAt });
 }
 
 describeWithSqlite('agent delegation store', (): void => {
@@ -531,7 +537,7 @@ describeWithSqlite('agent delegation store', (): void => {
   it('rejects a resume claim when Checkpoint history never reached ready', (): void => {
     const input = createPreparedInput('event-ready-missing');
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     const result = createTaskResult(input.tasks[0].taskId);
     const ready = store.recordTaskResult({
       taskId: input.tasks[0].taskId,
@@ -749,13 +755,429 @@ describeWithSqlite('agent delegation store', (): void => {
     expect(store.getTask('task-plan')?.executionPlanSnapshotHash).toBe(plan.planHash);
   });
 
+  it('atomically begins and acknowledges one frozen-plan Attempt', (): void => {
+    const input = createPreparedInput('attempt-lifecycle');
+    const { taskId } = input.tasks[0];
+    const attemptId = 'attempt-lifecycle-1';
+    const runtimeId = 'runtime-lifecycle-1';
+    const plan = createExecutionPlan(input);
+    store.prepareDelegation(input, (): undefined => undefined);
+    store.transitionTask({ taskId, toStatus: 'planning', occurredAt, source: 'coordinator' });
+    store.transitionTask({
+      taskId,
+      toStatus: 'authorized',
+      executionPlanSnapshot: plan,
+      executionPlanSnapshotHash: plan.planHash,
+      occurredAt,
+      source: 'coordinator'
+    });
+    store.transitionTask({ taskId, toStatus: 'queued', queuePhase: 'start', occurredAt, source: 'coordinator' });
+    const beforeBeginEvents = store.listEvents('task', taskId);
+
+    const starting = store.beginAttempt({
+      taskId,
+      attemptId,
+      parentRuntimeId: input.checkpoint.sourceRuntimeId,
+      runtimeId,
+      occurredAt
+    });
+
+    expect(starting).toMatchObject({
+      task: {
+        taskId,
+        status: 'starting',
+        currentAttemptId: attemptId
+      },
+      attempt: {
+        attemptId,
+        taskId,
+        attemptNumber: 1,
+        parentRuntimeId: input.checkpoint.sourceRuntimeId,
+        planHash: plan.planHash,
+        initialRuntimeId: runtimeId,
+        currentRuntimeId: runtimeId,
+        runtimeSequence: 1,
+        status: 'starting',
+        createdAt: occurredAt
+      }
+    });
+    expect(starting.attempt.startedAt).toBeUndefined();
+    expect(starting.attempt.finishedAt).toBeUndefined();
+    expect(store.getAttempt(attemptId)).toEqual(starting.attempt);
+    expect(store.listTaskAttempts(taskId)).toEqual([starting.attempt]);
+    const afterBeginEvents = store.listEvents('task', taskId);
+    expect(afterBeginEvents).toHaveLength(beforeBeginEvents.length + 2);
+    expect(afterBeginEvents.slice(-2)).toMatchObject([
+      {
+        type: 'task.status_changed',
+        attemptId,
+        runtimeId,
+        source: 'coordinator',
+        payload: { from: 'queued', to: 'starting' }
+      },
+      {
+        type: 'runtime.starting',
+        attemptId,
+        runtimeId,
+        source: 'coordinator',
+        payload: { runtimeId }
+      }
+    ]);
+    expect(afterBeginEvents.slice(-2).map((event): number => event.sequence)).toEqual([beforeBeginEvents.length + 1, beforeBeginEvents.length + 2]);
+
+    expect(
+      store.beginAttempt({
+        taskId,
+        attemptId,
+        parentRuntimeId: input.checkpoint.sourceRuntimeId,
+        runtimeId,
+        occurredAt
+      })
+    ).toEqual(starting);
+    expect(store.listEvents('task', taskId)).toHaveLength(afterBeginEvents.length);
+
+    const running = store.markAttemptRunning({ taskId, attemptId, runtimeId, occurredAt });
+
+    expect(running).toMatchObject({
+      task: { taskId, status: 'running', currentAttemptId: attemptId },
+      attempt: { attemptId, status: 'running', startedAt: occurredAt }
+    });
+    const afterRunningEvents = store.listEvents('task', taskId);
+    expect(afterRunningEvents).toHaveLength(afterBeginEvents.length + 2);
+    expect(afterRunningEvents.slice(-2)).toMatchObject([
+      {
+        type: 'task.status_changed',
+        attemptId,
+        runtimeId,
+        source: 'runtime',
+        payload: { from: 'starting', to: 'running' }
+      },
+      {
+        type: 'runtime.started',
+        attemptId,
+        runtimeId,
+        source: 'runtime',
+        payload: { runtimeId }
+      }
+    ]);
+    expect(afterRunningEvents.slice(-2).map((event): number => event.sequence)).toEqual([afterBeginEvents.length + 1, afterBeginEvents.length + 2]);
+    expect(store.markAttemptRunning({ taskId, attemptId, runtimeId, occurredAt })).toEqual(running);
+    expect(store.listEvents('task', taskId)).toHaveLength(afterRunningEvents.length);
+  });
+
+  it.each(['starting', 'running'] as const)('rejects %s Attempt replay when its Runtime Event is missing', (attemptStatus): void => {
+    const input = createPreparedInput(`attempt-replay-history-${attemptStatus}`);
+    const { taskId } = input.tasks[0];
+    const attemptId = `attempt-replay-history-${attemptStatus}`;
+    const runtimeId = `runtime-replay-history-${attemptStatus}`;
+    const plan = createExecutionPlan(input);
+    store.prepareDelegation(input, (): undefined => undefined);
+    store.transitionTask({ taskId, toStatus: 'planning', occurredAt, source: 'coordinator' });
+    store.transitionTask({
+      taskId,
+      toStatus: 'authorized',
+      executionPlanSnapshot: plan,
+      executionPlanSnapshotHash: plan.planHash,
+      occurredAt,
+      source: 'coordinator'
+    });
+    store.transitionTask({ taskId, toStatus: 'queued', queuePhase: 'start', occurredAt, source: 'coordinator' });
+    store.beginAttempt({
+      taskId,
+      attemptId,
+      parentRuntimeId: input.checkpoint.sourceRuntimeId,
+      runtimeId,
+      occurredAt
+    });
+    if (attemptStatus === 'running') store.markAttemptRunning({ taskId, attemptId, runtimeId, occurredAt });
+    allowEventCorruption(adapter);
+    adapter.execute('DELETE FROM chat_agent_events WHERE task_id = ? AND event_type = ?', [
+      taskId,
+      attemptStatus === 'starting' ? 'runtime.starting' : 'runtime.started'
+    ]);
+
+    expect((): void => {
+      if (attemptStatus === 'starting') {
+        store.beginAttempt({
+          taskId,
+          attemptId,
+          parentRuntimeId: input.checkpoint.sourceRuntimeId,
+          runtimeId,
+          occurredAt
+        });
+        return;
+      }
+      store.markAttemptRunning({ taskId, attemptId, runtimeId, occurredAt });
+    }).toThrowError(expect.objectContaining({ reason: 'task_runtime_history_invalid' }));
+  });
+
+  it('rejects persisted Attempt states outside the Attempt state machine', (): void => {
+    const input = createPreparedInput('attempt-status-domain');
+    const { taskId } = input.tasks[0];
+    store.prepareDelegation(input, (): undefined => undefined);
+    startTask(store, input);
+    adapter.execute('DROP TRIGGER trg_chat_agent_attempts_immutable');
+    adapter.execute('UPDATE chat_agent_attempts SET status = ?, started_at = NULL WHERE task_id = ?', ['queued', taskId]);
+
+    expect((): void => {
+      store.listActive();
+    }).toThrowError(expect.objectContaining({ reason: 'attempt_status_invalid' }));
+  });
+
+  it('rejects active recovery when Task and Attempt execution states diverge', (): void => {
+    const input = createPreparedInput('attempt-state-pair');
+    const { taskId } = input.tasks[0];
+    store.prepareDelegation(input, (): undefined => undefined);
+    startTask(store, input);
+    adapter.execute('DROP TRIGGER trg_chat_agent_attempts_immutable');
+    adapter.execute('UPDATE chat_agent_attempts SET status = ?, started_at = NULL WHERE task_id = ?', ['starting', taskId]);
+    allowEventCorruption(adapter);
+    adapter.execute('DELETE FROM chat_agent_events WHERE task_id = ? AND event_type = ?', [taskId, 'runtime.started']);
+
+    expect((): void => {
+      store.listActive();
+    }).toThrowError(expect.objectContaining({ reason: 'delegation_attempt_state_invalid' }));
+  });
+
+  it('rejects a Runtime start failure after its Attempt already reached running', (): void => {
+    const input = createPreparedInput('attempt-late-start-failure');
+    const { taskId } = input.tasks[0];
+    store.prepareDelegation(input, (): undefined => undefined);
+    startTask(store, input);
+    const result = createStartFailedResult(taskId);
+
+    expect((): void => {
+      store.recordTaskResult({
+        taskId,
+        checkpointId: input.checkpoint.checkpointId,
+        toolCallId: input.tasks[0].toolCallId,
+        result,
+        resultHash: hashAgentPayload(result),
+        occurredAt
+      });
+    }).toThrowError(expect.objectContaining({ reason: 'result_attempt_state_invalid' }));
+    expect(store.getTask(taskId)?.status).toBe('running');
+    expect(store.getAttempt(`attempt-${taskId}`)?.status).toBe('running');
+  });
+
+  it.each(['missing started Event', 'forged Attempt link', 'duplicate started Event'] as const)(
+    'rejects active recovery with %s in the Runtime lifecycle',
+    (caseName): void => {
+      let suffix = 'runtime-event-duplicate';
+      if (caseName === 'missing started Event') suffix = 'runtime-event-missing';
+      if (caseName === 'forged Attempt link') suffix = 'runtime-event-link';
+      const input = createPreparedInput(suffix);
+      const { taskId } = input.tasks[0];
+      store.prepareDelegation(input, (): undefined => undefined);
+      startTask(store, input);
+      allowEventCorruption(adapter);
+      if (caseName === 'missing started Event') {
+        adapter.execute('DELETE FROM chat_agent_events WHERE task_id = ? AND event_type = ?', [taskId, 'runtime.started']);
+      } else if (caseName === 'forged Attempt link') {
+        adapter.execute('UPDATE chat_agent_events SET attempt_id = ? WHERE task_id = ? AND event_type = ?', [
+          'attempt-forged-runtime-event',
+          taskId,
+          'runtime.started'
+        ]);
+      } else {
+        adapter.execute(
+          `INSERT INTO chat_agent_events (
+            event_id, aggregate_kind, aggregate_id, task_id, checkpoint_id, sequence,
+            attempt_id, runtime_id, event_type, occurred_at, source, schema_version, payload_json
+          )
+          SELECT ?, aggregate_kind, aggregate_id, task_id, checkpoint_id, sequence + 1,
+                 attempt_id, runtime_id, event_type, occurred_at, source, schema_version, payload_json
+          FROM chat_agent_events
+          WHERE task_id = ? AND event_type = ?`,
+          [`task:${taskId}:duplicate:runtime.started`, taskId, 'runtime.started']
+        );
+      }
+
+      expect((): void => {
+        store.listActive();
+      }).toThrowError(expect.objectContaining({ reason: 'task_runtime_history_invalid' }));
+    }
+  );
+
+  it('rolls back conflicting Attempt lifecycle mutations', (): void => {
+    const input = createPreparedInput('attempt-conflict');
+    const { taskId } = input.tasks[0];
+    const plan = createExecutionPlan(input);
+    store.prepareDelegation(input, (): undefined => undefined);
+    store.transitionTask({ taskId, toStatus: 'planning', occurredAt, source: 'coordinator' });
+    store.transitionTask({
+      taskId,
+      toStatus: 'authorized',
+      executionPlanSnapshot: plan,
+      executionPlanSnapshotHash: plan.planHash,
+      occurredAt,
+      source: 'coordinator'
+    });
+    store.transitionTask({ taskId, toStatus: 'queued', queuePhase: 'start', occurredAt, source: 'coordinator' });
+    const queuedEventCount = store.listEvents('task', taskId).length;
+    expect((): void => {
+      store.beginAttempt({
+        taskId,
+        attemptId: 'attempt-forged-parent',
+        parentRuntimeId: 'runtime-forged-parent',
+        runtimeId: 'runtime-forged-parent-child',
+        occurredAt
+      });
+    }).toThrowError(expect.objectContaining({ reason: 'attempt_parent_runtime_mismatch' }));
+    expect(store.getTask(taskId)).toMatchObject({ status: 'queued', queuePhase: 'start' });
+    expect(store.getTask(taskId)?.currentAttemptId).toBeUndefined();
+    expect(store.getAttempt('attempt-forged-parent')).toBeNull();
+    expect(store.listEvents('task', taskId)).toHaveLength(queuedEventCount);
+
+    store.beginAttempt({
+      taskId,
+      attemptId: 'attempt-conflict-1',
+      parentRuntimeId: input.checkpoint.sourceRuntimeId,
+      runtimeId: 'runtime-conflict-1',
+      occurredAt
+    });
+    const eventCount = store.listEvents('task', taskId).length;
+
+    expect((): void => {
+      store.beginAttempt({
+        taskId,
+        attemptId: 'attempt-conflict-2',
+        parentRuntimeId: input.checkpoint.sourceRuntimeId,
+        runtimeId: 'runtime-conflict-2',
+        occurredAt
+      });
+    }).toThrowError(expect.objectContaining({ reason: 'attempt_start_state_invalid' }));
+    expect((): void => {
+      store.markAttemptRunning({
+        taskId,
+        attemptId: 'attempt-conflict-1',
+        runtimeId: 'runtime-forged',
+        occurredAt
+      });
+    }).toThrowError(expect.objectContaining({ reason: 'attempt_runtime_mismatch' }));
+
+    expect(store.getTask(taskId)).toMatchObject({
+      status: 'starting',
+      currentAttemptId: 'attempt-conflict-1'
+    });
+    expect(store.getAttempt('attempt-conflict-1')).toMatchObject({
+      status: 'starting',
+      currentRuntimeId: 'runtime-conflict-1'
+    });
+    expect(store.getAttempt('attempt-conflict-2')).toBeNull();
+    expect(store.listTaskAttempts(taskId)).toHaveLength(1);
+    expect(store.listEvents('task', taskId)).toHaveLength(eventCount);
+  });
+
+  it.each(['runtime.starting', 'runtime.started'] as const)('rolls back Attempt lifecycle when %s Event persistence fails', (eventType): void => {
+    const input = createPreparedInput(`attempt-rollback-${eventType}`);
+    const { taskId } = input.tasks[0];
+    const attemptId = `attempt-rollback-${eventType}`;
+    const runtimeId = `runtime-rollback-${eventType}`;
+    const plan = createExecutionPlan(input);
+    store.prepareDelegation(input, (): undefined => undefined);
+    store.transitionTask({ taskId, toStatus: 'planning', occurredAt, source: 'coordinator' });
+    store.transitionTask({
+      taskId,
+      toStatus: 'authorized',
+      executionPlanSnapshot: plan,
+      executionPlanSnapshotHash: plan.planHash,
+      occurredAt,
+      source: 'coordinator'
+    });
+    store.transitionTask({ taskId, toStatus: 'queued', queuePhase: 'start', occurredAt, source: 'coordinator' });
+    if (eventType === 'runtime.started') {
+      store.beginAttempt({
+        taskId,
+        attemptId,
+        parentRuntimeId: input.checkpoint.sourceRuntimeId,
+        runtimeId,
+        occurredAt
+      });
+    }
+    const beforeTask = store.getTask(taskId);
+    const beforeAttempt = store.getAttempt(attemptId);
+    const beforeEvents = store.listEvents('task', taskId);
+    const { execute } = adapter;
+    adapter.execute = (sql: string, params: readonly unknown[] = []): { changes: number; lastInsertRowid: number | bigint } => {
+      if (sql.includes('INSERT INTO chat_agent_events') && params.includes(eventType)) {
+        throw new Error(`Injected ${eventType} persistence failure`);
+      }
+      return execute(sql, params);
+    };
+
+    expect((): void => {
+      if (eventType === 'runtime.starting') {
+        store.beginAttempt({
+          taskId,
+          attemptId,
+          parentRuntimeId: input.checkpoint.sourceRuntimeId,
+          runtimeId,
+          occurredAt
+        });
+        return;
+      }
+      store.markAttemptRunning({ taskId, attemptId, runtimeId, occurredAt });
+    }).toThrow(`Injected ${eventType} persistence failure`);
+
+    expect(store.getTask(taskId)).toEqual(beforeTask);
+    expect(store.getAttempt(attemptId)).toEqual(beforeAttempt);
+    expect(store.listEvents('task', taskId)).toEqual(beforeEvents);
+  });
+
+  it('records a structured start failure for an Attempt that never reached running', (): void => {
+    const input = createPreparedInput('attempt-start-failure');
+    const { taskId } = input.tasks[0];
+    const plan = createExecutionPlan(input);
+    store.prepareDelegation(input, (): undefined => undefined);
+    store.transitionTask({ taskId, toStatus: 'planning', occurredAt, source: 'coordinator' });
+    store.transitionTask({
+      taskId,
+      toStatus: 'authorized',
+      executionPlanSnapshot: plan,
+      executionPlanSnapshotHash: plan.planHash,
+      occurredAt,
+      source: 'coordinator'
+    });
+    store.transitionTask({ taskId, toStatus: 'queued', queuePhase: 'start', occurredAt, source: 'coordinator' });
+    store.beginAttempt({
+      taskId,
+      attemptId: `attempt-${taskId}`,
+      parentRuntimeId: input.checkpoint.sourceRuntimeId,
+      runtimeId: `runtime-${taskId}`,
+      occurredAt
+    });
+    const result = createStartFailedResult(taskId);
+
+    const checkpoint = store.recordTaskResult({
+      taskId,
+      checkpointId: input.checkpoint.checkpointId,
+      toolCallId: input.tasks[0].toolCallId,
+      result,
+      resultHash: hashAgentPayload(result),
+      occurredAt
+    });
+
+    expect(checkpoint.status).toBe('ready_to_resume');
+    expect(store.getTask(taskId)).toMatchObject({
+      status: 'failed',
+      result,
+      error: result.error
+    });
+    expect(store.getAttempt(`attempt-${taskId}`)).toMatchObject({
+      status: 'failed',
+      finishedAt: occurredAt,
+      error: result.error
+    });
+  });
+
   it.each(['completed', 'failed', 'cancelled', 'deadline_exceeded', 'commit_failed'] as const)(
     'rejects generic transitionTask terminalization to %s',
     (terminalStatus): void => {
       const input = createPreparedInput(`terminal-${terminalStatus}`);
       const { taskId } = input.tasks[0];
       store.prepareDelegation(input, (): undefined => undefined);
-      startTask(store, input, adapter);
+      startTask(store, input);
       const eventCount = store.listEvents('task', taskId).length;
 
       expect((): void => {
@@ -776,7 +1198,7 @@ describeWithSqlite('agent delegation store', (): void => {
   it('records an identical terminal result once and rejects conflicting replay', (): void => {
     const input = createPreparedInput('result');
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     const result = createTaskResult('task-result');
     const resultHash = hashAgentPayload(result);
 
@@ -823,7 +1245,7 @@ describeWithSqlite('agent delegation store', (): void => {
   it('enqueues one deduplicated delegation.ready outbox in the terminal-result transaction', (): void => {
     const input = createPreparedInput('ready-outbox');
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     const result = createTaskResult('task-ready-outbox');
 
     const ready = store.recordTaskResult({
@@ -866,7 +1288,7 @@ describeWithSqlite('agent delegation store', (): void => {
   it('rejects result replay when the matching Checkpoint terminal envelope is missing', (): void => {
     const input = createPreparedInput('result-replay-envelope');
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     const result = createTaskResult(input.tasks[0].taskId);
     const resultHash = hashAgentPayload(result);
     store.recordTaskResult({
@@ -912,7 +1334,7 @@ describeWithSqlite('agent delegation store', (): void => {
     const input = createPreparedInput(suffix);
     const { taskId } = input.tasks[0];
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     const taskEventCount = store.listEvents('task', taskId).length;
     if (caseName.startsWith('missing')) {
       adapter.execute('UPDATE chat_agent_tasks SET current_attempt_id = NULL WHERE task_id = ?', [taskId]);
@@ -948,7 +1370,7 @@ describeWithSqlite('agent delegation store', (): void => {
     const input = createPreparedInput('running-missing-attempt');
     const { taskId } = input.tasks[0];
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     adapter.execute('UPDATE chat_agent_tasks SET current_attempt_id = NULL WHERE task_id = ?', [taskId]);
 
     expect((): void => {
@@ -960,7 +1382,7 @@ describeWithSqlite('agent delegation store', (): void => {
     const input = createPreparedInput('attempt-status');
     const { taskId } = input.tasks[0];
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     adapter.execute('UPDATE chat_agent_attempts SET status = ? WHERE task_id = ?', ['legacy-unknown', taskId]);
     const result = createTaskResult(taskId);
 
@@ -986,7 +1408,7 @@ describeWithSqlite('agent delegation store', (): void => {
       const input = createPreparedInput(`attempt-lifecycle-${suffix}`);
       const { taskId } = input.tasks[0];
       store.prepareDelegation(input, (): undefined => undefined);
-      startTask(store, input, adapter);
+      startTask(store, input);
 
       if (caseName === 'nonterminal with finished time') {
         adapter.execute('UPDATE chat_agent_attempts SET finished_at = ? WHERE task_id = ?', [occurredAt, taskId]);
@@ -1029,7 +1451,7 @@ describeWithSqlite('agent delegation store', (): void => {
     const input = createPreparedInput(suffix);
     const { taskId } = input.tasks[0];
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     const baseResult = createTaskResult(taskId);
     const result: ChatAgentResult = {
       ...baseResult,
@@ -1075,7 +1497,7 @@ describeWithSqlite('agent delegation store', (): void => {
     const input = createPreparedInput('corrupt-task-result');
     const { taskId } = input.tasks[0];
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     const result = createTaskResult(taskId);
     store.recordTaskResult({
       taskId,
@@ -1113,7 +1535,7 @@ describeWithSqlite('agent delegation store', (): void => {
     store.prepareDelegation(input, (): undefined => undefined);
     const needsResult = ['result status mismatch', 'result on nonterminal status', 'error mismatch'].includes(caseName);
     if (needsResult) {
-      startTask(store, input, adapter);
+      startTask(store, input);
       const result = createTaskResult(taskId);
       store.recordTaskResult({
         taskId,
@@ -1176,7 +1598,7 @@ describeWithSqlite('agent delegation store', (): void => {
     const input = createPreparedInput(suffix);
     const { taskId } = input.tasks[0];
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     const baseResult = createTaskResult(taskId);
     const result: ChatAgentResult = {
       ...baseResult,
@@ -1225,7 +1647,7 @@ describeWithSqlite('agent delegation store', (): void => {
   it('uses checkpoint version CAS so resume can be claimed only once', (): void => {
     const input = createPreparedInput('resume');
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     const result = createTaskResult('task-resume');
     const ready = store.recordTaskResult({
       taskId: 'task-resume',
@@ -1258,7 +1680,7 @@ describeWithSqlite('agent delegation store', (): void => {
     (entryPoint): void => {
       const input = createPreparedInput(`result-event-${entryPoint}`);
       store.prepareDelegation(input, (): undefined => undefined);
-      startTask(store, input, adapter);
+      startTask(store, input);
       const result = createTaskResult(input.tasks[0].taskId);
       const ready = store.recordTaskResult({
         taskId: input.tasks[0].taskId,
@@ -1320,7 +1742,7 @@ describeWithSqlite('agent delegation store', (): void => {
   it('rejects a resume claim when ready results are incomplete', (): void => {
     const input = createPreparedInput('resume-incomplete');
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     const result = createTaskResult(input.tasks[0].taskId);
     const ready = store.recordTaskResult({
       taskId: input.tasks[0].taskId,
@@ -1345,7 +1767,7 @@ describeWithSqlite('agent delegation store', (): void => {
   it('rejects a resume claim when Task identity no longer matches its Checkpoint', (): void => {
     const input = createPreparedInput('resume-identity');
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     const result = createTaskResult(input.tasks[0].taskId);
     const ready = store.recordTaskResult({
       taskId: input.tasks[0].taskId,
@@ -1371,7 +1793,7 @@ describeWithSqlite('agent delegation store', (): void => {
   it('rejects a resume claim when its completed Task has no persisted Attempt', (): void => {
     const input = createPreparedInput('resume-attempt-missing');
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     const result = createTaskResult(input.tasks[0].taskId);
     const ready = store.recordTaskResult({
       taskId: input.tasks[0].taskId,
@@ -1398,7 +1820,7 @@ describeWithSqlite('agent delegation store', (): void => {
     const suffix = caseName === 'forged plan' ? 'active-attempt-plan' : 'active-attempt-status';
     const input = createPreparedInput(suffix);
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     const result = createTaskResult(input.tasks[0].taskId);
     store.recordTaskResult({
       taskId: input.tasks[0].taskId,
@@ -1423,7 +1845,7 @@ describeWithSqlite('agent delegation store', (): void => {
   it('finalizes a resume idempotently for the same Runtime and outcome', (): void => {
     const input = createPreparedInput('finalize-replay');
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     const result = createTaskResult(input.tasks[0].taskId);
     const ready = store.recordTaskResult({
       taskId: input.tasks[0].taskId,
@@ -1459,7 +1881,7 @@ describeWithSqlite('agent delegation store', (): void => {
   it('rejects finalized resume conflicts from another Runtime or outcome', (): void => {
     const input = createPreparedInput('finalize-conflict');
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     const result = createTaskResult(input.tasks[0].taskId);
     const ready = store.recordTaskResult({
       taskId: input.tasks[0].taskId,
@@ -1514,7 +1936,7 @@ describeWithSqlite('agent delegation store', (): void => {
   it('rejects resume finalization after the Checkpoint leaves the active record scope', (): void => {
     const input = createPreparedInput('finalize-tombstoned');
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     const result = createTaskResult(input.tasks[0].taskId);
     const ready = store.recordTaskResult({
       taskId: input.tasks[0].taskId,
@@ -1554,7 +1976,7 @@ describeWithSqlite('agent delegation store', (): void => {
     const suffix = caseName === 'missing terminal results' ? 'finalize-results-missing' : 'finalize-attempt-missing';
     const input = createPreparedInput(suffix);
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     const result = createTaskResult(input.tasks[0].taskId);
     const ready = store.recordTaskResult({
       taskId: input.tasks[0].taskId,
@@ -1607,7 +2029,7 @@ describeWithSqlite('agent delegation store', (): void => {
       store.tombstoneTask({ taskId: 'task-tombstone', reason: 'user_removed', occurredAt, source: 'user' });
     }).toThrowError(expect.objectContaining({ code: 'protocol_error' }));
 
-    startTask(store, input, adapter);
+    startTask(store, input);
     const result = createTaskResult('task-tombstone');
     const ready = store.recordTaskResult({
       taskId: 'task-tombstone',
@@ -1666,7 +2088,8 @@ describeWithSqlite('agent delegation store', (): void => {
       store.tombstoneTask({ taskId: 'task-tombstone', reason: 'user_removed', occurredAt, source: 'user' });
     }).toThrowError(expect.objectContaining({ code: 'protocol_error' }));
 
-    adapter.execute("UPDATE chat_agent_attempts SET status = 'completed', finished_at = ? WHERE attempt_id = ?", [occurredAt, 'attempt-live']);
+    adapter.execute('DROP TRIGGER trg_chat_agent_attempts_no_delete');
+    adapter.execute('DELETE FROM chat_agent_attempts WHERE attempt_id = ?', ['attempt-live']);
     const before = store.getTask('task-tombstone');
     const tombstoned = store.tombstoneTask({
       taskId: 'task-tombstone',
@@ -1684,13 +2107,7 @@ describeWithSqlite('agent delegation store', (): void => {
   it('persists cooperative cancellation before terminalizing a safe checkpoint', (): void => {
     const input = createPreparedInput('cancel');
     store.prepareDelegation(input, (): undefined => undefined);
-    adapter.execute(
-      `INSERT INTO chat_agent_attempts (
-        attempt_id, task_id, attempt_number, parent_runtime_id, plan_hash, initial_runtime_id,
-        current_runtime_id, runtime_sequence, status, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ['attempt-cancel', 'task-cancel', 1, 'runtime-a-cancel', 'a'.repeat(64), 'runtime-child-cancel', 'runtime-child-cancel', 1, 'running', occurredAt]
-    );
+    startTask(store, input);
 
     const cancelling = store.cancelCheckpoint({
       checkpointId: 'checkpoint-cancel',
@@ -1706,7 +2123,7 @@ describeWithSqlite('agent delegation store', (): void => {
     expect(store.listEvents('task', 'task-cancel').at(-1)?.type).toBe('task.status_changed');
     expect(store.listEvents('checkpoint', 'checkpoint-cancel').at(-1)?.type).toBe('delegation.cancel_requested');
 
-    adapter.execute("UPDATE chat_agent_attempts SET status = 'completed', finished_at = ? WHERE attempt_id = ?", [occurredAt, 'attempt-cancel']);
+    adapter.execute("UPDATE chat_agent_attempts SET status = 'completed', finished_at = ? WHERE attempt_id = ?", [occurredAt, 'attempt-task-cancel']);
     const cancelled = store.cancelCheckpoint({
       checkpointId: 'checkpoint-cancel',
       reason: 'user_requested',
@@ -1725,7 +2142,7 @@ describeWithSqlite('agent delegation store', (): void => {
   it('interrupts every nonterminal checkpoint while preserving persisted results', (): void => {
     const input = createPreparedInput('interrupt');
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     const reason = {
       code: 'runtime_interrupted' as const,
       phase: 'recovery' as const,
@@ -1798,7 +2215,7 @@ describeWithSqlite('agent delegation store', (): void => {
   it('leaves a journal-blocked recovery aggregate completely unchanged', (): void => {
     const input = createPreparedInput('interrupt-journal');
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     adapter.execute('UPDATE chat_agent_tasks SET unfinished_journal_count = ? WHERE task_id = ?', [1, input.tasks[0].taskId]);
     const reason = {
       code: 'runtime_interrupted' as const,
@@ -1831,11 +2248,11 @@ describeWithSqlite('agent delegation store', (): void => {
   it('interrupts safe recovery aggregates while preserving a journal-blocked neighbor', (): void => {
     const blockedInput = createPreparedInput('interrupt-mixed-blocked');
     store.prepareDelegation(blockedInput, (): undefined => undefined);
-    startTask(store, blockedInput, adapter);
+    startTask(store, blockedInput);
     adapter.execute('UPDATE chat_agent_tasks SET unfinished_journal_count = ? WHERE task_id = ?', [1, blockedInput.tasks[0].taskId]);
     const safeInput = createPreparedInput('interrupt-mixed-safe');
     store.prepareDelegation(safeInput, (): undefined => undefined);
-    startTask(store, safeInput, adapter);
+    startTask(store, safeInput);
     const reason = {
       code: 'runtime_interrupted' as const,
       phase: 'recovery' as const,
@@ -1867,11 +2284,11 @@ describeWithSqlite('agent delegation store', (): void => {
     (caseName): void => {
       const safeInput = createPreparedInput('interrupt-aggregate-a-safe');
       store.prepareDelegation(safeInput, (): undefined => undefined);
-      startTask(store, safeInput, adapter);
+      startTask(store, safeInput);
       const corruptSuffix = `interrupt-aggregate-z-${caseName.replaceAll(' ', '-')}`;
       const corruptInput = createPreparedInput(corruptSuffix);
       store.prepareDelegation(corruptInput, (): undefined => undefined);
-      startTask(store, corruptInput, adapter);
+      startTask(store, corruptInput);
 
       if (caseName === 'missing Task') {
         adapter.execute('DROP TRIGGER trg_chat_agent_tasks_no_delete');
@@ -2014,7 +2431,7 @@ describeWithSqlite('agent delegation store', (): void => {
   it('rejects active recovery when ready results are incomplete', (): void => {
     const input = createPreparedInput('active-incomplete');
     store.prepareDelegation(input, (): undefined => undefined);
-    startTask(store, input, adapter);
+    startTask(store, input);
     const result = createTaskResult(input.tasks[0].taskId);
     store.recordTaskResult({
       taskId: input.tasks[0].taskId,

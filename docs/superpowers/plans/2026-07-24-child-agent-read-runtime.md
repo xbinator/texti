@@ -39,7 +39,7 @@
 - Consumes: `AgentTaskRecord.executionPlanSnapshotHash`、现有 Task 状态机和 append-only Event。
 - Produces: `AgentAttemptRecord`、`beginAttempt()`、`markAttemptRunning()`、`getAttempt()`、`listTaskAttempts()`，后续 Coordinator 不再直接写 `chat_agent_attempts`。
 
-- [ ] **Step 1: Write failing Store tests**
+- [x] **Step 1: Write failing Store tests**
 
 在 `store.test.ts` 中把测试专用原始 SQL 启动逻辑替换为期望的生产 API，并增加原子冲突断言：
 
@@ -76,7 +76,7 @@ expect(() => store.beginAttempt({
 
 再验证 `markAttemptRunning()` 同一事务更新 Task、Attempt，并追加带 `attemptId/runtimeId` 的 `runtime.started` Event；错误 Attempt 或 Runtime ID 必须保持数据库不变。
 
-- [ ] **Step 2: Run the Store tests and verify RED**
+- [x] **Step 2: Run the Store tests and verify RED**
 
 Run:
 
@@ -86,7 +86,7 @@ pnpm exec vitest run test/electron/main/modules/chat/agents/store.test.ts
 
 Expected: FAIL，因为 `AgentDelegationStore` 尚无 Attempt lifecycle API。
 
-- [ ] **Step 3: Add public Attempt types and inputs**
+- [x] **Step 3: Add public Attempt types and inputs**
 
 在 `types.mts` 中移动当前 `store.mts` 私有 Attempt 类型，并定义精确输入：
 
@@ -146,7 +146,7 @@ getAttempt(attemptId: string): AgentAttemptRecord | null
 listTaskAttempts(taskId: string): AgentAttemptRecord[]
 ```
 
-- [ ] **Step 4: Implement atomic Attempt start and running acknowledgement**
+- [x] **Step 4: Implement atomic Attempt start and running acknowledgement**
 
 `beginAttempt()` 必须在一个事务中：
 
@@ -160,11 +160,11 @@ listTaskAttempts(taskId: string): AgentAttemptRecord[]
 
 同步 Runtime 启动失败由服务合成零 usage 的失败结果；`recordTaskResult()` 必须允许 `starting → failed`，不能留下无法终态化的 Attempt。
 
-- [ ] **Step 5: Remove raw Attempt SQL from tests**
+- [x] **Step 5: Remove raw Attempt SQL from tests**
 
 `store.test.ts` 和 `delegation-foundation.test.ts` 的 `startTask()` 只能通过 Store API 建立 Attempt；保留直接 SQL 仅用于显式损坏恢复测试。
 
-- [ ] **Step 6: Run focused Store verification**
+- [x] **Step 6: Run focused Store verification**
 
 Run:
 
@@ -174,7 +174,7 @@ pnpm exec cross-env ELECTRON_RUN_AS_NODE=1 HOST=127.0.0.1 electron node_modules/
 
 Expected: PASS，且基础端到端测试不再自行插入 Attempt。
 
-- [ ] **Step 7: Commit Task 1**
+- [x] **Step 7: Commit Task 1**
 
 ```bash
 git add electron/main/modules/chat/agents/types.mts electron/main/modules/chat/agents/store.mts test/electron/main/modules/chat/agents/store.test.ts test/electron/main/modules/chat/agents/delegation-foundation.test.ts

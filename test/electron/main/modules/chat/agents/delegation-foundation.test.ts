@@ -205,9 +205,8 @@ function createExecutionPlan(store: AgentDelegationStore): AgentExecutionPlanSna
 /**
  * 将准备完成的 Task 推进至 running 并建立真实 Attempt。
  * @param store - 生产 Agent Store
- * @param adapter - 共享 SQLite adapter
  */
-function startTask(store: AgentDelegationStore, adapter: AgentStoreDatabase): void {
+function startTask(store: AgentDelegationStore): void {
   const plan = createExecutionPlan(store);
   store.transitionTask({ taskId: 'task-1', toStatus: 'planning', occurredAt, source: 'coordinator' });
   store.transitionTask({
@@ -219,16 +218,19 @@ function startTask(store: AgentDelegationStore, adapter: AgentStoreDatabase): vo
     source: 'coordinator'
   });
   store.transitionTask({ taskId: 'task-1', toStatus: 'queued', queuePhase: 'start', occurredAt, source: 'coordinator' });
-  adapter.execute(
-    `INSERT INTO chat_agent_attempts (
-      attempt_id, task_id, attempt_number, parent_runtime_id, plan_hash, initial_runtime_id,
-      current_runtime_id, runtime_sequence, status, started_at, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ['attempt-1', 'task-1', 1, 'runtime-a', plan.planHash, 'runtime-child-1', 'runtime-child-1', 1, 'running', occurredAt, occurredAt]
-  );
-  adapter.execute('UPDATE chat_agent_tasks SET current_attempt_id = ? WHERE task_id = ?', ['attempt-1', 'task-1']);
-  store.transitionTask({ taskId: 'task-1', toStatus: 'starting', occurredAt, source: 'coordinator' });
-  store.transitionTask({ taskId: 'task-1', toStatus: 'running', occurredAt, source: 'runtime' });
+  store.beginAttempt({
+    taskId: 'task-1',
+    attemptId: 'attempt-1',
+    parentRuntimeId: 'runtime-a',
+    runtimeId: 'runtime-child-1',
+    occurredAt
+  });
+  store.markAttemptRunning({
+    taskId: 'task-1',
+    attemptId: 'attempt-1',
+    runtimeId: 'runtime-child-1',
+    occurredAt
+  });
 }
 
 /**
@@ -383,7 +385,7 @@ describeWithSqlite('delegation foundation end to end', (): void => {
     expect(locks.getContinuationFence('session:session-1/history')?.checkpointId).toBe(checkpointId);
     expect(runtimeEvents).not.toContain('chat:runtime:tool-request');
 
-    startTask(store, adapter);
+    startTask(store);
     agentService.recordTaskResult({
       taskId: 'task-1',
       checkpointId,
@@ -566,7 +568,7 @@ describeWithSqlite('delegation foundation end to end', (): void => {
     expect(store.getOutbox('delegation.created:checkpoint-1')).toMatchObject({ deliveryStatus: 'pending' });
     expect(service.listActive()).toEqual([expect.objectContaining({ checkpointId: 'checkpoint-1', status: 'waiting_children' })]);
 
-    startTask(store, adapter);
+    startTask(store);
     service.recordTaskResult({
       taskId: 'task-1',
       checkpointId: 'checkpoint-1',
