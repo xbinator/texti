@@ -249,6 +249,25 @@ function mountDesignSetter(element: WidgetElement): VueWrapper {
           },
           template: '<div><slot v-for="option in options" name="label" :record="option" /></div>'
         }),
+        BMonacoModal: defineComponent({
+          name: 'BMonacoModal',
+          props: {
+            open: {
+              type: Boolean,
+              default: false
+            },
+            value: {
+              type: String,
+              default: ''
+            },
+            language: {
+              type: String,
+              default: ''
+            }
+          },
+          emits: ['confirm', 'update:open', 'update:value'],
+          template: '<div class="b-monaco-modal-stub"></div>'
+        }),
         BIcon: true
       }
     }
@@ -281,6 +300,31 @@ function findLayoutInput(wrapper: VueWrapper, label: string): ReturnType<VueWrap
 }
 
 describe('DesignSetter', (): void => {
+  it('opens css source modal and writes confirmed css to the element model', async (): Promise<void> => {
+    const element = createWidgetElement();
+    element.style = {
+      color: '#111827',
+      fontSize: 14
+    };
+    const wrapper = mountDesignSetter(element);
+
+    await wrapper.find('.design-setter__css-edit').trigger('click');
+
+    const modal = wrapper.findComponent({ name: 'BMonacoModal' });
+    expect(modal.props('open')).toBe(true);
+    expect(modal.props('language')).toBe('css');
+    expect(modal.props('value')).toContain(':root {');
+    expect(modal.props('value')).toContain('font-size: 14px;');
+
+    modal.vm.$emit('confirm', ':root {\n  filter: blur(2px);\n  color: #0f172a;\n}');
+
+    expect(element.style).toEqual({
+      css: ':root {\n  filter: blur(2px);\n  color: #0f172a;\n}',
+      color: '#0f172a'
+    });
+    wrapper.unmount();
+  });
+
   it('keeps layout geometry valid when numeric layout inputs are cleared', async (): Promise<void> => {
     const element = createWidgetElement();
     const wrapper = mountDesignSetter(element);

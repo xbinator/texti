@@ -15,7 +15,6 @@
           :options="props.options"
           :value="editorText"
           @update:value="handleEditorInput"
-          @save="handleEditorConfirm"
         />
       </div>
       <p v-if="editorError" class="b-monaco-modal__error">
@@ -95,7 +94,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   /** 默认值初始化或保存成功时触发 */
   change: [value: unknown];
-  /** 点击保存或 Monaco 保存快捷键时触发 */
+  /** 点击保存时触发 */
   confirm: [value: unknown];
   /** 点击取消或弹窗关闭时触发 */
   cancel: [];

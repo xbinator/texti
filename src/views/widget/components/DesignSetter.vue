@@ -4,6 +4,10 @@
 -->
 <template>
   <div>
+    <div :class="$style.toolbar">
+      <BButton class="design-setter__css-edit" icon="lucide:braces" size="small" type="outline" @click="openCssEditor">CSS 源码</BButton>
+    </div>
+
     <!-- 文字 -->
     <BSectionBlock title="文字">
       <div :class="$style.fieldGrid">
@@ -104,13 +108,26 @@
 
       <ControlPanel v-model:value="dataItem.style.borderRadius" label="圆角" mode="corners" />
     </BSectionBlock>
+
+    <BMonacoModal
+      v-model:open="cssEditorOpen"
+      v-model:value="cssEditorValue"
+      title="CSS 源码"
+      language="css"
+      :editor-state="cssEditorState"
+      :options="cssEditorOptions"
+      @confirm="handleCssConfirm"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, useCssModule } from 'vue';
+import { computed, ref, useCssModule } from 'vue';
+import type { EditorState } from '@/components/BEditor/types';
+import BMonacoModal from '@/components/BMonaco/Modal.vue';
 import { WIDGET_MIN_ELEMENT_SIZE } from '@/components/BWidget/constants/board';
 import type { WidgetBorderStyle, WidgetElement, WidgetElementStyle, WidgetFontStyle, WidgetTextDecoration } from '@/components/BWidget/types';
+import { applyWidgetStyleCss, parseWidgetStyleCss, serializeWidgetStyleCss } from '../utils/widgetStyleCss';
 import ControlPanel from './DesignSetter/ControlPanel.vue';
 
 const $style = useCssModule();
@@ -124,8 +141,26 @@ type EditableWidgetElement = WidgetElement & {
 };
 
 const dataItem = defineModel<EditableWidgetElement>('element', { default: () => ({}) });
+/** CSS 源码编辑弹窗开关。 */
+const cssEditorOpen = ref(false);
+/** CSS 源码编辑草稿。 */
+const cssEditorValue = ref('');
 /** 当前元素是否锁定位置和尺寸。 */
 const isGeometryLocked = computed<boolean>(() => dataItem.value.locked === true);
+/** CSS 源码编辑器文件状态。 */
+const cssEditorState = computed<EditorState>(() => ({
+  id: `widget-style-css-${dataItem.value.id ?? 'element'}`,
+  name: `${dataItem.value.title || dataItem.value.id || 'element'}.css`,
+  path: null,
+  ext: 'css',
+  content: cssEditorValue.value
+}));
+/** CSS 源码编辑器运行配置。 */
+const cssEditorOptions = {
+  wordWrap: true,
+  search: true,
+  stickyScroll: true
+};
 
 /** 字重选项。 */
 const fontWeightOptions = [
@@ -178,6 +213,24 @@ const borderStyleOptions: Array<{ value: WidgetBorderStyle; label: string }> = [
 function toggleGeometryLocked(): void {
   dataItem.value.locked = !isGeometryLocked.value;
 }
+
+/**
+ * 打开 CSS 源码编辑弹窗。
+ */
+function openCssEditor(): void {
+  cssEditorValue.value = serializeWidgetStyleCss(dataItem.value.style);
+  cssEditorOpen.value = true;
+}
+
+/**
+ * 处理 CSS 源码确认。
+ * @param value - BMonacoModal 回传的 CSS 文本
+ */
+function handleCssConfirm(value: unknown): void {
+  const cssSource = typeof value === 'string' ? value : '';
+  const result = parseWidgetStyleCss(cssSource);
+  dataItem.value.style = applyWidgetStyleCss(dataItem.value.style, result.style);
+}
 </script>
 
 <style module lang="less">
@@ -185,5 +238,11 @@ function toggleGeometryLocked(): void {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding-bottom: 12px;
 }
 </style>

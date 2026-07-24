@@ -93,6 +93,8 @@ export type WidgetFontStyle = 'normal' | 'italic';
  * Widget元素样式。
  */
 export interface WidgetElementStyle {
+  /** CSS 源码样式，支持保存完整 CSS 声明文本 */
+  css?: string;
   /** 填充色 */
   backgroundColor?: string;
   /** 描边色 */

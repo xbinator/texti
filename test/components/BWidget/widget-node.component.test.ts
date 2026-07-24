@@ -88,6 +88,23 @@ describe('WidgetNode', (): void => {
     wrapper.unmount();
   });
 
+  it('applies custom CSS declarations from the element style model', (): void => {
+    const node = createStyledNode();
+    node.style.css = 'filter: blur(2px); width: 220px; transform: scale(1.1);';
+    const wrapper = mount(WidgetNode, {
+      props: {
+        node
+      }
+    });
+    const nodeStyle = (wrapper.element as HTMLElement).style;
+    const styleAttribute = wrapper.attributes('style') ?? '';
+
+    expect(styleAttribute).toContain('filter: blur(2px);');
+    expect(nodeStyle.width).toBe('220px');
+    expect(nodeStyle.transform).toBe('scale(1.1)');
+    wrapper.unmount();
+  });
+
   it('measures text preview size through the text render schema while resizing', (): void => {
     const wrapper = mount(WidgetNode, {
       props: {

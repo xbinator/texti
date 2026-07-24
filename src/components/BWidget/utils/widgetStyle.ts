@@ -6,6 +6,11 @@ import type { WidgetBoxSideValue, WidgetCornerRadiusValue, WidgetElementStyle } 
 import type { CSSProperties } from 'vue';
 
 /**
+ * 可动态写入任意 CSS 属性的样式对象。
+ */
+type MutableCssProperties = CSSProperties & Record<string, string | number | undefined>;
+
+/**
  * 归一化非负盒模型数值。
  * @param value - 原始数值
  * @returns 可用于 CSS 的非负数值
@@ -21,6 +26,76 @@ function normalizeBoxNumber(value: number | undefined): number {
  */
 function toPixelValue(value: number): string {
   return `${normalizeBoxNumber(value)}px`;
+}
+
+/**
+ * 移除 CSS 块注释。
+ * @param source - CSS 源码
+ * @returns 无注释 CSS
+ */
+function stripCssComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//gu, '');
+}
+
+/**
+ * 读取可作为 inline style 的声明源码。
+ * @param source - CSS 源码
+ * @returns CSS 声明源码
+ */
+function readInlineDeclarationSource(source: string): string {
+  const trimmedSource = stripCssComments(source).trim();
+  const openIndex = trimmedSource.indexOf('{');
+
+  if (openIndex < 0) {
+    return trimmedSource;
+  }
+
+  const closeIndex = trimmedSource.indexOf('}', openIndex + 1);
+  return closeIndex < 0 ? '' : trimmedSource.slice(openIndex + 1, closeIndex).trim();
+}
+
+/**
+ * 将 CSS 属性名转换为 Vue style 对象 key。
+ * @param property - CSS 属性名
+ * @returns Vue style key
+ */
+function toVueStyleKey(property: string): string {
+  if (property.startsWith('--')) {
+    return property;
+  }
+
+  return property.replace(/-([a-z])/gu, (_match: string, character: string): string => character.toUpperCase());
+}
+
+/**
+ * 将 CSS 声明文本解析为 Vue style 对象。
+ * @param source - CSS 声明源码
+ * @returns Vue style 对象
+ */
+function parseCssDeclarations(source: string): CSSProperties {
+  const properties: MutableCssProperties = {};
+  const declarationSource = readInlineDeclarationSource(source);
+
+  declarationSource
+    .split(';')
+    .map((segment: string): string => segment.trim())
+    .filter((segment: string): boolean => segment.length > 0)
+    .forEach((segment: string): void => {
+      const colonIndex = segment.indexOf(':');
+      if (colonIndex <= 0) {
+        return;
+      }
+
+      const property = segment.slice(0, colonIndex).trim();
+      const value = segment.slice(colonIndex + 1).trim();
+      if (!property || !value) {
+        return;
+      }
+
+      properties[toVueStyleKey(property)] = value;
+    });
+
+  return properties;
 }
 
 /**
@@ -147,6 +222,19 @@ export function createWidgetElementStyleProperties(style?: WidgetElementStyle): 
   assignPaddingProperties(properties, style?.padding);
 
   return properties;
+}
+
+/**
+ * 创建 Widget 元素 CSS 源码样式属性。
+ * @param style - 元素样式
+ * @returns Vue CSS 属性对象
+ */
+export function createWidgetElementCustomCssProperties(style?: WidgetElementStyle): CSSProperties {
+  if (!style?.css) {
+    return {};
+  }
+
+  return parseCssDeclarations(style.css);
 }
 
 /**

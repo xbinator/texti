@@ -290,6 +290,19 @@ describe('BMonacoModal', (): void => {
     wrapper.unmount();
   });
 
+  it('ignores inner Monaco save events so shortcuts do not close the modal', async (): Promise<void> => {
+    const wrapper = mountMonacoModal({ value: { draft: true } });
+
+    await wrapper.find('.b-monaco-stub').setValue('{ "shortcut": true }');
+    await nextTick();
+    await wrapper.find('.b-monaco-save-stub').trigger('click');
+
+    expect(wrapper.emitted('update:value')).toBeUndefined();
+    expect(wrapper.emitted('confirm')).toBeUndefined();
+    expect(wrapper.emitted('update:open')).toBeUndefined();
+    wrapper.unmount();
+  });
+
   it('keeps object model unchanged and shows feedback for invalid JSON', async (): Promise<void> => {
     const wrapper = mountMonacoModal({ value: { draft: true } });
 

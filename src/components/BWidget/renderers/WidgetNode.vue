@@ -24,7 +24,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { getWidgetElementView } from '../elements';
 import { provideRenderContext, useRenderContext } from '../hooks/useRenderContext';
 import { createWidgetElementCssTransform, getWidgetShapeRenderSize, registerWidgetElementTarget, unregisterWidgetElementTarget } from '../utils/widgetGeometry';
-import { createWidgetElementContentStyleProperties, createWidgetElementStyleProperties } from '../utils/widgetStyle';
+import { createWidgetElementContentStyleProperties, createWidgetElementCustomCssProperties, createWidgetElementStyleProperties } from '../utils/widgetStyle';
 
 /**
  * 节点组件入参。
@@ -91,7 +91,8 @@ const nodeStyle = computed<CSSProperties>(() => ({
   width: `${renderSize.value.width}px`,
   height: `${renderSize.value.height}px`,
   opacity: props.node.style.opacity,
-  transform: createWidgetElementCssTransform(renderPosition.value, props.node.rotation)
+  transform: createWidgetElementCssTransform(renderPosition.value, props.node.rotation),
+  ...createWidgetElementCustomCssProperties(props.node.style)
 }));
 
 /**

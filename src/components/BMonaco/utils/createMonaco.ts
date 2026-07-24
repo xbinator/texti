@@ -107,30 +107,80 @@ interface MonacoWorkerModule {
   default: new () => Worker;
 }
 
+/**
+ * Monaco worker 类型。
+ */
+export type MonacoWorkerKind = 'editor' | 'json' | 'typescript' | 'css' | 'html';
+
 let cachedMonaco: typeof Monaco | null = null;
 let monacoEnvironmentReady = false;
 let jsonDefaultsReady = false;
 let editorWorkerConstructor: MonacoWorkerModule['default'] | null = null;
 let jsonWorkerConstructor: MonacoWorkerModule['default'] | null = null;
 let typescriptWorkerConstructor: MonacoWorkerModule['default'] | null = null;
+let cssWorkerConstructor: MonacoWorkerModule['default'] | null = null;
+let htmlWorkerConstructor: MonacoWorkerModule['default'] | null = null;
+
+/**
+ * 根据 Monaco 语言服务 label 解析对应 worker 类型。
+ * @param label - Monaco 请求的语言服务标签
+ * @returns worker 类型
+ */
+export function resolveMonacoWorkerKind(label: string): MonacoWorkerKind {
+  switch (label) {
+    case 'json':
+      return 'json';
+    case 'typescript':
+    case 'javascript':
+      return 'typescript';
+    case 'css':
+    case 'less':
+    case 'scss':
+      return 'css';
+    case 'html':
+    case 'handlebars':
+    case 'razor':
+      return 'html';
+    default:
+      return 'editor';
+  }
+}
+
+/**
+ * 创建已加载的 Monaco worker。
+ * @param WorkerConstructor - worker 构造器
+ * @param errorMessage - worker 未准备好时的错误信息
+ * @returns worker 实例
+ */
+function createMonacoWorker(WorkerConstructor: MonacoWorkerModule['default'] | null, errorMessage: string): Worker {
+  if (!WorkerConstructor) {
+    throw new Error(errorMessage);
+  }
+
+  return new WorkerConstructor();
+}
 
 /**
  * 懒加载 Monaco worker 构造器。
  */
 async function ensureWorkerConstructors(): Promise<void> {
-  if (editorWorkerConstructor && jsonWorkerConstructor && typescriptWorkerConstructor) {
+  if (editorWorkerConstructor && jsonWorkerConstructor && typescriptWorkerConstructor && cssWorkerConstructor && htmlWorkerConstructor) {
     return;
   }
 
-  const [editorWorkerModule, jsonWorkerModule, typescriptWorkerModule] = await Promise.all([
+  const [editorWorkerModule, jsonWorkerModule, typescriptWorkerModule, cssWorkerModule, htmlWorkerModule] = await Promise.all([
     import('monaco-editor/esm/vs/editor/editor.worker?worker') as Promise<MonacoWorkerModule>,
     import('monaco-editor/esm/vs/language/json/json.worker?worker') as Promise<MonacoWorkerModule>,
-    import('monaco-editor/esm/vs/language/typescript/ts.worker?worker') as Promise<MonacoWorkerModule>
+    import('monaco-editor/esm/vs/language/typescript/ts.worker?worker') as Promise<MonacoWorkerModule>,
+    import('monaco-editor/esm/vs/language/css/css.worker?worker') as Promise<MonacoWorkerModule>,
+    import('monaco-editor/esm/vs/language/html/html.worker?worker') as Promise<MonacoWorkerModule>
   ]);
 
   editorWorkerConstructor = editorWorkerModule.default;
   jsonWorkerConstructor = jsonWorkerModule.default;
   typescriptWorkerConstructor = typescriptWorkerModule.default;
+  cssWorkerConstructor = cssWorkerModule.default;
+  htmlWorkerConstructor = htmlWorkerModule.default;
 }
 
 /**
@@ -146,22 +196,18 @@ async function ensureMonacoEnvironment(): Promise<void> {
   const environmentHost = globalThis as typeof globalThis & MonacoEnvironmentHost;
   environmentHost.MonacoEnvironment = {
     getWorker(_moduleId: string, label: string): Worker {
-      if (label === 'json' && jsonWorkerConstructor) {
-        const JsonWorker = jsonWorkerConstructor;
-        return new JsonWorker();
+      switch (resolveMonacoWorkerKind(label)) {
+        case 'json':
+          return createMonacoWorker(jsonWorkerConstructor, 'Monaco JSON worker is not ready');
+        case 'typescript':
+          return createMonacoWorker(typescriptWorkerConstructor, 'Monaco TypeScript worker is not ready');
+        case 'css':
+          return createMonacoWorker(cssWorkerConstructor, 'Monaco CSS worker is not ready');
+        case 'html':
+          return createMonacoWorker(htmlWorkerConstructor, 'Monaco HTML worker is not ready');
+        default:
+          return createMonacoWorker(editorWorkerConstructor, 'Monaco editor worker is not ready');
       }
-
-      if ((label === 'typescript' || label === 'javascript') && typescriptWorkerConstructor) {
-        const TypescriptWorker = typescriptWorkerConstructor;
-        return new TypescriptWorker();
-      }
-
-      if (!editorWorkerConstructor) {
-        throw new Error('Monaco editor worker is not ready');
-      }
-
-      const EditorWorker = editorWorkerConstructor;
-      return new EditorWorker();
     }
   };
 
@@ -179,7 +225,9 @@ async function loadMonaco(): Promise<typeof Monaco> {
 
   await Promise.all([
     import('monaco-editor/esm/vs/language/json/monaco.contribution.js'),
-    import('monaco-editor/esm/vs/language/typescript/monaco.contribution.js')
+    import('monaco-editor/esm/vs/language/typescript/monaco.contribution.js'),
+    import('monaco-editor/esm/vs/language/css/monaco.contribution.js'),
+    import('monaco-editor/esm/vs/language/html/monaco.contribution.js')
   ]);
   cachedMonaco = await import('monaco-editor/esm/vs/editor/editor.main.js');
   return cachedMonaco;

@@ -3,7 +3,7 @@
  * @description 验证 BWidget 元素盒模型样式到 CSS 属性的转换规则。
  */
 import { describe, expect, it } from 'vitest';
-import { createWidgetElementStyleProperties, resolveWidgetBoxSideNumbers } from '@/components/BWidget/utils/widgetStyle';
+import { createWidgetElementCustomCssProperties, createWidgetElementStyleProperties, resolveWidgetBoxSideNumbers } from '@/components/BWidget/utils/widgetStyle';
 
 describe('widgetStyle', (): void => {
   it('creates CSS properties from all-side box style values', (): void => {
@@ -67,6 +67,18 @@ describe('widgetStyle', (): void => {
       right: 2,
       bottom: 2,
       left: 2
+    });
+  });
+
+  it('creates CSS properties from custom CSS model text', (): void => {
+    expect(
+      createWidgetElementCustomCssProperties({
+        css: 'filter: blur(2px); --widget-accent: #ff0000; border-block-start-width: 3px;'
+      })
+    ).toMatchObject({
+      filter: 'blur(2px)',
+      '--widget-accent': '#ff0000',
+      borderBlockStartWidth: '3px'
     });
   });
 });
