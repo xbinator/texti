@@ -284,6 +284,7 @@ describe('PanelSidebar', (): void => {
     expect(panelSidebarSource).toContain('transition: width 0.36s ease, right 0.36s ease, opacity 0.36s ease;');
     expect(panelSidebarSource).toContain('will-change: width, right;');
     expect(panelSidebarSource).toContain('@media (prefers-reduced-motion: reduce)');
+    expect(panelSidebarSource).not.toContain('action-motion');
     expect(sidebarActionSource).toContain(":icon=\"isExpanded ? 'lucide:minimize-2' : 'lucide:maximize-2'\"");
     expect(sidebarActionSource).not.toContain('action-expand-button');
     expect(sidebarActionSource).not.toContain('action-expand-icon');

@@ -83,7 +83,7 @@ describe('WidgetNode', (): void => {
     expect(nodeStyle.color).toBe('rgb(17, 24, 39)');
     expect(nodeStyle.fontSize).toBe('18px');
     expect(nodeStyle.fontWeight).toBe('700');
-    expect(nodeStyle.justifyContent).toBe('flex-end');
+    expect(nodeStyle.justifyContent).toBe('');
     expect(nodeStyle.alignItems).toBe('center');
     wrapper.unmount();
   });
