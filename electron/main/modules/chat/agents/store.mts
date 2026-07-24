@@ -40,6 +40,7 @@ import {
   type AgentStoreDatabase,
   type AgentTaskRecord,
   type AgentTerminalResultEnvelope,
+  type AuthorizeAgentTaskInput,
   type BeginAgentAttemptInput,
   type CancelCheckpointInput,
   type ClaimCheckpointInput,
@@ -1127,6 +1128,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
     }
 
     let projectedStatus: AgentTaskStatus = 'created';
+    let planAuthorizedCount = 0;
     events.forEach((event, index): void => {
       if (event.sequence !== index + 1) {
         throw new AgentStoreProtocolError('event_sequence_invalid', 'Task Event sequence is not continuous from one');
@@ -1140,6 +1142,34 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
           throw new AgentStoreProtocolError('task_event_status_link_invalid', 'Task status Event does not link from the projected state');
         }
         projectedStatus = payload.to;
+        return;
+      }
+      if (event.type === 'plan.authorized') {
+        const payload = event.payload as ChatAgentEventPayloadMap['plan.authorized'];
+        if (
+          projectedStatus !== 'authorized' ||
+          !task.executionPlanSnapshot ||
+          payload.planHash !== task.executionPlanSnapshotHash ||
+          payload.planSchemaVersion !== task.executionPlanSnapshot.planSchemaVersion ||
+          payload.policyVersion !== task.executionPlanSnapshot.policyVersion
+        ) {
+          throw new AgentStoreProtocolError('task_event_plan_invalid', 'Plan authorization Event does not match the immutable Task plan');
+        }
+        planAuthorizedCount += 1;
+        return;
+      }
+      if (event.type === 'task.queued') {
+        const payload = event.payload as ChatAgentEventPayloadMap['task.queued'];
+        const previous = events[index - 1];
+        const previousPayload = previous?.type === 'task.status_changed' ? (previous.payload as ChatAgentEventPayloadMap['task.status_changed']) : undefined;
+        if (
+          projectedStatus !== 'queued' ||
+          previous?.type !== 'task.status_changed' ||
+          previousPayload?.to !== 'queued' ||
+          previousPayload.queuePhase !== payload.queuePhase
+        ) {
+          throw new AgentStoreProtocolError('task_event_queue_invalid', 'Task queued Event does not follow its matching status transition');
+        }
         return;
       }
       if (event.type === 'task.completed') {
@@ -1178,6 +1208,9 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
     });
     if (projectedStatus !== task.status) {
       throw new AgentStoreProtocolError('task_event_projection_invalid', 'Task Event projection does not match the persisted Task status');
+    }
+    if (planAuthorizedCount !== (task.executionPlanSnapshot ? 1 : 0)) {
+      throw new AgentStoreProtocolError('task_event_plan_invalid', 'Task plan and authorization Event are not an exact pair');
     }
     this.validateRuntimeHistory(task, events);
   }
@@ -1313,6 +1346,12 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       const task = this.getTask(input.taskId);
       if (!task) throw new AgentStoreProtocolError('task_not_found', 'Task does not exist');
       if (task.recordState !== 'active') throw new AgentStoreProtocolError('task_tombstoned', 'Task is tombstoned');
+      if (
+        task.contractSnapshot.mode === 'read' &&
+        ((task.status === 'created' && input.toStatus === 'planning') || (task.status === 'planning' && input.toStatus === 'authorized'))
+      ) {
+        throw new AgentStoreProtocolError('read_authorization_requires_atomic_protocol', 'Read Task authorization must use authorizeTask');
+      }
       if (isTaskTerminal(input.toStatus)) {
         throw new AgentStoreProtocolError('task_terminalization_requires_protocol', 'Terminal Task states require result, cancellation, or recovery protocol');
       }
@@ -1408,6 +1447,136 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       const updated = this.getTask(task.taskId);
       if (!updated) throw new AgentStoreProtocolError('task_projection_missing', 'Updated Task is missing');
       return updated;
+    });
+  }
+
+  /** @inheritdoc */
+  authorizeTask(input: AuthorizeAgentTaskInput): AgentTaskRecord {
+    return this.database.transaction((): AgentTaskRecord => {
+      const task = this.getTask(input.taskId);
+      if (!task) throw new AgentStoreProtocolError('task_not_found', 'Task does not exist');
+      if (task.recordState !== 'active') throw new AgentStoreProtocolError('task_tombstoned', 'Task is tombstoned');
+      if (
+        input.executionPlanSnapshot.planHash !== input.executionPlanSnapshotHash ||
+        task.contractSnapshot.mode !== 'read' ||
+        !Number.isFinite(Date.parse(input.occurredAt))
+      ) {
+        throw new AgentStoreProtocolError('authorization_input_invalid', 'Authorization envelope or plan hash is invalid');
+      }
+      const planValidation = validateExecutionPlanSnapshot(task.contractSnapshot, input.executionPlanSnapshot);
+      if (!planValidation.ok || planValidation.plan.planHash !== input.executionPlanSnapshotHash) {
+        throw new AgentStoreProtocolError('execution_plan_invalid', 'Execution plan failed contract-bound validation');
+      }
+
+      // 相同授权可安全重放，但必须重验完整 Event 历史，不能补写半套事实。
+      if (
+        task.status === 'queued' &&
+        task.queuePhase === 'start' &&
+        task.executionPlanSnapshotHash === input.executionPlanSnapshotHash &&
+        task.executionPlanSnapshot?.planHash === input.executionPlanSnapshotHash
+      ) {
+        const events = this.listEvents('task', task.taskId);
+        const planEvents = events.filter((event): boolean => event.type === 'plan.authorized');
+        const queueEvents = events.filter((event): boolean => event.type === 'task.queued');
+        const planEvent = planEvents[0];
+        const queueEvent = queueEvents[0];
+        const planPayload = planEvent?.payload as ChatAgentEventPayloadMap['plan.authorized'] | undefined;
+        const queuePayload = queueEvent?.payload as ChatAgentEventPayloadMap['task.queued'] | undefined;
+        if (
+          planEvents.length !== 1 ||
+          queueEvents.length !== 1 ||
+          planPayload?.planHash !== input.executionPlanSnapshotHash ||
+          queuePayload?.queuePhase !== 'start'
+        ) {
+          throw new AgentStoreProtocolError('authorization_history_invalid', 'Authorized Task history is incomplete or inconsistent');
+        }
+        return task;
+      }
+      if (task.status !== 'created' || task.executionPlanSnapshot || task.executionPlanSnapshotHash) {
+        throw new AgentStoreProtocolError('authorization_state_invalid', 'Task is not eligible for first authorization');
+      }
+      const checkpoint = this.getCheckpoint(task.checkpointId);
+      const orderedCall = checkpoint?.continuationSnapshot.orderedToolCalls.find((entry): boolean => entry.taskId === task.taskId);
+      const frozenModel = checkpoint?.continuationSnapshot.modelSnapshot;
+      if (
+        !checkpoint ||
+        checkpoint.status !== 'waiting_children' ||
+        checkpoint.recordState !== 'active' ||
+        checkpoint.sessionId !== task.sessionId ||
+        checkpoint.turnId !== task.turnId ||
+        checkpoint.primaryAgentId !== task.parentAgentId ||
+        checkpoint.rootRuntimeId !== task.rootRuntimeId ||
+        orderedCall?.toolCallId !== task.toolCallId ||
+        !frozenModel ||
+        frozenModel.providerId !== planValidation.plan.modelSnapshot.providerId ||
+        frozenModel.modelId !== planValidation.plan.modelSnapshot.modelId
+      ) {
+        throw new AgentStoreProtocolError('authorization_aggregate_invalid', 'Authorization plan does not match its active Checkpoint');
+      }
+      if (
+        !canTransitionTask('created', 'planning', { mode: 'read' }) ||
+        !canTransitionTask('planning', 'authorized', {
+          mode: 'read',
+          executionPlanSnapshot: planValidation.plan,
+          contractSnapshot: task.contractSnapshot
+        }) ||
+        !canTransitionTask('authorized', 'queued', { mode: 'read', queuePhase: 'start' })
+      ) {
+        throw new AgentStoreProtocolError('authorization_protocol_invalid', 'Read authorization transitions are not legal');
+      }
+
+      const planningUpdate = this.database.execute(
+        `UPDATE chat_agent_tasks
+         SET status = ?, queue_phase = NULL, updated_at = ?
+         WHERE task_id = ? AND status = ? AND record_state = ?
+           AND execution_plan_snapshot_json IS NULL AND execution_plan_snapshot_hash IS NULL`,
+        ['planning', input.occurredAt, task.taskId, 'created', 'active']
+      );
+      if (planningUpdate.changes !== 1) {
+        throw new AgentStoreProtocolError('authorization_conflict', 'Task changed before planning could be recorded');
+      }
+      this.appendEvent('task', task.taskId, 'task.status_changed', { from: 'created', to: 'planning' }, input.occurredAt, input.source);
+
+      const authorizationUpdate = this.database.execute(
+        `UPDATE chat_agent_tasks
+         SET status = ?, execution_plan_snapshot_json = ?,
+             execution_plan_snapshot_hash = ?, updated_at = ?
+         WHERE task_id = ? AND status = ? AND record_state = ?
+           AND execution_plan_snapshot_json IS NULL AND execution_plan_snapshot_hash IS NULL`,
+        ['authorized', JSON.stringify(planValidation.plan), planValidation.plan.planHash, input.occurredAt, task.taskId, 'planning', 'active']
+      );
+      if (authorizationUpdate.changes !== 1) {
+        throw new AgentStoreProtocolError('authorization_conflict', 'Task changed before authorization could be recorded');
+      }
+      this.appendEvent('task', task.taskId, 'task.status_changed', { from: 'planning', to: 'authorized' }, input.occurredAt, input.source);
+      this.appendEvent(
+        'task',
+        task.taskId,
+        'plan.authorized',
+        {
+          planHash: planValidation.plan.planHash,
+          planSchemaVersion: planValidation.plan.planSchemaVersion,
+          policyVersion: planValidation.plan.policyVersion
+        },
+        input.occurredAt,
+        input.source
+      );
+
+      const queueUpdate = this.database.execute(
+        `UPDATE chat_agent_tasks
+         SET status = ?, queue_phase = ?, updated_at = ?
+         WHERE task_id = ? AND status = ? AND record_state = ?`,
+        ['queued', 'start', input.occurredAt, task.taskId, 'authorized', 'active']
+      );
+      if (queueUpdate.changes !== 1) {
+        throw new AgentStoreProtocolError('authorization_conflict', 'Task changed before start queue could be recorded');
+      }
+      this.appendEvent('task', task.taskId, 'task.status_changed', { from: 'authorized', to: 'queued', queuePhase: 'start' }, input.occurredAt, input.source);
+      this.appendEvent('task', task.taskId, 'task.queued', { queuePhase: 'start' }, input.occurredAt, input.source);
+
+      const authorized = this.getTask(task.taskId);
+      if (!authorized) throw new AgentStoreProtocolError('task_projection_missing', 'Authorized Task is missing');
+      return authorized;
     });
   }
 

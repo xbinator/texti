@@ -2,11 +2,12 @@
  * @file service.test.ts
  * @description Child Agent 委派 prepare 边界、逻辑栅栏和恢复测试。
  */
-import type { AgentCheckpointRecord, AgentTaskRecord } from '../../../../../../electron/main/modules/chat/agents/types.mjs';
+import type { AgentCheckpointRecord, AgentTaskRecord, PrepareDelegationInput } from '../../../../../../electron/main/modules/chat/agents/types.mjs';
 import type { ActiveChatRuntime, ChatRuntimeDelegationPrepareInput } from '../../../../../../electron/main/modules/chat/runtime/types.mjs';
 import type { ChatMessageRecord } from 'types/chat';
-import type { AgentTaskError, ChatAgentApplicationEvent, ChatAgentResult } from 'types/chat-agent';
+import type { AgentExecutionPlanSnapshot, AgentTaskError, ChatAgentApplicationEvent, ChatAgentResult } from 'types/chat-agent';
 import { describe, expect, it, vi } from 'vitest';
+import { hashExecutionPlanSnapshot } from '../../../../../../electron/main/modules/chat/agents/contracts.mjs';
 import { createChatAgentDelegationService, type ChatAgentDelegationServiceDependencies } from '../../../../../../electron/main/modules/chat/agents/service.mjs';
 import { createRuntimeLockRegistry } from '../../../../../../electron/main/modules/chat/runtime/infrastructure/locks.mjs';
 
@@ -167,6 +168,7 @@ function createTaskResult(): ChatAgentResult {
 function createDependencies(): {
   dependencies: ChatAgentDelegationServiceDependencies;
   prepareDelegation: ReturnType<typeof vi.fn>;
+  authorizeTask: ReturnType<typeof vi.fn>;
   interruptCheckpoint: ReturnType<typeof vi.fn>;
   interruptActive: ReturnType<typeof vi.fn>;
   markOutboxDelivered: ReturnType<typeof vi.fn>;
@@ -186,11 +188,14 @@ function createDependencies(): {
   publishAssistant: ReturnType<typeof vi.fn>;
   publishCheckpoint: ReturnType<typeof vi.fn>;
   publish: ReturnType<typeof vi.fn>;
+  resolveReadLimits: ReturnType<typeof vi.fn>;
+  compileReadPlan: ReturnType<typeof vi.fn>;
 } {
   const prepareDelegation = vi.fn((_input, persistAssistant: () => undefined): void => {
     persistAssistant();
   });
   const interruptCheckpoint = vi.fn();
+  const authorizeTask = vi.fn();
   const interruptActive = vi.fn((): number => 0);
   const markOutboxDelivered = vi.fn();
   const listActive = vi.fn(() => []);
@@ -209,6 +214,12 @@ function createDependencies(): {
   const publishAssistant = vi.fn();
   const publishCheckpoint = vi.fn();
   const publish = vi.fn();
+  const resolveReadLimits = vi.fn(() => ({
+    availableToolNames: ['read_file'],
+    permissionScopeIds: ['workspace:read'],
+    budget: { tokenLimit: 800, costLimitUsd: 0.08, pricingVersion: 'test-v1' }
+  }));
+  const compileReadPlan = vi.fn();
   getCheckpoint.mockImplementation((checkpointId: string): AgentCheckpointRecord | null => {
     const preparedInput = prepareDelegation.mock.calls.at(-1)?.[0];
     if (!preparedInput || preparedInput.checkpoint.checkpointId !== checkpointId) return null;
@@ -226,6 +237,7 @@ function createDependencies(): {
     dependencies: {
       store: {
         prepareDelegation,
+        authorizeTask,
         interruptCheckpoint,
         interruptActive,
         markOutboxDelivered,
@@ -248,9 +260,12 @@ function createDependencies(): {
       publishCheckpoint,
       createId: (kind, index): string => `${kind}-${index ?? 1}`,
       now: (): string => '2026-07-23T00:00:01.000Z',
+      resolveReadLimits,
+      compileReadPlan,
       startPrimaryContinuation
     },
     prepareDelegation,
+    authorizeTask,
     interruptCheckpoint,
     interruptActive,
     markOutboxDelivered,
@@ -269,7 +284,51 @@ function createDependencies(): {
     readMessages,
     publishAssistant,
     publishCheckpoint,
-    publish
+    publish,
+    resolveReadLimits,
+    compileReadPlan
+  };
+}
+
+/**
+ * 从 prepare 调用构造 Store 当前 Task 投影。
+ * @param input - 已提交委派事实
+ * @returns created Task
+ */
+function createPreparedTask(input: PrepareDelegationInput): AgentTaskRecord {
+  const task = input.tasks[0];
+  if (!task) throw new Error('Prepared fixture must contain one Task');
+  return {
+    ...task,
+    status: 'created',
+    recordState: 'active',
+    unfinishedJournalCount: 0,
+    createdAt: input.occurredAt,
+    updatedAt: input.occurredAt
+  };
+}
+
+/**
+ * 创建与 prepared Task 绑定的已 hash 只读计划。
+ * @param task - created Task
+ * @param checkpoint - 冻结模型来源
+ * @returns 可交给 Store 的计划
+ */
+function createReadPlan(task: AgentTaskRecord, checkpoint: AgentCheckpointRecord): AgentExecutionPlanSnapshot {
+  const planBody = {
+    planSchemaVersion: 1,
+    policyVersion: 'read-runtime-v1',
+    capabilitySet: ['read_file'],
+    modelSnapshot: { ...checkpoint.continuationSnapshot.modelSnapshot },
+    permissionSnapshot: { scopeIds: ['workspace:read'] },
+    resourceScopes: ['file:/workspace/CONTEXT.md'],
+    toolEffectSet: [{ toolName: 'read_file', effect: 'pure_read' as const }],
+    commitPolicy: { mode: 'none' as const },
+    budget: { tokenLimit: 800, costLimitUsd: 0.08, pricingVersion: 'test-v1' }
+  };
+  return {
+    ...planBody,
+    planHash: hashExecutionPlanSnapshot(task.contractSnapshot, planBody)
   };
 }
 
@@ -343,6 +402,110 @@ describe('chat agent delegation service', (): void => {
     });
   });
 
+  it('compiles trusted read limits and atomically authorizes one prepared Task', (): void => {
+    const fixture = createDependencies();
+    const service = createChatAgentDelegationService(fixture.dependencies);
+    const input = createInput();
+    input.runtime.tools = [...(input.runtime.tools ?? []), { name: 'read_file', description: 'read a file', parameters: { type: 'object' } }];
+    service.prepareDelegation(input);
+    const prepared = fixture.prepareDelegation.mock.calls[0]?.[0] as PrepareDelegationInput | undefined;
+    if (!prepared) throw new Error('Prepare facts must be captured');
+    const task = createPreparedTask(prepared);
+    const checkpoint: AgentCheckpointRecord = {
+      ...prepared.checkpoint,
+      status: 'waiting_children',
+      version: 1,
+      terminalResults: {},
+      recordState: 'active',
+      createdAt: prepared.occurredAt,
+      updatedAt: prepared.occurredAt
+    };
+    const plan = createReadPlan(task, checkpoint);
+    const queuedTask: AgentTaskRecord = {
+      ...task,
+      executionPlanSnapshot: plan,
+      executionPlanSnapshotHash: plan.planHash,
+      status: 'queued',
+      queuePhase: 'start'
+    };
+    fixture.getTask.mockReturnValue(task);
+    fixture.compileReadPlan.mockReturnValue({ ok: true, plan });
+    fixture.authorizeTask.mockReturnValue(queuedTask);
+
+    const result = service.authorizeReadTask(task.taskId);
+
+    expect(fixture.resolveReadLimits).toHaveBeenCalledWith(task, checkpoint, expect.objectContaining({ workspaceRoot: '/workspace' }));
+    expect(fixture.compileReadPlan).toHaveBeenCalledWith({
+      task,
+      checkpoint,
+      parentToolNames: ['delegate_task', 'read_file'],
+      availableToolNames: ['read_file'],
+      permissionScopeIds: ['workspace:read'],
+      workspaceRoot: '/workspace',
+      budget: { tokenLimit: 800, costLimitUsd: 0.08, pricingVersion: 'test-v1' }
+    });
+    expect(fixture.authorizeTask).toHaveBeenCalledWith({
+      taskId: task.taskId,
+      executionPlanSnapshot: plan,
+      executionPlanSnapshotHash: plan.planHash,
+      occurredAt: '2026-07-23T00:00:01.000Z',
+      source: 'coordinator'
+    });
+    expect(result).toBe(queuedTask);
+  });
+
+  it('leaves a Task created when plan compilation fails before the Store boundary', (): void => {
+    const fixture = createDependencies();
+    const service = createChatAgentDelegationService(fixture.dependencies);
+    const input = createInput();
+    input.runtime.tools = [...(input.runtime.tools ?? []), { name: 'read_file', description: 'read a file', parameters: { type: 'object' } }];
+    service.prepareDelegation(input);
+    const prepared = fixture.prepareDelegation.mock.calls[0]?.[0] as PrepareDelegationInput | undefined;
+    if (!prepared) throw new Error('Prepare facts must be captured');
+    const task = createPreparedTask(prepared);
+    fixture.getTask.mockReturnValue(task);
+    fixture.compileReadPlan.mockReturnValue({
+      ok: false,
+      error: {
+        code: 'capability_denied',
+        phase: 'plan_validation',
+        category: 'policy',
+        retryable: false,
+        details: { reason: 'plan_capability_empty' }
+      }
+    });
+
+    expect((): void => {
+      service.authorizeReadTask(task.taskId);
+    }).toThrowError(expect.objectContaining({ code: 'capability_denied', phase: 'plan_validation' }));
+    expect(fixture.authorizeTask).not.toHaveBeenCalled();
+    expect(task.status).toBe('created');
+  });
+
+  it('keeps production authorization fail-closed until a trusted budget and permission provider is injected', (): void => {
+    const fixture = createDependencies();
+    delete fixture.dependencies.resolveReadLimits;
+    const service = createChatAgentDelegationService(fixture.dependencies);
+    const input = createInput();
+    input.runtime.tools = [...(input.runtime.tools ?? []), { name: 'read_file', description: 'read a file', parameters: { type: 'object' } }];
+    service.prepareDelegation(input);
+    const prepared = fixture.prepareDelegation.mock.calls[0]?.[0] as PrepareDelegationInput | undefined;
+    if (!prepared) throw new Error('Prepare facts must be captured');
+    const task = createPreparedTask(prepared);
+    fixture.getTask.mockReturnValue(task);
+
+    expect((): void => {
+      service.authorizeReadTask(task.taskId);
+    }).toThrowError(
+      expect.objectContaining({
+        code: 'capability_denied',
+        details: expect.objectContaining({ reason: 'plan_budget_allocator_unavailable' })
+      })
+    );
+    expect(fixture.compileReadPlan).not.toHaveBeenCalled();
+    expect(fixture.authorizeTask).not.toHaveBeenCalled();
+  });
+
   it('normalizes a Child result, computes its canonical hash, and publishes the persisted ready outbox', (): void => {
     const fixture = createDependencies();
     const prepared = createInput();
@@ -370,7 +533,7 @@ describe('chat agent delegation service', (): void => {
       executionPlanSnapshot: {
         planHash: 'b'.repeat(64),
         planSchemaVersion: 1,
-        policyVersion: 'foundation-v1',
+        policyVersion: 'read-runtime-v1',
         capabilitySet: ['read_file'],
         modelSnapshot: { providerId: 'provider-1', modelId: 'model-1' },
         permissionSnapshot: { scopeIds: ['workspace-read'] },

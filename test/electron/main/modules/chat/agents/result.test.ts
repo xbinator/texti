@@ -21,7 +21,7 @@ const contractSnapshot: AgentTaskContractSnapshot = {
 const executionPlanSnapshot: AgentExecutionPlanSnapshot = {
   planHash: 'a'.repeat(64),
   planSchemaVersion: 1,
-  policyVersion: 'foundation-v1',
+  policyVersion: 'read-runtime-v1',
   capabilitySet: ['read_file'],
   modelSnapshot: { providerId: 'openai', modelId: 'gpt-5' },
   permissionSnapshot: { scopeIds: ['workspace-read'] },

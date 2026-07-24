@@ -13,6 +13,7 @@
 - 始终继承 Primary Runtime A 已冻结的 `modelSnapshot`，Renderer 和 Child 不能提交模型覆盖。
 - 委派深度固定为一层；Child capability 永远移除 `delegate_task`、模型切换、会话管理和写入工具。
 - `effectiveCapability = persistedCapability ∩ availableCapability ∩ role/policyCapability`，恢复时只能单调收缩。
+- 连续恢复必须把上一次 effective projection 作为新的 ceiling；首次恢复显式传 `null`，后续不得因工具、权限、资源或预算重新可用而回扩。
 - 第一阶段只授权 `effect.effect === 'pure_read'`、`runtime === 'main'`、`executionClass === 'direct'` 的工具。
 - 第一阶段本地文件工具只读取显式声明的真实路径 scope；需要 Bridge、用户确认或工作区外扩权的调用直接拒绝。
 - 每个 Turn 最多六个 Child Task，最多三个资源相容的 read Attempt 并行。
@@ -191,14 +192,21 @@ git commit -m "feat(chat): 增加 Child Attempt 生命周期"
 - Create: `test/electron/main/modules/chat/agents/resource-scopes.test.ts`
 - Create: `test/electron/main/modules/chat/agents/plan-compiler.test.ts`
 - Modify: `electron/main/modules/chat/agents/contracts.mts`
+- Modify: `electron/main/modules/chat/agents/store.mts`
 - Modify: `electron/main/modules/chat/agents/types.mts`
 - Modify: `electron/main/modules/chat/agents/service.mts`
+- Modify: `test/electron/main/modules/chat/agents/contracts.test.ts`
+- Modify: `test/electron/main/modules/chat/agents/delegation-foundation.test.ts`
+- Modify: `test/electron/main/modules/chat/agents/result.test.ts`
+- Modify: `test/electron/main/modules/chat/agents/service.test.ts`
+- Modify: `test/electron/main/modules/chat/agents/state.test.ts`
+- Modify: `test/electron/main/modules/chat/agents/store.test.ts`
 
 **Interfaces:**
 - Consumes: Contract snapshot、Continuation model snapshot、父 Runtime 冻结工具、共享 tool registry、权限/资源/预算依赖。
-- Produces: 只能收缩的 `compileAgentPlan()` 与 `restoreAgentPlan()`；主进程授权后调用现有 `transitionTask()` 冻结 snapshot。
+- Produces: 只能收缩的 `compileAgentPlan()` 与 `restoreAgentPlan()`；主进程通过 `authorizeTask()` 在单一事务中冻结 snapshot 和三段状态/Event 事实。
 
-- [ ] **Step 1: Write capability intersection tests**
+- [x] **Step 1: Write capability intersection tests**
 
 覆盖以下事实：
 
@@ -230,9 +238,10 @@ expect(result).toMatchObject({
 - required 工具全部消失时返回 `capability_denied/plan_validation`。
 - 文件资源规范化为真实路径 scope，符号链接不能越过父 workspace real root。
 - `restoreAgentPlan()` 只返回 `persisted ∩ available ∩ currentPolicy`，不能加入新工具。
+- `restoreAgentPlan()` 的后续调用必须继续与 `previousEffective` 求交，不能重新扩回 persisted 上限。
 - 模型必须与 checkpoint 完全一致。
 
-- [ ] **Step 2: Run plan tests and verify RED**
+- [x] **Step 2: Run plan tests and verify RED**
 
 Run:
 
@@ -242,7 +251,7 @@ pnpm exec vitest run test/electron/main/modules/chat/agents/resource-scopes.test
 
 Expected: FAIL，因为资源 scope resolver 和计划编译器尚不存在。
 
-- [ ] **Step 3: Define compiler dependencies and result**
+- [x] **Step 3: Define compiler dependencies and result**
 
 ```ts
 export interface AgentPlanCompilerDependencies {
@@ -269,7 +278,7 @@ export type AgentPlanCompileResult =
   | { ok: false; error: AgentTaskError }
 ```
 
-- [ ] **Step 4: Implement the exact intersection**
+- [x] **Step 4: Implement the exact intersection**
 
 按下列顺序计算，并在每层后保持排序去重：
 
@@ -285,7 +294,7 @@ contract.requestedTools
 
 `resource-scopes.mts` 先把 file/directory 引用解析成 realpath scope，拒绝不存在的资源、`unsaved://`、工作区外路径和符号链接逃逸。使用 `hashExecutionPlanSnapshot()` 生成 `planHash`。`validateExecutionPlanSnapshot()` 增加第一阶段的强约束：read plan 不接受 `external_read`，`commitPolicy.mode` 必须为 `none`，模型必须由调用方与 continuation 单独比较，不能仅校验形状。
 
-- [ ] **Step 5: Add service authorization entry**
+- [x] **Step 5: Add service authorization entry**
 
 增加不接受 Renderer 模型/权限/预算覆盖的内部方法：
 
@@ -299,22 +308,23 @@ authorizeReadTask(taskId: string): AgentTaskRecord
 created → planning → authorized(plan snapshot) → queued(start)
 ```
 
-任一步失败都生成结构化失败结果或由 Task 协议终态化入口收敛，不能留下永久 `planning`。
+计划编译必须发生在写事务之前；Store 在单一事务内提交三段状态迁移、`plan.authorized` 与 `task.queued` Event，并拒绝通过通用 `transitionTask()` 拆分 read 授权。编译失败保持 `created` 并返回结构化错误，事务中间失败完整回滚，不能留下永久 `planning` 或半套授权历史。真实父权限与层级预算提供器接入前，生产默认授权必须 fail-closed，不能为每个 Child 合成独立额度。
 
-- [ ] **Step 6: Run plan, contract, service tests**
+- [x] **Step 6: Run plan, contract, service tests**
 
 Run:
 
 ```bash
 pnpm exec vitest run test/electron/main/modules/chat/agents/resource-scopes.test.ts test/electron/main/modules/chat/agents/plan-compiler.test.ts test/electron/main/modules/chat/agents/contracts.test.ts test/electron/main/modules/chat/agents/service.test.ts
+pnpm exec cross-env ELECTRON_RUN_AS_NODE=1 HOST=127.0.0.1 electron node_modules/vitest/vitest.mjs run test/electron/main/modules/chat/agents/store.test.ts
 ```
 
 Expected: PASS。
 
-- [ ] **Step 7: Commit Task 2**
+- [x] **Step 7: Commit Task 2**
 
 ```bash
-git add electron/main/modules/chat/agents/resource-scopes.mts electron/main/modules/chat/agents/plan-compiler.mts electron/main/modules/chat/agents/contracts.mts electron/main/modules/chat/agents/types.mts electron/main/modules/chat/agents/service.mts test/electron/main/modules/chat/agents/resource-scopes.test.ts test/electron/main/modules/chat/agents/plan-compiler.test.ts test/electron/main/modules/chat/agents/contracts.test.ts test/electron/main/modules/chat/agents/service.test.ts
+git add electron/main/modules/chat/agents/resource-scopes.mts electron/main/modules/chat/agents/plan-compiler.mts electron/main/modules/chat/agents/contracts.mts electron/main/modules/chat/agents/types.mts electron/main/modules/chat/agents/store.mts electron/main/modules/chat/agents/service.mts test/electron/main/modules/chat/agents/resource-scopes.test.ts test/electron/main/modules/chat/agents/plan-compiler.test.ts test/electron/main/modules/chat/agents/contracts.test.ts test/electron/main/modules/chat/agents/delegation-foundation.test.ts test/electron/main/modules/chat/agents/result.test.ts test/electron/main/modules/chat/agents/service.test.ts test/electron/main/modules/chat/agents/state.test.ts test/electron/main/modules/chat/agents/store.test.ts changelog/2026-07-24.md docs/superpowers/plans/2026-07-24-child-agent-read-runtime.md
 git commit -m "feat(chat): 编译冻结只读 Child 执行计划"
 ```
 
@@ -349,6 +359,8 @@ expect(coordinator.getCheckpointState('checkpoint-1')).toBe('running')
 ```
 
 再验证 tombstoned/terminal checkpoint 不启动，超过六个 Task 稳定失败，任一 required Task 计划失败仍为每个 Task 生成终态结果。Child registry 必须先 `ensureActor(task)`、再 `bindRuntime(address, planHash)`、最后才允许 executor start；Runtime 解绑不能删除稳定 Actor。
+
+Coordinator 接入 Outbox 前必须先定义 pre-Attempt authorization failure 协议：不可重试的计划/资源/权限失败需要写入 Task error、审计 Event 与可供 Checkpoint rendezvous 的终态工具结果，不能反复重试或永久停留在 `created`。该协议不得伪造一个已执行 Attempt。
 
 - [ ] **Step 2: Run coordinator tests and verify RED**
 
@@ -699,6 +711,8 @@ export interface AgentBudgetLedger {
 ```
 
 新增 `chat_agent_budget_reservations` 持久化表，字段至少包含 `reservationId/sessionId/turnId/checkpointId/taskId/kind/reserved/used/status/createdAt/updatedAt`。ledger 由 checkpoint/Turn 持有，不由 Child 创建；授权前在同一数据库事务中验证所有 active reservation，所有 reservation 操作串行执行。Main 重启后即使 Checkpoint 被安全中断，reservation 仍能按持久化状态结算或释放，不能泄漏 Turn/Session 额度。
+
+Task 6 同时把 ledger 与父权限 ceiling 组合成生产 `resolveReadLimits` 依赖并注入默认 Agent service；在这一步完成前，Task 2 的生产默认 resolver 持续 fail-closed，Coordinator 测试只能显式注入可信 fixture。
 
 - [ ] **Step 4: Write cancellation/deadline integration tests**
 

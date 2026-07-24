@@ -98,7 +98,7 @@ function createExecutionPlan(contract: DelegateTaskInput): AgentExecutionPlanSna
   if (!validation.ok) throw new Error('Fixture contract must be valid');
   const body = {
     planSchemaVersion: 1,
-    policyVersion: 'foundation-v1',
+    policyVersion: 'read-runtime-v1',
     capabilitySet: ['read_file'],
     modelSnapshot: { providerId: 'openai', modelId: 'gpt-5' },
     permissionSnapshot: { scopeIds: ['workspace-read'] },
@@ -296,6 +296,14 @@ describe('foundation delegation contract', (): void => {
       ...expandedBody,
       planHash: hashExecutionPlanSnapshot(contractValidation.contractSnapshot, expandedBody)
     };
+    const externalBody = {
+      ...plan,
+      toolEffectSet: [{ toolName: 'read_file', effect: 'external_read' as const }]
+    };
+    const externalPlan = {
+      ...externalBody,
+      planHash: hashExecutionPlanSnapshot(contractValidation.contractSnapshot, externalBody)
+    };
 
     expect(validateExecutionPlanSnapshot(contractValidation.contractSnapshot, { ...plan, planHash: 'f'.repeat(64) })).toMatchObject({
       ok: false
@@ -307,6 +315,14 @@ describe('foundation delegation contract', (): void => {
       })
     ).toMatchObject({ ok: false });
     expect(validateExecutionPlanSnapshot(contractValidation.contractSnapshot, expandedPlan)).toMatchObject({ ok: false });
+    expect(validateExecutionPlanSnapshot(contractValidation.contractSnapshot, { ...plan, policyVersion: 'foundation-v1' })).toMatchObject({ ok: false });
+    expect(validateExecutionPlanSnapshot(contractValidation.contractSnapshot, externalPlan)).toMatchObject({ ok: false });
+    expect(
+      validateExecutionPlanSnapshot(contractValidation.contractSnapshot, {
+        ...plan,
+        permissionSnapshot: { scopeIds: [] }
+      })
+    ).toMatchObject({ ok: false });
   });
 
   it('rejects secret-shaped model and continuation identities even when their hashes are recomputed', (): void => {

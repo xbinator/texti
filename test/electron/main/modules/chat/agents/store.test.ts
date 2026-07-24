@@ -205,7 +205,7 @@ function allowResultCorruption(databaseAdapter: AgentStoreDatabase): void {
 function createExecutionPlan(input: PrepareDelegationInput): AgentExecutionPlanSnapshot {
   const planWithoutHash = {
     planSchemaVersion: 1,
-    policyVersion: 'foundation-v1',
+    policyVersion: 'read-runtime-v1',
     capabilitySet: ['read_file'],
     modelSnapshot: { providerId: 'openai', modelId: 'gpt-5' },
     permissionSnapshot: { scopeIds: ['workspace-read'] },
@@ -320,16 +320,13 @@ function createStartFailedResult(taskId: string): ChatAgentResult {
 function startTask(store: AgentDelegationStore, input: PrepareDelegationInput): void {
   const { taskId } = input.tasks[0];
   const plan = createExecutionPlan(input);
-  store.transitionTask({ taskId, toStatus: 'planning', occurredAt, source: 'coordinator' });
-  store.transitionTask({
+  store.authorizeTask({
     taskId,
-    toStatus: 'authorized',
     executionPlanSnapshot: plan,
     executionPlanSnapshotHash: plan.planHash,
     occurredAt,
     source: 'coordinator'
   });
-  store.transitionTask({ taskId, toStatus: 'queued', queuePhase: 'start', occurredAt, source: 'coordinator' });
   const attemptId = `attempt-${taskId}`;
   const runtimeId = `runtime-${attemptId}`;
   store.beginAttempt({
@@ -440,19 +437,12 @@ describeWithSqlite('agent delegation store', (): void => {
     const gapInput = createPreparedInput('event-gap');
     const gapPlan = createExecutionPlan(gapInput);
     store.prepareDelegation(gapInput, (): undefined => undefined);
-    store.transitionTask({
+    store.authorizeTask({
       taskId: gapInput.tasks[0].taskId,
-      toStatus: 'planning',
+      executionPlanSnapshot: gapPlan,
+      executionPlanSnapshotHash: gapPlan.planHash,
       occurredAt,
       source: 'coordinator'
-    });
-    store.transitionTask({
-      taskId: gapInput.tasks[0].taskId,
-      toStatus: 'authorized',
-      occurredAt,
-      source: 'coordinator',
-      executionPlanSnapshot: gapPlan,
-      executionPlanSnapshotHash: gapPlan.planHash
     });
     allowEventCorruption(adapter);
     adapter.execute('DELETE FROM chat_agent_events WHERE aggregate_kind = ? AND aggregate_id = ? AND sequence = ?', ['task', gapInput.tasks[0].taskId, 2]);
@@ -461,10 +451,12 @@ describeWithSqlite('agent delegation store', (): void => {
     }).toThrowError(expect.objectContaining({ code: 'protocol_error' }));
 
     const linkInput = createPreparedInput('event-link');
+    const linkPlan = createExecutionPlan(linkInput);
     store.prepareDelegation(linkInput, (): undefined => undefined);
-    store.transitionTask({
+    store.authorizeTask({
       taskId: linkInput.tasks[0].taskId,
-      toStatus: 'planning',
+      executionPlanSnapshot: linkPlan,
+      executionPlanSnapshotHash: linkPlan.planHash,
       occurredAt,
       source: 'coordinator'
     });
@@ -477,6 +469,60 @@ describeWithSqlite('agent delegation store', (): void => {
     expect((): void => {
       store.listEvents('task', linkInput.tasks[0].taskId);
     }).toThrowError(expect.objectContaining({ code: 'protocol_error' }));
+  });
+
+  it('rejects a plan authorization Event that no longer matches the immutable Task plan', (): void => {
+    const input = createPreparedInput('event-plan');
+    const { taskId } = input.tasks[0];
+    const plan = createExecutionPlan(input);
+    store.prepareDelegation(input, (): undefined => undefined);
+    store.authorizeTask({
+      taskId,
+      executionPlanSnapshot: plan,
+      executionPlanSnapshotHash: plan.planHash,
+      occurredAt,
+      source: 'coordinator'
+    });
+    allowEventCorruption(adapter);
+    adapter.execute('UPDATE chat_agent_events SET payload_json = ? WHERE aggregate_kind = ? AND aggregate_id = ? AND event_type = ?', [
+      JSON.stringify({
+        planHash: 'f'.repeat(64),
+        planSchemaVersion: plan.planSchemaVersion,
+        policyVersion: plan.policyVersion
+      }),
+      'task',
+      taskId,
+      'plan.authorized'
+    ]);
+
+    expect((): void => {
+      store.listEvents('task', taskId);
+    }).toThrowError(expect.objectContaining({ reason: 'task_event_plan_invalid' }));
+  });
+
+  it('rejects a queued Event that no longer follows its matching status transition', (): void => {
+    const input = createPreparedInput('event-queue');
+    const { taskId } = input.tasks[0];
+    const plan = createExecutionPlan(input);
+    store.prepareDelegation(input, (): undefined => undefined);
+    store.authorizeTask({
+      taskId,
+      executionPlanSnapshot: plan,
+      executionPlanSnapshotHash: plan.planHash,
+      occurredAt,
+      source: 'coordinator'
+    });
+    allowEventCorruption(adapter);
+    adapter.execute('UPDATE chat_agent_events SET payload_json = ? WHERE aggregate_kind = ? AND aggregate_id = ? AND event_type = ?', [
+      JSON.stringify({ queuePhase: 'commit' }),
+      'task',
+      taskId,
+      'task.queued'
+    ]);
+
+    expect((): void => {
+      store.listEvents('task', taskId);
+    }).toThrowError(expect.objectContaining({ reason: 'task_event_queue_invalid' }));
   });
 
   it('rejects Task history when its projected status differs from the Task row', (): void => {
@@ -730,10 +776,8 @@ describeWithSqlite('agent delegation store', (): void => {
     store.prepareDelegation(input, (): undefined => undefined);
     const plan = createExecutionPlan(input);
 
-    store.transitionTask({ taskId: 'task-plan', toStatus: 'planning', occurredAt, source: 'coordinator' });
-    const authorized = store.transitionTask({
+    const authorized = store.authorizeTask({
       taskId: 'task-plan',
-      toStatus: 'authorized',
       executionPlanSnapshot: plan,
       executionPlanSnapshotHash: plan.planHash,
       occurredAt,
@@ -755,6 +799,115 @@ describeWithSqlite('agent delegation store', (): void => {
     expect(store.getTask('task-plan')?.executionPlanSnapshotHash).toBe(plan.planHash);
   });
 
+  it('rejects split read authorization through the generic transition API', (): void => {
+    const input = createPreparedInput('split-plan');
+    store.prepareDelegation(input, (): undefined => undefined);
+
+    expect((): void => {
+      store.transitionTask({
+        taskId: input.tasks[0].taskId,
+        toStatus: 'planning',
+        occurredAt,
+        source: 'coordinator'
+      });
+    }).toThrowError(expect.objectContaining({ reason: 'read_authorization_requires_atomic_protocol' }));
+    expect(store.getTask(input.tasks[0].taskId)?.status).toBe('created');
+    expect(store.listEvents('task', input.tasks[0].taskId)).toHaveLength(1);
+  });
+
+  it('atomically authorizes and queues one compiled read plan with idempotent replay', (): void => {
+    const input = createPreparedInput('atomic-plan');
+    const { taskId } = input.tasks[0];
+    const plan = createExecutionPlan(input);
+    store.prepareDelegation(input, (): undefined => undefined);
+
+    const queued = store.authorizeTask({
+      taskId,
+      executionPlanSnapshot: plan,
+      executionPlanSnapshotHash: plan.planHash,
+      occurredAt,
+      source: 'coordinator'
+    });
+    const eventTypes = store.listEvents('task', taskId).map((event): string => event.type);
+    const replayed = store.authorizeTask({
+      taskId,
+      executionPlanSnapshot: plan,
+      executionPlanSnapshotHash: plan.planHash,
+      occurredAt,
+      source: 'coordinator'
+    });
+
+    expect(queued).toMatchObject({
+      status: 'queued',
+      queuePhase: 'start',
+      executionPlanSnapshotHash: plan.planHash
+    });
+    expect(eventTypes).toEqual(['task.created', 'task.status_changed', 'task.status_changed', 'plan.authorized', 'task.status_changed', 'task.queued']);
+    expect(replayed).toEqual(queued);
+    expect(store.listEvents('task', taskId)).toHaveLength(eventTypes.length);
+  });
+
+  it('rolls back every authorization fact when an intermediate Event append fails', (): void => {
+    const input = createPreparedInput('atomic-rollback');
+    const { taskId } = input.tasks[0];
+    const plan = createExecutionPlan(input);
+    store.prepareDelegation(input, (): undefined => undefined);
+    const failingAdapter: AgentStoreDatabase = {
+      execute(sql: string, params: readonly unknown[] = []): { changes: number; lastInsertRowid: number | bigint } {
+        if (sql.includes('INSERT INTO chat_agent_events') && params[8] === 'plan.authorized') {
+          throw new Error('injected plan Event failure');
+        }
+        return adapter.execute(sql, params);
+      },
+      select: <T>(sql: string, params: readonly unknown[] = []): T[] => adapter.select<T>(sql, params),
+      transaction: <T>(operation: () => T): T => adapter.transaction(operation)
+    };
+    const failingStore = createAgentDelegationStore(failingAdapter);
+
+    expect((): void => {
+      failingStore.authorizeTask({
+        taskId,
+        executionPlanSnapshot: plan,
+        executionPlanSnapshotHash: plan.planHash,
+        occurredAt,
+        source: 'coordinator'
+      });
+    }).toThrowError('injected plan Event failure');
+
+    const rolledBackTask = store.getTask(taskId);
+    expect(rolledBackTask?.status).toBe('created');
+    expect(rolledBackTask?.executionPlanSnapshot).toBeUndefined();
+    expect(rolledBackTask?.executionPlanSnapshotHash).toBeUndefined();
+    expect(store.listEvents('task', taskId).map((event): string => event.type)).toEqual(['task.created']);
+  });
+
+  it('rejects a plan whose model differs from the frozen Checkpoint without mutation', (): void => {
+    const input = createPreparedInput('model-mismatch');
+    const { taskId } = input.tasks[0];
+    const plan = createExecutionPlan(input);
+    const mismatchedBody = {
+      ...plan,
+      modelSnapshot: { providerId: 'openai', modelId: 'upgraded-model' }
+    };
+    const mismatchedPlan: AgentExecutionPlanSnapshot = {
+      ...mismatchedBody,
+      planHash: hashExecutionPlanSnapshot(input.tasks[0].contractSnapshot, mismatchedBody)
+    };
+    store.prepareDelegation(input, (): undefined => undefined);
+
+    expect((): void => {
+      store.authorizeTask({
+        taskId,
+        executionPlanSnapshot: mismatchedPlan,
+        executionPlanSnapshotHash: mismatchedPlan.planHash,
+        occurredAt,
+        source: 'coordinator'
+      });
+    }).toThrowError(expect.objectContaining({ reason: 'authorization_aggregate_invalid' }));
+    expect(store.getTask(taskId)?.status).toBe('created');
+    expect(store.listEvents('task', taskId)).toHaveLength(1);
+  });
+
   it('atomically begins and acknowledges one frozen-plan Attempt', (): void => {
     const input = createPreparedInput('attempt-lifecycle');
     const { taskId } = input.tasks[0];
@@ -762,16 +915,13 @@ describeWithSqlite('agent delegation store', (): void => {
     const runtimeId = 'runtime-lifecycle-1';
     const plan = createExecutionPlan(input);
     store.prepareDelegation(input, (): undefined => undefined);
-    store.transitionTask({ taskId, toStatus: 'planning', occurredAt, source: 'coordinator' });
-    store.transitionTask({
+    store.authorizeTask({
       taskId,
-      toStatus: 'authorized',
       executionPlanSnapshot: plan,
       executionPlanSnapshotHash: plan.planHash,
       occurredAt,
       source: 'coordinator'
     });
-    store.transitionTask({ taskId, toStatus: 'queued', queuePhase: 'start', occurredAt, source: 'coordinator' });
     const beforeBeginEvents = store.listEvents('task', taskId);
 
     const starting = store.beginAttempt({
@@ -872,16 +1022,13 @@ describeWithSqlite('agent delegation store', (): void => {
     const runtimeId = `runtime-replay-history-${attemptStatus}`;
     const plan = createExecutionPlan(input);
     store.prepareDelegation(input, (): undefined => undefined);
-    store.transitionTask({ taskId, toStatus: 'planning', occurredAt, source: 'coordinator' });
-    store.transitionTask({
+    store.authorizeTask({
       taskId,
-      toStatus: 'authorized',
       executionPlanSnapshot: plan,
       executionPlanSnapshotHash: plan.planHash,
       occurredAt,
       source: 'coordinator'
     });
-    store.transitionTask({ taskId, toStatus: 'queued', queuePhase: 'start', occurredAt, source: 'coordinator' });
     store.beginAttempt({
       taskId,
       attemptId,
@@ -1004,16 +1151,13 @@ describeWithSqlite('agent delegation store', (): void => {
     const { taskId } = input.tasks[0];
     const plan = createExecutionPlan(input);
     store.prepareDelegation(input, (): undefined => undefined);
-    store.transitionTask({ taskId, toStatus: 'planning', occurredAt, source: 'coordinator' });
-    store.transitionTask({
+    store.authorizeTask({
       taskId,
-      toStatus: 'authorized',
       executionPlanSnapshot: plan,
       executionPlanSnapshotHash: plan.planHash,
       occurredAt,
       source: 'coordinator'
     });
-    store.transitionTask({ taskId, toStatus: 'queued', queuePhase: 'start', occurredAt, source: 'coordinator' });
     const queuedEventCount = store.listEvents('task', taskId).length;
     expect((): void => {
       store.beginAttempt({
@@ -1076,16 +1220,13 @@ describeWithSqlite('agent delegation store', (): void => {
     const runtimeId = `runtime-rollback-${eventType}`;
     const plan = createExecutionPlan(input);
     store.prepareDelegation(input, (): undefined => undefined);
-    store.transitionTask({ taskId, toStatus: 'planning', occurredAt, source: 'coordinator' });
-    store.transitionTask({
+    store.authorizeTask({
       taskId,
-      toStatus: 'authorized',
       executionPlanSnapshot: plan,
       executionPlanSnapshotHash: plan.planHash,
       occurredAt,
       source: 'coordinator'
     });
-    store.transitionTask({ taskId, toStatus: 'queued', queuePhase: 'start', occurredAt, source: 'coordinator' });
     if (eventType === 'runtime.started') {
       store.beginAttempt({
         taskId,
@@ -1130,16 +1271,13 @@ describeWithSqlite('agent delegation store', (): void => {
     const { taskId } = input.tasks[0];
     const plan = createExecutionPlan(input);
     store.prepareDelegation(input, (): undefined => undefined);
-    store.transitionTask({ taskId, toStatus: 'planning', occurredAt, source: 'coordinator' });
-    store.transitionTask({
+    store.authorizeTask({
       taskId,
-      toStatus: 'authorized',
       executionPlanSnapshot: plan,
       executionPlanSnapshotHash: plan.planHash,
       occurredAt,
       source: 'coordinator'
     });
-    store.transitionTask({ taskId, toStatus: 'queued', queuePhase: 'start', occurredAt, source: 'coordinator' });
     store.beginAttempt({
       taskId,
       attemptId: `attempt-${taskId}`,

@@ -49,6 +49,9 @@ export const AGENT_EVENT_SCHEMA_VERSION = 1;
 /** 当前基础阶段的安全策略版本。 */
 export const AGENT_FOUNDATION_POLICY_VERSION = 'foundation-v1';
 
+/** 当前只读 Child Execution Plan 的安全策略版本。 */
+export const AGENT_READ_PLAN_POLICY_VERSION = 'read-runtime-v1';
+
 /** 单个契约允许的最大验收标准数量。 */
 export const AGENT_MAX_ACCEPTANCE_CRITERIA = 16;
 
@@ -968,7 +971,8 @@ export function validateExecutionPlanSnapshot(contractSnapshot: AgentTaskContrac
   if (!isPlainRecord(input) || !hasOnlyKeys(input, allowedKeys)) {
     return fail('plan_schema_invalid', 'Execution plan contains unknown or missing structure');
   }
-  if (input.planSchemaVersion !== AGENT_PLAN_SCHEMA_VERSION || input.policyVersion !== AGENT_FOUNDATION_POLICY_VERSION) {
+  if (contractSnapshot.mode !== 'read') return fail('plan_mode_invalid', 'Read execution plans require a read Task contract');
+  if (input.planSchemaVersion !== AGENT_PLAN_SCHEMA_VERSION || input.policyVersion !== AGENT_READ_PLAN_POLICY_VERSION) {
     return fail('plan_version_unsupported', 'Execution plan schema or policy version is unsupported');
   }
   if (!isSha256(input.planHash)) return fail('plan_hash_invalid', 'Execution plan hash is invalid');
@@ -982,13 +986,13 @@ export function validateExecutionPlanSnapshot(contractSnapshot: AgentTaskContrac
   if (!isPlainRecord(input.permissionSnapshot) || !hasOnlyKeys(input.permissionSnapshot, new Set(['scopeIds']))) {
     return fail('plan_permission_invalid', 'Execution plan permission snapshot is invalid');
   }
-  const scopeIds = normalizeStringSet(input.permissionSnapshot.scopeIds, AGENT_MAX_RESOURCES, true);
+  const scopeIds = normalizeStringSet(input.permissionSnapshot.scopeIds, AGENT_MAX_RESOURCES, false);
   const resourceScopes = normalizeStringSet(input.resourceScopes, AGENT_MAX_RESOURCES, false);
   if (!scopeIds || !resourceScopes) return fail('plan_scope_invalid', 'Execution plan scopes are invalid');
   if (!Array.isArray(input.toolEffectSet) || input.toolEffectSet.length !== capabilitySet.length) {
     return fail('plan_effect_invalid', 'Execution plan tool effects must match the capability set');
   }
-  const allowedEffects = new Set<AgentPlanToolEffect['effect']>(['pure_read', 'external_read']);
+  const allowedEffects = new Set<AgentPlanToolEffect['effect']>(['pure_read']);
   const toolEffectSet = input.toolEffectSet.map((effect): AgentPlanToolEffect | null => {
     if (!isPlainRecord(effect) || !hasOnlyKeys(effect, new Set(['toolName', 'effect']))) return null;
     const toolName = normalizeAgentIdentity(effect.toolName);
@@ -1014,14 +1018,14 @@ export function validateExecutionPlanSnapshot(contractSnapshot: AgentTaskContrac
     input.commitPolicy.mode !== 'none' ||
     input.commitPolicy.adapter !== undefined
   ) {
-    return fail('plan_commit_policy_invalid', 'Foundation execution plans must use the no-write commit policy');
+    return fail('plan_commit_policy_invalid', 'Read execution plans must use the no-write commit policy');
   }
   const budget = normalizeBudgetSnapshot(input.budget);
   if (!budget) return fail('plan_budget_invalid', 'Execution plan budget is invalid');
 
   const body: AgentExecutionPlanBody = {
     planSchemaVersion: AGENT_PLAN_SCHEMA_VERSION,
-    policyVersion: AGENT_FOUNDATION_POLICY_VERSION,
+    policyVersion: AGENT_READ_PLAN_POLICY_VERSION,
     capabilitySet,
     modelSnapshot,
     permissionSnapshot: { scopeIds },
@@ -1269,7 +1273,7 @@ function normalizeEventPayload(type: ChatAgentEventType, input: unknown): ChatAg
         hasExactKeys(input, ['planHash', 'planSchemaVersion', 'policyVersion']) &&
         isSha256(input.planHash) &&
         input.planSchemaVersion === AGENT_PLAN_SCHEMA_VERSION &&
-        input.policyVersion === AGENT_FOUNDATION_POLICY_VERSION;
+        input.policyVersion === AGENT_READ_PLAN_POLICY_VERSION;
       break;
     case 'task.queued':
       valid = hasExactKeys(input, ['queuePhase']) && (input.queuePhase === 'start' || input.queuePhase === 'commit');

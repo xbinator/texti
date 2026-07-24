@@ -2,10 +2,18 @@
  * @file service.mts
  * @description Child Agent 委派契约校验、原子 prepare、continuation fence 与启动恢复服务。
  */
-import type { AgentCheckpointRecord, AgentDelegationStore, AgentStoreDatabase, PrepareAgentTaskInput, PrepareDelegationInput } from './types.mjs';
+import type {
+  AgentCheckpointRecord,
+  AgentDelegationStore,
+  AgentStoreDatabase,
+  AgentTaskRecord,
+  PrepareAgentTaskInput,
+  PrepareDelegationInput
+} from './types.mjs';
 import type { ChatRuntimeDelegationPrepareAck, ChatRuntimeDelegationPrepareInput, ChatRuntimePrimaryContinuationContext } from '../runtime/types.mjs';
 import type { ChatMessageRecord } from 'types/chat';
 import type {
+  AgentBudgetSnapshot,
   AgentDelegationContinuationSnapshot,
   AgentDelegationCreatedPayload,
   AgentDelegationReadyPayload,
@@ -22,6 +30,7 @@ import type {
 import type { ChatRuntimeAddress } from 'types/chat-runtime';
 import { BrowserWindow } from 'electron';
 import { nanoid } from 'nanoid';
+import { getToolRegistryEntry } from '../../../../../shared/ai/tools/index.js';
 import { dbExecute, dbSelect, transaction } from '../../database/service.mjs';
 import { chatRuntimeLocks, getSessionHistoryScope, type RuntimeContinuationFenceHandle, type RuntimeLockRegistry } from '../runtime/infrastructure/locks.mjs';
 import { finishAssistantMessageInterrupted } from '../runtime/messages/finalizer.mjs';
@@ -36,6 +45,8 @@ import {
   validateContinuationSnapshot,
   validateFoundationContract
 } from './contracts.mjs';
+import { compileAgentPlan, type AgentPlanCompileInput, type AgentPlanCompileResult } from './plan-compiler.mjs';
+import { resolveAgentScopes } from './resource-scopes.mjs';
 import { validateAgentResult } from './result.mjs';
 import { createAgentDelegationStore } from './store.mjs';
 
@@ -46,6 +57,7 @@ export type ContinuationRuntimeContext = ChatRuntimePrimaryContinuationContext;
 export type ChatAgentDelegationStore = Pick<
   AgentDelegationStore,
   | 'prepareDelegation'
+  | 'authorizeTask'
   | 'recordTaskResult'
   | 'getTask'
   | 'getCheckpoint'
@@ -60,6 +72,16 @@ export type ChatAgentDelegationStore = Pick<
   | 'listPendingOutbox'
   | 'markOutboxDelivered'
 >;
+
+/** 主进程授权器为一个只读 Task 分配的当前上限。 */
+export interface ChatAgentReadPlanLimits {
+  /** 主进程此刻实际可用的工具名称。 */
+  readonly availableToolNames: readonly string[];
+  /** 权限系统批准的 scope IDs。 */
+  readonly permissionScopeIds: readonly string[];
+  /** Task 独立预算上限。 */
+  readonly budget: AgentBudgetSnapshot;
+}
 
 /** 委派服务稳定 ID 域。 */
 export type ChatAgentDelegationIdKind = 'task' | 'child' | 'outbox' | 'continuation' | 'runtime';
@@ -134,6 +156,20 @@ export interface ChatAgentDelegationServiceDependencies {
   /** @returns 当前 ISO-8601 时间。 */
   now: () => string;
   /**
+   * 从主进程权限、可用性和预算事实解析当前 Task 上限。
+   * @param task - 不可变 Task
+   * @param checkpoint - Task 所属 Checkpoint
+   * @param context - 已通过 hash 校验的冻结上下文
+   * @returns 不接受 Renderer 覆盖的当前上限
+   */
+  resolveReadLimits?: (task: AgentTaskRecord, checkpoint: AgentCheckpointRecord, context: ContinuationRuntimeContext) => ChatAgentReadPlanLimits;
+  /**
+   * 使用主进程 registry 与 policy 编译计划。
+   * @param input - 持久化事实和可信授权上限
+   * @returns 已冻结计划或结构化失败
+   */
+  compileReadPlan?: (input: AgentPlanCompileInput) => AgentPlanCompileResult;
+  /**
    * 启动只接受内部冻结输入的 Primary Runtime B。
    * @param input - claimed Checkpoint、Runtime ID 与易失上下文
    * @returns 安全完成或已持久化失败
@@ -161,6 +197,12 @@ export interface ChatAgentDelegationService {
    * @returns 精确同步 ACK
    */
   prepareDelegation(input: ChatRuntimeDelegationPrepareInput): ChatRuntimeDelegationPrepareAck;
+  /**
+   * 从持久化事实和主进程可信依赖编译并原子授权一个只读 Task。
+   * @param taskId - created 状态的 Task
+   * @returns queued(start) 状态的 Task
+   */
+  authorizeReadTask(taskId: string): AgentTaskRecord;
   /**
    * 规范化并原子记录一个 Child 终态结果。
    * @param input - 不含 Child hash 的 Task 结果
@@ -426,6 +468,47 @@ function isSettledStatus(
   return status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'interrupted';
 }
 
+/** 首版 Child Runtime 显式允许的本地纯读工具。 */
+const CHILD_READ_TOOL_NAMES = new Set(['glob', 'grep', 'read_directory', 'read_file']);
+
+/**
+ * 在层级预算账本接入前拒绝生产默认授权。
+ * @param task - 当前 Task
+ * @param checkpoint - 当前 Checkpoint
+ * @param context - 已校验冻结上下文
+ * @returns 不会返回；必须由 Main 注入可信权限与预算提供器
+ */
+function resolveDefaultLimits(task: AgentTaskRecord, checkpoint: AgentCheckpointRecord, context: ContinuationRuntimeContext): ChatAgentReadPlanLimits {
+  const hasFrozenAuthority = task.checkpointId === checkpoint.checkpointId && checkpoint.status === 'waiting_children' && Boolean(context.workspaceRoot);
+  throw new ChatAgentDelegationError({
+    code: 'capability_denied',
+    phase: 'plan_validation',
+    category: 'policy',
+    retryable: false,
+    message: '层级预算与父权限提供器尚未接入，默认授权保持关闭',
+    details: {
+      reason: hasFrozenAuthority ? 'plan_budget_allocator_unavailable' : 'plan_parent_authority_invalid',
+      taskId: task.taskId,
+      checkpointId: checkpoint.checkpointId
+    }
+  });
+}
+
+/**
+ * 使用主进程 registry、scope resolver 与显式 policy 编译计划。
+ * @param input - 持久化事实和可信当前上限
+ * @returns 已冻结计划或结构化错误
+ */
+function compileDefaultPlan(input: AgentPlanCompileInput): AgentPlanCompileResult {
+  return compileAgentPlan(input, {
+    resolveScopes: resolveAgentScopes,
+    getToolEntry: getToolRegistryEntry,
+    isToolAllowed: (toolName: string): boolean => CHILD_READ_TOOL_NAMES.has(toolName),
+    // 当前输入本身来自一次已发生的 delegate_task tool-call，因此冻结模型已证明支持工具调用。
+    isModelToolCapable: (): boolean => input.checkpoint.continuationSnapshot.orderedToolCalls.length > 0
+  });
+}
+
 /**
  * 创建 Child Agent 委派服务。
  * @param dependencies - 同步 Store、共享锁和事件依赖
@@ -640,6 +723,60 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
   }
 
   /**
+   * 编译并原子授权一个 created read Task。
+   * @param taskId - 目标 Task
+   * @returns queued(start) Task
+   */
+  function authorizeReadTask(taskId: string): AgentTaskRecord {
+    const normalizedTaskId = taskId.trim();
+    const task = normalizedTaskId ? dependencies.store.getTask(normalizedTaskId) : null;
+    const checkpoint = task ? dependencies.store.getCheckpoint(task.checkpointId) : null;
+    if (!task || !checkpoint) {
+      throw new ChatAgentDelegationError({
+        code: 'protocol_error',
+        phase: 'plan_validation',
+        category: 'protocol',
+        retryable: false,
+        message: '只读 Task 或所属 Checkpoint 不存在',
+        details: { reason: 'authorization_context_missing', taskId: normalizedTaskId }
+      });
+    }
+    const context = continuationContexts.get(checkpoint.checkpointId);
+    assertResumeContext(checkpoint, context);
+    if (!context.workspaceRoot) {
+      throw new ChatAgentDelegationError({
+        code: 'resource_scope_invalid',
+        phase: 'resource_validation',
+        category: 'resource',
+        retryable: false,
+        message: '只读 Child Task 缺少冻结工作区',
+        details: { reason: 'workspace_root_missing', taskId: task.taskId }
+      });
+    }
+
+    const limitsResolver = dependencies.resolveReadLimits ?? resolveDefaultLimits;
+    const compiler = dependencies.compileReadPlan ?? compileDefaultPlan;
+    const limits = limitsResolver(task, checkpoint, context);
+    const compiled = compiler({
+      task,
+      checkpoint,
+      parentToolNames: context.toolSchemaSnapshot.map((tool): string => tool.name),
+      availableToolNames: limits.availableToolNames,
+      permissionScopeIds: limits.permissionScopeIds,
+      workspaceRoot: context.workspaceRoot,
+      budget: limits.budget
+    });
+    if (!compiled.ok) throw new ChatAgentDelegationError(compiled.error);
+    return dependencies.store.authorizeTask({
+      taskId: task.taskId,
+      executionPlanSnapshot: compiled.plan,
+      executionPlanSnapshotHash: compiled.plan.planHash,
+      occurredAt: dependencies.now(),
+      source: 'coordinator'
+    });
+  }
+
+  /**
    * 返回所有公开非终态 Checkpoint 投影。
    * @returns 按 Store 顺序排列的 allowlist 快照
    */
@@ -775,6 +912,8 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
       }
       return { prepared: true };
     },
+
+    authorizeReadTask,
 
     recordTaskResult(input: ChatAgentRecordTaskResultInput): ReturnType<AgentDelegationStore['recordTaskResult']> {
       const task = dependencies.store.getTask(input.taskId);

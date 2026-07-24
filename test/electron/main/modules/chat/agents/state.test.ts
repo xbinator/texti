@@ -27,7 +27,7 @@ const contractSnapshot: AgentTaskContractSnapshot = {
 /** 满足授权迁移要求的冻结执行计划快照。 */
 const executionPlanBody = {
   planSchemaVersion: 1,
-  policyVersion: 'foundation-v1',
+  policyVersion: 'read-runtime-v1',
   capabilitySet: ['read_file'],
   modelSnapshot: { providerId: 'openai', modelId: 'gpt-5' },
   permissionSnapshot: { scopeIds: ['workspace-read'] },

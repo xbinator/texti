@@ -357,6 +357,20 @@ export interface TransitionAgentTaskInput {
   source: ChatAgentEventSource;
 }
 
+/** 原子编译后授权一个只读 Task 的输入。 */
+export interface AuthorizeAgentTaskInput {
+  /** created 状态的目标 Task。 */
+  taskId: string;
+  /** 经 Coordinator 编译并校验的不可变计划。 */
+  executionPlanSnapshot: AgentExecutionPlanSnapshot;
+  /** 计划完整性 hash。 */
+  executionPlanSnapshotHash: string;
+  /** 三段迁移共享的 Event 时间。 */
+  occurredAt: string;
+  /** 可信授权来源。 */
+  source: Extract<ChatAgentEventSource, 'coordinator' | 'system'>;
+}
+
 /** 原子创建一个 Child Attempt 的输入。 */
 export interface BeginAgentAttemptInput {
   /** 已冻结计划并处于 queued(start) 的 Task。 */
@@ -491,6 +505,12 @@ export interface AgentDelegationStore {
    * @returns 更新后的 Task
    */
   transitionTask(input: TransitionAgentTaskInput): AgentTaskRecord;
+  /**
+   * 在一个事务内写入 planning、authorized 和 queued(start) 事实。
+   * @param input - 已编译且未落库的只读计划
+   * @returns 已进入 queued(start) 的 Task
+   */
+  authorizeTask(input: AuthorizeAgentTaskInput): AgentTaskRecord;
   /**
    * 原子创建 Attempt、绑定 Task 并进入 starting。
    * @param input - 冻结 Task 与预注册 Runtime 身份

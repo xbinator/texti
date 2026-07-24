@@ -187,7 +187,7 @@ function createExecutionPlan(store: AgentDelegationStore): AgentExecutionPlanSna
   if (!task) throw new Error('Expected prepared task');
   const planWithoutHash = {
     planSchemaVersion: 1,
-    policyVersion: 'foundation-v1',
+    policyVersion: 'read-runtime-v1',
     capabilitySet: ['read_file'],
     modelSnapshot: { providerId: 'provider-1', modelId: 'model-1' },
     permissionSnapshot: { scopeIds: ['workspace-read'] },
@@ -208,16 +208,13 @@ function createExecutionPlan(store: AgentDelegationStore): AgentExecutionPlanSna
  */
 function startTask(store: AgentDelegationStore): void {
   const plan = createExecutionPlan(store);
-  store.transitionTask({ taskId: 'task-1', toStatus: 'planning', occurredAt, source: 'coordinator' });
-  store.transitionTask({
+  store.authorizeTask({
     taskId: 'task-1',
-    toStatus: 'authorized',
     executionPlanSnapshot: plan,
     executionPlanSnapshotHash: plan.planHash,
     occurredAt,
     source: 'coordinator'
   });
-  store.transitionTask({ taskId: 'task-1', toStatus: 'queued', queuePhase: 'start', occurredAt, source: 'coordinator' });
   store.beginAttempt({
     taskId: 'task-1',
     attemptId: 'attempt-1',
