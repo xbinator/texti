@@ -4,8 +4,10 @@
 -->
 <template>
   <BPanelSplitter
-    v-show="settingStore.sidebarVisible"
     v-model:size="settingStore.sidebarWidth"
+    :class="bem({ visible: settingStore.sidebarVisible })"
+    :inert="settingStore.sidebarVisible ? undefined : true"
+    :style="siderStyle"
     position="left"
     :min-width="340"
     max-width="40%"
@@ -59,6 +61,7 @@
 
 <script setup lang="ts">
 import type { ChatSession } from 'types/chat';
+import type { CSSProperties } from 'vue';
 import { computed, defineAsyncComponent, onMounted, reactive, ref } from 'vue';
 import { Input as AInput, message } from 'ant-design-vue';
 import BButton from '@/components/BButton/index.vue';
@@ -74,6 +77,14 @@ import { useChatSession } from '../hooks/useChatSession';
 const BChat = defineAsyncComponent(() => import('@/components/BChat/index.vue'));
 
 const [, bem] = createNamespace('chat-sider', '');
+
+/**
+ * ChatSider 根元素内联样式。
+ */
+type ChatSiderStyle = CSSProperties & {
+  /** 当前聊天侧栏宽度，用于显示状态切换时做显式宽度过渡。 */
+  '--chat-sider-width': string;
+};
 
 /** 应用设置存储。 */
 const settingStore = useSettingStore();
@@ -97,6 +108,12 @@ const {
 const bChatRef = ref<InstanceType<typeof BChat>>();
 /** 当前标题。 */
 const currentTitle = computed<string>(() => currentSession.value?.title || '新会话');
+/** 根元素样式变量，隐藏态宽度归零，显示态恢复用户拖拽宽度。 */
+const siderStyle = computed<ChatSiderStyle>(
+  (): ChatSiderStyle => ({
+    '--chat-sider-width': `${settingStore.sidebarWidth}px`
+  })
+);
 /** 是否禁用会话切换、新会话和删除操作。 */
 const isSessionActionDisabled = computed<boolean>(() => chatLoading.value || chatStore.sessionsLoading);
 
@@ -189,6 +206,26 @@ function handleChatLoadingChange(loading: boolean): void {
 </script>
 
 <style lang="less">
+.chat-sider {
+  flex-shrink: 0;
+  width: 0;
+  min-width: 0;
+  max-width: 40%;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(12px);
+  transition: width 0.36s ease, opacity 0.24s ease, transform 0.36s ease;
+  will-change: width, opacity, transform;
+}
+
+.chat-sider--visible {
+  width: var(--chat-sider-width);
+  pointer-events: auto;
+  opacity: 1;
+  transform: translateX(0);
+}
+
 .chat-sider__content {
   display: flex;
   flex-shrink: 0;
@@ -227,5 +264,11 @@ function handleChatLoadingChange(loading: boolean): void {
   width: 1px;
   height: 16px;
   background: var(--border-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-sider {
+    transition: none;
+  }
 }
 </style>

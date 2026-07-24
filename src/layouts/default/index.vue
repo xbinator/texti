@@ -71,7 +71,7 @@
         </RouterView>
       </MainDropZone>
 
-      <ChatSider v-show="settingStore.sidebarVisible" />
+      <ChatSider />
 
       <ShortcutsHelp v-model:visible="visible.shortcutsHelp" />
     </div>

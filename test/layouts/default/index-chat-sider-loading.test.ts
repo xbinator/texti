@@ -15,9 +15,10 @@ describe('Default layout chat sidebar mounting', (): void => {
     expect(defaultLayoutSource).not.toContain('<div class="b-layout__content__main">');
   });
 
-  it('imports ChatSider directly and toggles visibility with v-show', (): void => {
+  it('imports ChatSider directly and lets it own animated visibility', (): void => {
     expect(defaultLayoutSource).toContain("import ChatSider from './components/ChatSider.vue';");
-    expect(defaultLayoutSource).toContain('<ChatSider v-show="settingStore.sidebarVisible" />');
+    expect(defaultLayoutSource).toContain('<ChatSider />');
+    expect(defaultLayoutSource).not.toContain('<ChatSider v-show="settingStore.sidebarVisible" />');
     expect(defaultLayoutSource).not.toContain('<ChatSider v-if="settingStore.sidebarVisible" />');
     expect(defaultLayoutSource).not.toContain("defineAsyncComponent(() => import('./components/ChatSider.vue'))");
   });

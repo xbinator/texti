@@ -4,6 +4,7 @@
  * @vitest-environment jsdom
  */
 /* eslint-disable vue/one-component-per-file */
+import { readFileSync } from 'node:fs';
 import type { ChatSession } from 'types/chat';
 import { defineComponent, h, nextTick } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
@@ -14,6 +15,8 @@ import { useChatSessionStore } from '@/stores/chat/session';
 import { useChatTabStore } from '@/stores/chat/tab';
 import { useSettingStore } from '@/stores/ui/setting';
 import { useTabsStore } from '@/stores/workspace/tabs';
+
+const chatSiderSource = readFileSync('src/layouts/default/components/ChatSider.vue', 'utf8');
 
 const bChatResetDraftMock = vi.hoisted(() => vi.fn<(options?: { focus?: boolean }) => Promise<void>>());
 const bChatFocusInputMock = vi.hoisted(() => vi.fn<() => void>());
@@ -98,7 +101,9 @@ const BPanelSplitterStub = defineComponent({
       h(
         'div',
         {
-          class: ['b-panel-splitter', attrs.class]
+          class: ['b-panel-splitter', attrs.class],
+          style: attrs.style,
+          inert: attrs.inert
         },
         slots.default?.()
       );
@@ -175,6 +180,40 @@ describe('ChatSider', (): void => {
     routerPushMock.mockReset();
     routerPushMock.mockResolvedValue(undefined);
     routeMock.fullPath = '/welcome';
+  });
+
+  it('keeps the sider mounted while using an animated visibility class', async (): Promise<void> => {
+    const settingStore = useSettingStore();
+    settingStore.setSidebarVisible(false);
+    settingStore.setSidebarWidth(420);
+    const wrapper = mountChatSider();
+    await flushPromises();
+    await nextTick();
+
+    const sider = wrapper.find('.b-panel-splitter');
+    expect(sider.classes()).toContain('chat-sider');
+    expect(sider.classes()).not.toContain('chat-sider--visible');
+    expect(sider.attributes('style')).toContain('--chat-sider-width: 420px;');
+    expect(sider.attributes('aria-hidden')).toBeUndefined();
+    expect(sider.attributes('inert')).toBeDefined();
+
+    settingStore.setSidebarVisible(true);
+    await nextTick();
+
+    expect(sider.classes()).toContain('chat-sider--visible');
+    expect(sider.attributes('aria-hidden')).toBeUndefined();
+    expect(sider.attributes('inert')).toBeUndefined();
+
+    wrapper.unmount();
+  });
+
+  it('keeps ChatSider opening animated from its own root element', (): void => {
+    expect(chatSiderSource).toContain(':class="bem({ visible: settingStore.sidebarVisible })"');
+    expect(chatSiderSource).toContain("'--chat-sider-width'");
+    expect(chatSiderSource).toContain('transition: width 0.36s ease, opacity 0.24s ease, transform 0.36s ease;');
+    expect(chatSiderSource).toContain('@media (prefers-reduced-motion: reduce)');
+    expect(chatSiderSource).not.toContain(':aria-hidden=');
+    expect(chatSiderSource).not.toContain('v-show="settingStore.sidebarVisible"');
   });
 
   it('renders BChat with the active session id and displays the SessionHistory current session', async (): Promise<void> => {
