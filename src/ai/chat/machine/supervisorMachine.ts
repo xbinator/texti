@@ -19,6 +19,8 @@ export interface SupervisorMachineContext {
   sessions: Map<string, ActorRefFrom<typeof sessionMachine>>;
   /** Runtime ID 到完整 Actor 地址 */
   runtimeRoutes: Map<string, ChatActorAddress>;
+  /** 检测到身份冲突并拒绝覆盖的 Runtime ID。 */
+  routeConflicts: Set<string>;
 }
 
 /**
@@ -60,6 +62,25 @@ function findAddressedAgent(context: SupervisorMachineContext, address: ChatActo
   }
 
   return address.agentId === 'primary' ? turnRef.getSnapshot().context.primaryAgentRef : undefined;
+}
+
+/**
+ * 比较完整 Runtime Actor 地址，避免相同 Runtime ID 被改绑到其他资源域。
+ * @param left - 已持久化路由
+ * @param right - 新注册路由
+ * @returns 是否为同一不可变地址
+ */
+function isSameAddress(left: ChatActorAddress, right: ChatActorAddress): boolean {
+  return (
+    left.sessionId === right.sessionId &&
+    left.turnId === right.turnId &&
+    left.agentId === right.agentId &&
+    left.runtimeId === right.runtimeId &&
+    left.parentAgentId === right.parentAgentId &&
+    left.parentRuntimeId === right.parentRuntimeId &&
+    left.rootRuntimeId === right.rootRuntimeId &&
+    left.continuationOfRuntimeId === right.continuationOfRuntimeId
+  );
 }
 
 /**
@@ -110,6 +131,17 @@ export const supervisorMachine = setup({
         }
 
         return new Map([...context.runtimeRoutes].filter(([, address]): boolean => address.sessionId !== event.sessionId));
+      },
+      routeConflicts: ({ context, event }): Set<string> => {
+        if (event.type !== 'supervisor.removeSession') {
+          return context.routeConflicts;
+        }
+
+        const routeConflicts = new Set(context.routeConflicts);
+        context.runtimeRoutes.forEach((address, runtimeId): void => {
+          if (address.sessionId === event.sessionId) routeConflicts.delete(runtimeId);
+        });
+        return routeConflicts;
       }
     }),
     sendToSession: enqueueActions(({ context, event, enqueue }): void => {
@@ -123,9 +155,21 @@ export const supervisorMachine = setup({
           return context.runtimeRoutes;
         }
 
+        const existing = context.runtimeRoutes.get(event.address.runtimeId);
+        if (existing && !isSameAddress(existing, event.address)) {
+          return context.runtimeRoutes;
+        }
         const runtimeRoutes = new Map(context.runtimeRoutes);
         runtimeRoutes.set(event.address.runtimeId, event.address);
         return runtimeRoutes;
+      },
+      routeConflicts: ({ context, event }): Set<string> => {
+        if (event.type !== 'runtime.register') return context.routeConflicts;
+        const existing = context.runtimeRoutes.get(event.address.runtimeId);
+        if (!existing || isSameAddress(existing, event.address)) return context.routeConflicts;
+        const conflicts = new Set(context.routeConflicts);
+        conflicts.add(event.address.runtimeId);
+        return conflicts;
       }
     }),
     unregisterRuntime: assign({
@@ -137,6 +181,12 @@ export const supervisorMachine = setup({
         const runtimeRoutes = new Map(context.runtimeRoutes);
         runtimeRoutes.delete(event.runtimeId);
         return runtimeRoutes;
+      },
+      routeConflicts: ({ context, event }): Set<string> => {
+        if (event.type !== 'runtime.unregister' || !context.routeConflicts.has(event.runtimeId)) return context.routeConflicts;
+        const conflicts = new Set(context.routeConflicts);
+        conflicts.delete(event.runtimeId);
+        return conflicts;
       }
     }),
     routeRuntimeEvent: enqueueActions(({ context, event, enqueue }): void => {
@@ -153,7 +203,8 @@ export const supervisorMachine = setup({
   id: 'chatSupervisor',
   context: {
     sessions: new Map(),
-    runtimeRoutes: new Map()
+    runtimeRoutes: new Map(),
+    routeConflicts: new Set()
   },
   initial: 'active',
   states: {

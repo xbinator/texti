@@ -36,10 +36,28 @@ export function selectIsWaitingForUser(snapshot: AgentMachineSnapshot): boolean 
 }
 
 /**
+ * 判断 Agent 是否等待 Child Checkpoint。
+ * @param snapshot - Agent snapshot
+ * @returns 是否等待 Child
+ */
+export function selectIsWaitingForChildren(snapshot: AgentMachineSnapshot): boolean {
+  return snapshot.hasTag('waitingForChildren');
+}
+
+/**
  * 读取 Agent 当前 Runtime ID。
  * @param snapshot - Agent snapshot
  * @returns Runtime ID
  */
 export function selectAgentRuntimeId(snapshot: AgentMachineSnapshot): string | undefined {
   return snapshot.context.runtimeId;
+}
+
+/**
+ * 读取 Agent 当前委派 Checkpoint ID。
+ * @param snapshot - Agent snapshot
+ * @returns Checkpoint ID
+ */
+export function selectAgentCheckpointId(snapshot: AgentMachineSnapshot): string | undefined {
+  return snapshot.context.checkpointId;
 }

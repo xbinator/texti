@@ -62,4 +62,95 @@ describe('supervisorMachine', (): void => {
     expect(actor.getSnapshot().context.sessions.has('session-a')).toBe(false);
     expect(sessionRef?.getSnapshot().status).toBe('stopped');
   });
+
+  it('fails closed when the same Runtime ID is registered with a different address', (): void => {
+    const actor = createActor(supervisorMachine);
+    actor.start();
+    actor.send({
+      type: 'runtime.register',
+      address: {
+        sessionId: 'session-a',
+        turnId: 'turn-a',
+        agentId: 'primary',
+        runtimeId: 'runtime-shared',
+        rootRuntimeId: 'runtime-a'
+      }
+    });
+    actor.send({
+      type: 'runtime.register',
+      address: {
+        sessionId: 'session-b',
+        turnId: 'turn-b',
+        agentId: 'primary',
+        runtimeId: 'runtime-shared',
+        rootRuntimeId: 'runtime-b'
+      }
+    });
+
+    expect(actor.getSnapshot().context.runtimeRoutes.get('runtime-shared')).toMatchObject({
+      sessionId: 'session-a',
+      turnId: 'turn-a',
+      rootRuntimeId: 'runtime-a'
+    });
+    expect(actor.getSnapshot().context.routeConflicts.has('runtime-shared')).toBe(true);
+  });
+
+  it('clears route conflicts owned by a removed Session', (): void => {
+    const actor = createActor(supervisorMachine);
+    actor.start();
+    actor.send({ type: 'supervisor.ensureSession', sessionId: 'session-a' });
+    actor.send({
+      type: 'runtime.register',
+      address: {
+        sessionId: 'session-a',
+        turnId: 'turn-a',
+        agentId: 'primary',
+        runtimeId: 'runtime-shared',
+        rootRuntimeId: 'runtime-a'
+      }
+    });
+    actor.send({
+      type: 'runtime.register',
+      address: {
+        sessionId: 'session-b',
+        turnId: 'turn-b',
+        agentId: 'primary',
+        runtimeId: 'runtime-shared',
+        rootRuntimeId: 'runtime-b'
+      }
+    });
+    expect(actor.getSnapshot().context.routeConflicts.has('runtime-shared')).toBe(true);
+
+    actor.send({ type: 'supervisor.removeSession', sessionId: 'session-a' });
+
+    expect(actor.getSnapshot().context.runtimeRoutes.has('runtime-shared')).toBe(false);
+    expect(actor.getSnapshot().context.routeConflicts.has('runtime-shared')).toBe(false);
+  });
+
+  it('does not route a non-primary Runtime address to the Primary Agent', (): void => {
+    const actor = createActor(supervisorMachine);
+    actor.start();
+    actor.send({ type: 'supervisor.ensureSession', sessionId: 'session-a' });
+    actor.send({ type: 'supervisor.sendToSession', sessionId: 'session-a', event: { type: 'session.submit', input: SUBMIT_INPUT } });
+    const session = actor.getSnapshot().context.sessions.get('session-a');
+    session?.send({ type: 'session.prepared' });
+    const turn = session?.getSnapshot().context.turnRef;
+    const primary = turn?.getSnapshot().context.primaryAgentRef;
+    actor.send({
+      type: 'runtime.register',
+      address: {
+        sessionId: 'session-a',
+        turnId: turn?.getSnapshot().context.turnId as string,
+        agentId: 'child-1',
+        runtimeId: 'runtime-child',
+        parentAgentId: 'primary',
+        rootRuntimeId: 'runtime-primary'
+      }
+    });
+
+    actor.send({ type: 'runtime.event', runtimeId: 'runtime-child', event: { type: 'runtime.started', runtimeId: 'runtime-child' } });
+
+    expect(primary?.getSnapshot().matches('starting')).toBe(true);
+    expect(primary?.getSnapshot().context.runtimeId).toBeUndefined();
+  });
 });

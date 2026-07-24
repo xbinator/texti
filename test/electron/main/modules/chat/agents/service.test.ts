@@ -5,7 +5,7 @@
 import type { AgentCheckpointRecord, AgentTaskRecord } from '../../../../../../electron/main/modules/chat/agents/types.mjs';
 import type { ActiveChatRuntime, ChatRuntimeDelegationPrepareInput } from '../../../../../../electron/main/modules/chat/runtime/types.mjs';
 import type { ChatMessageRecord } from 'types/chat';
-import type { AgentTaskError, ChatAgentResult } from 'types/chat-agent';
+import type { AgentTaskError, ChatAgentApplicationEvent, ChatAgentResult } from 'types/chat-agent';
 import { describe, expect, it, vi } from 'vitest';
 import { createChatAgentDelegationService, type ChatAgentDelegationServiceDependencies } from '../../../../../../electron/main/modules/chat/agents/service.mjs';
 import { createRuntimeLockRegistry } from '../../../../../../electron/main/modules/chat/runtime/infrastructure/locks.mjs';
@@ -177,9 +177,14 @@ function createDependencies(): {
   recordTaskResult: ReturnType<typeof vi.fn>;
   claimResume: ReturnType<typeof vi.fn>;
   finalizeResume: ReturnType<typeof vi.fn>;
+  cancelCheckpoint: ReturnType<typeof vi.fn>;
+  listEvents: ReturnType<typeof vi.fn>;
   listPendingOutbox: ReturnType<typeof vi.fn>;
   startPrimaryContinuation: ReturnType<typeof vi.fn>;
   persistAssistant: ReturnType<typeof vi.fn>;
+  readMessages: ReturnType<typeof vi.fn>;
+  publishAssistant: ReturnType<typeof vi.fn>;
+  publishCheckpoint: ReturnType<typeof vi.fn>;
   publish: ReturnType<typeof vi.fn>;
 } {
   const prepareDelegation = vi.fn((_input, persistAssistant: () => undefined): void => {
@@ -195,10 +200,28 @@ function createDependencies(): {
   const recordTaskResult = vi.fn();
   const claimResume = vi.fn();
   const finalizeResume = vi.fn();
+  const cancelCheckpoint = vi.fn();
+  const listEvents = vi.fn(() => []);
   const listPendingOutbox = vi.fn(() => []);
   const startPrimaryContinuation = vi.fn();
   const persistAssistant = vi.fn((): undefined => undefined);
+  const readMessages = vi.fn(() => [] as ChatMessageRecord[]);
+  const publishAssistant = vi.fn();
+  const publishCheckpoint = vi.fn();
   const publish = vi.fn();
+  getCheckpoint.mockImplementation((checkpointId: string): AgentCheckpointRecord | null => {
+    const preparedInput = prepareDelegation.mock.calls.at(-1)?.[0];
+    if (!preparedInput || preparedInput.checkpoint.checkpointId !== checkpointId) return null;
+    return {
+      ...preparedInput.checkpoint,
+      status: 'waiting_children',
+      version: 1,
+      terminalResults: {},
+      recordState: 'active',
+      createdAt: preparedInput.occurredAt,
+      updatedAt: preparedInput.occurredAt
+    };
+  });
   return {
     dependencies: {
       store: {
@@ -213,11 +236,16 @@ function createDependencies(): {
         recordTaskResult,
         claimResume,
         finalizeResume,
+        cancelCheckpoint,
+        listEvents,
         listPendingOutbox
       },
       locks: createRuntimeLockRegistry(),
       persistAssistant,
+      readMessages,
+      publishAssistant,
       publish,
+      publishCheckpoint,
       createId: (kind, index): string => `${kind}-${index ?? 1}`,
       now: (): string => '2026-07-23T00:00:01.000Z',
       startPrimaryContinuation
@@ -233,9 +261,14 @@ function createDependencies(): {
     recordTaskResult,
     claimResume,
     finalizeResume,
+    cancelCheckpoint,
+    listEvents,
     listPendingOutbox,
     startPrimaryContinuation,
     persistAssistant,
+    readMessages,
+    publishAssistant,
+    publishCheckpoint,
     publish
   };
 }
@@ -455,8 +488,8 @@ describe('chat agent delegation service', (): void => {
       version: 3,
       resumeRuntimeId: 'runtime-1'
     };
-    fixture.getCheckpoint.mockReturnValue(ready);
-    fixture.claimResume.mockReturnValueOnce(claimed).mockReturnValueOnce(null);
+    fixture.getCheckpoint.mockReturnValueOnce(ready).mockReturnValue(claimed);
+    fixture.claimResume.mockReturnValueOnce(claimed);
     fixture.startPrimaryContinuation.mockResolvedValue({ outcome: 'completed' });
     fixture.finalizeResume.mockReturnValue({
       ...claimed,
@@ -464,9 +497,10 @@ describe('chat agent delegation service', (): void => {
       version: 4
     });
 
-    const [first, duplicate] = await Promise.all([service.resumePrimary('checkpoint-1'), service.resumePrimary('checkpoint-1')]);
+    const resumeInput = { checkpointId: 'checkpoint-1', expectedVersion: 2, resumeRuntimeId: 'runtime-1' };
+    const [first, duplicate] = await Promise.all([service.resumePrimary(resumeInput), service.resumePrimary(resumeInput)]);
 
-    expect([first, duplicate].filter(Boolean)).toHaveLength(1);
+    expect([first.status, duplicate.status].sort()).toEqual(['already_started', 'started']);
     expect(fixture.claimResume).toHaveBeenCalledWith({
       checkpointId: 'checkpoint-1',
       expectedVersion: 2,
@@ -490,15 +524,109 @@ describe('chat agent delegation service', (): void => {
         tools: expect.anything()
       })
     );
-    expect(fixture.finalizeResume).toHaveBeenCalledWith({
-      checkpointId: 'checkpoint-1',
-      expectedVersion: 3,
-      resumeRuntimeId: 'runtime-1',
-      outcome: 'completed',
-      occurredAt: '2026-07-23T00:00:01.000Z'
+    const resumingPublishIndex = fixture.publishCheckpoint.mock.calls.findIndex(
+      ([event]): boolean => (event as ChatAgentApplicationEvent).checkpoint.status === 'resuming'
+    );
+    expect(fixture.publishCheckpoint.mock.invocationCallOrder[resumingPublishIndex]).toBeLessThan(
+      fixture.startPrimaryContinuation.mock.invocationCallOrder[0] ?? 0
+    );
+    await vi.waitFor((): void => {
+      expect(fixture.finalizeResume).toHaveBeenCalledWith({
+        checkpointId: 'checkpoint-1',
+        expectedVersion: 3,
+        resumeRuntimeId: 'runtime-1',
+        outcome: 'completed',
+        occurredAt: '2026-07-23T00:00:01.000Z'
+      });
     });
     expect(service.getContinuationContext('checkpoint-1')).toBeUndefined();
     expect(fixture.dependencies.locks.getContinuationFence('session:session-1/history')).toBeUndefined();
+  });
+
+  it('returns an idempotent settled result after a claimed Runtime completes before retry', async (): Promise<void> => {
+    const fixture = createDependencies();
+    const service = createChatAgentDelegationService(fixture.dependencies);
+    service.prepareDelegation(createInput());
+    const preparedInput = fixture.prepareDelegation.mock.calls[0]?.[0];
+    if (!preparedInput) throw new Error('Prepare input must be captured');
+    const ready: AgentCheckpointRecord = {
+      ...preparedInput.checkpoint,
+      status: 'ready_to_resume',
+      version: 2,
+      terminalResults: {},
+      recordState: 'active',
+      createdAt: preparedInput.occurredAt,
+      updatedAt: preparedInput.occurredAt
+    };
+    const claimed: AgentCheckpointRecord = {
+      ...ready,
+      status: 'resuming',
+      version: 3,
+      resumeRuntimeId: 'runtime-1'
+    };
+    const completed: AgentCheckpointRecord = {
+      ...claimed,
+      status: 'completed',
+      version: 4
+    };
+    fixture.getCheckpoint.mockReturnValueOnce(ready).mockReturnValue(completed);
+    fixture.claimResume.mockReturnValue(claimed);
+    fixture.startPrimaryContinuation.mockResolvedValue({ outcome: 'completed' });
+    fixture.finalizeResume.mockReturnValue(completed);
+    const input = { checkpointId: 'checkpoint-1', expectedVersion: 2, resumeRuntimeId: 'runtime-1' };
+
+    await expect(service.resumePrimary(input)).resolves.toMatchObject({ status: 'started' });
+    await vi.waitFor((): void => {
+      expect(fixture.finalizeResume).toHaveBeenCalledOnce();
+    });
+    await expect(service.resumePrimary(input)).resolves.toEqual({
+      status: 'settled',
+      checkpoint: expect.objectContaining({
+        checkpointId: 'checkpoint-1',
+        status: 'completed',
+        version: 4,
+        resumeRuntimeId: 'runtime-1'
+      }),
+      address: {
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        agentId: 'primary',
+        runtimeId: 'runtime-1',
+        rootRuntimeId: 'runtime-a',
+        continuationOfRuntimeId: 'runtime-a'
+      }
+    });
+    expect(fixture.startPrimaryContinuation).toHaveBeenCalledOnce();
+  });
+
+  it('returns a settled cancellation without inventing a Runtime address', async (): Promise<void> => {
+    const fixture = createDependencies();
+    const service = createChatAgentDelegationService(fixture.dependencies);
+    service.prepareDelegation(createInput());
+    const preparedInput = fixture.prepareDelegation.mock.calls[0]?.[0];
+    if (!preparedInput) throw new Error('Prepare input must be captured');
+    fixture.getCheckpoint.mockReturnValue({
+      ...preparedInput.checkpoint,
+      status: 'cancelled',
+      version: 3,
+      terminalResults: {},
+      recordState: 'active',
+      createdAt: preparedInput.occurredAt,
+      updatedAt: preparedInput.occurredAt
+    });
+
+    await expect(
+      service.resumePrimary({
+        checkpointId: 'checkpoint-1',
+        expectedVersion: 1,
+        resumeRuntimeId: 'runtime-proposed'
+      })
+    ).resolves.toEqual({
+      status: 'settled',
+      checkpoint: expect.objectContaining({ checkpointId: 'checkpoint-1', status: 'cancelled', version: 3 })
+    });
+    expect(fixture.claimResume).not.toHaveBeenCalled();
+    expect(fixture.startPrimaryContinuation).not.toHaveBeenCalled();
   });
 
   it('finalizes only a safely persisted continuation failure before releasing volatile state', async (): Promise<void> => {
@@ -535,17 +663,21 @@ describe('chat agent delegation service', (): void => {
     fixture.startPrimaryContinuation.mockResolvedValue({ outcome: 'failed', phase: 'starting', error: safeFailure });
     fixture.finalizeResume.mockReturnValue({ ...claimed, status: 'failed', version: 6 });
 
-    await expect(service.resumePrimary('checkpoint-1')).resolves.toBe(true);
+    await expect(service.resumePrimary({ checkpointId: 'checkpoint-1', expectedVersion: 4, resumeRuntimeId: 'runtime-1' })).resolves.toMatchObject({
+      status: 'started'
+    });
 
-    expect(fixture.finalizeResume).toHaveBeenCalledWith(
-      expect.objectContaining({
-        checkpointId: 'checkpoint-1',
-        expectedVersion: 5,
-        resumeRuntimeId: 'runtime-1',
-        outcome: 'failed',
-        error: safeFailure
-      })
-    );
+    await vi.waitFor((): void => {
+      expect(fixture.finalizeResume).toHaveBeenCalledWith(
+        expect.objectContaining({
+          checkpointId: 'checkpoint-1',
+          expectedVersion: 5,
+          resumeRuntimeId: 'runtime-1',
+          outcome: 'failed',
+          error: safeFailure
+        })
+      );
+    });
     expect(service.getContinuationContext('checkpoint-1')).toBeUndefined();
     expect(fixture.dependencies.locks.getContinuationFence('session:session-1/history')).toBeUndefined();
   });
@@ -568,8 +700,12 @@ describe('chat agent delegation service', (): void => {
     fixture.getCheckpoint.mockReturnValue(ready);
     fixture.claimResume.mockReturnValue({ ...ready, status: 'resuming', version: 5, resumeRuntimeId: 'runtime-1' });
     fixture.startPrimaryContinuation.mockRejectedValue(new Error('unsafe persistence failure'));
+    const errorLog = vi.spyOn(console, 'error').mockImplementation((): void => undefined);
 
-    await expect(service.resumePrimary('checkpoint-1')).rejects.toThrow('unsafe persistence failure');
+    await expect(service.resumePrimary({ checkpointId: 'checkpoint-1', expectedVersion: 4, resumeRuntimeId: 'runtime-1' })).resolves.toMatchObject({
+      status: 'started'
+    });
+    await Promise.resolve();
 
     expect(fixture.finalizeResume).not.toHaveBeenCalled();
     expect(service.getContinuationContext('checkpoint-1')).toBeDefined();
@@ -577,6 +713,9 @@ describe('chat agent delegation service', (): void => {
       scope: 'session:session-1/history',
       checkpointId: 'checkpoint-1'
     });
+    expect(errorLog).toHaveBeenCalledWith('[chat-agent-resume-finalize] checkpointId=checkpoint-1');
+    expect(errorLog).not.toHaveBeenCalledWith(expect.stringContaining('unsafe persistence failure'));
+    errorLog.mockRestore();
   });
 
   it('rejects invalid continuation context before the resume CAS claim', async (): Promise<void> => {
@@ -599,10 +738,132 @@ describe('chat agent delegation service', (): void => {
       updatedAt: preparedInput.occurredAt
     });
 
-    await expect(service.resumePrimary('checkpoint-1')).rejects.toMatchObject({ code: 'protocol_error', phase: 'recovery' });
+    await expect(service.resumePrimary({ checkpointId: 'checkpoint-1', expectedVersion: 2, resumeRuntimeId: 'runtime-1' })).rejects.toMatchObject({
+      code: 'protocol_error',
+      phase: 'recovery'
+    });
     expect(fixture.claimResume).not.toHaveBeenCalled();
     expect(fixture.startPrimaryContinuation).not.toHaveBeenCalled();
     expect(fixture.finalizeResume).not.toHaveBeenCalled();
+  });
+
+  it('returns an allowlisted recovery snapshot without continuation or Child result details', (): void => {
+    const fixture = createDependencies();
+    const service = createChatAgentDelegationService(fixture.dependencies);
+    service.prepareDelegation(createInput());
+    const preparedInput = fixture.prepareDelegation.mock.calls[0]?.[0];
+    if (!preparedInput) throw new Error('Prepare input must be captured');
+    fixture.listActive.mockReturnValue([
+      {
+        checkpoint: {
+          ...preparedInput.checkpoint,
+          status: 'ready_to_resume',
+          version: 2,
+          terminalResults: {
+            'call-1': {
+              result: createTaskResult(),
+              resultHash: 'f'.repeat(64)
+            }
+          },
+          recordState: 'active',
+          createdAt: preparedInput.occurredAt,
+          updatedAt: preparedInput.occurredAt
+        },
+        tasks: [],
+        eventSequence: 4
+      }
+    ]);
+
+    const snapshots = service.listActive();
+    const serialized = JSON.stringify(snapshots);
+
+    expect(snapshots).toEqual([
+      expect.objectContaining({
+        checkpointId: 'checkpoint-1',
+        status: 'ready_to_resume',
+        version: 2,
+        checkpointSequence: 4
+      })
+    ]);
+    expect(serialized).not.toContain('continuationSnapshot');
+    expect(serialized).not.toContain('terminalResults');
+    expect(serialized).not.toContain('Found a partial answer');
+    expect(serialized).not.toContain('must-not-persist');
+  });
+
+  it('terminalizes and broadcasts the source assistant before releasing the cancellation fence', (): void => {
+    const fixture = createDependencies();
+    const service = createChatAgentDelegationService(fixture.dependencies);
+    service.prepareDelegation(createInput());
+    const preparedInput = fixture.prepareDelegation.mock.calls[0]?.[0];
+    if (!preparedInput) throw new Error('Prepare input must be captured');
+    const cancelled: AgentCheckpointRecord = {
+      ...preparedInput.checkpoint,
+      status: 'cancelled',
+      version: 3,
+      terminalResults: {},
+      recordState: 'active',
+      createdAt: preparedInput.occurredAt,
+      updatedAt: '2026-07-23T00:00:02.000Z'
+    };
+    fixture.cancelCheckpoint.mockReturnValue(cancelled);
+    fixture.readMessages.mockReturnValue([createAssistant()]);
+
+    const snapshot = service.cancelCheckpoint({ checkpointId: 'checkpoint-1' });
+
+    expect(snapshot.status).toBe('cancelled');
+    expect(fixture.cancelCheckpoint).toHaveBeenCalledWith({
+      checkpointId: 'checkpoint-1',
+      reason: 'user_cancelled',
+      occurredAt: '2026-07-23T00:00:01.000Z'
+    });
+    expect(fixture.persistAssistant).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'assistant-1',
+        loading: false,
+        finished: true,
+        parts: [expect.objectContaining({ type: 'tool', status: 'done', result: expect.objectContaining({ status: 'cancelled' }) })]
+      }),
+      'checkpoint-1'
+    );
+    expect(fixture.publishAssistant.mock.invocationCallOrder[0]).toBeGreaterThan(fixture.persistAssistant.mock.invocationCallOrder.at(-1) ?? 0);
+    expect(fixture.publishCheckpoint.mock.invocationCallOrder.at(-1)).toBeGreaterThan(fixture.publishAssistant.mock.invocationCallOrder[0] ?? 0);
+    expect(service.getContinuationContext('checkpoint-1')).toBeUndefined();
+    expect(fixture.dependencies.locks.getContinuationFence('session:session-1/history')).toBeUndefined();
+  });
+
+  it('keeps the cancellation fence when source assistant persistence fails and finishes on retry', (): void => {
+    const fixture = createDependencies();
+    const service = createChatAgentDelegationService(fixture.dependencies);
+    service.prepareDelegation(createInput());
+    const preparedInput = fixture.prepareDelegation.mock.calls[0]?.[0];
+    if (!preparedInput) throw new Error('Prepare input must be captured');
+    const cancelled: AgentCheckpointRecord = {
+      ...preparedInput.checkpoint,
+      status: 'cancelled',
+      version: 3,
+      terminalResults: {},
+      recordState: 'active',
+      createdAt: preparedInput.occurredAt,
+      updatedAt: '2026-07-23T00:00:02.000Z'
+    };
+    fixture.cancelCheckpoint.mockReturnValue(cancelled);
+    fixture.readMessages.mockReturnValue([createAssistant()]);
+    fixture.persistAssistant.mockImplementationOnce((): never => {
+      throw new Error('assistant write failed');
+    });
+
+    expect((): void => {
+      service.cancelCheckpoint({ checkpointId: 'checkpoint-1' });
+    }).toThrow('assistant write failed');
+    expect(service.getContinuationContext('checkpoint-1')).toBeDefined();
+    expect(fixture.dependencies.locks.getContinuationFence('session:session-1/history')).toMatchObject({ checkpointId: 'checkpoint-1' });
+    expect(fixture.publishAssistant).not.toHaveBeenCalled();
+
+    expect(service.cancelCheckpoint({ checkpointId: 'checkpoint-1' }).status).toBe('cancelled');
+    expect(fixture.cancelCheckpoint).toHaveBeenCalledTimes(2);
+    expect(service.getContinuationContext('checkpoint-1')).toBeUndefined();
+    expect(fixture.dependencies.locks.getContinuationFence('session:session-1/history')).toBeUndefined();
   });
 
   it('rejects write mode with capability_denied before creating a checkpoint', (): void => {

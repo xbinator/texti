@@ -2,6 +2,7 @@
  * @file actor-system.test.ts
  * @description 应用级 Chat Actor system 外观测试。
  */
+import type { ChatAgentCheckpointSnapshot } from 'types/chat-agent';
 import type { ChatRuntimeRecoverySnapshot } from 'types/chat-runtime';
 import { describe, expect, it } from 'vitest';
 import { createChatActorSystem } from '@/ai/chat/actorSystem';
@@ -155,6 +156,60 @@ describe('chat actor system', (): void => {
     });
 
     expect(() => system.recoverRuntime(snapshot, capabilities)).toThrow(/protocol_error/);
+    system.stop();
+  });
+
+  it('does not resurrect an idle Session from a terminal delegation event', (): void => {
+    const system = createChatActorSystem();
+    system.start();
+    const terminal: ChatAgentCheckpointSnapshot = {
+      checkpointId: 'checkpoint-1',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      primaryAgentId: 'primary',
+      rootRuntimeId: 'runtime-a',
+      sourceRuntimeId: 'runtime-a',
+      status: 'completed',
+      version: 4,
+      checkpointSequence: 6,
+      createdAt: '2026-07-24T00:00:00.000Z',
+      updatedAt: '2026-07-24T00:00:02.000Z'
+    };
+
+    system.recoverDelegation(terminal);
+
+    expect(system.getSession('session-1')?.getSnapshot().matches('idle')).toBe(true);
+    expect(system.getSession('session-1')?.getSnapshot().context.turnRef).toBeUndefined();
+    system.stop();
+  });
+
+  it('closes a waiting Session when a settled completion is recovered', (): void => {
+    const system = createChatActorSystem();
+    system.start();
+    const waiting: ChatAgentCheckpointSnapshot = {
+      checkpointId: 'checkpoint-1',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      primaryAgentId: 'primary',
+      rootRuntimeId: 'runtime-a',
+      sourceRuntimeId: 'runtime-a',
+      status: 'waiting_children',
+      version: 1,
+      checkpointSequence: 3,
+      createdAt: '2026-07-24T00:00:00.000Z',
+      updatedAt: '2026-07-24T00:00:01.000Z'
+    };
+    system.recoverDelegation(waiting);
+    system.recoverDelegation({
+      ...waiting,
+      status: 'completed',
+      version: 4,
+      checkpointSequence: 6,
+      resumeRuntimeId: 'runtime-b'
+    });
+
+    expect(system.getSession('session-1')?.getSnapshot().matches('idle')).toBe(true);
+    expect(system.getSession('session-1')?.getSnapshot().context.turnRef).toBeUndefined();
     system.stop();
   });
 });

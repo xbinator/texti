@@ -9,15 +9,22 @@ import type {
   AgentDelegationContinuationSnapshot,
   AgentDelegationCreatedPayload,
   AgentDelegationReadyPayload,
+  ChatAgentApplicationEvent,
+  ChatAgentCancelCheckpointInput,
+  ChatAgentCheckpointSnapshot,
   AgentModelSnapshot,
   AgentOrderedToolCallSnapshot,
   AgentTaskError,
+  ChatAgentResumePrimaryInput,
+  ChatAgentResumeResult,
   DelegateTaskInput
 } from 'types/chat-agent';
+import type { ChatRuntimeAddress } from 'types/chat-runtime';
 import { BrowserWindow } from 'electron';
 import { nanoid } from 'nanoid';
 import { dbExecute, dbSelect, transaction } from '../../database/service.mjs';
 import { chatRuntimeLocks, getSessionHistoryScope, type RuntimeContinuationFenceHandle, type RuntimeLockRegistry } from '../runtime/infrastructure/locks.mjs';
+import { finishAssistantMessageInterrupted } from '../runtime/messages/finalizer.mjs';
 import { getRuntimeTaskDeadlineAt } from '../runtime/task-clock.mjs';
 import { chatSessionManager } from '../service.mjs';
 import {
@@ -45,8 +52,10 @@ export type ChatAgentDelegationStore = Pick<
   | 'getOutbox'
   | 'claimResume'
   | 'finalizeResume'
+  | 'cancelCheckpoint'
   | 'interruptCheckpoint'
   | 'interruptActive'
+  | 'listEvents'
   | 'listActive'
   | 'listPendingOutbox'
   | 'markOutboxDelivered'
@@ -91,13 +100,30 @@ export interface ChatAgentDelegationServiceDependencies {
    * @param message - 含完整 deferred tool-call 的 assistant
    * @returns 必须同步完成
    */
-  persistAssistant: (message: ChatMessageRecord) => undefined;
+  persistAssistant: (message: ChatMessageRecord, ownerCheckpointId?: string) => undefined;
+  /**
+   * 读取会话完整消息，用于 Checkpoint 终态化 source assistant。
+   * @param sessionId - 会话 ID
+   * @returns 按持久化顺序排列的消息
+   */
+  readMessages: (sessionId: string) => ChatMessageRecord[];
+  /**
+   * 广播已由 fence owner 持久化的 source assistant 更新。
+   * @param message - 已终态化 assistant
+   * @param checkpoint - 消息所属 Checkpoint
+   */
+  publishAssistant: (message: ChatMessageRecord, checkpoint: AgentCheckpointRecord) => void;
   /**
    * 发布已持久化 Outbox 事件。
    * @param eventType - 事件类型
    * @param payload - allowlist payload
    */
   publish: (eventType: 'delegation.created' | 'delegation.ready', payload: AgentDelegationCreatedPayload | AgentDelegationReadyPayload) => void;
+  /**
+   * 发布已持久化的公开 Checkpoint 投影。
+   * @param event - 单调 application event
+   */
+  publishCheckpoint: (event: ChatAgentApplicationEvent) => void;
   /**
    * 创建稳定身份。
    * @param kind - 身份域
@@ -148,11 +174,19 @@ export interface ChatAgentDelegationService {
    */
   claimPrimaryResume(checkpointId: string): AgentCheckpointRecord | null;
   /**
-   * claim 并执行唯一 Primary Runtime B。
-   * @param checkpointId - ready Checkpoint
-   * @returns 本调用是否取得并处理了 claim
+   * CAS claim 并启动唯一 Primary Runtime B。
+   * @param input - Renderer 只能提议身份与观察版本
+   * @returns 启动确认与 Main 派生地址，不等待模型完成
    */
-  resumePrimary(checkpointId: string): Promise<boolean>;
+  resumePrimary(input: ChatAgentResumePrimaryInput): Promise<ChatAgentResumeResult>;
+  /** @returns 所有公开非终态 Checkpoint 投影。 */
+  listActive(): ChatAgentCheckpointSnapshot[];
+  /**
+   * 持久化 cooperative cancellation 并安全终态化 source assistant。
+   * @param input - 最小取消输入
+   * @returns 当前公开 Checkpoint 投影
+   */
+  cancelCheckpoint(input: ChatAgentCancelCheckpointInput): ChatAgentCheckpointSnapshot;
   /**
    * 读取进程内 allowlist continuation context。
    * @param checkpointId - Checkpoint ID
@@ -341,6 +375,57 @@ function createTaskFacts(
 }
 
 /**
+ * 投影 Renderer 可见的 Checkpoint allowlist。
+ * @param checkpoint - 完整内部 Checkpoint
+ * @param checkpointSequence - 持久化事件 cursor
+ * @returns 不含 continuation 与 Child 结果的公开投影
+ */
+function projectCheckpoint(checkpoint: AgentCheckpointRecord, checkpointSequence: number): ChatAgentCheckpointSnapshot {
+  return Object.freeze({
+    checkpointId: checkpoint.checkpointId,
+    sessionId: checkpoint.sessionId,
+    turnId: checkpoint.turnId,
+    primaryAgentId: checkpoint.primaryAgentId,
+    rootRuntimeId: checkpoint.rootRuntimeId,
+    sourceRuntimeId: checkpoint.sourceRuntimeId,
+    status: checkpoint.status,
+    version: checkpoint.version,
+    ...(checkpoint.resumeRuntimeId ? { resumeRuntimeId: checkpoint.resumeRuntimeId } : {}),
+    checkpointSequence,
+    createdAt: checkpoint.createdAt,
+    updatedAt: checkpoint.updatedAt
+  });
+}
+
+/**
+ * 从 Checkpoint 不可变身份派生 Primary Runtime B 地址。
+ * @param checkpoint - 已 claim Checkpoint
+ * @param runtimeId - Checkpoint 绑定的 Runtime B
+ * @returns 完整 Runtime 地址
+ */
+function createResumeAddress(checkpoint: AgentCheckpointRecord, runtimeId: string): ChatRuntimeAddress {
+  return Object.freeze({
+    sessionId: checkpoint.sessionId,
+    turnId: checkpoint.turnId,
+    agentId: checkpoint.primaryAgentId,
+    runtimeId,
+    rootRuntimeId: checkpoint.rootRuntimeId,
+    continuationOfRuntimeId: checkpoint.sourceRuntimeId
+  });
+}
+
+/**
+ * 判断 Checkpoint 是否已经形成可幂等观察的终态。
+ * @param status - Checkpoint 状态
+ * @returns 是否为 settled resume 结果
+ */
+function isSettledStatus(
+  status: AgentCheckpointRecord['status']
+): status is Extract<AgentCheckpointRecord['status'], 'completed' | 'failed' | 'cancelled' | 'interrupted'> {
+  return status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'interrupted';
+}
+
+/**
  * 创建 Child Agent 委派服务。
  * @param dependencies - 同步 Store、共享锁和事件依赖
  * @returns 委派服务
@@ -360,6 +445,35 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
       fenceHandles.delete(checkpointId);
     }
     continuationContexts.delete(checkpointId);
+  }
+
+  /**
+   * 读取 Checkpoint 当前持久化事件 cursor。
+   * @param checkpointId - Checkpoint ID
+   * @returns 最新 sequence
+   */
+  function readCheckpointSequence(checkpointId: string): number {
+    return dependencies.store.listEvents('checkpoint', checkpointId).at(-1)?.sequence ?? 0;
+  }
+
+  /**
+   * 构造并广播公开 Checkpoint application event。
+   * @param checkpoint - 已持久化 Checkpoint
+   * @returns 同一份公开投影
+   */
+  function publishCheckpointSnapshot(checkpoint: AgentCheckpointRecord): ChatAgentCheckpointSnapshot {
+    const snapshot = projectCheckpoint(checkpoint, readCheckpointSequence(checkpoint.checkpointId));
+    try {
+      dependencies.publishCheckpoint({
+        schemaVersion: 1,
+        type: 'checkpoint.updated',
+        checkpoint: snapshot,
+        checkpointSequence: snapshot.checkpointSequence
+      });
+    } catch {
+      // application event 是可通过 listActive 补偿的投影，发布失败不能回滚持久化事实。
+    }
+    return snapshot;
   }
 
   /**
@@ -411,37 +525,155 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
    * @param checkpointId - ready Checkpoint
    * @returns 本次调用是否取得 claim
    */
-  async function resumePrimary(checkpointId: string): Promise<boolean> {
-    const claimed = claimPrimaryResume(checkpointId);
-    if (!claimed?.resumeRuntimeId) return false;
-    const { resumeRuntimeId } = claimed;
-    const context = continuationContexts.get(claimed.checkpointId);
-    assertResumeContext(claimed, context);
-    // rejection 表示 Runtime 未能证明失败 assistant 已安全持久化，必须保留 resuming 与 fence。
-    const runtimeResult = await dependencies.startPrimaryContinuation({
-      checkpoint: claimed,
-      runtimeId: resumeRuntimeId,
-      context: structuredClone(context)
-    });
+  async function finalizePrimaryResume(claimed: AgentCheckpointRecord, completion: Promise<ChatAgentPrimaryContinuationResult>): Promise<void> {
+    const runtimeResult = await completion;
     if (runtimeResult.outcome === 'failed') {
       const validatedError = validateAgentTaskError(runtimeResult.error);
       if (!validatedError || validatedError.phase !== runtimeResult.phase || !['runtime_start_failed', 'runtime_failed'].includes(validatedError.code)) {
         throw createFenceError(claimed.checkpointId, 'continuation_failure_result_invalid');
       }
     }
-    const { outcome } = runtimeResult;
-
-    dependencies.store.finalizeResume({
+    if (!claimed.resumeRuntimeId) throw createFenceError(claimed.checkpointId, 'resume_runtime_missing');
+    const finalized = dependencies.store.finalizeResume({
       checkpointId: claimed.checkpointId,
       expectedVersion: claimed.version,
-      resumeRuntimeId,
-      outcome,
+      resumeRuntimeId: claimed.resumeRuntimeId,
+      outcome: runtimeResult.outcome,
       occurredAt: dependencies.now(),
       ...(runtimeResult.outcome === 'failed' ? { error: runtimeResult.error } : {})
     });
     // finalize 成功证明 assistant 已安全终态化；此前绝不释放 history fence。
     releaseContinuation(claimed.checkpointId);
-    return true;
+    publishCheckpointSnapshot(finalized);
+  }
+
+  /**
+   * CAS claim 并启动唯一 Primary Runtime B，不等待模型完成。
+   * @param input - Renderer 的身份提议与观察版本
+   * @returns 启动确认或已存在的权威 Runtime 地址
+   */
+  async function resumePrimary(input: ChatAgentResumePrimaryInput): Promise<ChatAgentResumeResult> {
+    const current = dependencies.store.getCheckpoint(input.checkpointId);
+    if (!current || current.recordState !== 'active') {
+      throw new ChatAgentDelegationError({
+        code: 'protocol_error',
+        phase: 'recovery',
+        category: 'protocol',
+        retryable: false,
+        message: 'Checkpoint 不存在或已删除',
+        details: { reason: 'checkpoint_not_found', checkpointId: input.checkpointId }
+      });
+    }
+    if (current.status === 'resuming' && current.resumeRuntimeId) {
+      const checkpoint = projectCheckpoint(current, readCheckpointSequence(current.checkpointId));
+      return {
+        status: 'already_started',
+        checkpoint,
+        address: createResumeAddress(current, current.resumeRuntimeId)
+      };
+    }
+    if (isSettledStatus(current.status)) {
+      const checkpoint = Object.freeze({
+        ...projectCheckpoint(current, readCheckpointSequence(current.checkpointId)),
+        status: current.status
+      });
+      return {
+        status: 'settled',
+        checkpoint,
+        ...(current.resumeRuntimeId ? { address: createResumeAddress(current, current.resumeRuntimeId) } : {})
+      };
+    }
+    if (current.status !== 'ready_to_resume' || current.version !== input.expectedVersion) {
+      throw new ChatAgentDelegationError({
+        code: 'protocol_error',
+        phase: 'recovery',
+        category: 'protocol',
+        retryable: true,
+        message: 'Checkpoint 状态或版本已变化',
+        details: {
+          reason: 'checkpoint_resume_conflict',
+          checkpointId: input.checkpointId,
+          status: current.status,
+          expectedVersion: input.expectedVersion,
+          actualVersion: current.version
+        }
+      });
+    }
+    assertResumeContext(current, continuationContexts.get(current.checkpointId));
+    const claimed = dependencies.store.claimResume({
+      checkpointId: current.checkpointId,
+      expectedVersion: input.expectedVersion,
+      resumeRuntimeId: input.resumeRuntimeId,
+      occurredAt: dependencies.now()
+    });
+    if (!claimed?.resumeRuntimeId) {
+      const winner = dependencies.store.getCheckpoint(input.checkpointId);
+      if (winner?.status === 'resuming' && winner.resumeRuntimeId) {
+        return {
+          status: 'already_started',
+          checkpoint: projectCheckpoint(winner, readCheckpointSequence(winner.checkpointId)),
+          address: createResumeAddress(winner, winner.resumeRuntimeId)
+        };
+      }
+      throw createFenceError(input.checkpointId, 'resume_claim_conflict');
+    }
+    const { resumeRuntimeId } = claimed;
+    const context = continuationContexts.get(claimed.checkpointId);
+    assertResumeContext(claimed, context);
+    const snapshot = publishCheckpointSnapshot(claimed);
+    // completion rejection 表示 Runtime 未能证明失败 assistant 已安全持久化，必须保留 resuming 与 fence。
+    const completion = dependencies.startPrimaryContinuation({
+      checkpoint: claimed,
+      runtimeId: resumeRuntimeId,
+      context: structuredClone(context)
+    });
+    finalizePrimaryResume(claimed, completion).catch((): void => {
+      // 未能安全终态化时保留 resuming、易失上下文与 continuation fence，等待恢复流程介入。
+      console.error(`[chat-agent-resume-finalize] checkpointId=${claimed.checkpointId}`);
+    });
+    return {
+      status: 'started',
+      checkpoint: snapshot,
+      address: createResumeAddress(claimed, resumeRuntimeId)
+    };
+  }
+
+  /**
+   * 返回所有公开非终态 Checkpoint 投影。
+   * @returns 按 Store 顺序排列的 allowlist 快照
+   */
+  function listActive(): ChatAgentCheckpointSnapshot[] {
+    return dependencies.store.listActive().map((recovery): ChatAgentCheckpointSnapshot => projectCheckpoint(recovery.checkpoint, recovery.eventSequence));
+  }
+
+  /**
+   * 持久化 cooperative cancellation，并在 Store 安全终态后关闭 source assistant。
+   * @param input - 最小取消输入
+   * @returns 当前公开 Checkpoint
+   */
+  function cancelCheckpoint(input: ChatAgentCancelCheckpointInput): ChatAgentCheckpointSnapshot {
+    const checkpoint = dependencies.store.cancelCheckpoint({
+      checkpointId: input.checkpointId,
+      reason: 'user_cancelled',
+      occurredAt: dependencies.now()
+    });
+    if (checkpoint.status !== 'cancelled') {
+      return publishCheckpointSnapshot(checkpoint);
+    }
+
+    const sourceAssistant = dependencies
+      .readMessages(checkpoint.sessionId)
+      .find((message): boolean => message.id === checkpoint.assistantMessageId && message.role === 'assistant');
+    if (!sourceAssistant) {
+      throw createFenceError(checkpoint.checkpointId, 'cancel_source_assistant_missing');
+    }
+    const interruptedAssistant = structuredClone(sourceAssistant);
+    finishAssistantMessageInterrupted(interruptedAssistant);
+    dependencies.persistAssistant(interruptedAssistant, checkpoint.checkpointId);
+    dependencies.publishAssistant(interruptedAssistant, checkpoint);
+    // Store cancellation 与 assistant 终态都已持久化并广播后，才允许释放历史 fence。
+    releaseContinuation(checkpoint.checkpointId);
+    return publishCheckpointSnapshot(checkpoint);
   }
 
   return {
@@ -526,6 +758,9 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
       const fence = fenceReservation.activate();
       fenceHandles.set(checkpointId, fence);
       continuationContexts.set(checkpointId, Object.freeze(structuredClone(continuationContext)));
+      const preparedCheckpoint = dependencies.store.getCheckpoint(checkpointId);
+      if (!preparedCheckpoint) throw createFenceError(checkpointId, 'prepared_checkpoint_missing');
+      publishCheckpointSnapshot(preparedCheckpoint);
 
       try {
         dependencies.publish('delegation.created', outboxPayload);
@@ -569,6 +804,7 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
         resultHash: validation.resultHash,
         occurredAt
       });
+      publishCheckpointSnapshot(checkpoint);
       if (checkpoint.status !== 'ready_to_resume') return checkpoint;
 
       const readyOutbox = dependencies.store.getOutbox(`delegation.ready:${checkpoint.checkpointId}`);
@@ -599,6 +835,10 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
     claimPrimaryResume,
 
     resumePrimary,
+
+    listActive,
+
+    cancelCheckpoint,
 
     getContinuationContext(checkpointId: string): ContinuationRuntimeContext | undefined {
       const context = continuationContexts.get(checkpointId);
@@ -671,7 +911,36 @@ const agentStoreDatabase: AgentStoreDatabase = {
  */
 function publishDelegation(eventType: 'delegation.created' | 'delegation.ready', payload: AgentDelegationCreatedPayload | AgentDelegationReadyPayload): void {
   BrowserWindow.getAllWindows().forEach((window): void => {
-    window.webContents.send('chat:agent:event', { type: eventType, payload });
+    window.webContents.send('chat:agent:outbox-event', { type: eventType, payload });
+  });
+}
+
+/**
+ * 向全部应用窗口发布公开 Checkpoint 投影。
+ * @param event - allowlist application event
+ */
+function publishCheckpoint(event: ChatAgentApplicationEvent): void {
+  BrowserWindow.getAllWindows().forEach((window): void => {
+    window.webContents.send('chat:agent:event', event);
+  });
+}
+
+/**
+ * 广播由 Checkpoint fence owner 终态化的 source assistant。
+ * @param message - 已持久化 assistant
+ * @param checkpoint - assistant 所属 Checkpoint
+ */
+function publishAssistant(message: ChatMessageRecord, checkpoint: AgentCheckpointRecord): void {
+  BrowserWindow.getAllWindows().forEach((window): void => {
+    window.webContents.send('chat:runtime:message-updated', {
+      runtimeId: checkpoint.sourceRuntimeId,
+      sessionId: checkpoint.sessionId,
+      turnId: checkpoint.turnId,
+      clientId: 'agent-continuation',
+      agentId: checkpoint.primaryAgentId,
+      rootRuntimeId: checkpoint.rootRuntimeId,
+      message: structuredClone(message)
+    });
   });
 }
 
@@ -679,11 +948,14 @@ function publishDelegation(eventType: 'delegation.created' | 'delegation.ready',
 export const chatAgentDelegationService = createChatAgentDelegationService({
   store: createAgentDelegationStore(agentStoreDatabase),
   locks: chatRuntimeLocks,
-  persistAssistant(message: ChatMessageRecord): undefined {
-    chatSessionManager.updateMessage(message);
+  persistAssistant(message: ChatMessageRecord, ownerCheckpointId?: string): undefined {
+    chatSessionManager.updateMessage(message, ownerCheckpointId);
     return undefined;
   },
+  readMessages: (sessionId: string): ChatMessageRecord[] => chatSessionManager.getAllMessages(sessionId),
+  publishAssistant,
   publish: publishDelegation,
+  publishCheckpoint,
   createId(kind: ChatAgentDelegationIdKind): string {
     return `${kind}-${nanoid()}`;
   },

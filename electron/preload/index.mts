@@ -13,6 +13,7 @@ import type {
   AIStreamToolInputStartChunk,
   AIStreamToolResultChunk
 } from 'types/ai';
+import type { ChatAgentApplicationEvent } from 'types/chat-agent';
 import type {
   ChatRuntimeBridgeRequestEvent,
   ChatRuntimeConfirmationRequestEvent,
@@ -25,12 +26,7 @@ import type {
   ChatRuntimeToolCancelledEvent,
   ChatRuntimeToolRequestEvent
 } from 'types/chat-runtime';
-import type {
-  ElectronAPI,
-  ElectronShellCommandOutputChunk,
-  ElectronShellRunEventEnvelope,
-  FileChangeEvent
-} from 'types/electron-api';
+import type { ElectronAPI, ElectronShellCommandOutputChunk, ElectronShellRunEventEnvelope, FileChangeEvent } from 'types/electron-api';
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { getAutoDefaultCapability } from '../main/modules/shell/interaction/capability.mjs';
 import { formatPreloadErrorMessage, shouldIgnorePreloadError } from './error-collector.mjs';
@@ -656,6 +652,26 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.on('chat:runtime:complete', handler);
     return () => {
       ipcRenderer.removeListener('chat:runtime:complete', handler);
+    };
+  },
+
+  // ==================== Chat Agent 委派操作 ====================
+
+  /** 查询公开的活跃 Checkpoint 投影。 */
+  chatAgentListActive: () => ipcRenderer.invoke('chat:agent:list-active'),
+
+  /** 请求 Main CAS 启动 Primary Runtime B。 */
+  chatAgentResumePrimary: (input) => ipcRenderer.invoke('chat:agent:resume-primary', input),
+
+  /** 请求 Checkpoint cooperative cancellation。 */
+  chatAgentCancelCheckpoint: (input) => ipcRenderer.invoke('chat:agent:cancel-checkpoint', input),
+
+  /** 监听持久化 Checkpoint application event。 */
+  chatAgentOnEvent: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: ChatAgentApplicationEvent): void => callback(payload);
+    ipcRenderer.on('chat:agent:event', handler);
+    return (): void => {
+      ipcRenderer.removeListener('chat:agent:event', handler);
     };
   },
 

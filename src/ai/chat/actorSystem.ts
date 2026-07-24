@@ -4,6 +4,7 @@
  */
 import type { SessionMachineEvent } from './machine/sessionMachine';
 import type { ChatActorAddress } from './types';
+import type { ChatAgentCheckpointSnapshot } from 'types/chat-agent';
 import type { ChatRuntimeRecoverySnapshot } from 'types/chat-runtime';
 import type { ActorRefFrom } from 'xstate';
 import { createActor } from 'xstate';
@@ -66,6 +67,23 @@ function isSameRuntimeAddress(left: ChatActorAddress, right: ChatActorAddress): 
 }
 
 /**
+ * 从 allowlist Checkpoint 投影派生 Primary Runtime B 地址。
+ * @param snapshot - 主进程权威 Checkpoint 投影
+ * @param runtimeId - 已 CAS 或即将 CAS 的 Runtime B
+ * @returns 不含 renderer 自报能力的完整地址
+ */
+export function createResumeAddress(snapshot: ChatAgentCheckpointSnapshot, runtimeId: string): ChatActorAddress {
+  return {
+    sessionId: snapshot.sessionId,
+    turnId: snapshot.turnId,
+    agentId: snapshot.primaryAgentId,
+    runtimeId,
+    rootRuntimeId: snapshot.rootRuntimeId,
+    continuationOfRuntimeId: snapshot.sourceRuntimeId
+  };
+}
+
+/**
  * 应用级 Chat Actor system。
  */
 export interface ChatActorSystem {
@@ -91,6 +109,8 @@ export interface ChatActorSystem {
   registerRuntime: (address: ChatActorAddress, capabilities: RuntimeExecutionCapabilities) => void;
   /** 从主进程快照恢复 Runtime 地址、Actor 与 renderer 能力 */
   recoverRuntime: (snapshot: ChatRuntimeRecoverySnapshot, capabilities: RuntimeExecutionCapabilities) => void;
+  /** 从公开 Checkpoint 快照恢复或推进等待 Child 的 Actor 投影。 */
+  recoverDelegation: (snapshot: ChatAgentCheckpointSnapshot) => void;
   /** 注销 Runtime 地址和 renderer 能力 */
   unregisterRuntime: (runtimeId: string) => void;
   /** 读取 Runtime renderer 能力 */
@@ -142,6 +162,11 @@ export function createChatActorSystem(): ChatActorSystem {
       actor.send({ type: 'supervisor.sendToSession', sessionId, event });
     },
     registerRuntime(address: ChatActorAddress, capabilities: RuntimeExecutionCapabilities): void {
+      const existingAddress = actor.getSnapshot().context.runtimeRoutes.get(address.runtimeId);
+      if (existingAddress && !isSameRuntimeAddress(existingAddress, address)) {
+        actor.send({ type: 'runtime.register', address });
+        throw new ChatActorProtocolError(`Runtime ${address.runtimeId} address conflicts with the registered route`);
+      }
       actor.send({ type: 'runtime.register', address });
       capabilityRegistry.register(address.runtimeId, capabilities);
     },
@@ -174,6 +199,57 @@ export function createChatActorSystem(): ChatActorSystem {
       }
 
       this.registerRuntime(recoveryAddress, capabilities);
+    },
+    recoverDelegation(snapshot: ChatAgentCheckpointSnapshot): void {
+      const sessionRef = this.ensureSession(snapshot.sessionId);
+      const sessionSnapshot = sessionRef.getSnapshot();
+      const activeTurnId = sessionSnapshot.context.turnRef?.getSnapshot().context.turnId;
+      const activeCheckpointId = sessionSnapshot.context.checkpointId;
+      if (!sessionSnapshot.matches('idle') && activeTurnId !== snapshot.turnId) {
+        throw new ChatActorProtocolError(
+          `Session ${snapshot.sessionId} already owns active Turn ${activeTurnId ?? 'unknown'} instead of delegated Turn ${snapshot.turnId}`
+        );
+      }
+      if (activeCheckpointId && activeCheckpointId !== snapshot.checkpointId) {
+        throw new ChatActorProtocolError(`Session ${snapshot.sessionId} already owns Checkpoint ${activeCheckpointId} instead of ${snapshot.checkpointId}`);
+      }
+      if (['completed', 'failed', 'cancelled', 'interrupted'].includes(snapshot.status)) {
+        if (sessionSnapshot.matches('idle')) return;
+        if (snapshot.status === 'completed') {
+          sessionRef.send({ type: 'session.checkpointCompleted', checkpointId: snapshot.checkpointId });
+        } else if (snapshot.status === 'failed') {
+          sessionRef.send({
+            type: 'session.checkpointFailed',
+            checkpointId: snapshot.checkpointId,
+            error: { code: 'runtime_failed', message: 'Primary continuation failed' }
+          });
+        } else if (snapshot.status === 'cancelled') {
+          sessionRef.send({ type: 'session.checkpointCancelled', checkpointId: snapshot.checkpointId });
+        } else if (snapshot.status === 'interrupted') {
+          sessionRef.send({ type: 'session.checkpointInterrupted', checkpointId: snapshot.checkpointId });
+        }
+        return;
+      }
+      if (sessionSnapshot.matches('idle')) {
+        sessionRef.send({ type: 'session.recoverDelegation', snapshot });
+        return;
+      }
+      if (!activeCheckpointId && ['waiting_children', 'ready_to_resume', 'cancelling'].includes(snapshot.status)) {
+        sessionRef.send({
+          type: 'session.waitingChildren',
+          checkpointId: snapshot.checkpointId,
+          runtimeId: snapshot.sourceRuntimeId
+        });
+      }
+      if (snapshot.status === 'resuming' && snapshot.resumeRuntimeId) {
+        sessionRef.send({
+          type: 'session.resumeStarted',
+          checkpointId: snapshot.checkpointId,
+          runtimeId: snapshot.resumeRuntimeId
+        });
+      } else if (snapshot.status === 'cancelling') {
+        sessionRef.send({ type: 'session.cancelRequested' });
+      }
     },
     unregisterRuntime(runtimeId: string): void {
       actor.send({ type: 'runtime.unregister', runtimeId });

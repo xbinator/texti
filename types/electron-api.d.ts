@@ -25,6 +25,14 @@ import type {
   SessionPaginationParams
 } from './chat';
 import type {
+  ChatAgentApplicationEvent,
+  ChatAgentCancelCheckpointInput,
+  ChatAgentCheckpointSnapshot,
+  ChatAgentHandlerResult,
+  ChatAgentResumePrimaryInput,
+  ChatAgentResumeResult
+} from './chat-agent';
+import type {
   ChatRuntimeAbortInput,
   ChatRuntimeAbortResult,
   ChatRuntimeAutoNameInput,
@@ -292,24 +300,6 @@ export interface ElectronShellCommandOutputChunk {
   createdAt: string;
 }
 
-/** Shell PTY 有序运行事件。 */
-export type ElectronShellRunEvent =
-  | { type: 'terminal_update'; content: string }
-  | { type: 'auto_answer'; count: number }
-  | { type: 'finished'; result: ElectronShellCommandRunResult };
-
-/** Shell PTY 事件信封。 */
-export interface ElectronShellRunEventEnvelope {
-  /** 命令唯一标识。 */
-  commandId: string;
-  /** 单命令递增序号。 */
-  sequence: number;
-  /** ISO 创建时间。 */
-  createdAt: string;
-  /** 事件载荷。 */
-  event: ElectronShellRunEvent;
-}
-
 /**
  * Electron Shell 命令执行结果。
  */
@@ -349,15 +339,26 @@ export interface ElectronShellCommandRunResult {
     /** 累计自动回答次数。 */
     answerCount: number;
     /** 自动交互停止原因。 */
-    stopReason?:
-      | 'completed'
-      | 'tool_timeout'
-      | 'interaction_timeout'
-      | 'answer_limit'
-      | 'process_exit'
-      | 'unsupported_prompt'
-      | 'cancelled';
+    stopReason?: 'completed' | 'tool_timeout' | 'interaction_timeout' | 'answer_limit' | 'process_exit' | 'unsupported_prompt' | 'cancelled';
   };
+}
+
+/** Shell PTY 有序运行事件。 */
+export type ElectronShellRunEvent =
+  | { type: 'terminal_update'; content: string }
+  | { type: 'auto_answer'; count: number }
+  | { type: 'finished'; result: ElectronShellCommandRunResult };
+
+/** Shell PTY 事件信封。 */
+export interface ElectronShellRunEventEnvelope {
+  /** 命令唯一标识。 */
+  commandId: string;
+  /** 单命令递增序号。 */
+  sequence: number;
+  /** ISO 创建时间。 */
+  createdAt: string;
+  /** 事件载荷。 */
+  event: ElectronShellRunEvent;
 }
 
 export interface DbExecuteResult {
@@ -624,6 +625,12 @@ export interface ElectronAPI {
   chatRuntimeOnBridgeRequested: (callback: (event: ChatRuntimeBridgeRequestEvent) => void) => () => void;
   chatRuntimeOnError: (callback: (event: ChatRuntimeEventMap['chat:runtime:error']) => void) => () => void;
   chatRuntimeOnComplete: (callback: (event: ChatRuntimeEventMap['chat:runtime:complete']) => void) => () => void;
+
+  // Chat Agent 委派操作
+  chatAgentListActive: () => Promise<ChatAgentHandlerResult<ChatAgentCheckpointSnapshot[]>>;
+  chatAgentResumePrimary: (input: ChatAgentResumePrimaryInput) => Promise<ChatAgentHandlerResult<ChatAgentResumeResult>>;
+  chatAgentCancelCheckpoint: (input: ChatAgentCancelCheckpointInput) => Promise<ChatAgentHandlerResult<ChatAgentCheckpointSnapshot>>;
+  chatAgentOnEvent: (callback: (event: ChatAgentApplicationEvent) => void) => () => void;
 
   // MCP runtime 操作
   getMcpStatus: (serverIds: string[]) => Promise<MCPStatusResponse[]>;

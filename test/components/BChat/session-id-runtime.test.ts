@@ -992,6 +992,119 @@ describe('BChat sessionId runtime', (): void => {
     expect(wrapper.emitted('new-session')).toBeUndefined();
   });
 
+  it('does not abort Runtime A or announce local cancellation while waiting for Child checkpoint persistence', async (): Promise<void> => {
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+    const runtimeId = await submitTextAndReadRuntimeId(wrapper, 'delegate work');
+
+    emitRuntimeEvent(runtimeListeners, 'complete', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      reason: 'waiting_children',
+      checkpointId: 'checkpoint-1'
+    });
+    await flushPromises();
+    electronAPIMock.chatRuntimeAbort.mockClear();
+
+    wrapper.findComponent(InputToolbarStub).vm.$emit('abort');
+    await flushPromises();
+
+    expect(electronAPIMock.chatRuntimeAbort).not.toHaveBeenCalled();
+    expect(wrapper.findComponent(InputToolbarStub).props('loading')).toBe(true);
+    expect(wrapper.emitted('runtime-status-change')?.at(-1)).not.toEqual([{ status: 'idle' }]);
+    wrapper.unmount();
+  });
+
+  it('applies the trusted Main cancellation update after Runtime A route is removed', async (): Promise<void> => {
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+    const runtimeId = await submitTextAndReadRuntimeId(wrapper, 'delegate then cancel');
+    const pendingToolPart: ChatMessageToolPart = {
+      id: 'delegate-part',
+      type: 'tool',
+      toolCallId: 'delegate-call',
+      toolName: 'delegate_task',
+      status: 'executing',
+      input: { task: 'read files' }
+    };
+    const pendingAssistant = {
+      ...createAssistantMessage({
+        id: 'assistant-delegated',
+        content: '',
+        parts: [pendingToolPart],
+        runtimeId,
+        loading: true,
+        finished: false
+      }),
+      sessionId: 'session-active'
+    } satisfies ChatMessageRecord;
+    emitRuntimeEvent(runtimeListeners, 'messageCreated', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      message: pendingAssistant
+    });
+    emitRuntimeEvent(runtimeListeners, 'complete', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      reason: 'waiting_children',
+      checkpointId: 'checkpoint-1'
+    });
+    const cancelledAssistant = {
+      ...pendingAssistant,
+      loading: false,
+      finished: true,
+      parts: [
+        {
+          ...pendingToolPart,
+          status: 'done' as const,
+          result: {
+            toolName: 'delegate_task',
+            status: 'cancelled' as const,
+            error: { code: 'USER_CANCELLED' as const, message: '任务已取消' }
+          }
+        }
+      ]
+    } satisfies ChatMessageRecord;
+
+    emitRuntimeEvent(runtimeListeners, 'messageUpdated', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'agent-continuation',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      message: cancelledAssistant
+    });
+    await flushPromises();
+
+    const visibleMessages = wrapper.findComponent(ConversationViewStub).props('messages') as Message[];
+    expect(visibleMessages.find((message: Message): boolean => message.id === 'assistant-delegated')).toMatchObject({
+      loading: false,
+      finished: true,
+      parts: [
+        expect.objectContaining({
+          type: 'tool',
+          status: 'done',
+          result: expect.objectContaining({ status: 'cancelled' })
+        })
+      ]
+    });
+    expect(wrapper.findComponent(InputToolbarStub).props('loading')).toBe(true);
+    wrapper.unmount();
+  });
+
   it('requests a new session from the host without clearing persisted messages', async (): Promise<void> => {
     const loadedMessage = createMessage('message-a', 'keep A');
     chatStoreMock.getSessionMessages.mockResolvedValue([loadedMessage]);

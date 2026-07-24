@@ -2,6 +2,7 @@
  * @file chat-agent.d.ts
  * @description Child Agent 委派契约、持久化快照、结果信封与审计事件的共享类型。
  */
+import type { ChatRuntimeAddress } from './chat-runtime';
 
 /** 委派任务优先级；调度器只能在该固定集合内比较。 */
 export type AgentTaskPriority = 'low' | 'normal' | 'high';
@@ -596,3 +597,93 @@ export type ChatAgentEvent<TType extends ChatAgentEventType = ChatAgentEventType
   : TType extends ChatAgentCheckpointEventType
   ? ChatAgentCheckpointEvent<TType>
   : never;
+
+/**
+ * Renderer 可见的 Checkpoint allowlist 投影。
+ * 不包含 continuation、模型、工具结果、artifact、错误消息或其他内部执行事实。
+ */
+export interface ChatAgentCheckpointSnapshot {
+  /** Checkpoint 稳定身份。 */
+  readonly checkpointId: string;
+  /** 所属会话。 */
+  readonly sessionId: string;
+  /** 所属 Turn。 */
+  readonly turnId: string;
+  /** Primary Actor 身份。 */
+  readonly primaryAgentId: string;
+  /** Turn 根 Runtime。 */
+  readonly rootRuntimeId: string;
+  /** 已挂起的 Runtime A。 */
+  readonly sourceRuntimeId: string;
+  /** 当前权威状态。 */
+  readonly status: AgentCheckpointStatus;
+  /** Checkpoint CAS 版本。 */
+  readonly version: number;
+  /** CAS claim 后唯一 Runtime B。 */
+  readonly resumeRuntimeId?: string;
+  /** Checkpoint 事件流的持久化 cursor。 */
+  readonly checkpointSequence: number;
+  /** 不可变创建时间。 */
+  readonly createdAt: string;
+  /** 投影更新时间。 */
+  readonly updatedAt: string;
+}
+
+/** Renderer 重载恢复所需的公开委派投影。 */
+export type ChatAgentRecoverySnapshot = ChatAgentCheckpointSnapshot;
+
+/** Renderer 请求 CAS 启动 Primary Runtime B 的最小输入。 */
+export interface ChatAgentResumePrimaryInput {
+  /** ready Checkpoint。 */
+  readonly checkpointId: string;
+  /** Renderer 观察到的 CAS 版本。 */
+  readonly expectedVersion: number;
+  /** Renderer 预注册的 Runtime B 身份提议。 */
+  readonly resumeRuntimeId: string;
+}
+
+/** Renderer 请求 cooperative cancellation 的最小输入。 */
+export interface ChatAgentCancelCheckpointInput {
+  /** 目标 Checkpoint。 */
+  readonly checkpointId: string;
+}
+
+/** Primary Runtime B 已启动或已由其他窗口启动的权威结果。 */
+export interface ChatAgentActiveResumeResult {
+  /** 本调用取得 claim，或观察到同一 Runtime 已被 claim。 */
+  readonly status: 'started' | 'already_started';
+  /** claim 后的公开 Checkpoint 投影。 */
+  readonly checkpoint: ChatAgentCheckpointSnapshot;
+  /** 从持久化身份派生的完整 Runtime B 地址。 */
+  readonly address: ChatRuntimeAddress;
+}
+
+/** Renderer 重试时观察到 Checkpoint 已经终态化的权威结果。 */
+export interface ChatAgentSettledResumeResult {
+  /** settled 结果不得再次启动 Runtime。 */
+  readonly status: 'settled';
+  /** 当前终态 Checkpoint 投影。 */
+  readonly checkpoint: ChatAgentCheckpointSnapshot & {
+    readonly status: 'completed' | 'failed' | 'cancelled' | 'interrupted';
+  };
+  /** completed/failed 且存在 Runtime B 时可返回其派生地址。 */
+  readonly address?: ChatRuntimeAddress;
+}
+
+/** Resume IPC 的启动或幂等终态观察结果。 */
+export type ChatAgentResumeResult = ChatAgentActiveResumeResult | ChatAgentSettledResumeResult;
+
+/** 应用级持久化委派事件。 */
+export interface ChatAgentApplicationEvent {
+  /** Application event schema 版本。 */
+  readonly schemaVersion: 1;
+  /** 当前基础阶段只广播权威 Checkpoint 更新。 */
+  readonly type: 'checkpoint.updated';
+  /** 不含敏感执行事实的 Checkpoint 投影。 */
+  readonly checkpoint: ChatAgentCheckpointSnapshot;
+  /** 与 Checkpoint 投影一致的单调 cursor。 */
+  readonly checkpointSequence: number;
+}
+
+/** Chat Agent IPC 统一结果。 */
+export type ChatAgentHandlerResult<T> = { ok: true; data: T } | { ok: false; error: string; code: string };

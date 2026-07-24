@@ -4,6 +4,7 @@
  * @vitest-environment jsdom
  */
 import type { AIToolExecutor } from 'types/ai';
+import type { ChatAgentCheckpointSnapshot } from 'types/chat-agent';
 import type {
   ChatRuntimeCompleteEvent,
   ChatRuntimeConfirmationRequestEvent,
@@ -307,6 +308,47 @@ describe('useRuntimeEvents', (): void => {
     system.stop();
   });
 
+  it('projects waiting_children without completing the Session or publishing runtimeCompleted', (): void => {
+    const system = createChatActorSystem();
+    system.start();
+    const session = system.ensureSession('session-1');
+    session.send({
+      type: 'session.submit',
+      input: { messageId: 'user-1', createdAt: '2026-07-24T00:00:00.000Z', content: 'delegate', parts: [] }
+    });
+    session.send({ type: 'session.prepared' });
+    const turn = session.getSnapshot().context.turnRef;
+    const agent = turn?.getSnapshot().context.primaryAgentRef;
+    system.registerRuntime(
+      {
+        sessionId: 'session-1',
+        turnId: turn?.getSnapshot().context.turnId as string,
+        agentId: 'primary',
+        runtimeId: 'runtime-1',
+        rootRuntimeId: 'runtime-1'
+      },
+      { tools: [], getToolContext: () => undefined, handleBridgeRequest: async (): Promise<unknown> => undefined }
+    );
+    system.send({ type: 'runtime.event', runtimeId: 'runtime-1', event: { type: 'runtime.started', runtimeId: 'runtime-1' } });
+    const visibleEvents = vi.fn();
+    system.subscribeSessionEvents('session-1', visibleEvents);
+    const runtimeStore = useChatTabStore();
+    runtimeStore.ensureTab('chat:session-1', 'session-1');
+    const scope = effectScope();
+    scope.run((): void => useRuntimeEvents(system));
+
+    runtimeListeners.complete?.({ ...createEventBase(), reason: 'waiting_children', checkpointId: 'checkpoint-1' });
+
+    expect(agent?.getSnapshot().matches('waitingChildren')).toBe(true);
+    expect(turn?.getSnapshot().matches('waitingChildren')).toBe(true);
+    expect(session.getSnapshot().matches('waitingChildren')).toBe(true);
+    expect(runtimeStore.getStatus('chat:session-1')).toBe('waiting');
+    expect(visibleEvents).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'runtimeCompleted' }));
+    expect(system.getRuntimeCapabilities('runtime-1')).toBeUndefined();
+    scope.stop();
+    system.stop();
+  });
+
   it('ignores events for runtimes that were not registered by the Actor system', (): void => {
     const system = createChatActorSystem();
     system.start();
@@ -320,6 +362,71 @@ describe('useRuntimeEvents', (): void => {
     runtimeListeners.messageDeleted?.({ ...createEventBase(), messageId: 'assistant-1' });
 
     expect(visibleEvents).not.toHaveBeenCalled();
+    scope.stop();
+    system.stop();
+  });
+
+  it('accepts only a lineage-matching Main continuation assistant update after Runtime A is unregistered', (): void => {
+    const system = createChatActorSystem();
+    system.start();
+    const checkpoint: ChatAgentCheckpointSnapshot = {
+      checkpointId: 'checkpoint-1',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      primaryAgentId: 'primary',
+      rootRuntimeId: 'runtime-a',
+      sourceRuntimeId: 'runtime-a',
+      status: 'waiting_children',
+      version: 1,
+      checkpointSequence: 3,
+      createdAt: '2026-07-24T00:00:00.000Z',
+      updatedAt: '2026-07-24T00:00:01.000Z'
+    };
+    system.recoverDelegation(checkpoint);
+    const visibleEvents = vi.fn();
+    system.subscribeSessionEvents('session-1', visibleEvents);
+    const scope = effectScope();
+    scope.run((): void => useRuntimeEvents(system));
+
+    const assistant = {
+      id: 'assistant-1',
+      sessionId: 'session-1',
+      role: 'assistant' as const,
+      content: 'cancelled',
+      parts: [],
+      createdAt: '2026-07-24T00:00:02.000Z',
+      runtimeId: 'runtime-a',
+      loading: false,
+      finished: true
+    };
+    runtimeListeners.messageUpdated?.({
+      ...createEventBase(),
+      runtimeId: 'runtime-a',
+      rootRuntimeId: 'runtime-a',
+      clientId: 'agent-continuation',
+      turnId: 'turn-other',
+      message: assistant
+    });
+    expect(visibleEvents).not.toHaveBeenCalled();
+
+    runtimeListeners.messageUpdated?.({
+      ...createEventBase(),
+      runtimeId: 'runtime-a',
+      rootRuntimeId: 'runtime-a',
+      clientId: 'agent-continuation',
+      message: assistant
+    });
+
+    expect(visibleEvents).toHaveBeenCalledWith({
+      type: 'messageUpdated',
+      event: expect.objectContaining({
+        runtimeId: 'runtime-a',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        clientId: 'agent-continuation',
+        message: expect.objectContaining({ id: 'assistant-1', loading: false, finished: true })
+      })
+    });
     scope.stop();
     system.stop();
   });

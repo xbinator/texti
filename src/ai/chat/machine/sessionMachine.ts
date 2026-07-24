@@ -5,6 +5,7 @@
 import type { PendingInteraction } from '../policies/pendingInteraction';
 import type { ChatIntent, ChatSubmitInput, ChatWorkflowError } from '../types';
 import type { AIUserChoiceAnswerData } from 'types/chat';
+import type { ChatAgentCheckpointSnapshot } from 'types/chat-agent';
 import type { ChatRuntimeRecoverySnapshot } from 'types/chat-runtime';
 import type { ActorRefFrom } from 'xstate';
 import { assign, enqueueActions, sendTo, setup } from 'xstate';
@@ -34,6 +35,10 @@ export interface SessionMachineContext extends SessionMachineInput {
   error?: ChatWorkflowError;
   /** 当前可恢复的用户交互。 */
   pendingInteraction?: PendingInteraction;
+  /** 当前委派 Checkpoint。 */
+  checkpointId?: string;
+  /** 被 Checkpoint 挂起的 Runtime A。 */
+  sourceRuntimeId?: string;
 }
 
 /**
@@ -41,6 +46,7 @@ export interface SessionMachineContext extends SessionMachineInput {
  */
 export type SessionMachineEvent =
   | { type: 'session.recoverRuntime'; snapshot: ChatRuntimeRecoverySnapshot }
+  | { type: 'session.recoverDelegation'; snapshot: ChatAgentCheckpointSnapshot }
   | { type: 'session.recoverInteraction'; interaction: PendingInteraction }
   | { type: 'session.submit'; input: ChatSubmitInput }
   | { type: 'session.compact' }
@@ -50,6 +56,13 @@ export type SessionMachineEvent =
   | { type: 'session.prepared' }
   | { type: 'session.preparationFailed'; error: ChatWorkflowError }
   | { type: 'session.userChoiceRequired'; interaction?: PendingInteraction }
+  | { type: 'session.waitingChildren'; runtimeId: string; checkpointId: string }
+  | { type: 'session.resumeStarted'; runtimeId: string; checkpointId: string }
+  | { type: 'session.resumeRejected'; checkpointId: string }
+  | { type: 'session.checkpointCompleted'; checkpointId: string }
+  | { type: 'session.checkpointFailed'; checkpointId: string; error: ChatWorkflowError }
+  | { type: 'session.checkpointCancelled'; checkpointId: string }
+  | { type: 'session.checkpointInterrupted'; checkpointId: string }
   | { type: 'session.interactionResolved' }
   | { type: 'session.completed' }
   | { type: 'session.failed'; error: ChatWorkflowError }
@@ -81,6 +94,9 @@ function readNewTurnIntent(event: SessionMachineEvent): ChatIntent | undefined {
   if (event.type === 'session.recoverRuntime') {
     return { type: 'recover', runtimeId: event.snapshot.runtimeId };
   }
+  if (event.type === 'session.recoverDelegation') {
+    return { type: 'recover', runtimeId: event.snapshot.sourceRuntimeId };
+  }
   if (event.type === 'session.recoverInteraction') {
     return { type: 'recover', runtimeId: event.interaction.runtimeId };
   }
@@ -96,13 +112,18 @@ export const sessionMachine = setup({
     context: {} as SessionMachineContext,
     input: {} as SessionMachineInput,
     events: {} as SessionMachineEvent,
-    tags: {} as 'busy' | 'abortable' | 'acceptsInput' | 'waitingForUser'
+    tags: {} as 'busy' | 'abortable' | 'acceptsInput' | 'waitingForUser' | 'waitingForChildren'
   },
   actors: {
     turnMachine
   },
   guards: {
     isContinueIntent: ({ context }): boolean => context.intent?.type === 'continue',
+    isRecoveredResuming: ({ event }): boolean => event.type === 'session.recoverDelegation' && event.snapshot.status === 'resuming',
+    isRecoveredCancelling: ({ event }): boolean => event.type === 'session.recoverDelegation' && event.snapshot.status === 'cancelling',
+    isMatchingCheckpoint: ({ context, event }): boolean => 'checkpointId' in event && context.checkpointId === event.checkpointId,
+    isActiveRuntime: ({ context, event }): boolean =>
+      event.type === 'session.waitingChildren' && context.turnRef?.getSnapshot().context.primaryAgentRef?.getSnapshot().context.runtimeId === event.runtimeId,
     hasPendingRecoveryInteraction: ({ event }): boolean =>
       event.type === 'session.recoverRuntime' && event.snapshot.pendingRequests.some((request): boolean => request.type === 'confirmation')
   },
@@ -118,7 +139,10 @@ export const sessionMachine = setup({
 
         const turnSequence = context.turnSequence + 1;
         // 主进程恢复快照已经冻结 Turn 身份；Renderer 重载时不得生成新的逻辑 Turn。
-        const turnId = event.type === 'session.recoverRuntime' ? event.snapshot.turnId : `${context.sessionId}:turn:${turnSequence}`;
+        const turnId =
+          event.type === 'session.recoverRuntime' || event.type === 'session.recoverDelegation'
+            ? event.snapshot.turnId
+            : `${context.sessionId}:turn:${turnSequence}`;
         const turnRef = spawn('turnMachine', {
           id: `turn-${turnSequence}`,
           input: {
@@ -132,6 +156,18 @@ export const sessionMachine = setup({
       pendingInteraction: ({ event }): PendingInteraction | undefined => (event.type === 'session.recoverInteraction' ? event.interaction : undefined),
       error: (): undefined => undefined
     }),
+    assignDelegation: assign({
+      checkpointId: ({ event }): string | undefined => {
+        if (event.type === 'session.waitingChildren') return event.checkpointId;
+        if (event.type === 'session.recoverDelegation') return event.snapshot.checkpointId;
+        return undefined;
+      },
+      sourceRuntimeId: ({ event }): string | undefined => {
+        if (event.type === 'session.waitingChildren') return event.runtimeId;
+        if (event.type === 'session.recoverDelegation') return event.snapshot.sourceRuntimeId;
+        return undefined;
+      }
+    }),
     resumeTurn: assign({
       intent: ({ event }): ChatIntent | undefined => (event.type === 'session.userChoiceSubmitted' ? { type: 'continue', answer: event.answer } : undefined),
       error: (): undefined => undefined
@@ -142,6 +178,42 @@ export const sessionMachine = setup({
     notifyTurnPrepared: sendTo(({ context }) => context.turnRef as ActorRefFrom<typeof turnMachine>, { type: 'turn.prepared', request: {} }),
     notifyTurnWaiting: enqueueActions(({ context, enqueue }): void => {
       if (context.turnRef) enqueue.sendTo(context.turnRef, { type: 'turn.waiting' });
+    }),
+    notifyTurnChildren: enqueueActions(({ context, event, enqueue }): void => {
+      if (!context.turnRef || event.type !== 'session.waitingChildren') return;
+      enqueue.sendTo(context.turnRef, {
+        type: 'turn.waitingChildren',
+        runtimeId: event.runtimeId,
+        checkpointId: event.checkpointId
+      });
+    }),
+    notifyTurnResumeStarted: enqueueActions(({ context, event, enqueue }): void => {
+      if (!context.turnRef || event.type !== 'session.resumeStarted') return;
+      enqueue.sendTo(context.turnRef, {
+        type: 'turn.resumeStarted',
+        runtimeId: event.runtimeId,
+        checkpointId: event.checkpointId
+      });
+    }),
+    notifyTurnResumeRejected: enqueueActions(({ context, event, enqueue }): void => {
+      if (!context.turnRef || event.type !== 'session.resumeRejected') return;
+      enqueue.sendTo(context.turnRef, { type: 'turn.resumeRejected', checkpointId: event.checkpointId });
+    }),
+    notifyTurnCheckpointCompleted: enqueueActions(({ context, event, enqueue }): void => {
+      if (!context.turnRef || event.type !== 'session.checkpointCompleted') return;
+      enqueue.sendTo(context.turnRef, { type: 'turn.checkpointCompleted', checkpointId: event.checkpointId });
+    }),
+    notifyTurnCheckpointFailed: enqueueActions(({ context, event, enqueue }): void => {
+      if (!context.turnRef || event.type !== 'session.checkpointFailed') return;
+      enqueue.sendTo(context.turnRef, { type: 'turn.checkpointFailed', checkpointId: event.checkpointId, error: event.error });
+    }),
+    notifyTurnCheckpointCancelled: enqueueActions(({ context, event, enqueue }): void => {
+      if (!context.turnRef || event.type !== 'session.checkpointCancelled') return;
+      enqueue.sendTo(context.turnRef, { type: 'turn.checkpointCancelled', checkpointId: event.checkpointId });
+    }),
+    notifyTurnCheckpointInterrupted: enqueueActions(({ context, event, enqueue }): void => {
+      if (!context.turnRef || event.type !== 'session.checkpointInterrupted') return;
+      enqueue.sendTo(context.turnRef, { type: 'turn.checkpointInterrupted', checkpointId: event.checkpointId });
     }),
     notifyTurnInteractionResolved: enqueueActions(({ context, enqueue }): void => {
       if (context.turnRef) enqueue.sendTo(context.turnRef, { type: 'turn.interactionResolved' });
@@ -181,6 +253,23 @@ export const sessionMachine = setup({
         interaction: event.snapshot.pendingRequests.some((request): boolean => request.type === 'confirmation') ? 'confirmation' : undefined
       });
     }),
+    hydrateDelegatedTurn: enqueueActions(({ context, event, enqueue }): void => {
+      if (!context.turnRef || event.type !== 'session.recoverDelegation') return;
+      enqueue.sendTo(context.turnRef, {
+        type: 'turn.recoveredChildren',
+        runtimeId: event.snapshot.sourceRuntimeId,
+        checkpointId: event.snapshot.checkpointId
+      });
+      if (event.snapshot.status === 'resuming' && event.snapshot.resumeRuntimeId) {
+        enqueue.sendTo(context.turnRef, {
+          type: 'turn.resumeStarted',
+          runtimeId: event.snapshot.resumeRuntimeId,
+          checkpointId: event.snapshot.checkpointId
+        });
+      } else if (event.snapshot.status === 'cancelling') {
+        enqueue.sendTo(context.turnRef, { type: 'turn.cancel' });
+      }
+    }),
     markInteractionSubmitting: assign({
       pendingInteraction: ({ context }): PendingInteraction | undefined =>
         context.pendingInteraction ? { ...context.pendingInteraction, status: 'submitting' } : undefined
@@ -206,7 +295,9 @@ export const sessionMachine = setup({
     clearActiveTurn: assign({
       turnRef: (): undefined => undefined,
       intent: (): undefined => undefined,
-      pendingInteraction: (): undefined => undefined
+      pendingInteraction: (): undefined => undefined,
+      checkpointId: (): undefined => undefined,
+      sourceRuntimeId: (): undefined => undefined
     }),
     clearRollback: assign({
       rollbackTargetMessageId: (): undefined => undefined
@@ -220,6 +311,22 @@ export const sessionMachine = setup({
     idle: {
       tags: ['acceptsInput'],
       on: {
+        'session.recoverDelegation': [
+          {
+            target: 'running',
+            guard: 'isRecoveredResuming',
+            actions: ['startNewTurn', 'assignDelegation', 'hydrateDelegatedTurn']
+          },
+          {
+            target: 'cancellingChildren',
+            guard: 'isRecoveredCancelling',
+            actions: ['startNewTurn', 'assignDelegation', 'hydrateDelegatedTurn']
+          },
+          {
+            target: 'waitingChildren',
+            actions: ['startNewTurn', 'assignDelegation', 'hydrateDelegatedTurn']
+          }
+        ],
         'session.recoverInteraction': {
           target: 'waitingForUser',
           actions: ['startNewTurn', 'hydrateRecoveredTurn']
@@ -288,6 +395,25 @@ export const sessionMachine = setup({
     running: {
       tags: ['busy', 'abortable'],
       on: {
+        'session.checkpointCompleted': {
+          target: 'idle',
+          guard: 'isMatchingCheckpoint',
+          actions: ['notifyTurnCheckpointCompleted', 'clearActiveTurn']
+        },
+        'session.checkpointFailed': {
+          target: 'idle',
+          guard: 'isMatchingCheckpoint',
+          actions: ['assignError', 'notifyTurnCheckpointFailed', 'clearActiveTurn']
+        },
+        'session.resumeStarted': {
+          guard: 'isMatchingCheckpoint',
+          actions: 'notifyTurnResumeStarted'
+        },
+        'session.waitingChildren': {
+          target: 'waitingChildren',
+          guard: 'isActiveRuntime',
+          actions: ['assignDelegation', 'notifyTurnChildren']
+        },
         'session.userChoiceRequired': {
           target: 'waitingForUser',
           actions: ['notifyTurnWaiting', 'capturePendingInteraction']
@@ -311,6 +437,69 @@ export const sessionMachine = setup({
         'session.rollbackRequested': {
           target: 'rollingBack.cancellingActiveRuntime',
           actions: ['assignRollbackTarget', 'notifyTurnCancel']
+        }
+      }
+    },
+    waitingChildren: {
+      tags: ['busy', 'abortable', 'waitingForChildren'],
+      on: {
+        'session.resumeStarted': {
+          target: 'running',
+          guard: 'isMatchingCheckpoint',
+          actions: 'notifyTurnResumeStarted'
+        },
+        'session.resumeRejected': {
+          guard: 'isMatchingCheckpoint',
+          actions: 'notifyTurnResumeRejected'
+        },
+        'session.checkpointCompleted': {
+          target: 'idle',
+          guard: 'isMatchingCheckpoint',
+          actions: ['notifyTurnCheckpointCompleted', 'clearActiveTurn']
+        },
+        'session.checkpointFailed': {
+          target: 'idle',
+          guard: 'isMatchingCheckpoint',
+          actions: ['assignError', 'notifyTurnCheckpointFailed', 'clearActiveTurn']
+        },
+        'session.cancelRequested': {
+          target: 'cancellingChildren',
+          actions: 'notifyTurnCancel'
+        },
+        'session.checkpointCancelled': {
+          target: 'idle',
+          guard: 'isMatchingCheckpoint',
+          actions: ['notifyTurnCheckpointCancelled', 'clearActiveTurn']
+        },
+        'session.checkpointInterrupted': {
+          target: 'idle',
+          guard: 'isMatchingCheckpoint',
+          actions: ['notifyTurnCheckpointInterrupted', 'clearActiveTurn']
+        }
+      }
+    },
+    cancellingChildren: {
+      tags: ['busy', 'abortable'],
+      on: {
+        'session.checkpointCompleted': {
+          target: 'idle',
+          guard: 'isMatchingCheckpoint',
+          actions: ['notifyTurnCheckpointCompleted', 'clearActiveTurn']
+        },
+        'session.checkpointFailed': {
+          target: 'idle',
+          guard: 'isMatchingCheckpoint',
+          actions: ['assignError', 'notifyTurnCheckpointFailed', 'clearActiveTurn']
+        },
+        'session.checkpointCancelled': {
+          target: 'idle',
+          guard: 'isMatchingCheckpoint',
+          actions: ['notifyTurnCheckpointCancelled', 'clearActiveTurn']
+        },
+        'session.checkpointInterrupted': {
+          target: 'idle',
+          guard: 'isMatchingCheckpoint',
+          actions: ['notifyTurnCheckpointInterrupted', 'clearActiveTurn']
         }
       }
     },

@@ -559,6 +559,9 @@ export function useChatWorkflow(options: UseChatWorkflowOptions): UseChatWorkflo
     const runtimeId = options.sessionActor.activeRuntimeId.value;
     const abortedSessionId = options.activeSessionId.value;
     options.sessionActor.cancel();
+    const sessionSnapshot = abortedSessionId ? options.actorSystem.getSession(abortedSessionId)?.getSnapshot() : undefined;
+    // waitingChildren 只能由持久化 Checkpoint 取消事件收敛；不得 abort 已释放的 Runtime A 或本地宣布成功。
+    if (sessionSnapshot?.matches('cancellingChildren')) return;
     try {
       if (!hasCurrentSessionCommandRuntime() && (await abortPendingUserChoiceIfNeeded())) {
         options.sessionActor.markRuntimeCancelled();
