@@ -83,6 +83,8 @@ interface WidgetSidebarTab {
 type WidgetSidebarStyle = CSSProperties & {
   /** 右侧设置面板宽度，用于展开态避让。 */
   '--widget-sidebar-settings-width': string;
+  /** 当前内容区宽度，用于普通态与展开态之间做显式宽度过渡。 */
+  '--widget-sidebar-content-width': string;
 };
 
 /**
@@ -156,7 +158,8 @@ let dragAbortController: AbortController | null = null;
 /** 根元素样式变量，展开态用它给右侧设置栏让位。 */
 const sidebarStyle = computed<WidgetSidebarStyle>(
   (): WidgetSidebarStyle => ({
-    '--widget-sidebar-settings-width': `${props.settingsWidth}px`
+    '--widget-sidebar-settings-width': `${props.settingsWidth}px`,
+    '--widget-sidebar-content-width': `${size.value}px`
   })
 );
 
@@ -262,11 +265,17 @@ onBeforeUnmount((): void => {
 
 <style lang="less" scoped>
 .widget-sidebar {
+  --widget-sidebar-tabs-width: 45px;
+
   display: flex;
   flex-shrink: 0;
+  width: calc(var(--widget-sidebar-tabs-width) + var(--widget-sidebar-content-width));
   height: 100%;
   min-height: 0;
+  overflow: hidden;
   background: var(--bg-primary);
+  transition: width 0.36s ease, right 0.36s ease, opacity 0.36s ease;
+  will-change: width, right;
 }
 
 .widget-sidebar--overlay {
@@ -285,14 +294,17 @@ onBeforeUnmount((): void => {
 
 .widget-sidebar--expanded {
   right: var(--widget-sidebar-settings-width);
+  width: calc(100% - var(--widget-sidebar-settings-width));
   background: var(--bg-primary);
 }
 
 .widget-sidebar__tabs {
+  box-sizing: border-box;
   display: flex;
   flex-shrink: 0;
   flex-direction: column;
   gap: 8px;
+  width: var(--widget-sidebar-tabs-width);
   min-height: 0;
   padding: 6px;
   border-right: 1px solid var(--border-primary);
@@ -300,6 +312,13 @@ onBeforeUnmount((): void => {
 
 .widget-sidebar__splitter {
   flex-shrink: 0;
+  width: var(--widget-sidebar-content-width);
+  overflow: hidden;
+  transition: width 0.36s ease, opacity 0.36s ease;
+}
+
+.widget-sidebar__splitter :deep(.b-panel-splitter__section) {
+  width: 100% !important;
 }
 
 .widget-sidebar__splitter--dragging {
@@ -314,8 +333,7 @@ onBeforeUnmount((): void => {
 }
 
 .widget-sidebar__splitter--expanded {
-  flex: 1;
-  width: 0;
+  width: calc(100% - var(--widget-sidebar-tabs-width));
 }
 
 .widget-sidebar__splitter--expanded :deep(.b-panel-splitter__section) {
@@ -331,5 +349,12 @@ onBeforeUnmount((): void => {
   min-height: 0;
   overflow: hidden;
   border-right: 1px solid var(--border-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .widget-sidebar,
+  .widget-sidebar__splitter {
+    transition: none;
+  }
 }
 </style>

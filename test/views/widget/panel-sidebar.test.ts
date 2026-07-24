@@ -4,12 +4,16 @@
  * @vitest-environment jsdom
  */
 /* eslint-disable vue/one-component-per-file */
+import { readFileSync } from 'node:fs';
 import { defineComponent, nextTick } from 'vue';
 import { mount, VueWrapper } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
 import type { WidgetData, WidgetElement } from '@/components/BWidget/types';
 import { createDefaultWidgetData } from '@/components/BWidget/utils/widgetData';
 import PanelSidebar from '@/views/widget/components/PanelSidebar.vue';
+
+const panelSidebarSource = readFileSync('src/views/widget/components/PanelSidebar.vue', 'utf8');
+const sidebarActionSource = readFileSync('src/views/widget/components/SidebarAction.vue', 'utf8');
 
 /**
  * BPanelSplitter 测试替身。
@@ -180,6 +184,21 @@ describe('PanelSidebar', (): void => {
     wrapper.unmount();
   });
 
+  it('exposes the current splitter size as an animated layout variable', async (): Promise<void> => {
+    const wrapper = mountPanelSidebar();
+    const splitter = wrapper.findComponent(BPanelSplitterStub);
+    const sidebar = wrapper.find<HTMLElement>('.widget-sidebar');
+
+    expect(sidebar.attributes('style')).toContain('--widget-sidebar-content-width: 320px;');
+
+    splitter.vm.$emit('update:size', 400);
+    await nextTick();
+
+    expect(sidebar.attributes('style')).toContain('--widget-sidebar-content-width: 400px;');
+
+    wrapper.unmount();
+  });
+
   it('keeps the splitter mounted while visually hiding it during dragging', async (): Promise<void> => {
     const wrapper = mountPanelSidebar();
 
@@ -259,5 +278,15 @@ describe('PanelSidebar', (): void => {
     expect(wrapper.emitted('save')).toHaveLength(1);
 
     wrapper.unmount();
+  });
+
+  it('keeps expand and collapse motion smooth for the action panel', (): void => {
+    expect(panelSidebarSource).toContain('transition: width 0.36s ease, right 0.36s ease, opacity 0.36s ease;');
+    expect(panelSidebarSource).toContain('will-change: width, right;');
+    expect(panelSidebarSource).toContain('@media (prefers-reduced-motion: reduce)');
+    expect(sidebarActionSource).toContain(":icon=\"isExpanded ? 'lucide:minimize-2' : 'lucide:maximize-2'\"");
+    expect(sidebarActionSource).not.toContain('action-expand-button');
+    expect(sidebarActionSource).not.toContain('action-expand-icon');
+    expect(sidebarActionSource).not.toContain(':tooltip=');
   });
 });
