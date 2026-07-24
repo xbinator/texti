@@ -7,13 +7,26 @@
 import { readFileSync } from 'node:fs';
 import { defineComponent, nextTick } from 'vue';
 import { mount, VueWrapper } from '@vue/test-utils';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { WidgetData, WidgetElement } from '@/components/BWidget/types';
 import { createDefaultWidgetData } from '@/components/BWidget/utils/widgetData';
 import PanelSidebar from '@/views/widget/components/PanelSidebar.vue';
 
 const panelSidebarSource = readFileSync('src/views/widget/components/PanelSidebar.vue', 'utf8');
 const sidebarActionSource = readFileSync('src/views/widget/components/SidebarAction.vue', 'utf8');
+
+/**
+ * 读取指定 Less 选择器的首个规则体。
+ * @param source - Vue 单文件组件源码
+ * @param selector - 需要匹配的样式选择器
+ * @returns 样式规则体，未找到时返回空字符串
+ */
+function readStyleRuleBody(source: string, selector: string): string {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const match = new RegExp(`(?:^|\\n)\\s*${escapedSelector}\\s*\\{(?<body>[\\s\\S]*?)\\n\\}`, 'u').exec(source);
+
+  return match?.groups?.body ?? '';
+}
 
 /**
  * BPanelSplitter 测试替身。
@@ -184,7 +197,7 @@ describe('PanelSidebar', (): void => {
     wrapper.unmount();
   });
 
-  it('exposes the current splitter size as an animated layout variable', async (): Promise<void> => {
+  it('exposes the current splitter size as a layout variable', async (): Promise<void> => {
     const wrapper = mountPanelSidebar();
     const splitter = wrapper.findComponent(BPanelSplitterStub);
     const sidebar = wrapper.find<HTMLElement>('.widget-sidebar');
@@ -197,6 +210,37 @@ describe('PanelSidebar', (): void => {
     expect(sidebar.attributes('style')).toContain('--widget-sidebar-content-width: 400px;');
 
     wrapper.unmount();
+  });
+
+  it('only enables expand and collapse motion after action panel button clicks', async (): Promise<void> => {
+    vi.useFakeTimers();
+    const wrapper = mountPanelSidebar();
+
+    try {
+      const sidebar = wrapper.find<HTMLElement>('.widget-sidebar');
+
+      expect(sidebar.classes()).not.toContain('widget-sidebar--expand-motion');
+
+      await wrapper.find('[data-icon="lucide:file-code-corner"]').trigger('click');
+      expect(sidebar.classes()).not.toContain('widget-sidebar--expand-motion');
+
+      await wrapper.find('.action-expand-stub').trigger('click');
+      expect(sidebar.classes()).toContain('widget-sidebar--expand-motion');
+
+      vi.advanceTimersByTime(360);
+      await nextTick();
+      expect(sidebar.classes()).not.toContain('widget-sidebar--expand-motion');
+
+      await wrapper.find('.action-collapse-stub').trigger('click');
+      expect(sidebar.classes()).toContain('widget-sidebar--expand-motion');
+
+      vi.advanceTimersByTime(360);
+      await nextTick();
+      expect(sidebar.classes()).not.toContain('widget-sidebar--expand-motion');
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
   });
 
   it('keeps the splitter mounted while visually hiding it during dragging', async (): Promise<void> => {
@@ -264,6 +308,7 @@ describe('PanelSidebar', (): void => {
 
     expect(wrapper.find('.sidebar-layer-stub').exists()).toBe(true);
     expect(wrapper.find('.widget-sidebar').classes()).not.toContain('widget-sidebar--expanded');
+    expect(wrapper.find('.widget-sidebar').classes()).not.toContain('widget-sidebar--expand-motion');
     expect(wrapper.find('[data-icon="lucide:layers"]').attributes('data-type')).toBe('secondary');
 
     wrapper.unmount();
@@ -280,9 +325,18 @@ describe('PanelSidebar', (): void => {
     wrapper.unmount();
   });
 
-  it('keeps expand and collapse motion smooth for the action panel', (): void => {
-    expect(panelSidebarSource).toContain('transition: width 0.36s ease, right 0.36s ease, opacity 0.36s ease;');
-    expect(panelSidebarSource).toContain('will-change: width, right;');
+  it('keeps sidebar root and splitter unclipped while only transitioning during explicit action motion', (): void => {
+    const sidebarRuleBody = readStyleRuleBody(panelSidebarSource, '.widget-sidebar');
+    const splitterRuleBody = readStyleRuleBody(panelSidebarSource, '.widget-sidebar__splitter');
+    const expandMotionRuleBody = readStyleRuleBody(panelSidebarSource, '.widget-sidebar--expand-motion');
+    const expandMotionSplitterRuleBody = readStyleRuleBody(panelSidebarSource, '.widget-sidebar--expand-motion .widget-sidebar__splitter');
+
+    expect(sidebarRuleBody).not.toContain('overflow: hidden;');
+    expect(splitterRuleBody).not.toContain('overflow: hidden;');
+    expect(splitterRuleBody).not.toContain('transition:');
+    expect(expandMotionRuleBody).toContain('transition: width 0.36s ease, right 0.36s ease, opacity 0.36s ease;');
+    expect(expandMotionRuleBody).toContain('will-change: width, right;');
+    expect(expandMotionSplitterRuleBody).toContain('transition: width 0.36s ease, opacity 0.36s ease;');
     expect(panelSidebarSource).toContain('@media (prefers-reduced-motion: reduce)');
     expect(panelSidebarSource).not.toContain('action-motion');
     expect(sidebarActionSource).toContain(":icon=\"isExpanded ? 'lucide:minimize-2' : 'lucide:maximize-2'\"");

@@ -3,7 +3,7 @@
   @description Widget 页面左侧工具、图层、数据源和动作侧边栏，tabs 列常驻显示；动作面板可像 ChatSider 一样通过展开态样式覆盖画布并避让右侧设置栏。
 -->
 <template>
-  <aside :class="bem({ expanded: isExpanded, overlay: true })" :style="sidebarStyle">
+  <aside :class="bem({ 'expand-motion': isExpandMotionEnabled, expanded: isExpanded, overlay: true })" :style="sidebarStyle">
     <div :class="bem('tabs')">
       <template v-for="tab in sidebarTabs" :key="tab.key">
         <BButton :type="activeSidebarTab === tab.key ? 'secondary' : 'ghost'" square :icon="tab.icon" @click="handleTabClick(tab.key)" />
@@ -142,6 +142,9 @@ const SIDEBAR_DEFAULT_SIZE = 320;
 /** 普通拖拽态最大宽度；展开态通过 CSS 覆盖整段画布空间。 */
 const SIDEBAR_MAX_SIZE = 440;
 
+/** 展开 / 收起动画时长，需与 Less 里的 transition 时长保持一致。 */
+const EXPAND_MOTION_DURATION = 360;
+
 /** 内容区宽度（内部状态），为 0 时表示侧栏已关闭。 */
 const size = ref(SIDEBAR_DEFAULT_SIZE);
 
@@ -150,8 +153,12 @@ const activeSidebarTab = ref<ActiveWidgetSidebarTabKey>('tools');
 
 /** 当前是否处于展开态（由「动作」tab 触发）。 */
 const isExpanded = ref(false);
+/** 是否临时启用动作面板展开 / 收起过渡。 */
+const isExpandMotionEnabled = ref(false);
 /** 当前是否处于拖拽创建元素状态。 */
 const isDragging = ref(false);
+/** 展开 / 收起过渡状态清理定时器。 */
+let expandMotionTimer: number | null = null;
 /** 拖拽期间的全局指针监听控制器。 */
 let dragAbortController: AbortController | null = null;
 
@@ -164,9 +171,34 @@ const sidebarStyle = computed<WidgetSidebarStyle>(
 );
 
 /**
+ * 清理动作面板展开 / 收起过渡定时器。
+ */
+function cleanupExpandMotion(): void {
+  if (expandMotionTimer === null) {
+    return;
+  }
+
+  window.clearTimeout(expandMotionTimer);
+  expandMotionTimer = null;
+}
+
+/**
+ * 临时启用动作面板展开 / 收起过渡，仅响应用户点击展开或收起按钮。
+ */
+function enableExpandMotion(): void {
+  cleanupExpandMotion();
+  isExpandMotionEnabled.value = true;
+  expandMotionTimer = window.setTimeout((): void => {
+    isExpandMotionEnabled.value = false;
+    expandMotionTimer = null;
+  }, EXPAND_MOTION_DURATION);
+}
+
+/**
  * 处理「动作」tab 展开事件：只切换布局状态，保留普通态拖拽宽度。
  */
 function handleExpand(): void {
+  enableExpandMotion();
   isExpanded.value = true;
 }
 
@@ -174,6 +206,7 @@ function handleExpand(): void {
  * 处理「动作」tab 收起事件：恢复普通侧栏布局。
  */
 function handleCollapse(): void {
+  enableExpandMotion();
   isExpanded.value = false;
 }
 
@@ -212,9 +245,14 @@ function handleDragStart(): void {
  * @param key - 目标页签标识
  */
 function handleTabClick(key: WidgetSidebarTabKey): void {
-  // 切换到非「动作」tab 时退出覆盖布局，但保留用户拖拽后的普通态宽度。
-  if (key !== 'action' && isExpanded.value) {
-    isExpanded.value = false;
+  // 切换到非「动作」tab 时退出动作面板过渡和覆盖布局，但保留用户拖拽后的普通态宽度。
+  if (key !== 'action') {
+    cleanupExpandMotion();
+    isExpandMotionEnabled.value = false;
+
+    if (isExpanded.value) {
+      isExpanded.value = false;
+    }
   }
 
   if (size.value <= 0) {
@@ -259,6 +297,7 @@ function handleElementsMove(payload: LayerMovePayload): void {
 }
 
 onBeforeUnmount((): void => {
+  cleanupExpandMotion();
   cleanupDragListeners();
 });
 </script>
@@ -272,10 +311,7 @@ onBeforeUnmount((): void => {
   width: calc(var(--widget-sidebar-tabs-width) + var(--widget-sidebar-content-width));
   height: 100%;
   min-height: 0;
-  overflow: hidden;
   background: var(--bg-primary);
-  transition: width 0.36s ease, right 0.36s ease, opacity 0.36s ease;
-  will-change: width, right;
 }
 
 .widget-sidebar--overlay {
@@ -298,6 +334,15 @@ onBeforeUnmount((): void => {
   background: var(--bg-primary);
 }
 
+.widget-sidebar--expand-motion {
+  transition: width 0.36s ease, right 0.36s ease, opacity 0.36s ease;
+  will-change: width, right;
+
+  .widget-sidebar__splitter {
+    transition: width 0.36s ease, opacity 0.36s ease;
+  }
+}
+
 .widget-sidebar__tabs {
   box-sizing: border-box;
   display: flex;
@@ -313,12 +358,10 @@ onBeforeUnmount((): void => {
 .widget-sidebar__splitter {
   flex-shrink: 0;
   width: var(--widget-sidebar-content-width);
-  overflow: hidden;
-  transition: width 0.36s ease, opacity 0.36s ease;
-}
 
-.widget-sidebar__splitter :deep(.b-panel-splitter__section) {
-  width: 100% !important;
+  :deep(.b-panel-splitter__section) {
+    width: 100% !important;
+  }
 }
 
 .widget-sidebar__splitter--dragging {
@@ -326,18 +369,18 @@ onBeforeUnmount((): void => {
   overflow: hidden;
   pointer-events: none;
   opacity: 0;
-}
 
-.widget-sidebar__splitter--dragging :deep(.b-panel-splitter__section) {
-  width: 0 !important;
+  :deep(.b-panel-splitter__section) {
+    width: 0 !important;
+  }
 }
 
 .widget-sidebar__splitter--expanded {
   width: calc(100% - var(--widget-sidebar-tabs-width));
-}
 
-.widget-sidebar__splitter--expanded :deep(.b-panel-splitter__section) {
-  width: 100% !important;
+  :deep(.b-panel-splitter__section) {
+    width: 100% !important;
+  }
 }
 
 .widget-sidebar__content {
@@ -352,8 +395,8 @@ onBeforeUnmount((): void => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .widget-sidebar,
-  .widget-sidebar__splitter {
+  .widget-sidebar--expand-motion,
+  .widget-sidebar--expand-motion .widget-sidebar__splitter {
     transition: none;
   }
 }
