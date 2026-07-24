@@ -97,6 +97,7 @@ describe('runtime factories', (): void => {
       turnId: 'turn-1',
       agentId: 'primary',
       runtimeId: 'runtime-b',
+      parentRuntimeId: 'runtime-a',
       rootRuntimeId: 'runtime-root',
       continuationOfRuntimeId: 'runtime-a',
       model: { providerId: 'provider-frozen', modelId: 'model-frozen' },

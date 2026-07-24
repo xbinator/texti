@@ -78,6 +78,7 @@ export function createResumeAddress(snapshot: ChatAgentCheckpointSnapshot, runti
     turnId: snapshot.turnId,
     agentId: snapshot.primaryAgentId,
     runtimeId,
+    parentRuntimeId: snapshot.sourceRuntimeId,
     rootRuntimeId: snapshot.rootRuntimeId,
     continuationOfRuntimeId: snapshot.sourceRuntimeId
   };

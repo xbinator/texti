@@ -130,6 +130,7 @@ export function createPrimaryContinuationRuntime(input: PrimaryContinuationFacto
     turnId: input.turnId,
     clientId: context.clientId,
     agentId: input.primaryAgentId,
+    parentRuntimeId: input.sourceRuntimeId,
     rootRuntimeId: input.rootRuntimeId,
     continuationOfRuntimeId: input.sourceRuntimeId,
     model: structuredClone(context.modelSnapshot),

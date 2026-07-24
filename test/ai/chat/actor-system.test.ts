@@ -5,9 +5,36 @@
 import type { ChatAgentCheckpointSnapshot } from 'types/chat-agent';
 import type { ChatRuntimeRecoverySnapshot } from 'types/chat-runtime';
 import { describe, expect, it } from 'vitest';
-import { createChatActorSystem } from '@/ai/chat/actorSystem';
+import { createChatActorSystem, createResumeAddress } from '@/ai/chat/actorSystem';
 
 describe('chat actor system', (): void => {
+  it('derives the exact Runtime B lineage returned by Main', (): void => {
+    const snapshot: ChatAgentCheckpointSnapshot = {
+      checkpointId: 'checkpoint-1',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      primaryAgentId: 'primary',
+      rootRuntimeId: 'runtime-a',
+      sourceRuntimeId: 'runtime-a',
+      status: 'resuming',
+      version: 3,
+      resumeRuntimeId: 'runtime-b',
+      checkpointSequence: 5,
+      createdAt: '2026-07-24T00:00:00.000Z',
+      updatedAt: '2026-07-24T00:00:01.000Z'
+    };
+
+    expect(createResumeAddress(snapshot, 'runtime-b')).toEqual({
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      agentId: 'primary',
+      runtimeId: 'runtime-b',
+      parentRuntimeId: 'runtime-a',
+      rootRuntimeId: 'runtime-a',
+      continuationOfRuntimeId: 'runtime-a'
+    });
+  });
+
   it('owns one Supervisor and exposes stable Session actors', (): void => {
     const system = createChatActorSystem();
     system.start();

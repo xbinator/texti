@@ -161,6 +161,40 @@ function fromRecordMessage(record: ChatMessageRecord): Message {
   };
 }
 
+/**
+ * 读取当前会话执行破坏性草稿恢复前的 Agent 门禁。
+ * Renderer 重载期间仍存在活动委派 Checkpoint 时必须保留 Runtime A 草稿；
+ * Agent IPC 可用但查询失败时按 fail-closed 处理。旧浏览器测试环境没有该 API
+ * 时保持原有恢复行为。
+ * @param sessionId - 待恢复消息所属会话
+ * @returns legacy 表示保持旧行为，blocked 表示禁止恢复，clear 表示可重新读取
+ */
+async function readRecoveryGate(sessionId: string): Promise<'legacy' | 'blocked' | 'clear'> {
+  const listActive = getElectronAPI().chatAgentListActive;
+  if (typeof listActive !== 'function') return 'legacy';
+
+  const [requestError, response] = await asyncTo(listActive());
+  if (requestError) return 'blocked';
+  const [unwrapError, checkpoints] = await asyncTo(Promise.resolve().then(() => unwrap(response)));
+  if (unwrapError) return 'blocked';
+
+  return checkpoints.some((checkpoint): boolean => checkpoint.sessionId === sessionId) ? 'blocked' : 'clear';
+}
+
+/**
+ * 从主进程读取一次会话消息快照。
+ * @param sessionId - 目标会话
+ * @param cursor - 可选历史游标
+ * @returns 持久化消息记录
+ */
+async function readMessageRecords(sessionId: string, cursor?: ChatMessageHistoryCursor): Promise<ChatMessageRecord[]> {
+  return retryDuringDatabaseInitialization(async () => {
+    const plainCursor = cursor ? toCloneableData(cursor) : undefined;
+    const result = await getElectronAPI().chatMessageList(sessionId, plainCursor);
+    return unwrap(result);
+  });
+}
+
 export const useChatSessionStore = defineStore('chat', {
   state: (): ChatSessionState => ({
     sessions: [],
@@ -264,15 +298,22 @@ export const useChatSessionStore = defineStore('chat', {
      */
     async getSessionMessages(sessionId: string, cursor?: ChatMessageHistoryCursor): Promise<Message[]> {
       try {
-        const messages = await retryDuringDatabaseInitialization(async () => {
-          // 深拷贝以剥离 Vue 响应式 Proxy，否则 Electron IPC 结构化克隆会失败
-          const plainCursor = cursor ? toCloneableData(cursor) : undefined;
-          const result = await getElectronAPI().chatMessageList(sessionId, plainCursor);
-          return unwrap(result);
-        });
-
+        const messages = await readMessageRecords(sessionId, cursor);
         const loadedMessages = messages.map(fromRecordMessage);
-        const recoveryResult = recoverInterruptedAssistantDrafts(loadedMessages);
+        const initialRecovery = recoverInterruptedAssistantDrafts(loadedMessages);
+        // 绝大多数正常历史没有中断草稿，不触发额外 Agent IPC 或二次消息读取。
+        if (!initialRecovery.recovered) return initialRecovery.messages;
+
+        const recoveryGate = await readRecoveryGate(sessionId);
+        if (recoveryGate === 'blocked') return loadedMessages;
+
+        let recoveryResult = initialRecovery;
+        if (recoveryGate === 'clear') {
+          // Agent 状态确认与消息读取之间可能完成 Runtime B；必须用第二份新鲜快照恢复。
+          const [freshReadError, freshRecords] = await asyncTo(readMessageRecords(sessionId, cursor));
+          if (freshReadError) return loadedMessages;
+          recoveryResult = recoverInterruptedAssistantDrafts(freshRecords.map(fromRecordMessage));
+        }
 
         if (recoveryResult.recovered) {
           await Promise.all([

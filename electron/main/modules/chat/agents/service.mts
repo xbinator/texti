@@ -409,6 +409,7 @@ function createResumeAddress(checkpoint: AgentCheckpointRecord, runtimeId: strin
     turnId: checkpoint.turnId,
     agentId: checkpoint.primaryAgentId,
     runtimeId,
+    parentRuntimeId: checkpoint.sourceRuntimeId,
     rootRuntimeId: checkpoint.rootRuntimeId,
     continuationOfRuntimeId: checkpoint.sourceRuntimeId
   });

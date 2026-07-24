@@ -85,9 +85,11 @@ import {
 } from './runners/factory.mjs';
 import { createPersistableAssistant } from './stream/deferred-tools.mjs';
 import { createRuntimeStreamExecutor } from './stream/index.mjs';
+import { normalizeRendererToolTimeoutMs } from './stream/tools.mjs';
 import { getRuntimeTaskDeadlineAt, getRuntimeTaskTimeout } from './task-clock.mjs';
 import { createMainToolExecutor } from './tools/index.mjs';
 import { createRuntimeEventBase } from './types.mjs';
+import { getToolRegistryEntry } from '../../../../../shared/ai/tools/index.js';
 
 /** Renderer 请求默认超时时间。 */
 const RUNTIME_RENDERER_REQUEST_TIMEOUT_MS = 30_000;
@@ -153,16 +155,53 @@ function createDefaultMessageReader(): ChatRuntimeMessageReader {
 function createDefaultStreamExecutor(
   executeRendererTool?: (input: ChatRuntimeRendererToolExecutionInput) => Promise<AIToolExecutionResult>,
   executeMainTool?: (input: ChatRuntimeMainToolExecutionInput) => Promise<AIToolExecutionResult>,
-  rendererToolTimeoutMs?: number
+  rendererToolTimeoutMs?: number,
+  resolveModel?: ChatRuntimeServiceDependencies['resolveModel'],
+  streamText?: ChatRuntimeServiceDependencies['streamText']
 ): ChatRuntimeStreamExecutor {
-  const resolver = createDefaultChatModelResolver();
+  const defaultResolver = createDefaultChatModelResolver();
+  const resolver = {
+    resolve: resolveModel ?? ((model?: ChatRuntimeModelSelection): Promise<ChatModelResolution | null> => defaultResolver.resolve(model))
+  };
   return createRuntimeStreamExecutor({
     resolver,
-    streamText: (createOptions, request, callOptions) => aiService.streamText(createOptions, request, callOptions),
+    streamText: streamText ?? ((createOptions, request, callOptions) => aiService.streamText(createOptions, request, callOptions)),
     executeRendererTool,
     executeMainTool,
     rendererToolTimeoutMs
   });
+}
+
+/** Renderer 可公开启动的 Runtime 输入。 */
+type RendererRuntimeInput = ChatRuntimeSendInput | ChatRuntimeContinueInput | ChatRuntimeCompactInput | ChatRuntimeSubmitUserChoiceInput;
+
+/**
+ * 拒绝调用方伪造非 Primary 的内部 Runtime 谱系。
+ * 此检查必须发生在取得写锁和持久化消息之前。
+ * @param input - 待启动的 Primary Runtime 输入
+ */
+function assertPrimaryRuntimeInput(input: RendererRuntimeInput): void {
+  const hasInternalLineage =
+    input.agentId !== 'primary' ||
+    input.parentAgentId !== undefined ||
+    input.parentRuntimeId !== undefined ||
+    input.continuationOfRuntimeId !== undefined ||
+    input.rootRuntimeId !== input.runtimeId;
+  if (!hasInternalLineage) return;
+
+  throw new ChatRuntimeError('RUNTIME_INPUT_DENIED', '调用方不能创建 Child Runtime 或伪造内部续接谱系');
+}
+
+/**
+ * 拒绝 Renderer 暴露只能由主进程组装的延迟协调工具。
+ * @param input - Renderer 提供的 Runtime 启动输入
+ */
+function assertRendererRuntimeInput(input: RendererRuntimeInput): void {
+  assertPrimaryRuntimeInput(input);
+  const hasDeferredTool = input.tools?.some((tool): boolean => getToolRegistryEntry(tool.name)?.executionClass === 'deferred-coordination') ?? false;
+  if (!hasDeferredTool) return;
+
+  throw new ChatRuntimeError('RUNTIME_INPUT_DENIED', 'Renderer 不能暴露延迟协调工具');
 }
 
 /**
@@ -269,6 +308,19 @@ function assertDelegationAck(value: unknown): asserts value is ChatRuntimeDelega
 }
 
 /**
+ * 投影为与 Chat/Agent SQLite JSON 持久化一致的快照。
+ * @param value - 结构化克隆安全输入
+ * @returns 已移除对象 undefined 字段的 JSON 值
+ */
+function createJsonSnapshot(value: unknown): unknown {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) {
+    throw new ChatRuntimeError('INVALID_CONTINUATION', 'Primary continuation snapshot is not JSON serializable');
+  }
+  return JSON.parse(serialized) as unknown;
+}
+
+/**
  * 创建 ChatRuntime 服务。
  * @param dependencies - runtime 依赖项
  * @returns ChatRuntime 服务
@@ -280,7 +332,8 @@ export function createChatRuntimeService(dependencies: Partial<ChatRuntimeServic
   const listPendingCompactionMessages = dependencies.listPendingCompactionMessages ?? (() => chatSessionManager.listPendingCompactionMessages());
   const materializeFileParts = dependencies.materializeFileParts ?? materializeRuntimeFileParts;
   const streamAbort = dependencies.streamAbort ?? createDefaultStreamAborter();
-  const { prepareDelegation, rendererToolTimeoutMs } = dependencies;
+  const { prepareDelegation } = dependencies;
+  const rendererToolTimeoutMs = normalizeRendererToolTimeoutMs(dependencies.rendererToolTimeoutMs ?? RUNTIME_RENDERER_REQUEST_TIMEOUT_MS);
   const createMessageId = dependencies.createMessageId ?? createDefaultMessageId;
   const now = dependencies.now ?? (() => new Date().toISOString());
   const requestModelResolver = createDefaultChatModelResolver();
@@ -310,7 +363,7 @@ export function createChatRuntimeService(dependencies: Partial<ChatRuntimeServic
   const rendererToolRequests = createRuntimeRendererToolRequests({
     emit,
     getRuntime,
-    timeoutMs: RUNTIME_RENDERER_REQUEST_TIMEOUT_MS
+    timeoutMs: rendererToolTimeoutMs
   });
 
   /**
@@ -387,7 +440,9 @@ export function createChatRuntimeService(dependencies: Partial<ChatRuntimeServic
     requestConfirmation: confirmationRequests.request
   });
 
-  const streamExecutor = dependencies.streamExecutor ?? createDefaultStreamExecutor(rendererToolRequests.request, executeMainTool, rendererToolTimeoutMs);
+  const streamExecutor =
+    dependencies.streamExecutor ??
+    createDefaultStreamExecutor(rendererToolRequests.request, executeMainTool, rendererToolTimeoutMs, resolveModel, dependencies.streamText);
   const compactionExecutor =
     dependencies.compactionExecutor ??
     createCompactionExecutor({
@@ -1118,6 +1173,68 @@ export function createChatRuntimeService(dependencies: Partial<ChatRuntimeServic
     return results.every((result): boolean => result.status === 'fulfilled' && result.value);
   }
 
+  /**
+   * 通过共享生产管线启动一个已经完成调用方校验的 Primary Runtime。
+   * @param input - 已校验的 Primary Runtime 输入
+   * @returns 已启动 runtime 标识
+   */
+  async function startSend(input: ChatRuntimeSendInput): Promise<ChatRuntimeStartResult> {
+    const sessionId = input.sessionId ?? `session-${nanoid()}`;
+    const { runtimeId } = input;
+    assertRuntimeIdAvailable(runtimeId);
+    const lock = locks.acquireWritingLock({ sessionId, runtimeId });
+    assertWritingLock(sessionId, lock);
+
+    const runtime = createSendRuntime(input, runtimeId, sessionId);
+    activeRuntimes.set(runtimeId, runtime);
+
+    try {
+      const createdAt = input.userMessageCreatedAt ?? now();
+      const userParts = input.parts?.length
+        ? await materializeFileParts({
+            parts: input.parts,
+            runtime,
+            now,
+            requestBridge: bridgeRequests.request
+          })
+        : undefined;
+      if (!activeRuntimes.has(runtimeId)) {
+        throw new ChatRuntimeError('RUNTIME_NOT_ACTIVE', `Runtime ${runtimeId} was aborted before message persistence`);
+      }
+      const userMessage = createRuntimeUserMessage({ ...input, parts: userParts }, runtime, input.userMessageId ?? createMessageId('user'), createdAt);
+      const assistantMessage = createRuntimeAssistantPlaceholder(runtime, createMessageId('assistant'), createdAt);
+      activeAssistantMessages.set(runtimeId, assistantMessage);
+
+      await messageWriter.addMessage(userMessage);
+      emit('chat:runtime:message-created', {
+        ...createRuntimeEventBase(runtime),
+        message: userMessage
+      });
+
+      await messageWriter.addMessage(assistantMessage);
+      safeAssistantMessages.set(runtimeId, structuredClone(assistantMessage));
+      emit('chat:runtime:message-created', {
+        ...createRuntimeEventBase(runtime),
+        message: assistantMessage
+      });
+
+      if (!dependencies.keepRuntimeOpenForTest) {
+        runRuntimeStream(runtime, userMessage, assistantMessage).catch(() => undefined);
+      }
+    } catch (error) {
+      activeRuntimes.delete(runtime.runtimeId);
+      activeAssistantMessages.delete(runtime.runtimeId);
+      safeAssistantMessages.delete(runtime.runtimeId);
+      rendererToolRequests.rejectRuntime(runtime.runtimeId, 'Runtime start failed');
+      confirmationRequests.rejectRuntime(runtime.runtimeId, 'Runtime start failed');
+      bridgeRequests.rejectRuntime(runtime.runtimeId, 'Runtime start failed');
+      locks.releaseWritingLock({ sessionId: runtime.sessionId, runtimeId: runtime.runtimeId });
+      throw error;
+    }
+
+    return { runtimeId, sessionId };
+  }
+
   return {
     /**
      * 从已 claim Checkpoint 启动内部 Primary Runtime B。
@@ -1133,7 +1250,7 @@ export function createChatRuntimeService(dependencies: Partial<ChatRuntimeServic
         checkpoint.recordState !== 'active' ||
         checkpoint.continuationSnapshot.modelSnapshot.providerId !== context.modelSnapshot.providerId ||
         checkpoint.continuationSnapshot.modelSnapshot.modelId !== context.modelSnapshot.modelId ||
-        checkpoint.continuationSnapshot.toolSchemaSnapshotHash !== hashAgentPayload(context.toolSchemaSnapshot)
+        checkpoint.continuationSnapshot.toolSchemaSnapshotHash !== hashAgentPayload(createJsonSnapshot(context.toolSchemaSnapshot))
       ) {
         throw new ChatRuntimeError('INVALID_CONTINUATION', 'Primary continuation snapshot failed integrity validation');
       }
@@ -1164,7 +1281,7 @@ export function createChatRuntimeService(dependencies: Partial<ChatRuntimeServic
         if (!sourceAssistant) {
           throw new ChatRuntimeError('INVALID_CONTINUATION', 'Primary continuation source assistant is missing');
         }
-        if (!userMessage || hashAgentPayload(sourceAssistant) !== checkpoint.continuationSnapshot.sourceMessageRevision) {
+        if (!userMessage || hashAgentPayload(createJsonSnapshot(sourceAssistant)) !== checkpoint.continuationSnapshot.sourceMessageRevision) {
           throw new ChatRuntimeError('INVALID_CONTINUATION', 'Primary continuation source message revision is stale');
         }
         const assistantMessage = injectAgentResults(sourceAssistant, checkpoint.continuationSnapshot.orderedToolCalls, checkpoint.terminalResults);
@@ -1227,65 +1344,24 @@ export function createChatRuntimeService(dependencies: Partial<ChatRuntimeServic
     },
 
     /**
-     * 启动一轮 ChatRuntime。
+     * 启动仅由 Main Coordinator 组装的 Primary Runtime A。
+     * @internal 此入口不得注册到 Runtime IPC、preload 或 Electron API。
+     * @param input - 含内部延迟协调工具的 Primary Runtime 输入
+     * @returns 已启动 runtime 标识
+     */
+    async startTrustedPrimary(input: ChatRuntimeSendInput): Promise<ChatRuntimeStartResult> {
+      assertPrimaryRuntimeInput(input);
+      return startSend(input);
+    },
+
+    /**
+     * 启动一轮 Renderer ChatRuntime。
      * @param input - 发送内容与 renderer 快照
      * @returns 已启动 runtime 标识
      */
     async send(input: ChatRuntimeSendInput): Promise<ChatRuntimeStartResult> {
-      const sessionId = input.sessionId ?? `session-${nanoid()}`;
-      const { runtimeId } = input;
-      assertRuntimeIdAvailable(runtimeId);
-      const lock = locks.acquireWritingLock({ sessionId, runtimeId });
-      assertWritingLock(sessionId, lock);
-
-      const runtime = createSendRuntime(input, runtimeId, sessionId);
-      activeRuntimes.set(runtimeId, runtime);
-
-      try {
-        const createdAt = input.userMessageCreatedAt ?? now();
-        const userParts = input.parts?.length
-          ? await materializeFileParts({
-              parts: input.parts,
-              runtime,
-              now,
-              requestBridge: bridgeRequests.request
-            })
-          : undefined;
-        if (!activeRuntimes.has(runtimeId)) {
-          throw new ChatRuntimeError('RUNTIME_NOT_ACTIVE', `Runtime ${runtimeId} was aborted before message persistence`);
-        }
-        const userMessage = createRuntimeUserMessage({ ...input, parts: userParts }, runtime, input.userMessageId ?? createMessageId('user'), createdAt);
-        const assistantMessage = createRuntimeAssistantPlaceholder(runtime, createMessageId('assistant'), createdAt);
-        activeAssistantMessages.set(runtimeId, assistantMessage);
-
-        await messageWriter.addMessage(userMessage);
-        emit('chat:runtime:message-created', {
-          ...createRuntimeEventBase(runtime),
-          message: userMessage
-        });
-
-        await messageWriter.addMessage(assistantMessage);
-        safeAssistantMessages.set(runtimeId, structuredClone(assistantMessage));
-        emit('chat:runtime:message-created', {
-          ...createRuntimeEventBase(runtime),
-          message: assistantMessage
-        });
-
-        if (!dependencies.keepRuntimeOpenForTest) {
-          runRuntimeStream(runtime, userMessage, assistantMessage).catch(() => undefined);
-        }
-      } catch (error) {
-        activeRuntimes.delete(runtime.runtimeId);
-        activeAssistantMessages.delete(runtime.runtimeId);
-        safeAssistantMessages.delete(runtime.runtimeId);
-        rendererToolRequests.rejectRuntime(runtime.runtimeId, 'Runtime start failed');
-        confirmationRequests.rejectRuntime(runtime.runtimeId, 'Runtime start failed');
-        bridgeRequests.rejectRuntime(runtime.runtimeId, 'Runtime start failed');
-        locks.releaseWritingLock({ sessionId: runtime.sessionId, runtimeId: runtime.runtimeId });
-        throw error;
-      }
-
-      return { runtimeId, sessionId };
+      assertRendererRuntimeInput(input);
+      return startSend(input);
     },
 
     /**
@@ -1294,6 +1370,7 @@ export function createChatRuntimeService(dependencies: Partial<ChatRuntimeServic
      * @returns 已启动 runtime 标识
      */
     async continue(input: ChatRuntimeContinueInput): Promise<ChatRuntimeStartResult> {
+      assertRendererRuntimeInput(input);
       const { runtimeId } = input;
       assertRuntimeIdAvailable(runtimeId);
       const lock = locks.acquireWritingLock({ sessionId: input.sessionId, runtimeId });
@@ -1361,6 +1438,7 @@ export function createChatRuntimeService(dependencies: Partial<ChatRuntimeServic
      * @returns 已启动 runtime 标识
      */
     async compact(input: ChatRuntimeCompactInput): Promise<ChatRuntimeStartResult> {
+      assertRendererRuntimeInput(input);
       const { runtimeId, sessionId } = input;
       assertRuntimeIdAvailable(runtimeId);
       const lock = locks.acquireWritingLock({ sessionId, runtimeId });
@@ -1398,6 +1476,7 @@ export function createChatRuntimeService(dependencies: Partial<ChatRuntimeServic
      * @returns 已启动 runtime 标识
      */
     async submitUserChoice(input: ChatRuntimeSubmitUserChoiceInput): Promise<ChatRuntimeStartResult> {
+      assertRendererRuntimeInput(input);
       const { runtimeId } = input;
       assertRuntimeIdAvailable(runtimeId);
       const lock = locks.acquireWritingLock({ sessionId: input.sessionId, runtimeId });

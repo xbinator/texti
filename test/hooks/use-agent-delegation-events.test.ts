@@ -129,6 +129,7 @@ function createResumeResult(runtimeId = 'runtime-b'): Extract<ChatAgentResumeRes
       turnId: 'turn-1',
       agentId: 'primary',
       runtimeId,
+      parentRuntimeId: 'runtime-a',
       rootRuntimeId: 'runtime-a',
       continuationOfRuntimeId: 'runtime-a'
     }
@@ -159,6 +160,7 @@ function createSettledResult(status: 'completed' | 'failed' | 'cancelled' | 'int
             turnId: 'turn-1',
             agentId: 'primary',
             runtimeId: checkpoint.resumeRuntimeId,
+            parentRuntimeId: 'runtime-a',
             rootRuntimeId: 'runtime-a',
             continuationOfRuntimeId: 'runtime-a'
           }

@@ -592,6 +592,7 @@ describe('chat agent delegation service', (): void => {
         turnId: 'turn-1',
         agentId: 'primary',
         runtimeId: 'runtime-1',
+        parentRuntimeId: 'runtime-a',
         rootRuntimeId: 'runtime-a',
         continuationOfRuntimeId: 'runtime-a'
       }

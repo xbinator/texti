@@ -8,6 +8,7 @@ import type { SummaryGeneratorDependencies } from './compaction/summary-generato
 import type { RuntimeLockRegistry } from './infrastructure/locks.mjs';
 import type { RuntimeFilePartMaterializer } from './messages/file-parts.mjs';
 import type { ChatModelResolution } from './model/resolver.mjs';
+import type { RuntimeStreamText } from './stream/types.mjs';
 import type { ToolStepSnapshot } from '../../ai/tool-loop-policy.mjs';
 import type {
   AICreateOptions,
@@ -344,6 +345,8 @@ export interface ChatRuntimeServiceDependencies {
   streamAbort: ChatRuntimeStreamAborter;
   /** Renderer 本地工具超时时间。 */
   rendererToolTimeoutMs: number;
+  /** 可选的底层 Provider 流函数，用于受控集成测试。 */
+  streamText?: RuntimeStreamText;
   /** 创建 runtime 消息 ID。 */
   createMessageId: (kind: ChatRuntimeMessageKind) => string;
   /** 获取当前 ISO 时间。 */

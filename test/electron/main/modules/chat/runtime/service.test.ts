@@ -17,7 +17,7 @@ import type {
   ChatRuntimeDelegationPreparer,
   ChatRuntimeStreamExecutor
 } from '../../../../../../electron/main/modules/chat/runtime/types.mjs';
-import type { AICreateOptions, AIInvokeResult, AIRequestOptions, AIServiceError } from 'types/ai';
+import type { AICreateOptions, AIInvokeResult, AIRequestOptions, AIServiceError, AIStreamResult } from 'types/ai';
 import type { ChatMessageCompactionPart, ChatMessagePart, ChatMessageRecord, StructuredContextSummary } from 'types/chat';
 import type {
   ChatRuntimeCompactInput,
@@ -58,7 +58,7 @@ function createInput(overrides: Partial<ChatRuntimeSendInput> = {}): ChatRuntime
     sessionId: overrides.sessionId ?? 'session-1',
     turnId: overrides.turnId ?? `turn-${runtimeId}`,
     clientId: overrides.clientId ?? 'client-1',
-    agentId: overrides.agentId ?? 'agent-1',
+    agentId: overrides.agentId ?? 'primary',
     rootRuntimeId: overrides.rootRuntimeId ?? runtimeId,
     content: overrides.content ?? 'hello'
   };
@@ -77,7 +77,7 @@ function createContinueInput(overrides: Partial<ChatRuntimeContinueInput> = {}):
     sessionId: overrides.sessionId ?? 'session-1',
     turnId: overrides.turnId ?? `turn-${runtimeId}`,
     clientId: overrides.clientId ?? 'client-1',
-    agentId: overrides.agentId ?? 'agent-1',
+    agentId: overrides.agentId ?? 'primary',
     rootRuntimeId: overrides.rootRuntimeId ?? runtimeId,
     messages: overrides.messages ?? []
   };
@@ -290,6 +290,232 @@ function createCompactionSummary(sourcePartId: string): StructuredContextSummary
 }
 
 describe('chat runtime service shell', (): void => {
+  it('rejects renderer-supplied deferred tools and internal lineage before taking locks or writing messages', async (): Promise<void> => {
+    const addMessage = vi.fn();
+    const prepareDelegation = vi.fn();
+    const streamExecutor = vi.fn(createNoopStreamExecutor());
+    const locks = createRuntimeLockRegistry();
+    const service = createChatRuntimeService({
+      locks,
+      emit: vi.fn(),
+      messageWriter: { addMessage, updateMessage: vi.fn() },
+      messageReader: createNoopMessageReader(),
+      streamExecutor,
+      prepareDelegation
+    });
+    const delegateTool = {
+      name: 'delegate_task',
+      description: 'must remain internal',
+      parameters: { type: 'object' as const, properties: {} }
+    };
+
+    await expect(service.send(createInput({ tools: [delegateTool] }))).rejects.toMatchObject({
+      code: 'RUNTIME_INPUT_DENIED'
+    });
+    await expect(service.continue(createContinueInput({ tools: [delegateTool] }))).rejects.toMatchObject({
+      code: 'RUNTIME_INPUT_DENIED'
+    });
+    await expect(
+      service.compact({
+        ...createInput({
+          runtimeId: 'runtime-compact-denied',
+          turnId: 'turn-compact-denied',
+          rootRuntimeId: 'runtime-compact-denied'
+        }),
+        tools: [delegateTool]
+      })
+    ).rejects.toMatchObject({
+      code: 'RUNTIME_INPUT_DENIED'
+    });
+    await expect(
+      service.submitUserChoice({
+        ...createInput({
+          runtimeId: 'runtime-choice-denied',
+          turnId: 'turn-choice-denied',
+          rootRuntimeId: 'runtime-choice-denied'
+        }),
+        tools: [delegateTool],
+        answer: {
+          questionId: 'question-denied',
+          toolCallId: 'call-denied',
+          answers: []
+        }
+      })
+    ).rejects.toMatchObject({
+      code: 'RUNTIME_INPUT_DENIED'
+    });
+    await expect(
+      service.send(
+        createInput({
+          runtimeId: 'runtime-forged-child',
+          turnId: 'turn-forged-child',
+          rootRuntimeId: 'runtime-forged-child',
+          agentId: 'child-forged',
+          parentAgentId: 'primary',
+          parentRuntimeId: 'runtime-parent'
+        })
+      )
+    ).rejects.toMatchObject({
+      code: 'RUNTIME_INPUT_DENIED'
+    });
+
+    expect(addMessage).not.toHaveBeenCalled();
+    expect(prepareDelegation).not.toHaveBeenCalled();
+    expect(streamExecutor).not.toHaveBeenCalled();
+    expect(locks.getWritingOwner('session-1')).toBeUndefined();
+  });
+
+  it('uses one normalized configured timeout for the renderer request controller and stream executor', async (): Promise<void> => {
+    vi.useFakeTimers();
+    try {
+      const collector = createEventCollector();
+      let streamCall = 0;
+      const service = createChatRuntimeService({
+        emit: collector.emit,
+        messageWriter: createNoopMessageWriter(),
+        messageReader: createNoopMessageReader(),
+        rendererToolTimeoutMs: 45_000,
+        resolveModel: async (): Promise<ChatModelResolution> => ({
+          createOptions: {
+            providerId: 'provider-1',
+            providerName: 'Provider',
+            providerType: 'openai',
+            apiKey: 'test-key',
+            baseUrl: 'https://example.com'
+          },
+          modelId: 'model-1'
+        }),
+        streamText: async () => {
+          streamCall += 1;
+          /**
+           * 创建首轮 renderer 工具调用与次轮最终文本。
+           * @returns 确定性 Provider chunk 流
+           */
+          async function* createStream(): AsyncGenerator<unknown> {
+            if (streamCall === 1) {
+              yield {
+                type: 'tool-call',
+                toolCallId: 'renderer-call-1',
+                toolName: 'renderer_custom_tool',
+                input: {}
+              };
+              yield { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
+              return;
+            }
+            yield { type: 'text-delta', textDelta: 'done' };
+            yield { type: 'finish', finishReason: 'stop', totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
+          }
+
+          return [undefined, { stream: createStream() as unknown as AIStreamResult['stream'] }];
+        }
+      });
+      const start = await service.send(
+        createInput({
+          tools: [
+            {
+              name: 'renderer_custom_tool',
+              description: 'Read document',
+              parameters: { type: 'object', properties: {} }
+            }
+          ]
+        })
+      );
+      await flushUntil(() => collector.events.some((event): boolean => event.name === 'chat:runtime:tool-request'));
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(service.listRecoverySnapshots()[0]?.pendingRequests).toHaveLength(1);
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      await flushUntil(() => service.getActiveRuntime(start.runtimeId) === undefined);
+
+      expect(service.listRecoverySnapshots()).toEqual([]);
+      expect(
+        collector.events.some(
+          (event): boolean =>
+            event.name === 'chat:runtime:tool-cancelled' && event.payload.runtimeId === start.runtimeId && event.payload.toolCallId === 'renderer-call-1'
+        )
+      ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('preserves the public default renderer tool timeout at 30 seconds', async (): Promise<void> => {
+    vi.useFakeTimers();
+    try {
+      const collector = createEventCollector();
+      let streamCall = 0;
+      const service = createChatRuntimeService({
+        emit: collector.emit,
+        messageWriter: createNoopMessageWriter(),
+        messageReader: createNoopMessageReader(),
+        resolveModel: async (): Promise<ChatModelResolution> => ({
+          createOptions: {
+            providerId: 'provider-1',
+            providerName: 'Provider',
+            providerType: 'openai',
+            apiKey: 'test-key',
+            baseUrl: 'https://example.com'
+          },
+          modelId: 'model-1'
+        }),
+        streamText: async () => {
+          streamCall += 1;
+          /**
+           * 创建首轮 renderer 工具调用与次轮最终文本。
+           * @returns 确定性 Provider chunk 流
+           */
+          async function* createStream(): AsyncGenerator<unknown> {
+            if (streamCall === 1) {
+              yield {
+                type: 'tool-call',
+                toolCallId: 'renderer-default-timeout',
+                toolName: 'renderer_custom_tool',
+                input: {}
+              };
+              yield { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
+              return;
+            }
+            yield { type: 'text-delta', text: 'done' };
+            yield { type: 'finish', finishReason: 'stop', totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
+          }
+
+          return [undefined, { stream: createStream() as unknown as AIStreamResult['stream'] }];
+        }
+      });
+      const start = await service.send(
+        createInput({
+          tools: [
+            {
+              name: 'renderer_custom_tool',
+              description: 'Renderer custom tool',
+              parameters: { type: 'object', properties: {} }
+            }
+          ]
+        })
+      );
+      await flushUntil(() => collector.events.some((event): boolean => event.name === 'chat:runtime:tool-request'));
+
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(service.listRecoverySnapshots()[0]?.pendingRequests).toHaveLength(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await flushUntil(() => service.getActiveRuntime(start.runtimeId) === undefined);
+
+      expect(
+        collector.events.filter(
+          (event): boolean =>
+            event.name === 'chat:runtime:tool-cancelled' &&
+            event.payload.runtimeId === start.runtimeId &&
+            event.payload.toolCallId === 'renderer-default-timeout'
+        )
+      ).toHaveLength(1);
+      expect(service.listRecoverySnapshots()).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps deferred parts private when delegation prepare fails', async (): Promise<void> => {
     const collector = createEventCollector();
     const persistedUpdates: ChatMessageRecord[] = [];
@@ -789,12 +1015,13 @@ describe('chat runtime service shell', (): void => {
       prepareDelegation
     });
     const input = createInput({
+      runtimeId: 'runtime-waiting-children',
       sessionId: 'session-waiting-children',
       agentId: 'primary',
       rootRuntimeId: 'runtime-waiting-children'
     });
 
-    await service.send(input);
+    await service.startTrustedPrimary(input);
     await vi.waitFor((): void => {
       expect(collector.events.some((event): boolean => event.name === 'chat:runtime:complete')).toBe(true);
     });
@@ -837,6 +1064,7 @@ describe('chat runtime service shell', (): void => {
     });
     expect(waitingMessageLockOwners).toEqual([undefined]);
     expect(prepareDelegation.mock.invocationCallOrder[0]).toBeLessThan(emit.mock.invocationCallOrder.at(-1) ?? Number.MAX_SAFE_INTEGER);
+    expect(collector.events.some((event): boolean => event.name === 'chat:runtime:tool-request')).toBe(false);
     expect(service.getActiveRuntime(input.runtimeId)).toBeUndefined();
     expect(locks.getWritingOwner('session-waiting-children')).toBeUndefined();
   });
@@ -849,7 +1077,11 @@ describe('chat runtime service shell', (): void => {
       streamExecutor: createNoopStreamExecutor(),
       keepRuntimeOpenForTest: true
     });
-    const input = { ...createInput(), runtimeId: 'runtime-renderer-owned' } as ChatRuntimeSendInput;
+    const input = {
+      ...createInput(),
+      runtimeId: 'runtime-renderer-owned',
+      rootRuntimeId: 'runtime-renderer-owned'
+    } as ChatRuntimeSendInput;
 
     const result = await service.send(input);
 
@@ -1031,7 +1263,7 @@ describe('chat runtime service shell', (): void => {
         runtimeId: result.runtimeId,
         sessionId: 'session-1',
         clientId: 'client-1',
-        agentId: 'agent-1'
+        agentId: 'primary'
       })
     });
   });
@@ -1116,7 +1348,7 @@ describe('chat runtime service shell', (): void => {
       content: 'hello runtime',
       parts: [{ type: 'text', text: 'hello runtime' }],
       runtimeId: result.runtimeId,
-      agentId: 'agent-1',
+      agentId: 'primary',
       createdAt: '2026-06-19T00:00:00.000Z',
       finished: true
     });
@@ -1127,7 +1359,7 @@ describe('chat runtime service shell', (): void => {
       content: '',
       parts: [],
       runtimeId: result.runtimeId,
-      agentId: 'agent-1',
+      agentId: 'primary',
       createdAt: '2026-06-19T00:00:00.000Z',
       loading: true,
       finished: false
@@ -1877,7 +2109,7 @@ describe('chat runtime service shell', (): void => {
             sessionId: 'session-1',
             messageId: 'assistant-message-1',
             runtimeId: result.runtimeId,
-            agentId: 'agent-1',
+            agentId: 'primary',
             toolCallId: 'tool-call-question',
             questionId: 'question-1'
           }
@@ -2069,7 +2301,7 @@ describe('chat runtime service shell', (): void => {
           runtimeId: result.runtimeId,
           sessionId: 'session-1',
           clientId: 'client-1',
-          agentId: 'agent-1',
+          agentId: 'primary',
           toolCallId: 'tool-call-1',
           confirmationId: 'confirmation-1',
           request: expect.objectContaining({ toolName: 'write_file', title: '写入文件' })
@@ -2198,7 +2430,7 @@ describe('chat runtime service shell', (): void => {
           runtimeId: result.runtimeId,
           sessionId: 'session-1',
           clientId: 'client-1',
-          agentId: 'agent-1',
+          agentId: 'primary',
           requestId: 'bridge-1',
           toolCallId: 'tool-call-1',
           kind: 'document-snapshot',
@@ -3377,7 +3609,7 @@ describe('chat runtime service shell', (): void => {
       sessionId: 'session-1',
       turnId: 'turn-choice-answer',
       clientId: 'client-1',
-      agentId: 'agent-1',
+      agentId: 'primary',
       rootRuntimeId: 'runtime-choice-answer',
       contextWindow: 200_000,
       answer: {
@@ -3495,7 +3727,7 @@ describe('chat runtime service shell', (): void => {
       sessionId: 'session-1',
       turnId: 'turn-choice-cancelled',
       clientId: 'client-1',
-      agentId: 'agent-1',
+      agentId: 'primary',
       rootRuntimeId: 'runtime-choice-cancelled',
       contextWindow: 200_000,
       answer: {
@@ -3987,6 +4219,7 @@ describe('chat runtime service shell', (): void => {
         sessionId: 'session-1',
         turnId: 'turn-1',
         agentId: 'primary',
+        parentRuntimeId: 'runtime-a',
         rootRuntimeId: 'runtime-root',
         continuationOfRuntimeId: 'runtime-a',
         model: { providerId: 'provider-frozen', modelId: 'model-frozen' },

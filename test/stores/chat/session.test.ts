@@ -3,6 +3,7 @@
  * @description 聊天会话 store 消息草稿恢复与单条更新测试。
  */
 import type { ChatMessageRecord, ChatSession, ChatSessionModelMetadata, PaginatedSessionsResult, SessionPaginationParams } from 'types/chat';
+import type { ChatAgentCheckpointSnapshot } from 'types/chat-agent';
 import type { ChatHandlerResult } from 'types/electron-api';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -20,7 +21,8 @@ const mockElectronAPI = vi.hoisted(() => ({
   chatSessionDelete: vi.fn<(sessionId: string) => Promise<ChatHandlerResult<void>>>(),
   chatMessageList: vi.fn<(sessionId: string) => Promise<{ ok: true; data: ChatMessageRecord[] }>>(),
   chatMessageAdd: vi.fn<(message: ChatMessageRecord) => Promise<{ ok: true; data: void }>>(),
-  chatMessageUpdate: vi.fn<(message: ChatMessageRecord) => Promise<{ ok: true; data: void }>>()
+  chatMessageUpdate: vi.fn<(message: ChatMessageRecord) => Promise<{ ok: true; data: void }>>(),
+  chatAgentListActive: vi.fn<() => Promise<ChatHandlerResult<ChatAgentCheckpointSnapshot[]>>>()
 }));
 const recentStoreMock = vi.hoisted(() => ({
   updateChatRecordTitle: vi.fn<(_sessionId: string, _title: string) => Promise<unknown>>(),
@@ -112,6 +114,8 @@ describe('useChatSessionStore', () => {
     mockElectronAPI.chatMessageList.mockReset();
     mockElectronAPI.chatMessageAdd.mockReset();
     mockElectronAPI.chatMessageUpdate.mockReset();
+    mockElectronAPI.chatAgentListActive.mockReset();
+    mockElectronAPI.chatAgentListActive.mockResolvedValue({ ok: true, data: [] });
     recentStoreMock.updateChatRecordTitle.mockReset();
     recentStoreMock.updateChatRecordTitle.mockResolvedValue(undefined);
     recentStoreMock.removeFile.mockReset();
@@ -260,6 +264,118 @@ describe('useChatSessionStore', () => {
         finished: true
       })
     );
+    expect(mockElectronAPI.chatMessageList).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not query Agent checkpoints when loaded messages contain no interrupted draft', async (): Promise<void> => {
+    const store = useChatSessionStore();
+    mockElectronAPI.chatMessageList.mockResolvedValue({
+      ok: true,
+      data: [{ ...createInterruptedAssistantRecord(), loading: false, finished: true }]
+    });
+
+    await expect(store.getSessionMessages('session-1')).resolves.toEqual([
+      expect.objectContaining({
+        id: 'assistant-draft-1',
+        loading: false,
+        finished: true
+      })
+    ]);
+    expect(mockElectronAPI.chatAgentListActive).not.toHaveBeenCalled();
+    expect(mockElectronAPI.chatMessageList).toHaveBeenCalledOnce();
+  });
+
+  it('preserves a waiting assistant across renderer reload while its delegation checkpoint remains active', async (): Promise<void> => {
+    const store = useChatSessionStore();
+    const assistant = createInterruptedAssistantRecord();
+    mockElectronAPI.chatMessageList.mockResolvedValue({ ok: true, data: [assistant] });
+    mockElectronAPI.chatAgentListActive.mockResolvedValue({
+      ok: true,
+      data: [
+        {
+          checkpointId: 'checkpoint-1',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          primaryAgentId: 'primary',
+          rootRuntimeId: 'runtime-a',
+          sourceRuntimeId: 'runtime-a',
+          status: 'waiting_children',
+          version: 1,
+          checkpointSequence: 2,
+          createdAt: '2026-07-23T00:00:00.000Z',
+          updatedAt: '2026-07-23T00:00:01.000Z'
+        }
+      ]
+    });
+
+    await expect(store.getSessionMessages('session-1')).resolves.toEqual([
+      expect.objectContaining({
+        id: assistant.id,
+        loading: true,
+        finished: false
+      })
+    ]);
+    expect(mockElectronAPI.chatMessageUpdate).not.toHaveBeenCalled();
+    expect(mockElectronAPI.chatMessageAdd).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when active delegation status cannot be read during renderer reload', async (): Promise<void> => {
+    const store = useChatSessionStore();
+    mockElectronAPI.chatMessageList.mockResolvedValue({ ok: true, data: [createInterruptedAssistantRecord()] });
+    mockElectronAPI.chatAgentListActive.mockResolvedValue({
+      ok: false,
+      error: 'Agent status unavailable',
+      code: 'AGENT_STATUS_UNAVAILABLE'
+    });
+
+    const messages = await store.getSessionMessages('session-1');
+
+    expect(messages[0]).toMatchObject({ loading: true, finished: false });
+    expect(mockElectronAPI.chatMessageUpdate).not.toHaveBeenCalled();
+    expect(mockElectronAPI.chatMessageAdd).not.toHaveBeenCalled();
+  });
+
+  it('re-reads messages after Agent confirms no active checkpoint and preserves a concurrently finalized assistant', async (): Promise<void> => {
+    const store = useChatSessionStore();
+    const finalizedAssistant = {
+      ...createInterruptedAssistantRecord(),
+      content: '最终答案',
+      parts: [{ id: 'part-final', type: 'text' as const, text: '最终答案' }],
+      loading: false,
+      finished: true
+    };
+    mockElectronAPI.chatMessageList
+      .mockResolvedValueOnce({ ok: true, data: [createInterruptedAssistantRecord()] })
+      .mockResolvedValueOnce({ ok: true, data: [finalizedAssistant] });
+    mockElectronAPI.chatAgentListActive.mockResolvedValue({ ok: true, data: [] });
+
+    await expect(store.getSessionMessages('session-1')).resolves.toEqual([
+      expect.objectContaining({
+        content: '最终答案',
+        loading: false,
+        finished: true
+      })
+    ]);
+    expect(mockElectronAPI.chatMessageList).toHaveBeenCalledTimes(2);
+    expect(mockElectronAPI.chatMessageUpdate).not.toHaveBeenCalled();
+    expect(mockElectronAPI.chatMessageAdd).not.toHaveBeenCalled();
+  });
+
+  it('does not write an interrupt when the fresh post-checkpoint message read fails', async (): Promise<void> => {
+    const store = useChatSessionStore();
+    const firstDraft = createInterruptedAssistantRecord();
+    mockElectronAPI.chatMessageList.mockResolvedValueOnce({ ok: true, data: [firstDraft] }).mockRejectedValueOnce(new Error('fresh message read failed'));
+    mockElectronAPI.chatAgentListActive.mockResolvedValue({ ok: true, data: [] });
+
+    await expect(store.getSessionMessages('session-1')).resolves.toEqual([
+      expect.objectContaining({
+        id: firstDraft.id,
+        loading: true,
+        finished: false
+      })
+    ]);
+    expect(mockElectronAPI.chatMessageUpdate).not.toHaveBeenCalled();
+    expect(mockElectronAPI.chatMessageAdd).not.toHaveBeenCalled();
   });
 
   it('creates a session branch through the Electron API', async (): Promise<void> => {

@@ -5,6 +5,7 @@ Tibis 是一款基于 Electron + Vue 3 + TypeScript 的桌面端 Markdown 编辑
 **核心能力**：
 - 双视图 Markdown 编辑器（富文本 TipTap + 源码 CodeMirror），支持 AI 行内补全
 - AI 聊天侧边栏（流式对话、主进程 ChatRuntime、工具调用、文件/图片 part 输入、上下文压缩与用量指示、语音输入）
+- 默认关闭的 Child Agent 持久化委派基础（Task/Attempt/Checkpoint/Event/Outbox、Primary 挂起与单次续接；真实 Child 执行尚未启用）
 - 多 AI 服务商支持（OpenAI / Anthropic / Google / DeepSeek / 阿里 / 智谱 / 月之暗面 / 火山引擎 / 小米 / MiniMax）
 - 文件系统操作（读写、工作区监听、未保存草稿管理）
 - MCP（Model Context Protocol）工具集成
@@ -248,8 +249,8 @@ tibis/
 ├── shared/                           # 主进程与渲染进程共享代码
 │   └── ai/
 │       └── tools/
-│           ├── index.ts              # 跨进程纯元数据 registry（TOOL_REGISTRY，20 个工具条目）
-│           └── types.ts              # ToolRegistryEntry / ToolRuntimeOwner / ToolRuntimeGroup / ToolExposure 类型
+│           ├── index.ts              # 跨进程纯元数据 registry（含 internal delegate_task）
+│           └── types.ts              # Registry 归属/暴露/executionClass/工具 effect 类型
 │
 ├── electron/                         # Electron 主进程 + preload
 │   ├── main/
@@ -261,6 +262,7 @@ tibis/
 │   │       ├── index.mts             # 统一注册入口
 │   │       ├── ai/                   # AI 流式/非流式调用（10 个 Provider：openai/anthropic/google/deepseek/alibaba/glm/mimo/minimax/moonshot/volcengine + errors/ + helper/）
 │   │       ├── chat/                 # 聊天会话持久化 + ChatRuntime 主进程服务
+│   │       │   ├── agents/           # 委派契约、不可变事实 Store、结果校验、Checkpoint 协调服务与窄 IPC
 │   │       │   ├── runtime/          # ChatRuntime 核心
 │   │       │   │   ├── compaction/   # 上下文压缩（executor / service / structured-summary-generator）
 │   │       │   │   ├── context/      # 上下文预算/估算/模型消息/溢出降级/工具输出裁剪（budget / estimator / model-message / overflow / tool-output-prune / usage）
@@ -295,7 +297,7 @@ tibis/
 │       └── webview-tag.mts          # WebView 标签 preload
 │
 ├── types/                            # 全局 TypeScript 类型声明
-│   ├── ai.d.ts / chat.d.ts / chat-runtime.d.ts / compression.d.ts / electron-api.d.ts
+│   ├── ai.d.ts / chat.d.ts / chat-runtime.d.ts / chat-agent.d.ts / compression.d.ts / electron-api.d.ts
 │   ├── global.d.ts / model.d.ts / webview.d.ts / vite-env.d.ts
 │   └── components.d.ts              # 自动生成的组件类型
 │
@@ -395,7 +397,7 @@ tibis/
 2. 初始化日志（控制台）
 3. 清理过期日志 → 启动日志维护定时器
 4. 初始化 electron-store（加密存储）→ 初始化 SQLite 数据库
-5. 注册全部 IPC handler（各模块统一在 `modules/index.mts` 注册）
+5. 中断无法跨主进程恢复的活动 Agent Checkpoint（不自动重放模型）→ 注册全部 IPC handler（各模块统一在 `modules/index.mts` 注册）
 6. 设置系统菜单 → 刷新平台快捷入口
 7. 创建窗口 → 处理启动时的快捷动作（open-file / second-instance）
 8. 生命周期管理（lifecycle.mts 管理应用退出/重启流程）
@@ -608,13 +610,16 @@ electron/main/modules/chat/runtime/tools/
 | `main` | ChatRuntime 主进程直接执行 | `read_file`、`read_directory`、`glob`、`grep`、`write_file`、`edit_file`、`get_settings`、`update_settings`、`read_current_webpage`、`operate_webpage`、`open_resource`、MCP 工具 |
 | `renderer` | 通过 IPC bridge 到渲染进程执行 | `question_user`、`skill_*`、`memory`、`todo_write`、`shell_command`、`widget`、`open_widget` |
 | `sdk` | Vercel AI SDK 直接调用 | `mcp_*` |
+| `coordinator` | 主进程延迟协调协议；默认不向用户暴露 | `delegate_task`（已接入 Primary suspend/resume，尚无真实 Child executor） |
 
 ### 跨进程工具注册表
 
-`shared/ai/tools/index.ts` 集中定义已迁移工具的元数据（共 20 个工具条目）：
-- `runtime`：main / renderer / sdk
-- `group`：read / file / settings / resource / webview
-- `exposure`：default-readonly / default-writable / conditional-readonly / conditional-writable
+`shared/ai/tools/index.ts` 集中定义已迁移工具的元数据：
+- `runtime`：main / renderer / sdk / coordinator
+- `group`：read / file / settings / resource / webview / agent
+- `exposure`：default-readonly / default-writable / conditional-readonly / conditional-writable / internal
+- `executionClass`：direct / deferred-coordination
+- `effect`：工具副作用分类、资源范围解析器、可逆性及可选 commit adapter
 - `definition`：工具名称、描述、风险等级、参数 schema、权限类别、safeAutoApprove 等
 
 工具按来源目录组织：DocumentTool（read_current_document / create_document）、EnvironmentTool（get_current_time）、FileReadTool（read_file / read_directory / glob / grep）、FileWriteTool（write_file）、FileEditTool（edit_file）、LogsTool（query_logs）、SettingsTool（get_settings / update_settings）、MCPSettingsTool（get_mcp_settings / add_mcp_server / update_mcp_server / remove_mcp_server / refresh_mcp_discovery）、OpenResourceTool（open_resource）、WebviewTool（read_current_webpage / operate_webpage）。
@@ -669,6 +674,20 @@ electron/main/modules/chat/runtime/
    - SDK 工具：由 AI SDK 在流中直接完成
 6. 需要继续时自动 continuation（最多 25 轮），完成时返回 usage 并触发自动命名
 7. Assistant 草稿持久化 → 硬中断恢复（interruptedDraftRecovery）
+
+### Child Agent 委派基础（默认关闭）
+
+`electron/main/modules/chat/agents/` 已提供委派的持久化与续接基础：
+
+- `electron/main/modules/chat/agents/contracts.mts` / `electron/main/modules/chat/agents/result.mts`：校验最小只读 Task Contract、不可变 Continuation/Execution Plan 快照和结构化 Child 结果。
+- `electron/main/modules/chat/agents/store.mts`：在 SQLite 中维护 Task、Attempt、Checkpoint、Event 与 Outbox；Task Contract 和 Continuation Snapshot 不可修改，Event 以 aggregate sequence 追加。
+- `electron/main/modules/chat/agents/service.mts`：作为 Coordinator 服务职责执行原子 prepare、`waiting_children` fence、结果汇合、Checkpoint CAS、Primary Runtime B 单次续接、Checkpoint/Task 合作式取消基础和主进程重启中断。
+- `electron/main/modules/chat/agents/ipc.mts`：只暴露 `listActive`、`resumePrimary`、`cancelCheckpoint` 的精确 allowlist，不提供 Child transcript 或通用 Child Runtime 入口。
+- `types/chat-agent.d.ts`：定义 Task/Attempt/Event/Checkpoint、不可变快照、结构化结果、artifact ownership/visibility 与 usage/cost 公共类型。
+
+基础链路为 Runtime A → 原子 assistant/Task/Checkpoint/Event/Outbox → `waiting_children` → 内部结果写入 → Checkpoint `ready_to_resume` 与 `delegation.ready` Outbox → CAS → 无工具 `forceFinal` Runtime B。Renderer 重载时活动 Checkpoint 阻止把 source assistant 误写为硬中断；主进程重启则在开放 IPC 前把无法安全恢复的模型执行收敛为 `interrupted`。
+
+当前 `delegate_task` 仍为 `internal`，普通 Renderer Runtime 输入会在取得锁和写消息前拒绝它以及伪 Child lineage。当前没有真实 Child Actor/Runtime/executor、Child transcript、任务卡片、并行只读调度、Capability Intersection 生产编译、受控写入 adapter、ConfirmationQueue、commit journal 或 Child Runtime 取消信号。未来既有 Child 的有效能力必须满足 `persisted ∩ available ∩ role/policy` 并单调收缩；需要新增能力时必须创建新 Task，不能在恢复时升级旧 Task。
 
 ### 上下文压缩（/compact）
 
@@ -982,7 +1001,7 @@ better-sqlite3 在主进程运行，渲染进程通过 `electronAPI.dbExecute/db
 | 模块 | 职责 |
 |------|------|
 | `ai` | AI 流式/非流式调用、Provider 路由（10 个 Provider） |
-| `chat` | 聊天会话持久化 + ChatRuntime 主进程服务（模型调用、主进程工具、上下文压缩、自动命名） |
+| `chat` | 聊天会话持久化 + ChatRuntime + 默认关闭的 Agent 委派基础（模型调用、主进程工具、Checkpoint、上下文压缩、自动命名） |
 | `database` | SQLite 执行与查询 |
 | `dialog` | 原生文件对话框（打开/保存） |
 | `export` | PDF 导出（pdf-renderer） |

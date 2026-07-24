@@ -37,11 +37,11 @@ flowchart TD
 | Turn         | 只持有一个 `primaryAgentRef`。                                                              |
 | Agent        | 同一 Agent 生命周期只关联一个活动 Runtime。                                                 |
 | 主进程并发   | 不同 Session 可以并行；`send`、`continue` 和用户选择续跑在同一 Session 内受写锁保护。       |
-| Runtime 路由 | `runtimeId` 映射到 `{ sessionId, turnId, agentId }`。                                       |
-| Runtime 恢复 | 可以恢复活动 Runtime 和待处理请求，但当前恢复时会创建新的 Turn，并把 Agent 视为 `primary`。 |
+| Runtime 路由 | `runtimeId` 映射到完整 `ChatRuntimeAddress`，包含 root、parent 与 continuation 谱系。       |
+| Runtime 恢复 | 普通活动 Runtime 可恢复待处理请求；Agent Checkpoint 另以持久化投影恢复原 Turn 等待状态。    |
 | UI 订阅      | 应用级监听器始终接收 Runtime 事件；可见 `BChat` 只订阅所属 Session 的 UI 事件。             |
 
-这意味着多会话的底层隔离已经存在，但会话列表状态、后台任务提示和删除策略仍需产品层接入。多 Agent 则仍缺少调度、结果聚合和可恢复的层级协议。
+这意味着多会话的底层隔离和 Agent 委派的持久化/结果汇合基础已经存在，但会话列表状态、后台任务提示、真实 Child 执行、Capability Plan 编译和资源调度仍需后续接入。
 
 ## 不变式
 
@@ -49,7 +49,7 @@ flowchart TD
 
 1. **主进程是执行和消息持久化的事实来源。** Renderer 不创建一套并行的 Runtime 消息真相。
 2. **所有异步事件都按稳定地址路由。** 不允许根据“当前打开的会话”猜测事件归属。
-3. **Runtime capability 按 `runtimeId` 隔离。** 工具、文档上下文和 bridge 能力在启动时冻结，恢复后只能按描述符安全升级。
+3. **Runtime capability 按 `runtimeId` 隔离。** 工具、文档上下文和 bridge 能力在启动时冻结；普通 Runtime 恢复后只能按匹配描述符重挂既有 renderer handle，不能改变已声明能力。
 4. **会话切换不终止后台任务。** 只有明确的取消命令可以停止 Runtime。
 5. **同一消息只能有一个写入者。** 子 Agent 不直接修改 Primary 正在流式更新的 assistant 消息。
 6. **并发写入必须先有冲突模型。** 在锁粒度、分支和合并策略明确前，不允许同一 Session 内多个写 Runtime 并行。
@@ -117,37 +117,39 @@ interface ChatSessionRuntimeSummary {
 
 ### Renderer 重载恢复
 
-应用启动时继续通过 `src/hooks/useChatRuntimeRecovery.ts` 获取活动 Runtime。多会话恢复应遵循：
+应用启动时继续通过 `src/hooks/useChat/useRuntimeRecovery.ts` 获取活动 Runtime。多会话恢复应遵循：
 
 - 按 `sessionId` 独立创建 Session actor。
-- 先恢复 Actor 地址和降级 capability，再重放待处理 renderer 请求。
-- 可见 `BChat` 挂载后，只升级属于该会话且描述符匹配的 capability。
+- 先恢复 Actor 地址和持久化 capability 描述符，计算降级后的有效能力，再重放待处理 renderer 请求。
+- 可见 `BChat` 挂载后，只重挂属于该会话且描述符匹配的 renderer capability handle，不改写声明能力。
 - 同一 Session 若返回多个活动写 Runtime，应视为主进程约束被破坏并记录错误，不能静默覆盖。
 
 ## 多 Agent 接入
 
 ### 第一阶段选择
 
-第一版推荐实现**同一 Turn 内串行子 Agent**，而不是立即允许并行写入：
+当前已完成的是**默认关闭的持久化委派基础**，还没有启动真实 Child。后续第一版执行器应保持一层 Child、写能力关闭，并按 resource scope 最多并发 3 个彼此兼容的纯读任务：
 
 - Primary 负责规划、派发和最终回复。
-- Child Agent 每次只运行一个，完成后把结构化结果交回协调器。
+- Child Agent 不能继续委派；同一 Turn 最多只有一层 Child。
+- Coordinator 只并发调度 resource scope 兼容的 `pure_read` 任务，任一时刻最多 3 个；冲突范围必须排队。
+- 所有写工具、外部副作用和 commit adapter 在这一阶段保持禁用。
 - Child Agent 默认不直接生成用户可见消息。
 - Primary 消费结果后继续执行或形成最终回答。
 
-这与当前同 Session 单写锁一致，也能先验证 Agent 生命周期、权限隔离、取消和恢复协议。
+这先验证 Agent 生命周期、权限隔离、乱序结果汇合、取消和恢复协议，同时把并发限制在无副作用范围内。
 
-### 推荐 Actor 层级
+### Actor 与 Coordinator 服务职责
 
-不要为了未来可能存在的子 Agent，立即把当前 `primaryAgentRef` 改回通用 Map。启用多 Agent 后，可以按需增加协调器：
+不要为了未来可能存在的 Child，立即把当前 `primaryAgentRef` 改回通用 Map。`ChatAgentDelegationService` 当前承担 Coordinator 的持久化、校验、汇合与续接职责，但它是主进程服务职责，不是 Actor，也不是可替换 Runtime。真实 Child 执行启用后再按需创建 Child Actor：
 
 ```mermaid
 flowchart TD
   Session["Session"] --> Turn["Turn"]
   Turn --> Primary["Primary Agent"]
-  Turn --> Coordinator["Agent Coordinator<br/>按需创建"]
-  Coordinator --> ChildA["Child Agent A"]
-  Coordinator --> ChildB["Child Agent B"]
+  Turn -. "持久化与汇合" .-> Coordinator["Coordinator Service<br/>非 Actor"]
+  Turn --> ChildA["Child Agent A<br/>尚未实现"]
+  Turn --> ChildB["Child Agent B<br/>尚未实现"]
   Primary --> PrimaryRuntime["Primary Runtime"]
   ChildA --> ChildRuntimeA["Child Runtime A"]
   ChildB --> ChildRuntimeB["Child Runtime B"]
@@ -155,22 +157,22 @@ flowchart TD
 
 职责划分：
 
-| Actor             | 职责                                         |
-| ----------------- | -------------------------------------------- |
-| Session           | 一个会话的输入门禁、当前 Turn、取消和回滚。  |
-| Turn              | 一个用户意图的总生命周期，决定何时整体完成。 |
-| Primary Agent     | 用户可见的主要推理和最终回答。               |
-| Agent Coordinator | 创建子 Agent、排队、收集结果、执行失败策略。 |
-| Child Agent       | 执行一个边界清楚的子任务，输出结构化结果。   |
+| 组件/身份           | 职责                                                       |
+| ------------------- | ---------------------------------------------------------- |
+| Session Actor       | 一个会话的输入门禁、当前 Turn、取消和回滚。                |
+| Turn Actor          | 一个用户意图的总生命周期，决定何时整体完成。               |
+| Primary Agent Actor | 用户可见的主要推理和最终回答。                             |
+| Coordinator Service | 校验受限任务契约、持久化事实、汇合结果和 CAS 启动续接。    |
+| Child Agent Actor   | 未来执行一个边界清楚的子任务；当前尚未创建。               |
+| Runtime             | Actor 的可替换执行实例；不是 Task、Attempt 或 Actor 身份。 |
 
-Coordinator 只有在首个子 Agent 被派发时才创建。未启用多 Agent 的普通聊天继续保持当前简单路径。
+未启用真实 Child 的普通聊天继续保持当前简单路径。基本原则是：Task 是身份，Attempt 是执行，Event 是历史，Runtime 是可替换实例。
 
 ### Runtime 地址协议
 
-当前 Renderer 地址已有 `sessionId`、`turnId`、`agentId` 和 `runtimeId`，主进程 Runtime 已有 `agentId` 与 `parentRuntimeId`。多 Agent 恢复前，需要把层级元数据补齐到跨进程快照：
+共享 `ChatRuntimeAddress` 已包含完整谱系：
 
 ```ts
-/** 未来建议的完整 Runtime 地址，不是当前已存在的共享类型。 */
 interface ChatRuntimeAddress {
   sessionId: string;
   turnId: string;
@@ -179,7 +181,7 @@ interface ChatRuntimeAddress {
   parentAgentId?: string;
   parentRuntimeId?: string;
   rootRuntimeId: string;
-  role: 'primary' | 'child';
+  continuationOfRuntimeId?: string;
 }
 ```
 
@@ -190,38 +192,36 @@ interface ChatRuntimeAddress {
 - `parentAgentId`：Actor 层级关系。
 - `parentRuntimeId`：执行派生关系，表示哪个 Runtime 发起了当前 Runtime。
 - `rootRuntimeId`：快速聚合同一次 Turn 的 Runtime 树。
-- `role`：决定消息可见性和默认权限策略。
+- `continuationOfRuntimeId`：同一 Actor 的上一个 Runtime。Primary Runtime B 的 `parentRuntimeId` 与 `continuationOfRuntimeId` 都指向挂起的 Runtime A。
 
 `parentRuntimeId` 不能替代 `parentAgentId`。Agent 可能续跑多个 Runtime，Renderer 重载后也不能仅靠当前活动 Runtime 推断稳定 Actor 父子关系。
 
-### 启动顺序
+### 当前 deferred-coordination 生命周期
 
-子 Agent 与 Primary 使用相同的竞态保护：
+当前只有 registry 中 `executionClass: 'deferred-coordination'` 的 `delegate_task` 可产生 suspension，且只允许主进程受信任路径使用。完整基础闭环是：
 
-1. Coordinator 分配 `agentId` 和 `runtimeId`。
-2. 创建 Child Agent actor。
-3. 注册完整 Runtime 地址和 capability。
-4. 向 Agent 发送 `runtime.started`，进入运行态。
-5. 最后调用主进程 IPC。
-6. IPC 同步失败时，向该 Agent 发送启动失败事件并注销路由。
+1. Runtime A 完整解析一个只读 `delegate_task`，不生成 renderer-tool 请求。
+2. 同一 SQLite 事务提交 source assistant、不可变 Task Contract、Checkpoint、Event 和 Outbox。
+3. 事务提交后 Checkpoint 进入 `waiting_children`；Runtime A 的短时消息写锁释放，但 Session history continuation fence（`RuntimeContinuationFence`）保留。
+4. 当前测试或未来 Child executor 通过内部 `recordTaskResult` 写入已验证结果。全部 required Task 终态后，Checkpoint 在事务内进入 `ready_to_resume`，同时创建事件类型为 `delegation.ready` 的 Outbox。
+5. Checkpoint 版本 CAS 只允许一个 Primary Runtime B；Runtime B 使用冻结模型身份、禁用工具、`forceFinal`，并按原 `toolCallId` 注入结构化结果。
+6. Runtime B 安全终态化后释放 fence。无法证明 assistant 已安全持久化的 rejection 会保留 `resuming` 与 fence，等待恢复处理。
 
-不能先调用 IPC 再注册路由，否则首批流式事件可能找不到所属 Agent。
+Renderer 重载不等于主进程重启。前者通过 `chatAgentListActive` 恢复 `waitingChildren` 投影，并保留 Runtime A 的未完成 assistant；Agent 状态查询失败时也不执行破坏性草稿恢复。后者丢失 continuation context，启动时在 IPC 开放前把无法恢复的活动 Checkpoint 收敛为 `interrupted`，绝不猜测或重放 Provider 模型调用。
+
+Outbox 发布失败不会丢失持久化事实：pending Outbox 与 `listActive` 仍可用于人工对账或未来 dispatcher。本阶段没有自动 `delegation.created` dispatcher，不应把“事实仍可观察”描述成“已经自动补偿或重投”。
+
+### 当前禁用边界
+
+- `delegate_task` 的 exposure 仍为 `internal`，BChat 默认工具集不含它。
+- Renderer 的 `send`、`continue`、`compact` 与 `submitUserChoice` 在取得锁和写消息前拒绝 deferred 工具、伪 Child 身份和内部 lineage。
+- 当前没有 Child Actor、Child Runtime、`ChildTaskRuntimeExecutor`、Child transcript API、任务卡片、写入 adapter、ConfirmationQueue 或 commit journal。
+- Execution Plan 类型和持久化校验已存在，但生产 capability intersection、计划编译和资源调度尚未实现。
+- 当前专用 deferred parser 只接受 `delegate_task`；新增其他协调工具必须单独设计契约与持久化协议。
 
 ### 结果与消息归属
 
-子 Agent 默认返回结果信封，而不是直接向用户消息流追加 assistant 消息：
-
-```ts
-/** 未来建议的子 Agent 结果，不是当前已存在的类型。 */
-interface ChatAgentResult {
-  agentId: string;
-  runtimeId: string;
-  status: 'completed' | 'cancelled' | 'failed';
-  output?: unknown;
-  artifacts?: Array<{ kind: string; reference: string }>;
-  errorMessage?: string;
-}
-```
+`types/chat-agent.d.ts` 已定义结构化 `ChatAgentResult`，把执行状态、完成度、验证证据、机器错误、artifact ownership/visibility 和 usage/cost 分开。Child 不应直接向用户消息流追加 assistant 消息。
 
 建议的可见性规则：
 
@@ -237,8 +237,16 @@ interface ChatAgentResult {
 - Child 不能隐式使用当前可见编辑器的上下文。
 - 文档能力必须绑定明确的 `documentId`，磁盘工具必须绑定明确的工作区和权限。
 - Child 只获得完成子任务所需的工具，不继承 Primary 的全部工具。
-- Renderer 重载后的 capability 升级必须同时匹配 Runtime 描述符、文档和 Agent 角色。
+- 普通 Runtime 在 Renderer 重载后可以按已持久化描述符重挂 renderer capability handle；描述符、文档和 Runtime 地址必须全部匹配，这只是恢复既有能力，不是为 Task 扩权。
 - 需要用户确认的操作始终携带 `runtimeId`，决策返回原 Runtime。
+
+未来既有 Child 的能力恢复顺序固定为 `persisted capability → available capability → intersection → effective capability`，并满足：
+
+```text
+effective = persisted ∩ available ∩ role/policy
+```
+
+`effective` 对同一 Task/Attempt 只能单调收缩。环境重新出现不能让旧 Task 自动获得此前不可用或未授权的能力；确实需要新能力时，Primary 必须提交一个新 Task Contract。
 
 当前确认控制器适合串行流程。允许同一 Session 内 Agent 并行后，需要把“单个当前确认”升级为按 Runtime 排队的请求集合，并在 UI 中显示请求来自哪个会话和 Agent。
 
@@ -257,6 +265,10 @@ Child 任务在派发时应声明 `required` 或 `optional`：
 - `required` 失败会使 Turn 失败，或由 Primary 明确重试。
 - `optional` 失败会作为结构化结果返回，Primary 可以继续回答。
 - Turn 只有在 Primary 完成且所有 required Child 已进入终态后才能完成。
+
+当前实现只把 cooperative cancellation 落在持久化 Checkpoint/Task 状态与 `cancelCheckpoint` 窄 IPC 上，并在安全终态后关闭 source assistant。由于还没有真实 Child Runtime，本阶段没有把取消传播成 Child `AbortSignal`，也没有 grace period、超时后 hard abort 或进程级强制终止。
+
+未来取消 Primary Turn 时，Coordinator 应先持久化级联取消意图，再等待 required Child/Attempt 各自进入可证明的终态；IPC 已响应不代表 Child 已停止，等待期间 continuation fence 和 Turn 忙碌态不能提前释放。
 
 ## 真正并行前的前置条件
 
@@ -279,22 +291,23 @@ Child 任务在派发时应声明 `required` 或 `optional`：
 - 会话切换不影响全局监听和 Runtime 生命周期。
 - 删除活动会话执行明确的取消策略。
 
-### 阶段 1：串行子 Agent
+### 阶段 1：一层并行只读 Child
 
-- 增加按需创建的 Agent Coordinator。
-- 定义 Child Agent 请求和 `ChatAgentResult`。
-- 使用当前 Session 写锁串行启动 Child Runtime。
+- 复用现有 Coordinator Service，增加按需创建的一层 Child Actor 与专用执行器。
+- 复用现有 Task Contract 和 `ChatAgentResult`，编译只读 Execution Plan 与 capability intersection。
+- 以 resource scope 为调度门禁，最多并发 3 个彼此兼容的纯读 Child Runtime；Child 不得继续委派。
+- 禁用所有写工具、外部副作用、ConfirmationQueue 和 commit adapter。
 - Primary 聚合 Child 结果并生成唯一用户可见回复。
 
 ### 阶段 2：可恢复层级与交互
 
-- Runtime 输入、事件和恢复快照补充 `turnId`、`parentAgentId`、`rootRuntimeId` 与 `role`。
-- 恢复时重建原 Turn、Coordinator 和 Agent 树，不再把所有 Runtime 归为 `primary`。
+- 在现有完整 Runtime 地址上增加 Child Actor/Runtime 的持久化恢复投影，不引入重复 `role` 字段。
+- 恢复时按 Task/Attempt/Event 重建原 Turn 和一层 Child Actor，Coordinator 仍是服务职责。
 - 待确认、bridge 和 renderer 工具请求按 Runtime 恢复。
 
-### 阶段 3：并行只读 Agent
+### 阶段 3：扩展并行只读调度
 
-- Coordinator 支持有限并发和最大子任务数。
+- Coordinator 在首阶段 3 个并发上限的基础上支持可配置资源配额和最大子任务数。
 - capability 标注读写级别，并只并行无副作用工具。
 - 处理乱序完成、局部失败、取消和超时。
 
@@ -343,9 +356,16 @@ Child 任务在派发时应声明 `required` 或 `optional`：
 - `src/ai/chat/machine/sessionMachine.ts`
 - `src/ai/chat/machine/turnMachine.ts`
 - `src/ai/chat/machine/agentMachine.ts`
-- `src/hooks/useChatRuntimeEvents.ts`
-- `src/hooks/useChatRuntimeRecovery.ts`
+- `src/hooks/useChat/useRuntimeEvents.ts`
+- `src/hooks/useChat/useRuntimeRecovery.ts`
+- `src/hooks/useChat/useAgentDelegationEvents.ts`
 - `src/components/BChat/hooks/useChatRuntimeLauncher.ts`
+- `electron/main/modules/chat/agents/contracts.mts`
+- `electron/main/modules/chat/agents/result.mts`
+- `electron/main/modules/chat/agents/store.mts`
+- `electron/main/modules/chat/agents/service.mts`
+- `electron/main/modules/chat/agents/ipc.mts`
 - `electron/main/modules/chat/runtime/service.mts`
 - `electron/main/modules/chat/runtime/infrastructure/locks.mts`
+- `types/chat-agent.d.ts`
 - `types/chat-runtime.d.ts`
