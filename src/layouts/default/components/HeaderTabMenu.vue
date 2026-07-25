@@ -488,11 +488,13 @@ defineExpose({
   z-index: 50;
   display: flex;
   flex-direction: column;
+  gap: 2px;
   min-width: 168px;
   padding: 4px;
+  line-height: 32px;
   background: var(--dropdown-bg);
   border: 1px solid var(--dropdown-border);
-  border-radius: 8px;
+  border-radius: 6px;
   box-shadow: 0 12px 32px rgb(15 23 42 / 16%);
   transform-origin: top left;
   animation: header-tab-menu-enter 120ms ease-out;
@@ -504,34 +506,39 @@ defineExpose({
   gap: 8px;
   align-items: center;
   width: 100%;
-  height: 30px;
   padding: 0 8px;
-  font-size: 12px;
+  font: inherit;
   color: var(--text-primary);
   text-align: left;
   cursor: pointer;
   background: transparent;
   border: 0;
   border-radius: 6px;
-}
 
-.header-tab-menu__item:hover:not(:disabled) {
-  background: var(--bg-secondary);
-}
+  &:disabled {
+    cursor: default;
+    background: transparent;
+    opacity: 0.3;
+  }
 
-.header-tab-menu__item:disabled {
-  color: var(--text-disabled);
-  cursor: not-allowed;
-}
+  &:hover:not(:disabled) {
+    color: var(--text-primary);
+    background: var(--dropdown-item-hover-bg);
+  }
 
-.header-tab-menu__item.is-danger:not(:disabled) {
-  color: var(--color-danger);
+  &.is-danger {
+    color: var(--color-danger);
+
+    &:hover:not(:disabled) {
+      color: var(--color-danger);
+    }
+  }
 }
 
 .header-tab-menu__divider {
   height: 1px;
-  margin: 4px 6px;
-  background: var(--border-primary);
+  margin: 3px 8px;
+  border-top: 1px solid var(--dropdown-divider);
 }
 
 .header-tab-menu__label {
