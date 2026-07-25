@@ -3,6 +3,7 @@
  * @description Shell 命令子进程 runner，负责进程生命周期、实时输出、超时和取消。
  */
 import { spawn } from 'node:child_process';
+import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 import type { ShellCommandOutputChunk, ShellCommandRunRequest, ShellCommandRunResult, ShellCommandTermination } from './types.mjs';
 import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from 'node:child_process';
@@ -38,8 +39,6 @@ const ALLOWED_ENV_KEYS: ReadonlySet<string> = new Set([
   'GOPATH',
   'GOPROXY',
   // 语言运行时
-  'NODE_OPTIONS',
-  'PYTHONPATH',
   'PYTHONIOENCODING',
   // 区域设置
   'LANG',
@@ -163,19 +162,27 @@ function resolveSpawnCommand(request: ShellCommandRunRequest): { command: string
 
   return {
     command: 'bash',
-    args: ['-lc', request.command]
+    args: ['--noprofile', '--norc', '-c', request.command]
   };
 }
 
 /**
- * 判断目标目录是否位于工作区内。
+ * 解析真实路径，路径不存在时回退到规范化路径。
+ * @param targetPath - 目标路径
+ * @returns 真实路径或规范化路径
+ */
+async function resolveRealPath(targetPath: string): Promise<string> {
+  return realpath(targetPath).catch((): string => path.resolve(targetPath));
+}
+
+/**
+ * 判断目标目录真实路径是否位于工作区真实路径内。
  * @param cwd - 执行目录
  * @param workspaceRoot - 工作区根目录
  * @returns 是否位于工作区内
  */
-function isCwdInsideWorkspace(cwd: string, workspaceRoot: string): boolean {
-  const resolvedCwd = path.resolve(cwd);
-  const resolvedWorkspace = path.resolve(workspaceRoot);
+async function isCwdInsideWorkspace(cwd: string, workspaceRoot: string): Promise<boolean> {
+  const [resolvedCwd, resolvedWorkspace] = await Promise.all([resolveRealPath(cwd), resolveRealPath(workspaceRoot)]);
   const relativePath = path.relative(resolvedWorkspace, resolvedCwd);
 
   return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
@@ -214,16 +221,16 @@ export function createShellCommandRunner(options: CreateShellCommandRunnerOption
    * @param sink - 实时输出接收函数
    * @returns 命令执行结果
    */
-  function run(request: ShellCommandRunRequest, sink?: ShellCommandOutputSink, eventSink?: ShellRunEventSink): Promise<ShellCommandRunResult> {
+  async function run(request: ShellCommandRunRequest, sink?: ShellCommandOutputSink, eventSink?: ShellRunEventSink): Promise<ShellCommandRunResult> {
+    if (!(await isCwdInsideWorkspace(request.cwd, request.workspaceRoot))) {
+      return Promise.reject(new Error('命令执行目录必须位于当前工作区内'));
+    }
     if (request.interactionMode === 'auto-default') {
       const capability = resolveAutoDefaultCapability();
       if (!capability.enabled) {
         return Promise.reject(new Error(`Shell auto-default capability 未开放：${capability.reason ?? 'UNKNOWN'}`));
       }
       return ptyRunner.run(request, eventSink);
-    }
-    if (!isCwdInsideWorkspace(request.cwd, request.workspaceRoot)) {
-      return Promise.reject(new Error('命令执行目录必须位于当前工作区内'));
     }
 
     const maxOutputChars = request.maxOutputChars ?? DEFAULT_MAX_OUTPUT_CHARS;

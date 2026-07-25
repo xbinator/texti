@@ -2,6 +2,7 @@
  * @file pty-runner.mts
  * @description 编排 PTY、Screen Snapshot、PromptDetector、Controller、事件和终止清理。
  */
+import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 import type { ShellCommandRunRequest, ShellCommandRunResult, ShellCommandTermination, ShellRunEvent, ShellRunEventEnvelope } from './types.mjs';
 import {
@@ -60,13 +61,23 @@ interface ActivePtyCommand {
 }
 
 /**
- * 判断执行目录是否在工作区内。
+ * 解析真实路径，路径不存在时回退到规范化路径。
+ * @param targetPath - 目标路径
+ * @returns 真实路径或规范化路径
+ */
+async function resolveRealPath(targetPath: string): Promise<string> {
+  return realpath(targetPath).catch((): string => path.resolve(targetPath));
+}
+
+/**
+ * 判断执行目录真实路径是否在工作区真实路径内。
  * @param cwd - 执行目录
  * @param workspaceRoot - 工作区根目录
  * @returns 是否允许
  */
-function isInsideWorkspace(cwd: string, workspaceRoot: string): boolean {
-  const relative = path.relative(path.resolve(workspaceRoot), path.resolve(cwd));
+async function isInsideWorkspace(cwd: string, workspaceRoot: string): Promise<boolean> {
+  const [resolvedWorkspaceRoot, resolvedCwd] = await Promise.all([resolveRealPath(workspaceRoot), resolveRealPath(cwd)]);
+  const relative = path.relative(resolvedWorkspaceRoot, resolvedCwd);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
@@ -86,8 +97,8 @@ export function createPtyShellRunner(options: CreatePtyRunnerOptions = {}): PtyS
    * @param sink - 有序事件接收函数
    * @returns 最终结构化结果
    */
-  function run(request: ShellCommandRunRequest, sink?: ShellRunEventSink): Promise<ShellCommandRunResult> {
-    if (!isInsideWorkspace(request.cwd, request.workspaceRoot)) return Promise.reject(new Error('命令执行目录必须位于当前工作区内'));
+  async function run(request: ShellCommandRunRequest, sink?: ShellRunEventSink): Promise<ShellCommandRunResult> {
+    if (!(await isInsideWorkspace(request.cwd, request.workspaceRoot))) return Promise.reject(new Error('命令执行目录必须位于当前工作区内'));
     const startedAt = Date.now();
     const maxOutputChars = request.maxOutputChars ?? DEFAULT_OUTPUT_CHARS;
     const autoOptions: AutoDefaultOptions = { ...DEFAULT_AUTO_OPTIONS, ...options.autoDefaultOptions };

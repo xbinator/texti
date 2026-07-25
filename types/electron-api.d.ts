@@ -274,6 +274,8 @@ export interface ElectronShellCommandRunRequest {
   maxOutputChars?: number;
   /** 交互模式，缺省时使用普通管道模式。 */
   interactionMode?: ElectronShellInteractionMode;
+  /** Renderer 已完成用户确认的安全发现项编码。 */
+  confirmedSafetyFindingCodes?: string[];
 }
 
 /**

@@ -186,8 +186,7 @@ function formatSafetyFailureMessage(safety: ElectronShellCommandSafetyReport): s
  * @param cwd - 执行目录
  * @param timeoutMs - 超时时间
  * @param safety - 安全分析报告
- * @param autoApproved - 是否已自动批准，仅用于执行开始/完成回调时传 null
- * @returns 确认描述，无 finding 时返回 null 表示无需确认
+ * @returns 确认描述
  */
 function formatConfirmationDescription(shell: ElectronShellCommandShell, cwd: string, timeoutMs: number, safety: ElectronShellCommandSafetyReport): string {
   const findingText = safety.findings.map((finding) => `- [${finding.severity}] ${finding.message}`).join('\n');
@@ -372,7 +371,6 @@ export function createBuiltinShellCommandTool(options: CreateBuiltinShellCommand
         return createToolFailureResult(RUN_SHELL_COMMAND_TOOL_NAME, 'PERMISSION_DENIED', formatSafetyFailureMessage(safety));
       }
 
-      // 安全分析无 risk finding 时直接放行，有 finding 时弹窗让用户确认
       const hasSafetyFindings = safety.findings.length > 0;
       let confirmationRequest: AIToolConfirmationRequest | undefined;
 
@@ -409,7 +407,8 @@ export function createBuiltinShellCommandTool(options: CreateBuiltinShellCommand
           cwd,
           workspaceRoot: resolvedWorkspaceRoot,
           timeoutMs,
-          interactionMode
+          interactionMode,
+          ...(hasSafetyFindings ? { confirmedSafetyFindingCodes: safety.findings.map((finding): string => finding.code) } : {})
         })
       );
       abortSignal?.removeEventListener('abort', cancelCommand);

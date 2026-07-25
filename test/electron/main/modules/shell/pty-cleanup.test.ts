@@ -16,6 +16,8 @@ interface ControlledPty {
   emitData(data: string): void;
   /** 主动发送退出。 */
   emitExit(event: { exitCode: number; signal?: number }): void;
+  /** 等待 PTY 监听器完成订阅。 */
+  ready(): Promise<void>;
   /** data 订阅释放函数。 */
   disposeData: ReturnType<typeof vi.fn>;
   /** exit 订阅释放函数。 */
@@ -29,8 +31,23 @@ interface ControlledPty {
 function createControlledPty(): ControlledPty {
   let dataListener: ((data: string) => void) | null = null;
   let exitListener: ((event: { exitCode: number; signal?: number }) => void) | null = null;
+  let hasDataListener = false;
+  let hasExitListener = false;
   const disposeData = vi.fn();
   const disposeExit = vi.fn();
+  let resolveReady: (() => void) | null = null;
+  const readyPromise = new Promise<void>((resolve): void => {
+    resolveReady = resolve;
+  });
+
+  /** 标记监听器订阅状态，全部完成后释放 ready promise。 */
+  function markReady(): void {
+    if (hasDataListener && hasExitListener) {
+      resolveReady?.();
+      resolveReady = null;
+    }
+  }
+
   return {
     process: {
       pid: 4242,
@@ -38,10 +55,14 @@ function createControlledPty(): ControlledPty {
       kill: vi.fn(),
       onData(listener: (data: string) => void) {
         dataListener = listener;
+        hasDataListener = true;
+        markReady();
         return { dispose: disposeData };
       },
       onExit(listener: (event: { exitCode: number; signal?: number }) => void) {
         exitListener = listener;
+        hasExitListener = true;
+        markReady();
         return { dispose: disposeExit };
       }
     },
@@ -50,6 +71,9 @@ function createControlledPty(): ControlledPty {
     },
     emitExit(event: { exitCode: number; signal?: number }): void {
       exitListener?.(event);
+    },
+    ready(): Promise<void> {
+      return readyPromise;
     },
     disposeData,
     disposeExit
@@ -94,6 +118,7 @@ describe('PtyShellRunner cleanup', (): void => {
       events.push(event);
     });
 
+    await controlled.ready();
     controlled.emitExit({ exitCode: 0 });
     const result = await runPromise;
     controlled.emitExit({ exitCode: 1 });
@@ -119,6 +144,7 @@ describe('PtyShellRunner cleanup', (): void => {
       events.push(event);
     });
 
+    await controlled.ready();
     controlled.emitData('Enter API token:');
     const result = await runPromise;
 
@@ -141,6 +167,7 @@ describe('PtyShellRunner cleanup', (): void => {
       autoDefaultOptions: { activeOutputWindowMs: 0, interactionTimeoutMs: 20 }
     });
     const interactionPromise = interactionRunner.run({ ...REQUEST, commandId: 'interaction-timeout', timeoutMs: 500 });
+    await interactionPty.ready();
     interactionPty.emitData('Choose a custom action?');
 
     const toolPty = createControlledPty();
@@ -150,6 +177,7 @@ describe('PtyShellRunner cleanup', (): void => {
       gracePeriodMs: 5
     });
     const toolPromise = toolRunner.run({ ...REQUEST, commandId: 'tool-timeout', timeoutMs: 20 });
+    await toolPty.ready();
 
     await expect(interactionPromise).resolves.toMatchObject({ termination: { kind: 'interaction_timeout' }, timedOut: false });
     await expect(toolPromise).resolves.toMatchObject({ termination: { kind: 'tool_timeout' }, timedOut: true });
@@ -175,6 +203,7 @@ describe('PtyShellRunner cleanup', (): void => {
     });
     const runPromise = runner.run({ ...REQUEST, commandId: 'leader-exit' });
 
+    await controlled.ready();
     controlled.emitExit({ exitCode: 0 });
     const result = await runPromise;
 
@@ -195,6 +224,7 @@ describe('PtyShellRunner cleanup', (): void => {
       events.push(event);
     });
 
+    await controlled.ready();
     for (let progress = 0; progress <= 20; progress += 1) controlled.emitData(`\rDownloading ${progress}%`);
     controlled.emitExit({ exitCode: 0 });
     await runPromise;

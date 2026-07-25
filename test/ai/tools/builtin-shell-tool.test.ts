@@ -6,6 +6,7 @@ import type { AIToolExecutionResult } from 'types/ai';
 import type { ElectronShellCommandRunResult, ElectronShellCommandTermination } from 'types/electron-api';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createBuiltinShellCommandTool } from '@/ai/tools/builtin/ShellTool';
+import type { AIToolConfirmationAdapter } from '@/ai/tools/confirmation';
 
 /** 已通过当前 v1 验证的自动交互能力。 */
 const ENABLED_CAPABILITY = {
@@ -78,13 +79,14 @@ function createRunResult(termination: ElectronShellCommandTermination): Electron
  * @returns Shell 工具执行器
  */
 function createTool(
-  getAutoDefaultCapability: () => typeof ENABLED_CAPABILITY | typeof DISABLED_CAPABILITY = (): typeof ENABLED_CAPABILITY => ENABLED_CAPABILITY
+  getAutoDefaultCapability: () => typeof ENABLED_CAPABILITY | typeof DISABLED_CAPABILITY = (): typeof ENABLED_CAPABILITY => ENABLED_CAPABILITY,
+  confirm: AIToolConfirmationAdapter['confirm'] = vi.fn(async (): Promise<boolean> => true)
 ): ReturnType<typeof createBuiltinShellCommandTool> {
   return createBuiltinShellCommandTool({
     getWorkspaceRoot: (): string => '/workspace',
     getAutoDefaultCapability,
     confirm: {
-      confirm: vi.fn(async (): Promise<boolean> => true)
+      confirm
     }
   });
 }
@@ -106,6 +108,31 @@ describe('builtin ShellTool interaction contract', (): void => {
 
     expect(mocks.runShellCommand).toHaveBeenCalledWith(expect.objectContaining({ interactionMode: 'none' }));
     expect(tool.definition.parameters.properties?.interactionMode).toMatchObject({ enum: ['none', 'auto-default'] });
+  });
+
+  it('skips confirmation when safety report has no findings', async (): Promise<void> => {
+    const confirm = vi.fn(async (): Promise<boolean> => true);
+    const tool = createTool((): typeof ENABLED_CAPABILITY => ENABLED_CAPABILITY, confirm);
+
+    await tool.execute({ shell: 'bash', command: 'echo ok', commandId: 'tool-call-1' });
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(mocks.runShellCommand).toHaveBeenCalledTimes(1);
+  });
+
+  it('requests confirmation when safety report has warnings', async (): Promise<void> => {
+    const confirm = vi.fn(async (): Promise<boolean> => true);
+    const tool = createTool((): typeof ENABLED_CAPABILITY => ENABLED_CAPABILITY, confirm);
+    mocks.analyzeShellCommand.mockResolvedValue({
+      ...SAFE_REPORT,
+      findings: [{ severity: 'warning', code: 'READ_OUTSIDE_WORKSPACE', message: '命令可能读取工作区外路径: /Users/zhangbin' }]
+    });
+
+    await tool.execute({ shell: 'bash', command: 'find /Users/zhangbin -name widget.json', commandId: 'tool-call-1' });
+
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ toolName: 'run_shell_command', riskLevel: 'dangerous' }));
+    expect(mocks.runShellCommand).toHaveBeenCalledWith(expect.objectContaining({ confirmedSafetyFindingCodes: ['READ_OUTSIDE_WORKSPACE'] }));
+    expect(mocks.runShellCommand).toHaveBeenCalledTimes(1);
   });
 
   it('forwards auto-default and rejects unsupported interaction modes', async (): Promise<void> => {

@@ -95,7 +95,7 @@ export function createPtyFactory(spawn: PtySpawn): PtyProcessFactory {
     spawn(request: PtySpawnRequest): PtyProcess {
       let file = 'bash';
       if (request.shell === 'powershell') file = process.platform === 'win32' ? 'powershell.exe' : 'pwsh';
-      const args = request.shell === 'powershell' ? ['-NoProfile', '-Command', request.command] : ['-lc', request.command];
+      const args = request.shell === 'powershell' ? ['-NoProfile', '-Command', request.command] : ['--noprofile', '--norc', '-c', request.command];
       return spawn(file, args, {
         name: 'xterm-256color',
         cols: request.columns,

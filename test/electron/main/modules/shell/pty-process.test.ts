@@ -34,7 +34,7 @@ describe('PtyProcessAdapter', (): void => {
     process.write('\r');
     process.kill('SIGTERM');
 
-    expect(spawn).toHaveBeenCalledWith('bash', ['-lc', 'echo ok'], expect.objectContaining({ cwd: '/workspace', cols: 80, rows: 24 }));
+    expect(spawn).toHaveBeenCalledWith('bash', ['--noprofile', '--norc', '-c', 'echo ok'], expect.objectContaining({ cwd: '/workspace', cols: 80, rows: 24 }));
     expect(onData).toHaveBeenCalledWith('ok');
     expect(onExit).toHaveBeenCalledWith({ exitCode: 0, signal: undefined });
     expect(native.write).toHaveBeenCalledWith('\r');
