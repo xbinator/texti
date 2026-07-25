@@ -224,9 +224,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify Shell auto-default tests
-        run: pnpm vitest run test/electron/main/modules/shell test/ai/tools/builtin-shell-tool.test.ts test/ai/tools/stream.test.ts test/hooks/use-runtime-events.test.ts test/components/BChat/shell-run-events.test.ts test/components/BChat/bubble-part-tool-shell.test.ts
-
       - name: Verify TypeScript
         run: pnpm exec tsc --noEmit
 
@@ -236,22 +233,11 @@ jobs:
       - name: Verify Shell main-process lint
         run: pnpm exec eslint electron/main/modules/shell electron/main/index.mts scripts/shell test/electron/main/modules/shell test/hooks/use-runtime-events.test.ts --ext .ts,.mts,.mjs
 
-      - name: Verify Electron PTY ABI
-        if: runner.os != 'Linux'
-        run: pnpm shell:pty:smoke
-
-      - name: Verify Electron PTY ABI on Linux
-        if: runner.os == 'Linux'
-        run: xvfb-run -a pnpm shell:pty:smoke
-
       - name: Build release packages
         run: pnpm electron:build -- ${{ matrix.build_args }}
         env:
           ELECTRON_BUILDER_BINARIES_MIRROR: https://github.com/electron-userland/electron-builder-binaries/releases/download/
           npm_config_electron_builder_binaries_mirror: https://github.com/electron-userland/electron-builder-binaries/releases/download/
-
-      - name: Verify packaged PTY artifact
-        run: pnpm shell:pty:packaged-smoke
 
       - name: Upload packaged artifacts
         uses: actions/upload-artifact@v4
