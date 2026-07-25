@@ -8,7 +8,7 @@ import { isDocumentRecord, recentFilesStorage } from '@/shared/storage';
 import type { StoredDocumentRecord } from '@/shared/storage/files/types';
 import { isUnsavedPath } from '@/utils/file/unsaved';
 import { workspace } from '@/utils/file/workspace';
-import { createToolCancelledResult, createToolFailureResult, createToolSuccessResult } from '../results';
+import { createToolDeniedResult, createToolFailureResult, createToolSuccessResult } from '../results';
 
 // ─── 类型 ─────────────────────────────────────────────────────────────────────
 
@@ -141,11 +141,11 @@ export async function writeUnsavedDraft(options: UnsavedDraftOptions, fileId: st
 // ─── 确认流程 ─────────────────────────────────────────────────────────────────
 
 /**
- * 向用户请求确认，若拒绝则返回取消结果，否则返回 null。
+ * 向用户请求确认，若拒绝则返回可继续失败结果，否则返回 null。
  * @param adapter - 确认适配器
  * @param request - 确认请求
  * @param toolName - 工具名称
- * @returns 取消结果或 null
+ * @returns 用户拒绝结果或 null
  */
 export async function confirmOrCancel(
   adapter: AIToolConfirmationAdapter,
@@ -155,7 +155,7 @@ export async function confirmOrCancel(
   const decision = await adapter.confirm(request);
   const confirmed = typeof decision === 'boolean' ? decision : decision.approved;
 
-  return confirmed ? null : createToolCancelledResult(toolName);
+  return confirmed ? null : createToolDeniedResult(toolName);
 }
 
 /**

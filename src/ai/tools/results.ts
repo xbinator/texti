@@ -59,6 +59,15 @@ export function createToolCancelledResult(toolName: string): AIToolExecutionResu
 }
 
 /**
+ * Create a permission-denied-by-user tool result that keeps the stream continuable.
+ * @param toolName - Tool name.
+ * @returns User-denied failure result.
+ */
+export function createToolDeniedResult(toolName: string): AIToolExecutionResult<never> {
+  return createFailureLikeResult(toolName, 'failure', 'USER_CANCELLED', '用户取消了工具授权');
+}
+
+/**
  * Create an awaiting-user-input tool execution result.
  * @param toolName - Tool name.
  * @param question - Choice question payload.

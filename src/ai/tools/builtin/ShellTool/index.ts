@@ -16,7 +16,7 @@ import { nanoid } from 'nanoid';
 import { native } from '@/shared/platform';
 import { asyncTo } from '@/utils/asyncTo';
 import { workspace } from '@/utils/file/workspace';
-import { createToolCancelledResult, createToolFailureResult, createToolSuccessResult } from '../../results';
+import { createToolCancelledResult, createToolDeniedResult, createToolFailureResult, createToolSuccessResult } from '../../results';
 
 /** run_shell_command 工具名称。 */
 export const RUN_SHELL_COMMAND_TOOL_NAME = 'run_shell_command';
@@ -385,7 +385,7 @@ export function createBuiltinShellCommandTool(options: CreateBuiltinShellCommand
         };
         const decision = await options.confirm.confirm(confirmationRequest);
         if (!isConfirmationApproved(decision)) {
-          return createToolCancelledResult(RUN_SHELL_COMMAND_TOOL_NAME);
+          return createToolDeniedResult(RUN_SHELL_COMMAND_TOOL_NAME);
         }
         await options.confirm.onExecutionStart?.(confirmationRequest);
       }

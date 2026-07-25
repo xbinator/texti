@@ -7,7 +7,7 @@ import type { MainToolsDependencies } from '../types.mjs';
 import type { AIToolExecutionResult } from 'types/ai';
 import { OPERATE_WEBPAGE_TOOL_NAME, READ_CURRENT_WEBPAGE_TOOL_NAME, WEBVIEW_TOOL_NAMES } from '../constants.mjs';
 import { isRuntimeWebpageOperateResult, isRuntimeWebpageSnapshot } from '../guards.mjs';
-import { createBridgeFailureResult, createMainToolCancelledResult, createMainToolFailureResult, createMainToolSuccessResult } from '../results.mjs';
+import { createBridgeFailureResult, createMainDeniedResult, createMainToolFailureResult, createMainToolSuccessResult } from '../results.mjs';
 
 /**
  * WebView 操作动作最小描述。
@@ -135,7 +135,7 @@ async function executeOperateWebpage(input: ChatRuntimeMainToolExecutionInput, d
       rememberScopes: ['session', 'always']
     }
   });
-  if (!decision.approved) return createMainToolCancelledResult(OPERATE_WEBPAGE_TOOL_NAME);
+  if (!decision.approved) return createMainDeniedResult(OPERATE_WEBPAGE_TOOL_NAME);
 
   const bridgeResult = await deps.requestBridge({
     runtimeId: input.runtime.runtimeId,

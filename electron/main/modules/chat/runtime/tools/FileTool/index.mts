@@ -46,7 +46,13 @@ import {
 } from '../file-search.mjs';
 import { isRecord, isRuntimeFileContentSnapshot, isRuntimeOpenDraftResult } from '../guards.mjs';
 import { isRuntimePathInsideWorkspace, isRuntimeTrustedHomeReadPath, resolveRuntimeReadTarget, resolveRuntimeWriteTarget } from '../paths.mjs';
-import { createBridgeFailureResult, createMainToolCancelledResult, createMainToolFailureResult, createMainToolSuccessResult } from '../results.mjs';
+import {
+  createBridgeFailureResult,
+  createMainDeniedResult,
+  createMainToolCancelledResult,
+  createMainToolFailureResult,
+  createMainToolSuccessResult
+} from '../results.mjs';
 
 /** 真实文件写入队列，覆盖确认后的重新验证与原子写入阶段。 */
 const runtimeFileWriteQueues = new Map<string, Promise<void>>();
@@ -567,7 +573,7 @@ async function executeReadFileTool(input: ChatRuntimeMainToolExecutionInput, dep
           beforeText: realTarget.filePath
         }
       });
-      if (!decision.approved) return createMainToolCancelledResult(input.toolName);
+      if (!decision.approved) return createMainDeniedResult(input.toolName);
     }
 
     const data = await readWorkspaceFile({
@@ -612,7 +618,7 @@ async function executeReadDirectoryTool(input: ChatRuntimeMainToolExecutionInput
           beforeText: realTarget.filePath
         }
       });
-      if (!decision.approved) return createMainToolCancelledResult(input.toolName);
+      if (!decision.approved) return createMainDeniedResult(input.toolName);
     }
 
     const data = await readWorkspaceDirectory({
@@ -708,7 +714,7 @@ async function executeGlobTool(input: ChatRuntimeMainToolExecutionInput, deps: M
   try {
     const searchTarget = await resolveRuntimeRealSearchTarget(target, input.runtime.workspaceRoot);
     if (searchTarget.outsideWorkspace && !(await confirmRuntimeExternalSearchTarget(input, deps, searchTarget.filePath))) {
-      return createMainToolCancelledResult(input.toolName);
+      return createMainDeniedResult(input.toolName);
     }
 
     const stats = await fs.stat(searchTarget.filePath);
@@ -743,7 +749,7 @@ async function executeGrepTool(input: ChatRuntimeMainToolExecutionInput, deps: M
   try {
     const searchTarget = await resolveRuntimeRealSearchTarget(target, input.runtime.workspaceRoot);
     if (searchTarget.outsideWorkspace && !(await confirmRuntimeExternalSearchTarget(input, deps, searchTarget.filePath))) {
-      return createMainToolCancelledResult(input.toolName);
+      return createMainDeniedResult(input.toolName);
     }
 
     const stats = await fs.stat(searchTarget.filePath);
@@ -837,7 +843,7 @@ async function executeWriteFileTool(input: ChatRuntimeMainToolExecutionInput, de
         afterText: normalizedInput.content
       }
     });
-    if (!decision.approved) return createMainToolCancelledResult(input.toolName);
+    if (!decision.approved) return createMainDeniedResult(input.toolName);
 
     const bridgeResult = await deps.requestBridge({
       runtimeId: input.runtime.runtimeId,
@@ -883,7 +889,7 @@ async function executeWriteFileTool(input: ChatRuntimeMainToolExecutionInput, de
         afterText: normalizedInput.content
       }
     });
-    if (!decision.approved) return createMainToolCancelledResult(input.toolName);
+    if (!decision.approved) return createMainDeniedResult(input.toolName);
 
     const bridgeResult = await deps.requestBridge({
       runtimeId: input.runtime.runtimeId,
@@ -930,7 +936,7 @@ async function executeWriteFileTool(input: ChatRuntimeMainToolExecutionInput, de
       ...(existingFile.exists ? { beforeText: existingFile.content, afterText: normalizedInput.content } : { afterText: normalizedInput.content })
     }
   });
-  if (!decision.approved) return createMainToolCancelledResult(input.toolName);
+  if (!decision.approved) return createMainDeniedResult(input.toolName);
 
   try {
     return await withRuntimeFileLock(writePath, async (): Promise<AIToolExecutionResult> => {
@@ -1038,7 +1044,7 @@ async function executeEditFileTool(input: ChatRuntimeMainToolExecutionInput, dep
       afterText: normalizedInput.newString
     }
   });
-  if (!decision.approved) return createMainToolCancelledResult(input.toolName);
+  if (!decision.approved) return createMainDeniedResult(input.toolName);
 
   if (target.type === 'unsaved') {
     const bridgeResult = await deps.requestBridge({

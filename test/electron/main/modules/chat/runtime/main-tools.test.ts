@@ -315,6 +315,40 @@ describe('createMainToolExecutor', (): void => {
     ]);
   });
 
+  it('keeps operate_webpage bridge idle when permission is denied', async (): Promise<void> => {
+    const bridgeRequests: MainToolBridgeRequest[] = [];
+    const executeMainTool = createMainToolExecutor({
+      now: () => '2026-06-22T00:00:00.000Z',
+      async requestConfirmation(): Promise<{ approved: false }> {
+        return { approved: false };
+      },
+      async requestBridge(input: MainToolBridgeRequest) {
+        bridgeRequests.push(input);
+        return {
+          status: 'success',
+          data: {
+            ok: true,
+            action: 'click',
+            message: '已点击',
+            navigationStarted: false,
+            pageChanged: true,
+            shouldReadAgain: true
+          }
+        };
+      }
+    });
+
+    const result = await executeMainTool({
+      runtime,
+      toolCallId: 'tool-call-web-denied-1',
+      toolName: 'operate_webpage',
+      input: { snapshotId: 'snap-1', action: { type: 'click', index: 2 } }
+    });
+
+    expect(result).toMatchObject({ toolName: 'operate_webpage', status: 'failure', error: { code: 'USER_CANCELLED' } });
+    expect(bridgeRequests).toEqual([]);
+  });
+
   it('rejects invalid operate_webpage bridge payloads', async (): Promise<void> => {
     const bridgeRequests: MainToolBridgeRequest[] = [];
     const executeMainTool = createMainToolExecutor({
@@ -1119,7 +1153,7 @@ describe('createMainToolExecutor', (): void => {
     }
   });
 
-  it('does not create parent directories when a real write is cancelled', async (): Promise<void> => {
+  it('does not create parent directories when real write permission is denied', async (): Promise<void> => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tibis-runtime-tools-'));
     try {
       const workspaceRoot = path.join(tempRoot, 'workspace');
@@ -1141,7 +1175,7 @@ describe('createMainToolExecutor', (): void => {
         input: { path: 'reports/daily.md', content: '# Daily' }
       });
 
-      expect(result).toMatchObject({ toolName: 'write_file', status: 'cancelled' });
+      expect(result).toMatchObject({ toolName: 'write_file', status: 'failure', error: { code: 'USER_CANCELLED' } });
       await expect(fs.stat(parentPath)).rejects.toMatchObject({ code: 'ENOENT' });
       expect(requestBridge).not.toHaveBeenCalled();
     } finally {
@@ -1185,7 +1219,7 @@ describe('createMainToolExecutor', (): void => {
     }
   });
 
-  it('keeps real file content unchanged when an edit is cancelled', async (): Promise<void> => {
+  it('keeps real file content unchanged when edit permission is denied', async (): Promise<void> => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tibis-runtime-tools-'));
     try {
       const workspaceRoot = path.join(tempRoot, 'workspace');
@@ -1208,7 +1242,7 @@ describe('createMainToolExecutor', (): void => {
         input: { path: 'report.md', oldString: 'before', newString: 'after' }
       });
 
-      expect(result).toMatchObject({ toolName: 'edit_file', status: 'cancelled' });
+      expect(result).toMatchObject({ toolName: 'edit_file', status: 'failure', error: { code: 'USER_CANCELLED' } });
       await expect(fs.readFile(targetPath, 'utf8')).resolves.toBe('before value');
       expect(requestBridge).not.toHaveBeenCalled();
     } finally {

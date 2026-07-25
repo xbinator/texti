@@ -135,6 +135,20 @@ describe('builtin ShellTool interaction contract', (): void => {
     expect(mocks.runShellCommand).toHaveBeenCalledTimes(1);
   });
 
+  it('returns a continuable failure when warning confirmation is denied', async (): Promise<void> => {
+    const confirm = vi.fn(async (): Promise<{ approved: false }> => ({ approved: false }));
+    const tool = createTool((): typeof ENABLED_CAPABILITY => ENABLED_CAPABILITY, confirm);
+    mocks.analyzeShellCommand.mockResolvedValue({
+      ...SAFE_REPORT,
+      findings: [{ severity: 'warning', code: 'READ_OUTSIDE_WORKSPACE', message: '命令可能读取工作区外路径: /Users/zhangbin' }]
+    });
+
+    const result = await tool.execute({ shell: 'bash', command: 'find /Users/zhangbin -name widget.json', commandId: 'tool-call-1' });
+
+    expect(result).toMatchObject({ status: 'failure', error: { code: 'USER_CANCELLED' } });
+    expect(mocks.runShellCommand).not.toHaveBeenCalled();
+  });
+
   it('forwards auto-default and rejects unsupported interaction modes', async (): Promise<void> => {
     const tool = createTool();
 

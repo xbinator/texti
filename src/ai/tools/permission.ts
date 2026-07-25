@@ -5,7 +5,7 @@
 import type { AIToolConfirmationAdapter, AIToolConfirmationRequest } from './confirmation';
 import type { AIToolDefinition, AIToolExecutionResult } from 'types/ai';
 import { useChatPermissionStore } from '@/stores/chat/permission';
-import { createToolCancelledResult, createToolFailureResult, createToolSuccessResult } from './results';
+import { createToolDeniedResult, createToolFailureResult, createToolSuccessResult } from './results';
 
 /**
  * 权限包装执行选项。
@@ -119,7 +119,7 @@ export async function executeWithPermission<TResult>(options: ExecuteWithPermiss
     | { approved: true; grantScope?: 'session' | 'always' };
 
   if (!normalizedDecision.approved) {
-    return createToolCancelledResult(options.definition.name);
+    return createToolDeniedResult(options.definition.name);
   }
 
   const result = await executeOperation({ ...options, request: safeRequest });

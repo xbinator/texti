@@ -43,6 +43,15 @@ export function createMainToolCancelledResult(toolName: string): AIToolExecution
 }
 
 /**
+ * 创建用户拒绝授权的主进程工具失败结果。
+ * @param toolName - 工具名称
+ * @returns 可继续的用户拒绝结果
+ */
+export function createMainDeniedResult(toolName: string): AIToolExecutionResult {
+  return createMainToolFailureResult(toolName, 'USER_CANCELLED', '用户取消了工具授权');
+}
+
+/**
  * 将 bridge failure 转为工具失败结果。
  * @param toolName - 工具名称
  * @param error - Bridge 错误

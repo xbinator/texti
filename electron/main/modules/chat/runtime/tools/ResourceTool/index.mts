@@ -8,7 +8,7 @@ import type { AIToolExecutionResult } from 'types/ai';
 import { OPEN_RESOURCE_TOOL_NAME, RESOURCE_TOOL_NAMES, RUNTIME_URL_PROTOCOL_RE } from '../constants.mjs';
 import { isRecord, isRuntimeOpenResourceResult, isRuntimeOpenResourceType } from '../guards.mjs';
 import { resolveRuntimeReadTarget } from '../paths.mjs';
-import { createBridgeFailureResult, createMainToolCancelledResult, createMainToolFailureResult, createMainToolSuccessResult } from '../results.mjs';
+import { createBridgeFailureResult, createMainDeniedResult, createMainToolFailureResult, createMainToolSuccessResult } from '../results.mjs';
 
 /**
  * 判断工具是否属于资源工具模块。
@@ -97,7 +97,7 @@ export async function executeResourceTool(input: ChatRuntimeMainToolExecutionInp
           beforeText: target.filePath
         }
       });
-      if (!decision.approved) return createMainToolCancelledResult(input.toolName);
+      if (!decision.approved) return createMainDeniedResult(input.toolName);
     }
   }
 

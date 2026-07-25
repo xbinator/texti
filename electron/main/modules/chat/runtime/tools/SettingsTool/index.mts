@@ -33,7 +33,7 @@ import {
   UPDATE_SETTINGS_TOOL_NAME
 } from '../constants.mjs';
 import { isRecord, isRuntimeSettingKey, isRuntimeSettingsSnapshot, isRuntimeUpdateSettingsResult } from '../guards.mjs';
-import { createBridgeFailureResult, createMainToolCancelledResult, createMainToolFailureResult, createMainToolSuccessResult } from '../results.mjs';
+import { createBridgeFailureResult, createMainDeniedResult, createMainToolFailureResult, createMainToolSuccessResult } from '../results.mjs';
 import {
   findRuntimeMcpServer,
   normalizeRuntimeMcpSettings,
@@ -284,7 +284,7 @@ async function executeUpdateSettingsTool(input: ChatRuntimeMainToolExecutionInpu
       afterText: `${normalizedInput.key}: ${String(normalizedInput.value)}`
     }
   });
-  if (!decision.approved) return createMainToolCancelledResult(input.toolName);
+  if (!decision.approved) return createMainDeniedResult(input.toolName);
 
   const applyResult = await deps.requestBridge({
     runtimeId: input.runtime.runtimeId,
@@ -320,7 +320,7 @@ async function executeAddMcpServerTool(input: ChatRuntimeMainToolExecutionInput,
       afterText: formatRuntimeMcpConfirmationValue(server)
     }
   });
-  if (!decision.approved) return createMainToolCancelledResult(input.toolName);
+  if (!decision.approved) return createMainDeniedResult(input.toolName);
 
   try {
     const settings = await updateRuntimeMcpSettings((current) => ({ servers: [...current.servers, server] }));
@@ -359,7 +359,7 @@ async function executeUpdateMcpServerTool(input: ChatRuntimeMainToolExecutionInp
       afterText: formatRuntimeMcpConfirmationValue(nextServer)
     }
   });
-  if (!decision.approved) return createMainToolCancelledResult(input.toolName);
+  if (!decision.approved) return createMainDeniedResult(input.toolName);
 
   try {
     const updatedSettings = await updateRuntimeMcpSettings((current) => ({
@@ -403,7 +403,7 @@ async function executeRemoveMcpServerTool(input: ChatRuntimeMainToolExecutionInp
       afterText: '删除后该 MCP server 不会再出现在配置中。'
     }
   });
-  if (!decision.approved) return createMainToolCancelledResult(input.toolName);
+  if (!decision.approved) return createMainDeniedResult(input.toolName);
 
   try {
     await updateRuntimeMcpSettings((current) => ({ servers: current.servers.filter((server) => server.id !== existingServer.id) }));
@@ -441,7 +441,7 @@ async function executeRefreshMcpDiscoveryTool(input: ChatRuntimeMainToolExecutio
       afterText: formatRuntimeMcpConfirmationValue(existingServer)
     }
   });
-  if (!decision.approved) return createMainToolCancelledResult(input.toolName);
+  if (!decision.approved) return createMainDeniedResult(input.toolName);
 
   try {
     const result = await refreshMcpDiscovery(existingServer);
