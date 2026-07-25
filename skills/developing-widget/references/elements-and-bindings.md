@@ -1,10 +1,10 @@
-# Elements And Bindings Reference
+# 元素与绑定参考
 
-Use this reference when creating `elements`, styles, groups, loops, images, buttons, or template bindings.
+在创建 `elements`、样式、分组、循环、图片、按钮或模板绑定时使用本参考。
 
-## Base Element
+## 基础元素
 
-Every element in `elements` and group `children` should include:
+`elements` 与 group `children` 中的每个元素都应包含以下字段：
 
 ```json
 {
@@ -31,27 +31,27 @@ Every element in `elements` and group `children` should include:
 }
 ```
 
-Supported `name` values are `rect`, `text`, `image`, `button`, and `group`. Element IDs must be globally unique, including nested group children.
+`name` 支持的取值为 `rect`、`text`、`image`、`button`、`group`。元素 ID 必须全局唯一，包括嵌套 group 内的元素。
 
-## Element Metadata
+## 元素 metadata
 
-`rect` uses style and geometry. Its metadata may be `{}`.
+`rect` 仅使用样式和几何信息，其 metadata 可以为 `{}`。
 
-`text` metadata:
+`text` 的 metadata：
 
 ```json
 { "content": "{{ condition }}", "maxLines": 2 }
 ```
 
-`maxLines` controls the maximum visible lines. Positive integer caps the visible lines; non-positive or missing value keeps the text fully visible. Manual line breaks (`\n`) are counted toward the line budget.
+`maxLines` 控制最大可见行数。正整数会限制可见行数；非正数或缺省时文本完全可见。手动换行符（`\n`）也计入行数预算。
 
-`image` metadata:
+`image` 的 metadata：
 
 ```json
 { "src": "{{ iconUrl }}", "fit": "cover", "alt": "{{ condition }}" }
 ```
 
-`button` metadata:
+`button` 的 metadata：
 
 ```json
 {
@@ -62,21 +62,21 @@ Supported `name` values are `rect`, `text`, `image`, `button`, and `group`. Elem
 }
 ```
 
-Every button `actions[].method` should be a method declared on the exported Widget class.
+每个按钮的 `actions[].method` 都应是导出 Widget 类上已声明的方法。
 
-## Styles
+## 样式
 
-Useful style fields include `backgroundColor`, `borderColor`, `borderStyle`, `borderWidth`, `borderRadius`, `padding`, `color`, `fontSize`, `fontWeight`, `fontStyle`, `lineHeight`, `textDecoration`, `textAlign`, `textVerticalAlign`, and `opacity`.
+`style` 接受任意标准 CSS 属性（使用 camelCase 键名）。常用字段包括 `backgroundColor`、`borderColor`、`borderStyle`、`borderWidth`、`borderRadius`、`padding`、`margin`、`color`、`fontSize`、`fontWeight`、`fontStyle`、`lineHeight`、`textDecoration`、`textAlign`、`textVerticalAlign`、`opacity`。
 
-Use positive numbers for sizes and font sizes. `opacity` is between `0` and `1`. Box values such as `padding`, `borderWidth`, and `borderRadius` can be a number or an object of side/corner numbers.
+尺寸与字号使用正数。`opacity` 取值范围为 `0` 到 `1`。`padding`、`borderWidth`、`borderRadius`、`margin` 等盒型值可以是数字，或边/角数字对象。
 
-## Groups
+## 分组
 
-Groups use `name: "group"` and may contain `children`. Child positions are relative to the group position. Non-group elements must not contain `children`.
+分组使用 `name: "group"`，可包含 `children`。子元素的位置相对于分组位置。非 group 元素不能包含 `children`。
 
-## Loops
+## 循环
 
-Loop source is a binding path, not moustache text. Use a bare runtime data field such as `items`, not `{{ items }}`.
+循环的 `source` 是绑定路径，不是 moustache 文本。使用裸运行时数据字段（如 `items`），不要写成 `{{ items }}`。
 
 ```json
 {
@@ -91,17 +91,17 @@ Loop source is a binding path, not moustache text. Use a bare runtime data field
 }
 ```
 
-Set `autoColumns: true` when the parent width is not known up front. In that mode `columns` may be omitted or set to the literal string `"auto"` and the runtime will compute the column count from the available width. When `autoColumns: false`, `columns` must be a positive integer.
+当父级宽度无法预先确定时，设置 `autoColumns: true`。在该模式下 `columns` 可以省略或写字面字符串 `"auto"`，运行时会按可用宽度计算列数。当 `autoColumns: false` 时，`columns` 必须是正整数。
 
-Inside looped element metadata, `item` and `index` are local binding roots:
+在循环元素的 metadata 内，`item` 与 `index` 是本地绑定根：
 
 ```json
 { "content": "{{ item.label }} #{{ index }}" }
 ```
 
-## Bindings
+## 绑定
 
-Bindings use moustache syntax in metadata strings:
+绑定在 metadata 字符串中使用 moustache 语法：
 
 ```text
 {{ $input.city }}
@@ -110,15 +110,15 @@ Bindings use moustache syntax in metadata strings:
 {{ forecast[0].temperature }}
 ```
 
-Root rules:
+根名称规则：
 
-- `$input` reads `renderContext.input`.
-- `$output` reads the successful `onExecute` return value.
-- Bare names read `renderContext.data`.
-- Loop local roots come from `loop.itemName` and `loop.indexName`.
+- `$input` 读取 `renderContext.input`。
+- `$output` 读取 `onExecute` 成功返回的值。
+- 裸名读取 `renderContext.data`。
+- 循环本地根来自 `loop.itemName` 与 `loop.indexName`。
 
-Dotted or indexed paths such as `{{ forecast[0].temperature }}` and `{{ user.profile.name }}` are resolved at runtime but are not statically verified against the schema; only the root name is checked. Declare the root in the relevant schema (`dataSchema` for bare roots, `inputSchema` for `$input.x`, `outputSchema` for `$output.x`).
+诸如 `{{ forecast[0].temperature }}` 和 `{{ user.profile.name }}` 这样的点号或下标路径会在运行时解析，但不会对 schema 做静态校验；只校验根名。请在对应 schema 中声明根名（裸根名用 `dataSchema`，`$input.x` 用 `inputSchema`，`$output.x` 用 `outputSchema`）。
 
-## Image Resources
+## 图片资源
 
-The package can include local resource files, and the validator checks local image paths for existence and path traversal. Current image rendering passes `metadata.src` directly to `<img>`, so prefer HTTPS URLs, data URLs, or host-resolvable URLs unless the target integration is known to serve packaged resources.
+包内可包含本地资源文件，校验器会检查本地图片路径是否存在以及是否越界。当前图片渲染会直接把 `metadata.src` 传给 `<img>`，因此除非已知宿主集成会分发包内资源，否则优先使用 HTTPS URL、data URL 或宿主可解析的 URL。

@@ -50,7 +50,7 @@ my-widget/
 
 ## 顶层 WidgetData
 
-`widget.json` must contain one JSON object with this shape:
+`widget.json` 必须包含一个如下结构的 JSON 对象：
 
 ```json
 {
@@ -69,11 +69,11 @@ my-widget/
 }
 ```
 
-Do not add extra top-level fields unless the source type is updated.
+除非源类型本身更新，否则不要新增顶层字段。
 
 ## Schemas
 
-`inputSchema`, `outputSchema`, and `dataSchema` are object schemas:
+`inputSchema`、`outputSchema`、`dataSchema` 都是对象 schema：
 
 ```json
 {
@@ -89,17 +89,17 @@ Do not add extra top-level fields unless the source type is updated.
 }
 ```
 
-Property `type` supports `string`, `number`, `boolean`, `object`, and `array`. Object properties may include nested `properties` and `required`; array properties may include `items`.
+`type` 字段支持的取值为 `string`、`number`、`boolean`、`object`、`array`。`object` 类型可嵌套 `properties` 与 `required`；`array` 类型可包含 `items`。
 
-Use the schemas as the binding contract:
+schema 同时是绑定的契约：
 
-- `$input.foo` must exist in `inputSchema.properties`.
-- `$output.foo` must exist in `outputSchema.properties`.
-- Bare runtime data bindings such as `{{ temperature }}` must exist in `dataSchema.properties`.
+- `$input.foo` 必须在 `inputSchema.properties` 中声明。
+- `$output.foo` 必须在 `outputSchema.properties` 中声明。
+- 裸运行时数据绑定（如 `{{ temperature }}`）必须在 `dataSchema.properties` 中声明。
 
 ## Execute
 
-`execute.code` is JavaScript text. It should export a default class that extends `Widget`:
+`execute.code` 是 JavaScript 文本，应默认导出一个继承 `Widget` 的类：
 
 ```js
 export default class WeatherCard extends Widget {
@@ -109,18 +109,18 @@ export default class WeatherCard extends Widget {
 }
 ```
 
-See `references/runtime-api.md` before writing lifecycle code, button methods, HTTP requests, messages, or logger calls.
+编写生命周期代码、按钮方法、HTTP 请求、消息或 logger 调用前，先阅读 `references/runtime-api.md`。
 
 ## Metadata
 
-Top-level `metadata` is an object. `metadata.width` and `metadata.height` are optional positive numbers used by the validator for element bounds checks.
+顶层 `metadata` 是一个对象。`metadata.width` 与 `metadata.height` 是可选的正数，供校验器做元素边界检查使用。
 
-## Validation
+## 校验
 
-Run:
+执行：
 
 ```bash
 node ../scripts/validate-widget.js <widget-directory>
 ```
 
-The validator checks JSON shape, schemas, element IDs, supported element names, geometry, loops, package limits, image resource paths, button method names, runtime class protocol, and common binding mistakes.
+校验器会检查：JSON 结构、schema、元素 ID、受支持的元素名称、几何、循环、包体限制、图片资源路径、按钮方法名、运行时类协议，以及常见的绑定错误。

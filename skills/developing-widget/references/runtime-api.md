@@ -1,10 +1,10 @@
-# Runtime API Reference
+# 运行时 API 参考
 
-Use this reference when writing `execute.code`, lifecycle methods, button handlers, HTTP requests, messages, or logger calls.
+在编写 `execute.code`、生命周期方法、按钮处理、HTTP 请求、消息或 logger 调用时使用本参考。
 
-## Class Protocol
+## 类协议
 
-`execute.code` should export one default class that extends `Widget`:
+`execute.code` 应默认导出一个继承 `Widget` 的类：
 
 ```js
 export default class WeatherCard extends Widget {
@@ -14,19 +14,19 @@ export default class WeatherCard extends Widget {
 }
 ```
 
-`Widget` is a host-injected global symbol provided by the runtime. Do not `import` it; do not redeclare it locally. The validator checks this statically. It does not execute the script.
+`Widget` 是宿主注入的全局符号，由运行时提供。不要 `import` 它，也不要在本地重新声明。校验器会对此做静态检查，但不会真正执行脚本。
 
-## Context Fields
+## 上下文字段
 
-Inside the class:
+在类内部可以使用：
 
-- `this.$input` is the readonly input object derived from `inputSchema`.
-- `this.$output` is the readonly successful `onExecute` return value, or `undefined`.
-- `this.$http` is the hosted HTTP client.
-- `this.$sendMessage(...)` sends a user-visible message during display interactions.
-- `this.$logger` writes persistent logs.
+- `this.$input`：由 `inputSchema` 派生的只读入参对象。
+- `this.$output`：`onExecute` 成功返回的只读值，未返回时为 `undefined`。
+- `this.$http`：宿主提供的 HTTP 客户端。
+- `this.$sendMessage(...)`：在展示交互过程中发送用户可见消息。
+- `this.$logger`：写入持久化日志。
 
-Direct instance fields are mirrored into `renderContext.data` and can be used by element bindings:
+类的实例字段会被镜像到 `renderContext.data`，可被元素绑定使用：
 
 ```js
 export default class WeatherCard extends Widget {
@@ -60,26 +60,26 @@ export default class WeatherCard extends Widget {
 }
 ```
 
-Declare matching `dataSchema.properties` for fields rendered with bare bindings such as `{{ condition }}` or `{{ loading }}`.
+对于使用裸绑定（如 `{{ condition }}` 或 `{{ loading }}`）渲染的字段，需要在 `dataSchema.properties` 中声明同名字段。
 
-## Lifecycle
+## 生命周期
 
-`onExecute` runs when the model opens the Widget and may return an output object. `onMounted` runs when the Widget is displayed. Button actions and custom events call methods on the same Widget instance in a live display session.
+`onExecute` 在模型打开 Widget 时执行，可返回一个 output 对象。`onMounted` 在 Widget 展示时执行。按钮动作与自定义事件会在同一次实时展示会话中调用同一个 Widget 实例上的方法。
 
-Use persistent fields for facts that must survive rendering and history restore. Use private instance state only for temporary cache in the current live session.
+需要在渲染与历史恢复过程中保留的事实，应使用持久化字段。仅在当前实时会话中作为临时缓存使用的，才放到私有实例状态里。
 
-## Button Methods
+## 按钮方法
 
-Button actions call methods by name:
+按钮动作按名称调用方法：
 
 ```json
 { "actions": [{ "method": "refresh", "args": [] }] }
 ```
 
-The class must declare `refresh()` or `async refresh()`. Do not rely on a default placeholder method.
+类必须声明 `refresh()` 或 `async refresh()`。不要依赖默认的占位方法。
 
-## HTTP, Messages, And Logs
+## HTTP、消息与日志
 
-Use `this.$http.get/post/put/patch/delete` instead of browser globals for network calls. Use `this.$sendMessage` for interaction results that should flow back into chat. Use `this.$logger.info/warn/error` for durable logs.
+网络请求使用 `this.$http.get/post/put/patch/delete`，不要使用浏览器全局对象。需要回流到聊天中的交互结果使用 `this.$sendMessage`。持久化日志使用 `this.$logger.info/warn/error`。
 
-Runtime payloads cross a worker boundary. Inputs, outputs, data, and method arguments should be JSON-safe. Do not pass DOM events, functions, Vue proxies, or other non-cloneable objects as business data.
+运行时负载会跨越 worker 边界。input、output、data 与方法参数都应是 JSON 安全的。不要把 DOM 事件、函数、Vue 代理或其他不可克隆对象作为业务数据传递。
