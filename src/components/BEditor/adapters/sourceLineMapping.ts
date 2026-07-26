@@ -48,6 +48,48 @@ interface TopLevelBlockInfo {
 }
 
 /**
+ * 顶层 Markdown token 的源码行号与匹配信息。
+ */
+interface TopLevelMarkdownTokenInfo extends SourceLineRange {
+  /** token 类型 */
+  type: string;
+  /** token 原始 Markdown 文本 */
+  raw: string;
+  /** token 纯文本内容 */
+  text: string;
+}
+
+/**
+ * 已对齐的顶层块与 Markdown token。
+ */
+interface AlignedTopLevelBlock {
+  /** ProseMirror 顶层块信息 */
+  blockInfo: TopLevelBlockInfo;
+  /** Markdown token 行号与内容信息 */
+  tokenInfo: TopLevelMarkdownTokenInfo;
+}
+
+/**
+ * Markdown 列表项源码行信息。
+ */
+interface ListLineInfo extends SourceLineRange {
+  /** 去除列表标记后的可比较文本 */
+  text: string;
+}
+
+/**
+ * ProseMirror 文本块范围信息。
+ */
+interface TextBlockRange {
+  /** ProseMirror 起始位置 */
+  from: number;
+  /** ProseMirror 结束位置 */
+  to: number;
+  /** 可比较文本 */
+  text: string;
+}
+
+/**
  * 解析期的源码行号游标。
  */
 export interface SourceLineTracker {
@@ -352,14 +394,23 @@ function mapBlockSourceLineRangeToOffsets(
 }
 
 /**
- * 构建顶层 Markdown token 的源码行号范围列表，包含对独立空行的行号推进。
- * @param markdown - 原始 Markdown 文本
- * @returns 顶层非 space token 的源码行号范围列表
+ * 读取 Markdown token 的纯文本内容。
+ * @param token - marked 顶层 token
+ * @returns token 纯文本内容
  */
-function getTopLevelMarkdownTokenLineRanges(markdown: string): SourceLineRange[] {
+function getTokenText(token: ReturnType<typeof marked.lexer>[number]): string {
+  return 'text' in token && typeof token.text === 'string' ? token.text : '';
+}
+
+/**
+ * 构建顶层 Markdown token 信息列表，包含对独立空行的行号推进。
+ * @param markdown - 原始 Markdown 文本
+ * @returns 顶层非 space token 信息列表
+ */
+function getMarkdownTokens(markdown: string): TopLevelMarkdownTokenInfo[] {
   const tokens = marked.lexer(markdown);
   const tracker = createSourceLineTracker();
-  const ranges: SourceLineRange[] = [];
+  const tokenInfos: TopLevelMarkdownTokenInfo[] = [];
 
   tokens.forEach((token) => {
     if (token.type === 'space') {
@@ -372,10 +423,15 @@ function getTopLevelMarkdownTokenLineRanges(markdown: string): SourceLineRange[]
       return;
     }
 
-    ranges.push(captureSourceLineRange(tracker, raw));
+    tokenInfos.push({
+      ...captureSourceLineRange(tracker, raw),
+      type: token.type,
+      raw,
+      text: getTokenText(token)
+    });
   });
 
-  return ranges;
+  return tokenInfos;
 }
 
 /**
@@ -395,6 +451,228 @@ function getTopLevelBlocks(doc: ProseMirrorNode): TopLevelBlockInfo[] {
   });
 
   return blocks;
+}
+
+/**
+ * 归一化用于匹配 Markdown token 与 rich 块节点的文本。
+ * @param text - 原始文本
+ * @returns 可比较的文本
+ */
+function normalizeComparableText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * 判断 ProseMirror 节点是否为列表容器。
+ * @param node - ProseMirror 节点
+ * @returns 是否为列表节点
+ */
+function isListNode(node: ProseMirrorNode): boolean {
+  return ['bulletList', 'orderedList', 'taskList'].includes(node.type.name);
+}
+
+/**
+ * 判断 Markdown token 是否与 ProseMirror 顶层块表示同一个结构。
+ * @param tokenInfo - Markdown token 信息
+ * @param node - ProseMirror 顶层块节点
+ * @returns 是否匹配
+ */
+function matchTokenBlock(tokenInfo: TopLevelMarkdownTokenInfo, node: ProseMirrorNode): boolean {
+  if (tokenInfo.type === 'heading') {
+    return node.type.name === 'heading' && normalizeComparableText(tokenInfo.text) === normalizeComparableText(node.textContent);
+  }
+
+  if (tokenInfo.type === 'code') {
+    return node.type.name === 'codeBlock' && tokenInfo.text.trim() === node.textContent.trim();
+  }
+
+  if (tokenInfo.type === 'hr') {
+    return node.type.name === 'horizontalRule';
+  }
+
+  if (tokenInfo.type === 'table') {
+    return node.type.name === 'table';
+  }
+
+  if (tokenInfo.type === 'blockquote') {
+    return node.type.name === 'blockquote';
+  }
+
+  if (tokenInfo.type === 'list') {
+    return isListNode(node);
+  }
+
+  if (tokenInfo.type === 'paragraph') {
+    return node.type.name === 'paragraph' && normalizeComparableText(tokenInfo.text) === normalizeComparableText(node.textContent);
+  }
+
+  if (tokenInfo.type === 'html' || tokenInfo.type === 'def') {
+    return (
+      node.type.name === 'paragraph' &&
+      (normalizeComparableText(tokenInfo.text) === normalizeComparableText(node.textContent) ||
+        normalizeComparableText(tokenInfo.raw) === normalizeComparableText(node.textContent))
+    );
+  }
+
+  return false;
+}
+
+/**
+ * 将顶层 Markdown token 与 rich 顶层块按顺序贪心对齐。
+ * marked 会把某些 mixed list 拆成多个顶层 list token，rich 文档则可能合并成更少的块，因此不能按数组索引直连。
+ * @param topLevelBlocks - ProseMirror 顶层块列表
+ * @param tokenInfos - Markdown 顶层 token 信息列表
+ * @returns 已对齐的顶层块与 token 列表
+ */
+function alignTopLevelBlocks(topLevelBlocks: TopLevelBlockInfo[], tokenInfos: TopLevelMarkdownTokenInfo[]): AlignedTopLevelBlock[] {
+  const alignedBlocks: AlignedTopLevelBlock[] = [];
+  let tokenIndex = 0;
+
+  topLevelBlocks.forEach((blockInfo) => {
+    for (let index = tokenIndex; index < tokenInfos.length; index += 1) {
+      const tokenInfo = tokenInfos[index];
+      if (!tokenInfo || !matchTokenBlock(tokenInfo, blockInfo.node)) {
+        continue;
+      }
+
+      alignedBlocks.push({ blockInfo, tokenInfo });
+      tokenIndex = index + 1;
+      return;
+    }
+  });
+
+  return alignedBlocks;
+}
+
+/**
+ * 判断两个源码行号范围是否相交。
+ * @param range - 已知源码行号范围
+ * @param startLine - 目标起始行
+ * @param endLine - 目标结束行
+ * @returns 是否相交
+ */
+function isLineRangeOverlapping(range: SourceLineRange, startLine: number, endLine: number): boolean {
+  return range.startLine <= endLine && range.endLine >= startLine;
+}
+
+/**
+ * 从源码列表行中提取可与 rich 段落匹配的文本。
+ * @param line - Markdown 源码列表行
+ * @returns 可比较文本；非列表项返回 null
+ */
+function extractListLineText(line: string): string | null {
+  const taskMatch = /^\s*(?:[-+*]|\d+[.)])\s+\[[ xX]\]\s+(.*)$/.exec(line);
+  if (taskMatch?.[1]) {
+    return normalizeComparableText(taskMatch[1]);
+  }
+
+  const listMatch = /^\s*(?:[-+*]|\d+[.)])\s+(.*)$/.exec(line);
+  if (listMatch?.[1]) {
+    return normalizeComparableText(listMatch[1]);
+  }
+
+  return null;
+}
+
+/**
+ * 从 Markdown list token 中提取每个物理列表项行。
+ * @param tokenInfo - Markdown list token 信息
+ * @returns 列表项源码行信息
+ */
+function getListLineInfos(tokenInfo: TopLevelMarkdownTokenInfo): ListLineInfo[] {
+  return tokenInfo.raw
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .flatMap((line, index): ListLineInfo[] => {
+      const text = extractListLineText(line);
+      if (!text) {
+        return [];
+      }
+
+      const lineNumber = tokenInfo.startLine + index;
+      return [{ startLine: lineNumber, endLine: lineNumber, text }];
+    });
+}
+
+/**
+ * 提取列表子树中可选中的段落文本范围。
+ * @param blockInfo - 顶层列表块信息
+ * @returns 段落文本范围列表
+ */
+function getListTextBlockRanges(blockInfo: TopLevelBlockInfo): TextBlockRange[] {
+  const ranges: TextBlockRange[] = [];
+
+  blockInfo.node.descendants((node, pos) => {
+    if (node.type.name !== 'paragraph' || !node.textContent) {
+      return;
+    }
+
+    const paragraphPos = blockInfo.pos + pos + 1;
+    ranges.push({
+      from: paragraphPos + 1,
+      to: paragraphPos + node.content.size + 1,
+      text: normalizeComparableText(node.textContent)
+    });
+  });
+
+  return ranges;
+}
+
+/**
+ * 根据 Markdown list token 的真实源码行号反向定位 rich 列表项文本。
+ * @param blockInfo - 顶层列表块信息
+ * @param tokenInfo - Markdown list token 信息
+ * @param startLine - 目标起始行
+ * @param endLine - 目标结束行
+ * @returns 命中的 ProseMirror 范围；未命中时返回 null
+ */
+function mapListTokenLineRangeToOffsets(
+  blockInfo: TopLevelBlockInfo,
+  tokenInfo: TopLevelMarkdownTokenInfo,
+  startLine: number,
+  endLine: number
+): LineRangeMappingResult | null {
+  if (tokenInfo.type !== 'list' || !isListNode(blockInfo.node) || !isLineRangeOverlapping(tokenInfo, startLine, endLine)) {
+    return null;
+  }
+
+  const selectedLines = getListLineInfos(tokenInfo).filter((lineInfo) => isLineRangeOverlapping(lineInfo, startLine, endLine));
+  const textRanges = getListTextBlockRanges(blockInfo);
+  let textRangeIndex = 0;
+  let matchedCount = 0;
+  let mappedRange: LineRangeMappingResult | null = null;
+
+  for (const lineInfo of selectedLines) {
+    for (let index = textRangeIndex; index < textRanges.length; index += 1) {
+      const textRange = textRanges[index];
+      if (!textRange || textRange.text !== lineInfo.text) {
+        continue;
+      }
+
+      if (!mappedRange) {
+        mappedRange = { from: textRange.from, to: textRange.to, exact: true };
+      } else {
+        mappedRange = {
+          from: Math.min(mappedRange.from, textRange.from),
+          to: Math.max(mappedRange.to, textRange.to),
+          exact: mappedRange.exact
+        };
+      }
+      textRangeIndex = index + 1;
+      matchedCount += 1;
+      break;
+    }
+  }
+
+  if (!mappedRange) {
+    return null;
+  }
+
+  return {
+    from: mappedRange.from,
+    to: mappedRange.to,
+    exact: matchedCount === selectedLines.length
+  };
 }
 
 /**
@@ -430,10 +708,15 @@ function mergeMappedLineRange(current: LineRangeMappingResult | null, next: Line
  */
 function mapTopLevelBlockSourceLineRangeToOffsets(
   blockInfo: TopLevelBlockInfo,
-  tokenRange: SourceLineRange,
+  tokenRange: TopLevelMarkdownTokenInfo,
   startLine: number,
   endLine: number
 ): LineRangeMappingResult | null {
+  const listRange = mapListTokenLineRangeToOffsets(blockInfo, tokenRange, startLine, endLine);
+  if (listRange) {
+    return listRange;
+  }
+
   const { node, pos } = blockInfo;
   let subtreeDelta: number | null = null;
   let mappedRange: LineRangeMappingResult | null = null;
@@ -488,20 +771,14 @@ export function getSelectionSourceLineRangeFromMarkdown(doc: ProseMirrorNode, fr
     return null;
   }
 
-  const topLevelBlocks = getTopLevelBlocks(doc);
-  const tokenRanges = getTopLevelMarkdownTokenLineRanges(markdown);
-  const alignedCount = Math.min(topLevelBlocks.length, tokenRanges.length);
+  const alignedBlocks = alignTopLevelBlocks(getTopLevelBlocks(doc), getMarkdownTokens(markdown));
 
   let startLine = Number.POSITIVE_INFINITY;
   let endLine = 0;
 
-  topLevelBlocks.slice(0, alignedCount).forEach(({ node, pos }, index) => {
-    const range = tokenRanges[index];
-    if (!range) {
-      return;
-    }
-
-    const preciseRange = getPreciseSelectionLineRangeFromBaseRange(node, pos, from, to, range);
+  alignedBlocks.forEach(({ blockInfo, tokenInfo }) => {
+    const { node, pos } = blockInfo;
+    const preciseRange = getPreciseSelectionLineRangeFromBaseRange(node, pos, from, to, tokenInfo);
     if (!preciseRange) {
       return;
     }
@@ -573,22 +850,24 @@ export function mapSourceLineRangeToProseMirrorRange(
   markdown?: string
 ): LineRangeMappingResult | null {
   if (typeof markdown === 'string' && markdown.trim()) {
-    const topLevelBlocks = getTopLevelBlocks(doc);
-    const tokenRanges = getTopLevelMarkdownTokenLineRanges(markdown);
-    const alignedCount = Math.min(topLevelBlocks.length, tokenRanges.length);
     let mappedRange: LineRangeMappingResult | null = null;
+    let hasOverlappingMarkdownToken = false;
+    const alignedBlocks = alignTopLevelBlocks(getTopLevelBlocks(doc), getMarkdownTokens(markdown));
 
-    topLevelBlocks.slice(0, alignedCount).forEach((blockInfo, index) => {
-      const tokenRange = tokenRanges[index];
-      if (!tokenRange) {
-        return;
+    alignedBlocks.forEach(({ blockInfo, tokenInfo }) => {
+      if (isLineRangeOverlapping(tokenInfo, startLine, endLine)) {
+        hasOverlappingMarkdownToken = true;
       }
 
-      mappedRange = mergeMappedLineRange(mappedRange, mapTopLevelBlockSourceLineRangeToOffsets(blockInfo, tokenRange, startLine, endLine));
+      mappedRange = mergeMappedLineRange(mappedRange, mapTopLevelBlockSourceLineRangeToOffsets(blockInfo, tokenInfo, startLine, endLine));
     });
 
     if (mappedRange) {
       return mappedRange;
+    }
+
+    if (hasOverlappingMarkdownToken) {
+      return null;
     }
   }
 
