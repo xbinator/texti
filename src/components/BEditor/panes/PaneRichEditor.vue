@@ -79,8 +79,8 @@ interface Props {
   editable?: boolean;
   /** 编辑器文件状态 */
   editorState?: EditorState;
-  /** 搜索匹配元素聚焦回调 */
-  onSearchMatchElementFocus?: (targetElement: HTMLElement) => void;
+  /** 将目标元素滚动到编辑器可视区域中间的回调（搜索匹配与行定位选区共用） */
+  onScrollElementIntoCenter?: (targetElement: HTMLElement) => void;
   /** 将选区工具宿主状态回传给上层统一编排 */
   onSelectionHostChange?: (payload: RichSelectionHostPayload | null) => void;
   /** 请求上层重算选区浮层位置 */
@@ -90,7 +90,7 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   editable: true,
   editorState: () => ({ content: '', name: '', path: '', id: '', ext: '' }),
-  onSearchMatchElementFocus: undefined,
+  onScrollElementIntoCenter: undefined,
   onSelectionHostChange: undefined,
   onSelectionOverlayChange: undefined
 });
@@ -129,7 +129,7 @@ function syncToExternal(): void {
  */
 function handleSearchMatchFocus({ targetElement }: SearchScrollContext): void {
   if (targetElement instanceof HTMLElement) {
-    props.onSearchMatchElementFocus?.(targetElement);
+    props.onScrollElementIntoCenter?.(targetElement);
   }
 }
 
@@ -458,7 +458,34 @@ function getSearchState(): EditorSearchState {
 }
 
 /**
+ * 将 ProseMirror 选区起始位置滚动到编辑器可视区域中间。
+ *
+ * 通过 view.domAtPos 解析选区起始位置对应的 DOM 节点，
+ * 复用宿主注入的居中滚动回调（与搜索匹配共用同一滚动行为），
+ * 替代 Tiptap scrollIntoView 默认的"滚动到最近边"行为。
+ *
+ * @param instance - Tiptap 编辑器实例
+ * @param pos - 选区起始位置（ProseMirror 文档位置）
+ */
+function scrollRangeStartIntoCenter(instance: TiptapEditor, pos: number): void {
+  const { node } = instance.view.domAtPos(pos);
+  // 文本节点取父元素；元素节点直接用；其他类型向上取 parentElement
+  const element: HTMLElement | null = node instanceof HTMLElement ? node : node.parentElement;
+  if (!element) {
+    return;
+  }
+  props.onScrollElementIntoCenter?.(element);
+}
+
+/**
  * 按源码行号选中并滚动到对应范围。
+ *
+ * 使用 commands 而非 chain：每步独立 dispatch，语义清晰。
+ * 滚动行为：将选区起始位置居中显示，而非 Tiptap scrollIntoView 默认的"最近边"，
+ * 避免目标行停在视口顶部/底部边缘。
+ * 聚焦时禁用 focus 内部 scrollIntoView（{ scrollIntoView: false }），
+ * 防止其覆盖居中滚动位置。
+ *
  * @param startLine - 起始行号（1-based）
  * @param endLine - 结束行号（1-based）
  * @returns 是否成功设置选区
@@ -470,15 +497,20 @@ async function selectLineRange(startLine: number, endLine: number): Promise<bool
     return false;
   }
 
-  instance.commands.setTextSelection({
-    from: mappedRange.from,
-    to: mappedRange.to
-  });
+  // 1. 设置文本选区（独立事务）
+  instance.commands.setTextSelection({ from: mappedRange.from, to: mappedRange.to });
+
+  // 2. 滚动选区起始位置到可视区域中间
+  scrollRangeStartIntoCenter(instance, mappedRange.from);
+
+  // 3. 应用 AI 选区高亮装饰
   setAISelectionHighlight(instance, {
     from: mappedRange.from,
     to: mappedRange.to
   });
-  instance.commands.focus();
+
+  // 4. 聚焦编辑器；禁用 focus 内部的 scrollIntoView，避免覆盖居中滚动
+  instance.commands.focus(null, { scrollIntoView: false });
   return true;
 }
 

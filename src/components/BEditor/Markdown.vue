@@ -24,7 +24,7 @@
             v-model:outline-content="outlineContent"
             :editor-state="effectiveEditorState"
             :editable="editable"
-            :on-search-match-element-focus="scrollSearchMatchElementIntoView"
+            :on-scroll-element-into-center="scrollElementIntoCenter"
             :on-selection-host-change="handleRichSelectionHostChange"
             :on-selection-overlay-change="recomputeSelectionOverlays"
             @editor-blur="handleEditorBlur"
@@ -558,10 +558,10 @@ const { activeAnchorId, handleChangeAnchor, handleEditorScroll, setActiveAnchorI
 });
 
 /**
- * 将富文本搜索命中滚动到可视区域中心。
- * @param targetElement - 目标匹配元素
+ * 将目标元素滚动到编辑器可视区域中心（搜索匹配与行定位选区共用）。
+ * @param targetElement - 目标元素
  */
-function scrollSearchMatchElementIntoView(targetElement: HTMLElement): void {
+function scrollElementIntoCenter(targetElement: HTMLElement): void {
   const scrollElement = scrollbarRef.value?.getScrollElement();
   if (!scrollElement) {
     targetElement.scrollIntoView({ block: 'center', inline: 'nearest' });
