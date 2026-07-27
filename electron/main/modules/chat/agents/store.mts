@@ -2308,7 +2308,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         return confirmation;
       }
       if (confirmation.status !== 'pending' || confirmation.version !== input.expectedVersion) {
-        throw new AgentStoreProtocolError('confirmation_resolution_conflict', 'Confirmation CAS decision conflicts with persisted state', 'confirmation');
+        throw new AgentStoreProtocolError('confirmation_version_conflict', 'Confirmation CAS version conflicts with persisted state', 'confirmation');
       }
       const changeset = this.getChangeset(confirmation.changesetId);
       const task = changeset ? this.getTask(changeset.snapshot.taskId) : null;
@@ -2348,7 +2348,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         [input.decision, input.occurredAt, changeset.snapshot.changesetId, 'awaiting_confirmation', confirmation.confirmationId]
       );
       if (confirmationUpdate.changes !== 1 || changesetUpdate.changes !== 1) {
-        throw new AgentStoreProtocolError('confirmation_resolution_conflict', 'Confirmation decision lost its CAS', 'confirmation');
+        throw new AgentStoreProtocolError('confirmation_version_conflict', 'Confirmation decision lost its CAS', 'confirmation');
       }
       this.appendEvent(
         'task',

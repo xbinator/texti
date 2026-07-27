@@ -632,7 +632,7 @@ describeWithSqlite('agent delegation store', (): void => {
         decision: 'rejected',
         occurredAt: '2026-07-23T08:02:30.000Z'
       });
-    }).toThrowError(expect.objectContaining({ reason: 'confirmation_resolution_conflict' }));
+    }).toThrowError(expect.objectContaining({ reason: 'confirmation_version_conflict' }));
 
     expect(
       invokeWriteStore(store, 'queueCommit', {

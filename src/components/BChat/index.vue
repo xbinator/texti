@@ -19,7 +19,7 @@
         @rollback="handleRollback"
       >
         <template #footer>
-          <ConfirmationSheet :request="confirmationController.currentConfirmationRequest.value" @action="handleConfirmationSheetAction" />
+          <ConfirmationSheet :confirmation="confirmationController.currentConfirmation.value" @action="handleConfirmationSheetAction" />
         </template>
       </ConversationView>
 
@@ -83,11 +83,13 @@ import type { ChatSessionUIEvent } from '@/ai/chat/sessionEvents';
 import type BSmartEditor from '@/components/BSmart/Editor.vue';
 import type { BSmartEditorExpose, SlashCommandOption } from '@/components/BSmart/types';
 import { useActorSystem } from '@/hooks/useChat/useActorSystem';
+import { useAgentConfirmationEvents } from '@/hooks/useChat/useAgentConfirmationEvents';
 import { useNavigate } from '@/hooks/useNavigate';
 import { getElectronAPI } from '@/shared/platform/electron-api';
 import { useProviderStore } from '@/stores/ai/provider';
 import type { SelectedModel } from '@/stores/ai/serviceModel';
 import { useSkillStore } from '@/stores/ai/skill';
+import { useChatConfirmationQueueStore } from '@/stores/chat/confirmationQueue';
 import { useChatSessionStore } from '@/stores/chat/session';
 import { useCommandPanelStore } from '@/stores/ui/commandPanel';
 import { asyncTo } from '@/utils/asyncTo';
@@ -189,6 +191,10 @@ const conversationRef = ref<InstanceType<typeof ConversationView>>();
 const branchingMessageId = ref<string>();
 /** 确认控制器，管理工具调用的用户确认流程 */
 const confirmationController = createChatConfirmationController();
+/** 应用级 Runtime/Agent confirmation queue。 */
+const confirmationQueue = useChatConfirmationQueueStore();
+/** 订阅 Main 持久化 confirmation 事实并恢复 Renderer 队列。 */
+useAgentConfirmationEvents();
 /** 提供给早期初始化回调的工作流忙碌镜像。 */
 const workflowLoading = ref<boolean>(false);
 /** 会话 ID、历史消息与自动命名运行时态。 */
@@ -252,9 +258,31 @@ const { workspaceRoot, getActiveTools, syncAIResources, getSkillContentHashes, r
  * 处理底部确认弹窗操作。
  * @param action - 用户操作（approve/approve-session/approve-always/cancel）
  */
-function handleConfirmationSheetAction(action: ChatMessageConfirmationAction): void {
-  const confirmationId = confirmationController.currentConfirmationId.value;
-  if (!confirmationId) return;
+async function handleConfirmationSheetAction(action: ChatMessageConfirmationAction): Promise<void> {
+  const confirmation = confirmationController.currentConfirmation.value;
+  if (!confirmation) return;
+
+  if (confirmation.source === 'agent') {
+    const [requestError, response] = await asyncTo(
+      getElectronAPI().chatAgentResolveConfirmation({
+        confirmationId: confirmation.confirmationId,
+        expectedVersion: confirmation.snapshot.version,
+        decision: action === 'cancel' ? 'rejected' : 'approved'
+      })
+    );
+    if (requestError || !response?.ok) {
+      interactionAPI.showToast({
+        type: 'error',
+        content: requestError?.message ?? response?.error ?? '提交 Child Agent 确认失败'
+      });
+      return;
+    }
+    // IPC response 本身也是权威投影；event 丢失时仍可立即收敛当前窗口。
+    confirmationQueue.applyAgent(response.data);
+    return;
+  }
+
+  const { confirmationId } = confirmation;
 
   if (action === 'approve') {
     confirmationController.approveConfirmation(confirmationId);

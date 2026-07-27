@@ -618,6 +618,7 @@ export function useAgentDelegationEvents(actorSystem: ChatActorSystem, options: 
    * @param event - Main 广播的公开事件
    */
   function handleEvent(event: ChatAgentApplicationEvent): void {
+    if (event.type !== 'checkpoint.updated') return;
     const current = cursors.get(event.checkpoint.checkpointId);
     if (current && event.checkpointSequence > current.checkpointSequence + 1) {
       resync().catch((error: unknown): void => {

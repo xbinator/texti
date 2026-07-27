@@ -2,6 +2,7 @@
  * @file service.mts
  * @description Child Agent 委派契约校验、原子 prepare、continuation fence 与启动恢复服务。
  */
+import { readFileSync } from 'node:fs';
 import type {
   AgentAttemptProjection,
   AgentCheckpointRecord,
@@ -24,6 +25,8 @@ import type {
   ChatAgentApplicationEvent,
   ChatAgentCancelCheckpointInput,
   ChatAgentCheckpointSnapshot,
+  ChatAgentConfirmationSnapshot,
+  ChatAgentResolveConfirmationInput,
   AgentModelSnapshot,
   AgentOrderedToolCallSnapshot,
   AgentTaskError,
@@ -46,6 +49,7 @@ import { getRuntimeTaskDeadlineAt } from '../runtime/task-clock.mjs';
 import { chatSessionManager } from '../service.mjs';
 import { createAgentBudgetLedger, type AgentBudgetLedger } from './budget.mjs';
 import { createChildActorRegistry } from './child-registry.mjs';
+import { createAgentConfirmationQueue, type AgentConfirmationQueue } from './confirmation-store.mjs';
 import {
   AGENT_CHECKPOINT_SCHEMA_VERSION,
   AGENT_FOUNDATION_POLICY_VERSION,
@@ -165,10 +169,12 @@ export interface ChatAgentDelegationServiceDependencies {
     payload: AgentDelegationCreatedPayload | AgentDelegationReadyPayload
   ) => Promise<void>;
   /**
-   * 发布已持久化的公开 Checkpoint 投影。
-   * @param event - 单调 application event
+   * 发布已持久化的公开 Checkpoint 或 confirmation 投影。
+   * @param event - 判别式 application event
    */
   publishCheckpoint: (event: ChatAgentApplicationEvent) => void;
+  /** Main-owned 持久化 confirmation queue；隔离测试可省略以保持旧只读 fixture。 */
+  confirmationQueue?: AgentConfirmationQueue;
   /**
    * 创建稳定身份。
    * @param kind - 身份域
@@ -261,6 +267,14 @@ export interface ChatAgentDelegationService {
   resumePrimary(input: ChatAgentResumePrimaryInput): Promise<ChatAgentResumeResult>;
   /** @returns 所有公开非终态 Checkpoint 投影。 */
   listActive(): ChatAgentCheckpointSnapshot[];
+  /** @returns 所有公开 pending confirmation 投影。 */
+  listConfirmations(): ChatAgentConfirmationSnapshot[];
+  /**
+   * 使用 Renderer 观察版本决议 confirmation。
+   * @param input - 最小 CAS 输入
+   * @returns 权威 confirmation 投影
+   */
+  resolveConfirmation(input: ChatAgentResolveConfirmationInput): ChatAgentConfirmationSnapshot;
   /**
    * 持久化 cooperative cancellation 并安全终态化 source assistant。
    * @param input - 最小取消输入
@@ -580,6 +594,15 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
   const fenceHandles = new Map<string, RuntimeContinuationFenceHandle>();
   const deliveryInFlight = new Map<string, Promise<void>>();
   let deliveryTail = Promise.resolve();
+
+  /**
+   * 读取已接线的 Main-owned confirmation queue。
+   * @returns confirmation queue
+   */
+  function getConfirmationQueue(): AgentConfirmationQueue {
+    if (dependencies.confirmationQueue) return dependencies.confirmationQueue;
+    throw createFenceError('confirmation-queue', 'confirmation_queue_unavailable');
+  }
 
   /**
    * 按当前持久化 Checkpoint 状态判断 Outbox 是否仍可交付。
@@ -955,6 +978,23 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
   }
 
   /**
+   * 返回所有公开 pending confirmation 投影。
+   * @returns Main 持久化事实的 allowlist 快照
+   */
+  function listConfirmations(): ChatAgentConfirmationSnapshot[] {
+    return getConfirmationQueue().listPending();
+  }
+
+  /**
+   * 通过 Main-owned queue 执行 confirmation CAS。
+   * @param input - Renderer 最小决议输入
+   * @returns 权威 allowlist 快照
+   */
+  function resolveConfirmation(input: ChatAgentResolveConfirmationInput): ChatAgentConfirmationSnapshot {
+    return getConfirmationQueue().resolve(input);
+  }
+
+  /**
    * 终态化 cancelled Checkpoint 的 source assistant、预算和 continuation fence。
    * @param checkpoint - Store 已持久化的 cancelled Checkpoint
    */
@@ -983,10 +1023,18 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
   function cancelWithReason(checkpointId: string, reason: string): ChatAgentCheckpointSnapshot {
     const normalizedReason = reason.trim();
     if (!normalizedReason) throw createFenceError(checkpointId, 'cancel_reason_invalid');
+    const taskIds = dependencies.store
+      .listActive()
+      .find((recovery): boolean => recovery.checkpoint.checkpointId === checkpointId)
+      ?.tasks.map((task): string => task.taskId);
     const checkpoint = dependencies.store.cancelCheckpoint({
       checkpointId,
       reason: normalizedReason,
       occurredAt: dependencies.now()
+    });
+    // 先持久化 checkpoint/task cancellation intent，再撤销仍 pending 的确认。
+    taskIds?.forEach((taskId): void => {
+      dependencies.confirmationQueue?.revokeTask(taskId, normalizedReason);
     });
     if (checkpoint.status !== 'cancelled') {
       return publishCheckpointSnapshot(checkpoint);
@@ -1181,6 +1229,10 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
 
     listActive,
 
+    listConfirmations,
+
+    resolveConfirmation,
+
     cancelCheckpoint,
 
     cancelInternal(checkpointId: string, reason: string): ChatAgentCheckpointSnapshot {
@@ -1274,7 +1326,7 @@ function publishDelegation(eventType: 'delegation.created' | 'delegation.ready',
 }
 
 /**
- * 向全部应用窗口发布公开 Checkpoint 投影。
+ * 向全部应用窗口发布公开 Agent application event。
  * @param event - allowlist application event
  */
 function publishCheckpoint(event: ChatAgentApplicationEvent): void {
@@ -1304,6 +1356,14 @@ function publishAssistant(message: ChatMessageRecord, checkpoint: AgentCheckpoin
 
 /** 主进程默认 Agent Store，供 Service 与 Coordinator 共享同一事实源。 */
 const defaultAgentStore = createAgentDelegationStore(agentStoreDatabase);
+
+/** 主进程默认持久化 confirmation queue。 */
+const defaultConfirmationQueue = createAgentConfirmationQueue({
+  store: defaultAgentStore,
+  readUnifiedDiff: (reference: string): string => readFileSync(reference, 'utf8'),
+  publish: publishCheckpoint,
+  now: (): string => new Date().toISOString()
+});
 
 /** 主进程默认持久化 Turn/Checkpoint/Task 预算账本。 */
 const defaultBudgetLedger = createAgentBudgetLedger({
@@ -1358,6 +1418,7 @@ export const chatAgentDelegationService = createChatAgentDelegationService({
     }
   },
   publishCheckpoint,
+  confirmationQueue: defaultConfirmationQueue,
   createId(kind: ChatAgentDelegationIdKind): string {
     return `${kind}-${nanoid()}`;
   },

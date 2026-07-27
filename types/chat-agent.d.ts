@@ -890,6 +890,55 @@ export interface ChatAgentCheckpointSnapshot {
   readonly updatedAt: string;
 }
 
+/**
+ * Renderer 可见的 confirmation allowlist 投影。
+ * 私有 overlay 引用、候选文件和 rollback 内容不得跨越 Main 边界。
+ */
+export interface ChatAgentConfirmationSnapshot {
+  /** confirmation 稳定身份。 */
+  readonly confirmationId: string;
+  /** 所属会话。 */
+  readonly sessionId: string;
+  /** 所属 Turn。 */
+  readonly turnId: string;
+  /** 所属 Child Task。 */
+  readonly taskId: string;
+  /** 产生 changeset 的 Attempt。 */
+  readonly attemptId: string;
+  /** 所属 Child Actor。 */
+  readonly agentId: string;
+  /** 产生 changeset 的 Runtime。 */
+  readonly runtimeId: string;
+  /** 原始 delegate_task tool-call。 */
+  readonly toolCallId: string;
+  /** 待确认 changeset。 */
+  readonly changesetId: string;
+  /** confirmation 当前权威状态。 */
+  readonly status: AgentConfirmationStatus;
+  /** confirmation CAS 版本。 */
+  readonly version: number;
+  /** 用户风险提示等级。 */
+  readonly riskLevel: 'write' | 'dangerous';
+  /** 面向用户展示的 workspace 相对路径。 */
+  readonly displayPaths: readonly string[];
+  /** Main 授权的资源 scopes。 */
+  readonly resourceScopes: readonly string[];
+  /** 已通过 diffHash 校验的文本 unified diff。 */
+  readonly unifiedDiff: string;
+  /** 绑定的基础修订。 */
+  readonly baseRevision: string;
+  /** 完整 diff 完整性 hash。 */
+  readonly diffHash: string;
+  /** 规范化操作集合 hash。 */
+  readonly operationSetHash: string;
+  /** 绑定的 Execution Plan hash。 */
+  readonly planHash: string;
+  /** 不可变请求时间。 */
+  readonly createdAt: string;
+  /** 权威投影更新时间。 */
+  readonly updatedAt: string;
+}
+
 /** Renderer 重载恢复所需的公开委派投影。 */
 export type ChatAgentRecoverySnapshot = ChatAgentCheckpointSnapshot;
 
@@ -907,6 +956,16 @@ export interface ChatAgentResumePrimaryInput {
 export interface ChatAgentCancelCheckpointInput {
   /** 目标 Checkpoint。 */
   readonly checkpointId: string;
+}
+
+/** Renderer 请求 CAS 决议 confirmation 的最小输入。 */
+export interface ChatAgentResolveConfirmationInput {
+  /** 目标 confirmation。 */
+  readonly confirmationId: string;
+  /** Renderer 观察到的 CAS 版本。 */
+  readonly expectedVersion: number;
+  /** 仅允许一次性批准或拒绝。 */
+  readonly decision: 'approved' | 'rejected';
 }
 
 /** Primary Runtime B 已启动或已由其他窗口启动的权威结果。 */
@@ -934,17 +993,30 @@ export interface ChatAgentSettledResumeResult {
 /** Resume IPC 的启动或幂等终态观察结果。 */
 export type ChatAgentResumeResult = ChatAgentActiveResumeResult | ChatAgentSettledResumeResult;
 
-/** 应用级持久化委派事件。 */
-export interface ChatAgentApplicationEvent {
+/** 应用级持久化 Checkpoint 事件。 */
+export interface ChatAgentCheckpointApplicationEvent {
   /** Application event schema 版本。 */
   readonly schemaVersion: 1;
-  /** 当前基础阶段只广播权威 Checkpoint 更新。 */
+  /** 权威 Checkpoint 更新。 */
   readonly type: 'checkpoint.updated';
   /** 不含敏感执行事实的 Checkpoint 投影。 */
   readonly checkpoint: ChatAgentCheckpointSnapshot;
   /** 与 Checkpoint 投影一致的单调 cursor。 */
   readonly checkpointSequence: number;
 }
+
+/** 应用级持久化 confirmation 事件。 */
+export interface ChatAgentConfirmationApplicationEvent {
+  /** Application event schema 版本。 */
+  readonly schemaVersion: 1;
+  /** 权威 confirmation 更新。 */
+  readonly type: 'confirmation.updated';
+  /** 已通过 Main allowlist 与 diff integrity 校验的投影。 */
+  readonly confirmation: ChatAgentConfirmationSnapshot;
+}
+
+/** 由事件类型判别的应用级 Agent 投影事件。 */
+export type ChatAgentApplicationEvent = ChatAgentCheckpointApplicationEvent | ChatAgentConfirmationApplicationEvent;
 
 /** Chat Agent IPC 统一结果。 */
 export type ChatAgentHandlerResult<T> = { ok: true; data: T } | { ok: false; error: string; code: string };

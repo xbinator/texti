@@ -181,6 +181,9 @@ function createDependencies(): {
   claimResume: ReturnType<typeof vi.fn>;
   finalizeResume: ReturnType<typeof vi.fn>;
   cancelCheckpoint: ReturnType<typeof vi.fn>;
+  listConfirmations: ReturnType<typeof vi.fn>;
+  resolveConfirmation: ReturnType<typeof vi.fn>;
+  revokeTaskConfirmations: ReturnType<typeof vi.fn>;
   listEvents: ReturnType<typeof vi.fn>;
   listPendingOutbox: ReturnType<typeof vi.fn>;
   startPrimaryContinuation: ReturnType<typeof vi.fn>;
@@ -211,6 +214,9 @@ function createDependencies(): {
   const claimResume = vi.fn();
   const finalizeResume = vi.fn();
   const cancelCheckpoint = vi.fn();
+  const listConfirmations = vi.fn(() => []);
+  const resolveConfirmation = vi.fn();
+  const revokeTaskConfirmations = vi.fn(() => []);
   const listEvents = vi.fn(() => []);
   const listPendingOutbox = vi.fn(() => []);
   const startPrimaryContinuation = vi.fn();
@@ -278,6 +284,13 @@ function createDependencies(): {
       publishAssistant,
       publish,
       publishCheckpoint,
+      confirmationQueue: {
+        request: vi.fn(),
+        resolve: resolveConfirmation,
+        revokeTask: revokeTaskConfirmations,
+        listPending: listConfirmations,
+        recover: vi.fn()
+      },
       createId: (kind, index): string => `${kind}-${index ?? 1}`,
       now: (): string => '2026-07-23T00:00:01.000Z',
       resolveReadLimits,
@@ -306,6 +319,9 @@ function createDependencies(): {
     claimResume,
     finalizeResume,
     cancelCheckpoint,
+    listConfirmations,
+    resolveConfirmation,
+    revokeTaskConfirmations,
     listEvents,
     listPendingOutbox,
     startPrimaryContinuation,
@@ -952,9 +968,10 @@ describe('chat agent delegation service', (): void => {
         tools: expect.anything()
       })
     );
-    const resumingPublishIndex = fixture.publishCheckpoint.mock.calls.findIndex(
-      ([event]): boolean => (event as ChatAgentApplicationEvent).checkpoint.status === 'resuming'
-    );
+    const resumingPublishIndex = fixture.publishCheckpoint.mock.calls.findIndex(([event]): boolean => {
+      const applicationEvent = event as ChatAgentApplicationEvent;
+      return applicationEvent.type === 'checkpoint.updated' && applicationEvent.checkpoint.status === 'resuming';
+    });
     expect(fixture.publishCheckpoint.mock.invocationCallOrder[resumingPublishIndex]).toBeLessThan(
       fixture.startPrimaryContinuation.mock.invocationCallOrder[0] ?? 0
     );
@@ -1222,6 +1239,80 @@ describe('chat agent delegation service', (): void => {
     expect(serialized).not.toContain('terminalResults');
     expect(serialized).not.toContain('Found a partial answer');
     expect(serialized).not.toContain('must-not-persist');
+  });
+
+  it('lists and resolves confirmation snapshots only through the Main queue', (): void => {
+    const fixture = createDependencies();
+    const service = createChatAgentDelegationService(fixture.dependencies);
+    const pending = {
+      confirmationId: 'confirmation-1',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      taskId: 'task-1',
+      attemptId: 'attempt-1',
+      agentId: 'child-1',
+      runtimeId: 'runtime-1',
+      toolCallId: 'tool-call-1',
+      changesetId: 'changeset-1',
+      status: 'pending' as const,
+      version: 1,
+      riskLevel: 'write' as const,
+      displayPaths: ['notes.md'],
+      resourceScopes: ['file:/workspace/notes.md'],
+      unifiedDiff: '--- a/notes.md\n+++ b/notes.md',
+      baseRevision: 'a'.repeat(64),
+      diffHash: 'b'.repeat(64),
+      operationSetHash: 'c'.repeat(64),
+      planHash: 'd'.repeat(64),
+      createdAt: '2026-07-27T00:00:00.000Z',
+      updatedAt: '2026-07-27T00:00:00.000Z'
+    };
+    const approved = { ...pending, status: 'approved' as const, version: 2, updatedAt: '2026-07-27T00:00:01.000Z' };
+    fixture.listConfirmations.mockReturnValue([pending]);
+    fixture.resolveConfirmation.mockReturnValue(approved);
+
+    expect(service.listConfirmations()).toEqual([pending]);
+    expect(
+      service.resolveConfirmation({
+        confirmationId: 'confirmation-1',
+        expectedVersion: 1,
+        decision: 'approved'
+      })
+    ).toEqual(approved);
+    expect(fixture.resolveConfirmation).toHaveBeenCalledWith({
+      confirmationId: 'confirmation-1',
+      expectedVersion: 1,
+      decision: 'approved'
+    });
+  });
+
+  it('persists checkpoint cancellation before revoking its Task confirmations', (): void => {
+    const fixture = createDependencies();
+    const service = createChatAgentDelegationService(fixture.dependencies);
+    service.prepareDelegation(createInput('write'));
+    const preparedInput = fixture.prepareDelegation.mock.calls[0]?.[0];
+    if (!preparedInput) throw new Error('Prepare input must be captured');
+    const checkpoint: AgentCheckpointRecord = {
+      ...preparedInput.checkpoint,
+      status: 'waiting_children',
+      version: 1,
+      terminalResults: {},
+      recordState: 'active',
+      createdAt: preparedInput.occurredAt,
+      updatedAt: preparedInput.occurredAt
+    };
+    fixture.listActive.mockReturnValue([
+      {
+        checkpoint,
+        tasks: [createPreparedTask(preparedInput)],
+        eventSequence: 2
+      }
+    ]);
+    fixture.cancelCheckpoint.mockReturnValue({ ...checkpoint, status: 'cancelling', version: 2 });
+
+    expect(service.cancelCheckpoint({ checkpointId: checkpoint.checkpointId }).status).toBe('cancelling');
+    expect(fixture.revokeTaskConfirmations).toHaveBeenCalledWith(preparedInput.tasks[0]?.taskId, 'user_cancelled');
+    expect(fixture.revokeTaskConfirmations.mock.invocationCallOrder[0]).toBeGreaterThan(fixture.cancelCheckpoint.mock.invocationCallOrder[0] ?? 0);
   });
 
   it('terminalizes and broadcasts the source assistant before releasing the cancellation fence', (): void => {

@@ -2,13 +2,15 @@
  * @file ipc.test.ts
  * @description Chat Agent application IPC 的窄输入、allowlist 输出与结构化错误测试。
  */
-import type { ChatAgentCheckpointSnapshot, ChatAgentHandlerResult, ChatAgentResumeResult } from 'types/chat-agent';
+import type { ChatAgentCheckpointSnapshot, ChatAgentConfirmationSnapshot, ChatAgentHandlerResult, ChatAgentResumeResult } from 'types/chat-agent';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerChatAgentHandlers } from '../../../../../../electron/main/modules/chat/agents/ipc.mjs';
 
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => Promise<unknown>>(),
   listActive: vi.fn(),
+  listConfirmations: vi.fn(),
+  resolveConfirmation: vi.fn(),
   resumePrimary: vi.fn(),
   cancelCheckpoint: vi.fn()
 }));
@@ -24,6 +26,8 @@ vi.mock('electron', () => ({
 vi.mock('../../../../../../electron/main/modules/chat/agents/service.mjs', () => ({
   chatAgentDelegationService: {
     listActive: mocks.listActive,
+    listConfirmations: mocks.listConfirmations,
+    resolveConfirmation: mocks.resolveConfirmation,
     resumePrimary: mocks.resumePrimary,
     cancelCheckpoint: mocks.cancelCheckpoint
   }
@@ -46,12 +50,106 @@ function createSnapshot(): ChatAgentCheckpointSnapshot {
   };
 }
 
+/**
+ * 创建公开 confirmation 投影。
+ * @returns 不含私有 overlay 引用的确认快照
+ */
+function createConfirmation(): ChatAgentConfirmationSnapshot {
+  return {
+    confirmationId: 'confirmation-1',
+    sessionId: 'session-1',
+    turnId: 'turn-1',
+    taskId: 'task-1',
+    attemptId: 'attempt-1',
+    agentId: 'child-1',
+    runtimeId: 'runtime-1',
+    toolCallId: 'tool-call-1',
+    changesetId: 'changeset-1',
+    status: 'pending',
+    version: 1,
+    riskLevel: 'write',
+    displayPaths: ['notes.md'],
+    resourceScopes: ['file:/workspace/notes.md'],
+    unifiedDiff: '--- a/notes.md\n+++ b/notes.md',
+    baseRevision: 'a'.repeat(64),
+    diffHash: 'b'.repeat(64),
+    operationSetHash: 'c'.repeat(64),
+    planHash: 'd'.repeat(64),
+    createdAt: '2026-07-27T00:00:00.000Z',
+    updatedAt: '2026-07-27T00:00:00.000Z'
+  };
+}
+
 describe('chat agent IPC', (): void => {
   beforeEach((): void => {
     mocks.handlers.clear();
     mocks.listActive.mockReset();
+    mocks.listConfirmations.mockReset();
+    mocks.resolveConfirmation.mockReset();
     mocks.resumePrimary.mockReset();
     mocks.cancelCheckpoint.mockReset();
+  });
+
+  it('registers narrow confirmation list and CAS resolution handlers', async (): Promise<void> => {
+    const pending = createConfirmation();
+    const approved = { ...pending, status: 'approved' as const, version: 2, updatedAt: '2026-07-27T00:00:01.000Z' };
+    mocks.listConfirmations.mockReturnValue([pending]);
+    mocks.resolveConfirmation.mockReturnValue(approved);
+    registerChatAgentHandlers();
+
+    const listHandler = mocks.handlers.get('chat:agent:list-confirmations');
+    const resolveHandler = mocks.handlers.get('chat:agent:resolve-confirmation');
+    if (!listHandler || !resolveHandler) throw new Error('Confirmation handlers were not registered');
+
+    expect(await listHandler({})).toEqual({ ok: true, data: [pending] });
+    expect(await resolveHandler({}, { confirmationId: 'confirmation-1', expectedVersion: 1, decision: 'approved' })).toEqual({
+      ok: true,
+      data: approved
+    });
+    expect(mocks.resolveConfirmation).toHaveBeenCalledWith({
+      confirmationId: 'confirmation-1',
+      expectedVersion: 1,
+      decision: 'approved'
+    });
+  });
+
+  it.each(['diffHash', 'baseRevision', 'resourceScopes', 'taskId', 'planHash', 'rememberScope'])(
+    'rejects renderer-controlled confirmation field %s',
+    async (field: string): Promise<void> => {
+      registerChatAgentHandlers();
+      const handler = mocks.handlers.get('chat:agent:resolve-confirmation');
+      if (!handler) throw new Error('Confirmation resolve handler was not registered');
+
+      expect(
+        await handler(
+          {},
+          {
+            confirmationId: 'confirmation-1',
+            expectedVersion: 1,
+            decision: 'approved',
+            [field]: field === 'resourceScopes' ? [] : 'forged'
+          }
+        )
+      ).toMatchObject({ ok: false, code: 'INVALID_INPUT' });
+      expect(mocks.resolveConfirmation).not.toHaveBeenCalled();
+    }
+  );
+
+  it('rejects invalid confirmation decisions, versions and list payloads', async (): Promise<void> => {
+    registerChatAgentHandlers();
+    const listHandler = mocks.handlers.get('chat:agent:list-confirmations');
+    const resolveHandler = mocks.handlers.get('chat:agent:resolve-confirmation');
+    if (!listHandler || !resolveHandler) throw new Error('Confirmation handlers were not registered');
+
+    expect(await listHandler({}, { sessionId: 'session-1' })).toMatchObject({ ok: false, code: 'INVALID_INPUT' });
+    expect(await resolveHandler({}, { confirmationId: 'confirmation-1', expectedVersion: 0, decision: 'approved' })).toMatchObject({
+      ok: false,
+      code: 'INVALID_INPUT'
+    });
+    expect(await resolveHandler({}, { confirmationId: 'confirmation-1', expectedVersion: 1, decision: 'always' })).toMatchObject({
+      ok: false,
+      code: 'INVALID_INPUT'
+    });
   });
 
   it('registers list, resume and cancel handlers with allowlisted results', async (): Promise<void> => {

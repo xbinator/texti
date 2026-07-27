@@ -249,6 +249,7 @@ git commit -m "feat(chat): 冻结 Child 受控写入计划"
 - Test: `test/electron/main/modules/chat/agents/contracts.test.ts`
 - Test: `test/electron/main/modules/chat/agents/result.test.ts`
 - Test: `test/electron/main/modules/chat/agents/store.test.ts`
+- Test: `test/electron/main/modules/chat/runtime/main-boundary.test.ts`
 
 **Interfaces:**
 - Consumes: 现有 append-only Event、Task CAS 状态机、immutable snapshot trigger 和 `unfinished_journal_count`。
@@ -953,6 +954,7 @@ git commit -m "feat(chat): 增加 Child 写入资源门禁"
 - Modify: `types/electron-api.d.ts`
 - Modify: `electron/main/modules/chat/agents/service.mts`
 - Modify: `electron/main/modules/chat/agents/ipc.mts`
+- Modify: `electron/main/modules/chat/agents/store.mts`
 - Modify: `electron/preload/index.mts`
 - Modify: `src/shared/platform/electron-api.ts`
 - Modify: `src/hooks/useChat/useAgentDelegationEvents.ts`
@@ -962,6 +964,7 @@ git commit -m "feat(chat): 增加 Child 写入资源门禁"
 - Create: `test/electron/main/modules/chat/agents/confirmation-store.test.ts`
 - Test: `test/electron/main/modules/chat/agents/ipc.test.ts`
 - Test: `test/electron/main/modules/chat/agents/service.test.ts`
+- Test: `test/electron/main/modules/chat/agents/store.test.ts`
 - Create: `test/stores/chat/confirmation-queue.test.ts`
 - Create: `test/hooks/use-agent-confirmation-events.test.ts`
 - Test: `test/hooks/use-agent-delegation-events.test.ts`
@@ -972,7 +975,7 @@ git commit -m "feat(chat): 增加 Child 写入资源门禁"
 - Consumes: Task 2 confirmation Store API、application event publisher、现有 ConfirmationSheet。
 - Produces: 持久化 `ChatAgentConfirmationSnapshot[]`、`chat:agent:list-confirmations`、`chat:agent:resolve-confirmation` 与应用级风险优先/FIFO 选择投影。
 
-- [ ] **Step 1: Write failing Main queue and CAS tests**
+- [x] **Step 1: Write failing Main queue and CAS tests**
 
 ```ts
 const waiting = queue.request(createConfirmationInput());
@@ -998,7 +1001,7 @@ expect(() =>
 
 同时验证 reject、revoke、Task cancel、Renderer 无订阅者、Renderer 重载和迟到响应。相同 version/decision 的网络重放必须返回已持久化结果，但不能二次唤醒 commit。
 
-- [ ] **Step 2: Write failing Renderer ordering tests**
+- [x] **Step 2: Write failing Renderer ordering tests**
 
 Renderer Store 同时保存 `source: 'runtime' | 'agent'` 的 allowlist 投影，以风险优先、请求时间 FIFO、confirmationId 稳定排序：
 
@@ -1033,21 +1036,21 @@ expect(store.pending.map((item) => item.confirmationId)).toHaveLength(4);
 
 选择指定项只能改变 current projection，不能覆盖或删除其他 pending request。旧 version event 必须忽略。Runtime 项的 Promise resolver 保存在控制器私有 Map，不进入 Pinia state；Agent 项只由 Main snapshot/event 创建，不持有 Renderer resolver。
 
-- [ ] **Step 3: Implement Main-owned waiters over persisted facts**
+- [x] **Step 3: Implement Main-owned waiters over persisted facts**
 
 ```ts
 export interface AgentConfirmationQueue {
   request(input: CreateAgentConfirmationInput): Promise<AgentConfirmationDecision>;
-  resolve(input: ResolveAgentConfirmationInput): AgentConfirmationRecord;
-  revokeTask(taskId: string, reason: string): AgentConfirmationRecord[];
+  resolve(input: ChatAgentResolveConfirmationInput): ChatAgentConfirmationSnapshot;
+  revokeTask(taskId: string, reason: string): ChatAgentConfirmationSnapshot[];
   listPending(): ChatAgentConfirmationSnapshot[];
   recover(): void;
 }
 ```
 
-`request()` 必须先持久化再创建 waiter；发布 Renderer event 失败不影响 pending 事实。`recover()` 只恢复 pending snapshot，不承诺在 Main 重启后恢复原 Promise；启动恢复协议会撤销无 journal write Task。
+`request()` 必须先持久化再创建 waiter；发布 Renderer event 失败不影响 pending 事实。queue 的决议和撤销返回值也保持 Renderer allowlist，防止调用链误透传私有 overlay 引用。`recover()` 只恢复 pending snapshot，不承诺在 Main 重启后恢复原 Promise；启动恢复协议会撤销无 journal write Task。
 
-- [ ] **Step 4: Add exact IPC and preload APIs**
+- [x] **Step 4: Add exact IPC and preload APIs**
 
 Renderer allowlist 投影固定为：
 
@@ -1115,7 +1118,7 @@ chatAgentResolveConfirmation(
 ): Promise<ChatAgentHandlerResult<ChatAgentConfirmationSnapshot>>
 ```
 
-- [ ] **Step 5: Project the application-level queue into BChat**
+- [x] **Step 5: Project the application-level queue into BChat**
 
 `useAgentConfirmationEvents()` 先订阅 `confirmation.updated`，再调用 list snapshot，并按 `version + updatedAt` 收敛。`createChatConfirmationController()` 改为应用级队列的 Runtime adapter：每个 controller 拥有稳定 ownerId，`dispose()` 只能 reject 自己的 Runtime 项，绝不能删除 Agent 项。ConfirmationSheet 从统一 current projection 渲染，对 Agent request 展示：
 
@@ -1127,7 +1130,7 @@ chatAgentResolveConfirmation(
 
 Agent request 禁止“本会话允许/始终允许”；只提供本次批准或拒绝。BChat 卸载只取消事件订阅，不 resolve Main pending request。
 
-- [ ] **Step 6: Run Main, Renderer and component tests**
+- [x] **Step 6: Run Main, Renderer and component tests**
 
 Run:
 
@@ -1137,10 +1140,10 @@ pnpm exec vitest run test/electron/main/modules/chat/agents/confirmation-store.t
 
 Expected: PASS，且多个 Child pending confirmation 在 Renderer 重载后全部恢复。
 
-- [ ] **Step 7: Commit Task 5**
+- [x] **Step 7: Commit Task 5**
 
 ```bash
-git add electron/main/modules/chat/agents/confirmation-store.mts src/stores/chat/confirmationQueue.ts src/hooks/useChat/useAgentConfirmationEvents.ts types/chat-agent.d.ts types/electron-api.d.ts electron/main/modules/chat/agents/service.mts electron/main/modules/chat/agents/ipc.mts electron/preload/index.mts src/shared/platform/electron-api.ts src/hooks/useChat/useAgentDelegationEvents.ts src/components/BChat/utils/confirmationController.ts src/components/BChat/components/ConfirmationSheet.vue src/components/BChat/index.vue test/electron/main/modules/chat/agents/confirmation-store.test.ts test/electron/main/modules/chat/agents/ipc.test.ts test/electron/main/modules/chat/agents/service.test.ts test/stores/chat/confirmation-queue.test.ts test/hooks/use-agent-confirmation-events.test.ts test/hooks/use-agent-delegation-events.test.ts test/components/BChat/confirmation-controller.test.ts test/components/BChat/confirmation-sheet.component.test.ts changelog/2026-07-27.md
+git add electron/main/modules/chat/agents/confirmation-store.mts src/stores/chat/confirmationQueue.ts src/hooks/useChat/useAgentConfirmationEvents.ts types/chat-agent.d.ts types/electron-api.d.ts electron/main/modules/chat/agents/service.mts electron/main/modules/chat/agents/ipc.mts electron/main/modules/chat/agents/store.mts electron/preload/index.mts src/shared/platform/electron-api.ts src/hooks/useChat/useAgentDelegationEvents.ts src/components/BChat/utils/confirmationController.ts src/components/BChat/components/ConfirmationSheet.vue src/components/BChat/index.vue test/electron/main/modules/chat/agents/confirmation-store.test.ts test/electron/main/modules/chat/agents/ipc.test.ts test/electron/main/modules/chat/agents/service.test.ts test/electron/main/modules/chat/agents/store.test.ts test/electron/main/modules/chat/runtime/main-boundary.test.ts test/stores/chat/confirmation-queue.test.ts test/hooks/use-agent-confirmation-events.test.ts test/hooks/use-agent-delegation-events.test.ts test/components/BChat/confirmation-controller.test.ts test/components/BChat/confirmation-sheet.component.test.ts changelog/2026-07-27.md
 git commit -m "feat(chat): 持久化 Child 确认队列"
 ```
 

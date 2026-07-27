@@ -738,4 +738,46 @@ describe('useAgentDelegationEvents', (): void => {
     scope.stop();
     system.stop();
   });
+
+  it('ignores confirmation application events outside the checkpoint projection', async (): Promise<void> => {
+    agentAPI.listActive.mockResolvedValue({ ok: true, data: [] });
+    const system = createChatActorSystem();
+    system.start();
+    const scope = effectScope();
+    scope.run((): void => useAgentDelegationEvents(system));
+    await flushDelegation();
+
+    expect((): void => {
+      agentAPI.listener?.({
+        schemaVersion: 1,
+        type: 'confirmation.updated',
+        confirmation: {
+          confirmationId: 'confirmation-1',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          taskId: 'task-1',
+          attemptId: 'attempt-1',
+          agentId: 'child-1',
+          runtimeId: 'runtime-1',
+          toolCallId: 'tool-call-1',
+          changesetId: 'changeset-1',
+          status: 'pending',
+          version: 1,
+          riskLevel: 'write',
+          displayPaths: ['notes.md'],
+          resourceScopes: ['file:/workspace/notes.md'],
+          unifiedDiff: '--- a/notes.md\n+++ b/notes.md',
+          baseRevision: 'a'.repeat(64),
+          diffHash: 'b'.repeat(64),
+          operationSetHash: 'c'.repeat(64),
+          planHash: 'd'.repeat(64),
+          createdAt: '2026-07-27T00:00:00.000Z',
+          updatedAt: '2026-07-27T00:00:00.000Z'
+        }
+      });
+    }).not.toThrow();
+    expect(system.actor.getSnapshot().context.runtimeRoutes.size).toBe(0);
+    scope.stop();
+    system.stop();
+  });
 });

@@ -100,12 +100,19 @@ describe('chat runtime main boundary', (): void => {
     expect(violations).toEqual([]);
   });
 
-  it('keeps the Agent preload surface on the exact checkpoint lifecycle allowlist with no Child transcript API', async (): Promise<void> => {
+  it('keeps the Agent preload surface on the exact checkpoint and confirmation allowlist with no Child transcript API', async (): Promise<void> => {
     const [preloadSource, apiTypes] = await Promise.all([readSource('electron/preload/index.mts'), readSource('types/electron-api.d.ts')]);
     const agentMethods = [...preloadSource.matchAll(/\b(chatAgent[A-Za-z0-9]+):/g)].map((match): string => match[1] ?? '');
 
     expect([...new Set(agentMethods)].sort()).toEqual(
-      ['chatAgentCancelCheckpoint', 'chatAgentListActive', 'chatAgentOnEvent', 'chatAgentResumePrimary'].sort()
+      [
+        'chatAgentCancelCheckpoint',
+        'chatAgentListActive',
+        'chatAgentListConfirmations',
+        'chatAgentOnEvent',
+        'chatAgentResolveConfirmation',
+        'chatAgentResumePrimary'
+      ].sort()
     );
     expect(`${preloadSource}\n${apiTypes}`).not.toMatch(/chatAgent(?:Transcript|Send|Continue|Message)/);
   });

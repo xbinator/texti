@@ -2,7 +2,7 @@
  * @file ipc.mts
  * @description Chat Agent application IPC 的严格输入校验与窄 handler 注册。
  */
-import type { ChatAgentCancelCheckpointInput, ChatAgentHandlerResult, ChatAgentResumePrimaryInput } from 'types/chat-agent';
+import type { ChatAgentCancelCheckpointInput, ChatAgentHandlerResult, ChatAgentResolveConfirmationInput, ChatAgentResumePrimaryInput } from 'types/chat-agent';
 import { ipcMain } from 'electron';
 import { chatAgentDelegationService } from './service.mjs';
 
@@ -95,6 +95,27 @@ function parseCancelInput(input: unknown): ChatAgentCancelCheckpointInput {
 }
 
 /**
+ * 校验 resolveConfirmation 最小 CAS 输入。
+ * @param input - 未可信 IPC payload
+ * @returns 精确 confirmation 决议输入
+ */
+function parseConfirmationInput(input: unknown): ChatAgentResolveConfirmationInput {
+  if (!isPlainObject(input)) throw createInputError('resolveConfirmation input must be a plain object');
+  assertExactKeys(input, ['confirmationId', 'expectedVersion', 'decision']);
+  if (!Number.isSafeInteger(input.expectedVersion) || (input.expectedVersion as number) <= 0) {
+    throw createInputError('expectedVersion must be a positive safe integer');
+  }
+  if (input.decision !== 'approved' && input.decision !== 'rejected') {
+    throw createInputError('decision must be approved or rejected');
+  }
+  return {
+    confirmationId: requireIdentity(input.confirmationId, 'confirmationId'),
+    expectedVersion: input.expectedVersion as number,
+    decision: input.decision
+  };
+}
+
+/**
  * 从未知错误读取稳定机器码。
  * @param error - 捕获错误
  * @returns IPC 错误码
@@ -149,6 +170,20 @@ export function registerChatAgentHandlers(): void {
     wrapAgentHandler((_event, ...inputs) => {
       if (inputs.length !== 1) throw createInputError('cancelCheckpoint accepts exactly one input');
       return chatAgentDelegationService.cancelCheckpoint(parseCancelInput(inputs[0]));
+    })
+  );
+  ipcMain.handle(
+    'chat:agent:list-confirmations',
+    wrapAgentHandler((_event, ...inputs) => {
+      if (inputs.length !== 0) throw createInputError('listConfirmations does not accept input');
+      return chatAgentDelegationService.listConfirmations();
+    })
+  );
+  ipcMain.handle(
+    'chat:agent:resolve-confirmation',
+    wrapAgentHandler((_event, ...inputs) => {
+      if (inputs.length !== 1) throw createInputError('resolveConfirmation accepts exactly one input');
+      return chatAgentDelegationService.resolveConfirmation(parseConfirmationInput(inputs[0]));
     })
   );
 }

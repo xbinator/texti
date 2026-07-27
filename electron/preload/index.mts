@@ -660,6 +660,12 @@ const electronAPI: ElectronAPI = {
   /** 查询公开的活跃 Checkpoint 投影。 */
   chatAgentListActive: () => ipcRenderer.invoke('chat:agent:list-active'),
 
+  /** 查询公开的 pending confirmation 投影。 */
+  chatAgentListConfirmations: () => ipcRenderer.invoke('chat:agent:list-confirmations'),
+
+  /** 请求 Main 使用 version CAS 决议 confirmation。 */
+  chatAgentResolveConfirmation: (input) => ipcRenderer.invoke('chat:agent:resolve-confirmation', input),
+
   /** 请求 Main CAS 启动 Primary Runtime B。 */
   chatAgentResumePrimary: (input) => ipcRenderer.invoke('chat:agent:resume-primary', input),
 
