@@ -576,11 +576,23 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
   let deliveryTail = Promise.resolve();
 
   /**
+   * 按当前持久化 Checkpoint 状态判断 Outbox 是否仍可交付。
+   * @param outbox - 待交付事实
+   * @returns 中断、终态或 tombstone 聚合一律不可继续消费旧事件
+   */
+  function isOutboxEligible(outbox: AgentOutboxRecord): boolean {
+    const checkpoint = dependencies.store.getCheckpoint(outbox.payload.checkpointId);
+    if (!checkpoint || checkpoint.recordState !== 'active') return false;
+    if (outbox.eventType === 'delegation.created') return checkpoint.status === 'waiting_children';
+    return checkpoint.status === 'ready_to_resume';
+  }
+
+  /**
    * 先交付强制 Main 内部消费者，再发布 Renderer 投影并确认 Outbox。
    * @param outbox - 已持久化 Outbox
    */
   async function deliverOutbox(outbox: AgentOutboxRecord): Promise<void> {
-    if (outbox.deliveryStatus === 'delivered') return;
+    if (outbox.deliveryStatus === 'delivered' || !isOutboxEligible(outbox)) return;
     const existing = deliveryInFlight.get(outbox.outboxId);
     if (existing) return existing;
     const delivery = (async (): Promise<void> => {
@@ -1153,6 +1165,7 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
     },
 
     interruptUnrecoverableCheckpoints(): number {
+      const activeBeforeInterrupt = dependencies.store.listActive();
       const interruptedCount = dependencies.store.interruptActive({
         code: 'runtime_interrupted',
         phase: 'recovery',
@@ -1163,6 +1176,11 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
       });
       const survivors = dependencies.store.listActive();
       const survivorIds = new Set(survivors.map((snapshot): string => snapshot.checkpoint.checkpointId));
+      activeBeforeInterrupt.forEach((snapshot): void => {
+        if (!survivorIds.has(snapshot.checkpoint.checkpointId)) {
+          dependencies.budgetLedger?.releaseCheckpoint(snapshot.checkpoint.checkpointId);
+        }
+      });
 
       // 只有已被 Store 收敛为终态的 Checkpoint 可以释放旧 fence。
       fenceHandles.forEach((handle, checkpointId): void => {

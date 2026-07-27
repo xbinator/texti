@@ -1,6 +1,6 @@
 /**
  * @file delegation-foundation.test.ts
- * @description 使用真实 SQLite 与生产 Runtime/Agent 服务验证默认关闭的委派基础闭环。
+ * @description 使用真实 SQLite 与生产 Runtime/Agent 服务验证显式开启后的委派基础闭环。
  */
 import type { RuntimeStreamText } from '../../../../../../electron/main/modules/chat/runtime/stream/types.mjs';
 import type { ActiveChatRuntime } from '../../../../../../electron/main/modules/chat/runtime/types.mjs';
@@ -16,6 +16,7 @@ import { createAgentDelegationStore, type AgentDelegationStore, type AgentStoreD
 import { createRuntimeLockRegistry } from '../../../../../../electron/main/modules/chat/runtime/infrastructure/locks.mjs';
 import { createChatRuntimeService } from '../../../../../../electron/main/modules/chat/runtime/service.mjs';
 import { createAgentTables } from '../../../../../../electron/main/modules/database/service.mjs';
+import { getToolRegistryEntry } from '../../../../../../shared/ai/tools/index.js';
 
 /** 仅在 Electron Node ABI 下运行真实 better-sqlite3 测试。 */
 const describeWithSqlite = 'electron' in process.versions ? describe : describe.skip;
@@ -23,12 +24,18 @@ const describeWithSqlite = 'electron' in process.versions ? describe : describe.
 /** 固定基础时间。 */
 const occurredAt = '2026-07-23T08:00:00.000Z';
 
+/** 共享 registry 中的权威内部委派定义。 */
+const delegateDefinition = getToolRegistryEntry('delegate_task')?.definition;
+if (!delegateDefinition || typeof delegateDefinition.description !== 'string') {
+  throw new Error('Expected trusted delegate_task registry definition');
+}
+
 /** 内部委派工具快照。 */
-const delegateTool: AITransportTool = {
-  name: 'delegate_task',
-  description: 'Delegate one bounded read task.',
-  parameters: { type: 'object', properties: {} }
-};
+const delegateTool: AITransportTool = structuredClone({
+  name: delegateDefinition.name,
+  description: delegateDefinition.description,
+  parameters: delegateDefinition.parameters as AITransportTool['parameters']
+});
 
 /** 基础只读任务契约。 */
 const contract: DelegateTaskInput = {
@@ -323,33 +330,40 @@ describeWithSqlite('delegation foundation end to end', (): void => {
       now: (): string => occurredAt,
       startPrimaryContinuation: async (input) => runtimeService.resumePrimary(input)
     });
-    runtimeService = createChatRuntimeService({
-      locks,
-      emit: (name, payload): void => {
-        runtimeEvents.push(name);
-        if (name === 'chat:runtime:complete') {
-          completionEvents.push(payload as ChatRuntimeEventMap['chat:runtime:complete']);
-        }
-      },
-      messageReader: {
-        getMessages: (): ChatMessageRecord[] => [...messageRecords.values()].map((message): ChatMessageRecord => structuredClone(message))
-      },
-      messageWriter: {
-        addMessage(message: ChatMessageRecord): void {
-          messageRecords.set(message.id, structuredClone(message));
+    runtimeService = createChatRuntimeService(
+      {
+        locks,
+        emit: (name, payload): void => {
+          runtimeEvents.push(name);
+          if (name === 'chat:runtime:complete') {
+            completionEvents.push(payload as ChatRuntimeEventMap['chat:runtime:complete']);
+          }
         },
-        updateMessage(message: ChatMessageRecord): void {
-          messageRecords.set(message.id, structuredClone(message));
-        }
+        messageReader: {
+          getMessages: (): ChatMessageRecord[] => [...messageRecords.values()].map((message): ChatMessageRecord => structuredClone(message))
+        },
+        messageWriter: {
+          addMessage(message: ChatMessageRecord): void {
+            messageRecords.set(message.id, structuredClone(message));
+          },
+          updateMessage(message: ChatMessageRecord): void {
+            messageRecords.set(message.id, structuredClone(message));
+          }
+        },
+        createMessageId: (kind): string => `${kind}-1`,
+        now: (): string => occurredAt,
+        resolveModel: async () => createRuntimeA().resolvedModel ?? null,
+        streamText: createFoundationStream(runtimeBBarrier, (): void => {
+          runtimeBStarts += 1;
+        }),
+        prepareDelegation: (input) => agentService.prepareDelegation(input)
       },
-      createMessageId: (kind): string => `${kind}-1`,
-      now: (): string => occurredAt,
-      resolveModel: async () => createRuntimeA().resolvedModel ?? null,
-      streamText: createFoundationStream(runtimeBBarrier, (): void => {
-        runtimeBStarts += 1;
-      }),
-      prepareDelegation: (input) => agentService.prepareDelegation(input)
-    });
+      {
+        enabled: true,
+        pureReadChildEnabled: true,
+        maxParallelReadChildren: 3
+      }
+    );
 
     const startResult = await runtimeService.startTrustedPrimary({
       runtimeId: 'runtime-a',

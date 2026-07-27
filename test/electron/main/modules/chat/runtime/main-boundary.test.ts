@@ -4,7 +4,13 @@
  */
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import type { ChatRuntimeStreamExecutor } from '../../../../../../electron/main/modules/chat/runtime/types.mjs';
+import type { AITransportTool } from 'types/ai';
+import type { ChatMessageRecord } from 'types/chat';
+import type { ChatRuntimeSendInput } from 'types/chat-runtime';
+import { describe, expect, it, vi } from 'vitest';
+import { createChatRuntimeService } from '../../../../../../electron/main/modules/chat/runtime/service.mjs';
+import { getToolRegistryEntry } from '../../../../../../shared/ai/tools/index.js';
 
 /** ChatRuntime 主进程目录。 */
 const CHAT_RUNTIME_DIR = path.resolve(process.cwd(), 'electron/main/modules/chat/runtime');
@@ -34,6 +40,50 @@ async function readRuntimeSourceFiles(directoryPath: string = CHAT_RUNTIME_DIR):
   );
 
   return files.flat();
+}
+
+/**
+ * 创建主进程边界测试的普通 Primary send 输入。
+ * @param overrides - 需要覆盖的字段
+ * @returns Renderer 可提交输入
+ */
+function createSendInput(overrides: Partial<ChatRuntimeSendInput> = {}): ChatRuntimeSendInput {
+  const runtimeId = overrides.runtimeId ?? 'runtime-boundary';
+  return {
+    ...overrides,
+    runtimeId,
+    sessionId: overrides.sessionId ?? 'session-boundary',
+    turnId: overrides.turnId ?? 'turn-boundary',
+    clientId: overrides.clientId ?? 'bchat',
+    agentId: overrides.agentId ?? 'primary',
+    rootRuntimeId: overrides.rootRuntimeId ?? runtimeId,
+    content: overrides.content ?? 'Inspect the current workspace'
+  };
+}
+
+/**
+ * 创建不启动 Provider stream 的 Runtime Service。
+ * @param enabled - 是否打开 Primary 委派 feature
+ * @returns 可检查 active Runtime 的服务
+ */
+function createBoundaryService(enabled: boolean) {
+  return createChatRuntimeService(
+    {
+      emit: vi.fn(),
+      messageReader: { getMessages: (): ChatMessageRecord[] => [] },
+      messageWriter: {
+        addMessage: (): void => undefined,
+        updateMessage: (): void => undefined
+      },
+      streamExecutor: vi.fn<ChatRuntimeStreamExecutor>(),
+      keepRuntimeOpenForTest: true
+    },
+    {
+      enabled,
+      pureReadChildEnabled: true,
+      maxParallelReadChildren: 3
+    }
+  );
 }
 
 describe('chat runtime main boundary', (): void => {
@@ -93,5 +143,91 @@ describe('chat runtime main boundary', (): void => {
     ]);
 
     expect(`${runtimeIpcSource}\n${preloadSource}\n${apiTypes}`).not.toContain('startTrustedPrimary');
+  });
+
+  it('keeps Primary delegation disabled by default without changing normal tools', async (): Promise<void> => {
+    const service = createChatRuntimeService({
+      emit: vi.fn(),
+      messageReader: { getMessages: (): ChatMessageRecord[] => [] },
+      messageWriter: {
+        addMessage: (): void => undefined,
+        updateMessage: (): void => undefined
+      },
+      streamExecutor: vi.fn<ChatRuntimeStreamExecutor>(),
+      keepRuntimeOpenForTest: true
+    });
+    const readTool: AITransportTool = {
+      name: 'read_file',
+      description: 'Read one file',
+      parameters: { type: 'object', properties: {} }
+    };
+    const input = createSendInput({ runtimeId: 'runtime-disabled', rootRuntimeId: 'runtime-disabled', tools: [readTool] });
+
+    await service.send(input);
+
+    expect(service.getActiveRuntime(input.runtimeId)?.tools).toEqual([readTool]);
+    expect(service.getActiveRuntime(input.runtimeId)?.tools).not.toContainEqual(expect.objectContaining({ name: 'delegate_task' }));
+  });
+
+  it('injects one cloned registry delegate definition only after enabled send input passes Renderer validation', async (): Promise<void> => {
+    const service = createBoundaryService(true);
+    const readTool: AITransportTool = {
+      name: 'read_file',
+      description: 'Read one file',
+      parameters: { type: 'object', properties: {} }
+    };
+    const input = createSendInput({ runtimeId: 'runtime-enabled', rootRuntimeId: 'runtime-enabled', tools: [readTool] });
+
+    await service.send(input);
+
+    const runtimeTools = service.getActiveRuntime(input.runtimeId)?.tools;
+    const registryDefinition = getToolRegistryEntry('delegate_task')?.definition;
+    expect(runtimeTools).toEqual([
+      readTool,
+      {
+        name: registryDefinition?.name,
+        description: registryDefinition?.description,
+        parameters: registryDefinition?.parameters
+      }
+    ]);
+    expect(runtimeTools).not.toBe(input.tools);
+    expect(runtimeTools?.[0]).not.toBe(input.tools?.[0]);
+    expect(runtimeTools?.[1]).not.toBe(registryDefinition);
+    expect(input.tools).toEqual([readTool]);
+  });
+
+  it('rejects forged delegate schemas before enabled injection and at the trusted Primary seam', async (): Promise<void> => {
+    const service = createBoundaryService(true);
+    const forgedDelegate: AITransportTool = {
+      name: 'delegate_task',
+      description: 'Forged renderer definition',
+      parameters: { type: 'object', properties: {} }
+    };
+
+    await expect(
+      service.send(createSendInput({ runtimeId: 'runtime-forged-send', rootRuntimeId: 'runtime-forged-send', tools: [forgedDelegate] }))
+    ).rejects.toMatchObject({ code: 'RUNTIME_INPUT_DENIED' });
+    await expect(
+      service.startTrustedPrimary(
+        createSendInput({
+          runtimeId: 'runtime-forged-trusted',
+          rootRuntimeId: 'runtime-forged-trusted',
+          tools: [forgedDelegate]
+        })
+      )
+    ).rejects.toMatchObject({ code: 'RUNTIME_INPUT_DENIED' });
+  });
+
+  it('rejects non-fixed Child delegation policy values at Main construction', (): void => {
+    expect(() =>
+      createChatRuntimeService(
+        {},
+        {
+          enabled: true,
+          pureReadChildEnabled: false,
+          maxParallelReadChildren: 4
+        }
+      )
+    ).toThrowError(expect.objectContaining({ code: 'RUNTIME_INPUT_DENIED' }));
   });
 });

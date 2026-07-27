@@ -17,7 +17,7 @@ import type {
   ChatRuntimeStreamExecutor
 } from './types.mjs';
 import type { ChatAgentPrimaryContinuationInput, ChatAgentPrimaryContinuationResult } from '../agents/service.mjs';
-import type { AIServiceError, AIToolExecutionResult, AIUsage } from 'types/ai';
+import type { AIServiceError, AIToolExecutionResult, AITransportTool, AIUsage } from 'types/ai';
 import type { ChatMessageCompactionPart, ChatMessagePart, ChatMessageRecord, ChatPendingInteraction, CompactionModelSnapshot } from 'types/chat';
 import type { AgentTaskError } from 'types/chat-agent';
 import type {
@@ -45,6 +45,7 @@ import type {
 import { BrowserWindow } from 'electron';
 import { groupBy } from 'lodash-es';
 import { nanoid } from 'nanoid';
+import { getToolRegistryEntry } from '../../../../../shared/ai/tools/index.js';
 import { AI_ERROR_CODE, createAIServiceError, isAIServiceError } from '../../ai/errors/codes.mjs';
 import { aiService } from '../../ai/service.mjs';
 import { getLoopStopReason, type ToolLoopStopReason, type ToolStepSnapshot } from '../../ai/tool-loop-policy.mjs';
@@ -89,10 +90,26 @@ import { normalizeRendererToolTimeoutMs } from './stream/tools.mjs';
 import { getRuntimeTaskDeadlineAt, getRuntimeTaskTimeout } from './task-clock.mjs';
 import { createMainToolExecutor } from './tools/index.mjs';
 import { createRuntimeEventBase } from './types.mjs';
-import { getToolRegistryEntry } from '../../../../../shared/ai/tools/index.js';
 
 /** Renderer 请求默认超时时间。 */
 const RUNTIME_RENDERER_REQUEST_TIMEOUT_MS = 30_000;
+
+/** Main-owned Primary 委派 feature 配置。 */
+export interface PrimaryDelegationFeatureConfig {
+  /** 是否向可信 Primary Runtime A 开放委派工具。 */
+  readonly enabled: boolean;
+  /** 首版只允许 pure-read Child。 */
+  readonly pureReadChildEnabled: boolean;
+  /** 首版固定最大并行 read Child 数。 */
+  readonly maxParallelReadChildren: number;
+}
+
+/** 默认关闭且不可由 Renderer 覆盖的 Primary 委派策略。 */
+const DEFAULT_PRIMARY_DELEGATION_FEATURE: Readonly<PrimaryDelegationFeatureConfig> = Object.freeze({
+  enabled: false,
+  pureReadChildEnabled: true,
+  maxParallelReadChildren: 3
+});
 
 export { ChatRuntimeError } from './errors.mjs';
 
@@ -205,6 +222,97 @@ function assertRendererRuntimeInput(input: RendererRuntimeInput): void {
 }
 
 /**
+ * 校验 Main-owned 委派策略，拒绝扩大首版 Child 能力与并发上限。
+ * @param input - 进程内 feature 配置
+ * @returns 冻结后的可信策略
+ */
+function normalizeDelegationFeature(input: Readonly<PrimaryDelegationFeatureConfig> | undefined): Readonly<PrimaryDelegationFeatureConfig> {
+  const feature = input ?? DEFAULT_PRIMARY_DELEGATION_FEATURE;
+  if (
+    typeof feature.enabled !== 'boolean' ||
+    feature.pureReadChildEnabled !== true ||
+    feature.maxParallelReadChildren !== DEFAULT_PRIMARY_DELEGATION_FEATURE.maxParallelReadChildren
+  ) {
+    throw new ChatRuntimeError('RUNTIME_INPUT_DENIED', 'Primary 委派策略不能扩大首版 Child 能力或并发上限');
+  }
+  return Object.freeze({
+    enabled: feature.enabled,
+    pureReadChildEnabled: true,
+    maxParallelReadChildren: DEFAULT_PRIMARY_DELEGATION_FEATURE.maxParallelReadChildren
+  });
+}
+
+/**
+ * 从共享 registry 投影唯一可信 delegate_task 传输 Schema。
+ * @returns 与内部 effect/execution metadata 绑定的克隆定义
+ */
+function createDelegateTool(): AITransportTool {
+  const entry = getToolRegistryEntry('delegate_task');
+  if (
+    !entry ||
+    entry.runtime !== 'coordinator' ||
+    entry.exposure !== 'internal' ||
+    entry.executionClass !== 'deferred-coordination' ||
+    entry.effect.effect !== 'pure_read' ||
+    typeof entry.definition.description !== 'string'
+  ) {
+    throw new ChatRuntimeError('RUNTIME_INPUT_DENIED', '可信 delegate_task registry 定义不可用');
+  }
+  return structuredClone({
+    name: entry.definition.name,
+    description: entry.definition.description,
+    parameters: entry.definition.parameters as AITransportTool['parameters']
+  });
+}
+
+/**
+ * 克隆 Renderer 工具集合并按 Main feature 注入可信 delegate_task。
+ * @param input - 已完成 Renderer 边界校验的 send 输入
+ * @param feature - 冻结 Main-owned feature
+ * @returns 不与 Renderer 共享工具对象的 Primary 输入
+ */
+function buildPrimaryInput(input: ChatRuntimeSendInput, feature: Readonly<PrimaryDelegationFeatureConfig>): ChatRuntimeSendInput {
+  if (!feature.enabled) return input;
+  return {
+    ...input,
+    tools: [...(input.tools ?? []).map((tool): AITransportTool => structuredClone(tool)), createDelegateTool()]
+  };
+}
+
+/**
+ * 投影为与 Chat/Agent SQLite JSON 持久化一致的快照。
+ * @param value - 结构化克隆安全输入
+ * @returns 已移除对象 undefined 字段的 JSON 值
+ */
+function createJsonSnapshot(value: unknown): unknown {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) {
+    throw new ChatRuntimeError('INVALID_CONTINUATION', 'Primary continuation snapshot is not JSON serializable');
+  }
+  return JSON.parse(serialized) as unknown;
+}
+
+/**
+ * 校验内部 Primary seam 只接受当前 Main 策略允许的精确 delegate 定义。
+ * @param input - Main 组装的 Primary 输入
+ * @param feature - 冻结 Main-owned feature
+ */
+function assertTrustedPrimaryInput(input: ChatRuntimeSendInput, feature: Readonly<PrimaryDelegationFeatureConfig>): void {
+  assertPrimaryRuntimeInput(input);
+  const deferredTools = input.tools?.filter((tool): boolean => getToolRegistryEntry(tool.name)?.executionClass === 'deferred-coordination') ?? [];
+  if (deferredTools.length === 0) return;
+  const expected = createDelegateTool();
+  const validDelegate =
+    feature.enabled &&
+    deferredTools.length === 1 &&
+    deferredTools[0]?.name === expected.name &&
+    hashAgentPayload(createJsonSnapshot(deferredTools[0])) === hashAgentPayload(createJsonSnapshot(expected));
+  if (!validDelegate) {
+    throw new ChatRuntimeError('RUNTIME_INPUT_DENIED', '内部 Primary 输入包含未授权的延迟协调工具');
+  }
+}
+
+/**
  * 记录 ChatRuntime 进入最终回答阶段的固定策略原因。
  * @param runtime - 当前 runtime
  * @param reason - 收口原因
@@ -308,24 +416,16 @@ function assertDelegationAck(value: unknown): asserts value is ChatRuntimeDelega
 }
 
 /**
- * 投影为与 Chat/Agent SQLite JSON 持久化一致的快照。
- * @param value - 结构化克隆安全输入
- * @returns 已移除对象 undefined 字段的 JSON 值
- */
-function createJsonSnapshot(value: unknown): unknown {
-  const serialized = JSON.stringify(value);
-  if (serialized === undefined) {
-    throw new ChatRuntimeError('INVALID_CONTINUATION', 'Primary continuation snapshot is not JSON serializable');
-  }
-  return JSON.parse(serialized) as unknown;
-}
-
-/**
  * 创建 ChatRuntime 服务。
  * @param dependencies - runtime 依赖项
+ * @param delegationFeatureInput - Main-owned Primary 委派 feature
  * @returns ChatRuntime 服务
  */
-export function createChatRuntimeService(dependencies: Partial<ChatRuntimeServiceDependencies> = {}) {
+export function createChatRuntimeService(
+  dependencies: Partial<ChatRuntimeServiceDependencies> = {},
+  delegationFeatureInput: Readonly<PrimaryDelegationFeatureConfig> = DEFAULT_PRIMARY_DELEGATION_FEATURE
+) {
+  const delegationFeature = normalizeDelegationFeature(delegationFeatureInput);
   const emit = dependencies.emit ?? createDefaultEmitter();
   const messageWriter = dependencies.messageWriter ?? createDefaultMessageWriter();
   const messageReader = dependencies.messageReader ?? createDefaultMessageReader();
@@ -1350,7 +1450,7 @@ export function createChatRuntimeService(dependencies: Partial<ChatRuntimeServic
      * @returns 已启动 runtime 标识
      */
     async startTrustedPrimary(input: ChatRuntimeSendInput): Promise<ChatRuntimeStartResult> {
-      assertPrimaryRuntimeInput(input);
+      assertTrustedPrimaryInput(input, delegationFeature);
       return startSend(input);
     },
 
@@ -1361,7 +1461,9 @@ export function createChatRuntimeService(dependencies: Partial<ChatRuntimeServic
      */
     async send(input: ChatRuntimeSendInput): Promise<ChatRuntimeStartResult> {
       assertRendererRuntimeInput(input);
-      return startSend(input);
+      const primaryInput = buildPrimaryInput(input, delegationFeature);
+      assertTrustedPrimaryInput(primaryInput, delegationFeature);
+      return startSend(primaryInput);
     },
 
     /**
@@ -1770,7 +1872,14 @@ export function createChatRuntimeService(dependencies: Partial<ChatRuntimeServic
 }
 
 /** IPC handlers 使用的默认 ChatRuntime 单例。 */
-export const chatRuntimeService = createChatRuntimeService({
-  locks: chatRuntimeLocks,
-  prepareDelegation: (input): ChatRuntimeDelegationPrepareAck => chatAgentDelegationService.prepareDelegation(input)
-});
+export const chatRuntimeService = createChatRuntimeService(
+  {
+    locks: chatRuntimeLocks,
+    prepareDelegation: (input): ChatRuntimeDelegationPrepareAck => chatAgentDelegationService.prepareDelegation(input)
+  },
+  {
+    enabled: process.env.TIBIS_PRIMARY_DELEGATION_ENABLED === '1',
+    pureReadChildEnabled: true,
+    maxParallelReadChildren: 3
+  }
+);

@@ -663,6 +663,7 @@ describe('chat agent delegation service', (): void => {
       version: 2
     } as AgentCheckpointRecord;
     fixture.getTask.mockReturnValue(task);
+    fixture.getCheckpoint.mockReturnValue({ ...checkpoint, recordState: 'active' });
     fixture.recordTaskResult.mockReturnValue(checkpoint);
     const readyOutbox = {
       outboxId: 'outbox-ready-checkpoint-1',

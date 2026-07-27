@@ -788,7 +788,7 @@ git commit -m "feat(chat): 接通 Child 取消预算与结果汇合"
 - Consumes: Main-owned Child registry、持久化 Task/Attempt/Outbox、主进程 feature flag、共享 delegate tool definition。
 - Produces: Renderer 重载不影响的 Child execution state，以及仅对可信 Primary 开启的 `delegate_task`。
 
-- [ ] **Step 1: Write recovery tests**
+- [x] **Step 1: Write recovery tests**
 
 验证：
 
@@ -798,7 +798,7 @@ git commit -m "feat(chat): 接通 Child 取消预算与结果汇合"
 - interrupted Checkpoint 不消费旧 Outbox、不创建第二个 Runtime，也会释放持久化预算 reservation。
 - plan schema/policy/hash 不支持时 fail closed，capability 恢复只能收缩。
 
-- [ ] **Step 2: Run recovery tests and verify RED**
+- [x] **Step 2: Run recovery tests and verify RED**
 
 Run:
 
@@ -808,7 +808,7 @@ pnpm exec vitest run test/electron/main/modules/chat/agents/startup-recovery.tes
 
 Expected: FAIL，直到 Coordinator 与现有启动中断顺序接通。
 
-- [ ] **Step 3: Implement recovery order**
+- [x] **Step 3: Implement recovery order**
 
 主进程启动顺序固定为：
 
@@ -824,7 +824,7 @@ initialize database
 
 旧 running Attempt 不重放；同一进程中的 Renderer reload 只重新获取公开 snapshot，不改变 Main Child Actor/Runtime。
 
-- [ ] **Step 4: Write feature flag boundary tests**
+- [x] **Step 4: Write feature flag boundary tests**
 
 验证：
 
@@ -834,11 +834,11 @@ initialize database
 - Child Runtime、Renderer tool catalog 和 continuation 永远不能自行注入 delegate。
 - flag 开启不改变其他工具或未委派聊天。
 
-- [ ] **Step 5: Implement main-owned feature injection**
+- [x] **Step 5: Implement main-owned feature injection**
 
 feature flag 默认为 false，并包含固定 `pureReadChildEnabled=true` 与 `maxParallelReadChildren=3`。公开 `send()` 必须先调用现有 Renderer 输入校验，确认输入不含 internal/deferred 工具，再由 Main 使用共享 registry 的可信 definition 克隆增强 Runtime 输入。不得接受 Renderer 提供的 delegate definition、execution class、effect 或 permission 元数据。
 
-- [ ] **Step 6: Run recovery and boundary tests**
+- [x] **Step 6: Run recovery and boundary tests**
 
 Run:
 
@@ -848,7 +848,7 @@ pnpm exec vitest run test/electron/main/modules/chat/agents/startup-recovery.tes
 
 Expected: PASS。
 
-- [ ] **Step 7: Commit Task 7**
+- [x] **Step 7: Commit Task 7**
 
 ```bash
 git add electron/main/modules/chat/agents/coordinator.mts electron/main/modules/chat/agents/child-registry.mts electron/main/modules/chat/agents/service.mts electron/main/modules/chat/runtime/service.mts electron/main/index.mts test/electron/main/modules/chat/agents/startup-recovery.test.ts test/electron/main/modules/chat/runtime/main-boundary.test.ts
