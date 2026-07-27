@@ -85,6 +85,18 @@ export const AGENT_MAX_REQUESTED_TOOLS = 16;
 /** 单个规范化 Agent payload 的最大 UTF-8 字节数。 */
 export const AGENT_CANONICAL_PAYLOAD_MAX_BYTES = 256 * 1024;
 
+/** 单个 changeset 允许的最大文件操作数。 */
+export const AGENT_MAX_CHANGESET_OPERATIONS = 32;
+
+/** 单个 staged 文本文件允许的最大 UTF-8 字节数。 */
+export const AGENT_MAX_STAGED_FILE_BYTES = 4 * 1024 * 1024;
+
+/** 单个 changeset 允许的候选文本总字节数。 */
+export const AGENT_MAX_CHANGESET_BYTES = 16 * 1024 * 1024;
+
+/** 单个 changeset 允许的 unified diff 最大 UTF-8 字节数。 */
+export const AGENT_MAX_DIFF_BYTES = 256 * 1024;
+
 /** 基础契约成功校验结果。 */
 export interface FoundationContractSuccess {
   /** 校验是否成功。 */
@@ -940,6 +952,15 @@ export function hashAgentPayload(payload: unknown): string {
     throw new Error('Agent canonical payload exceeds size limit');
   }
   return createHash('sha256').update(serialized).digest('hex');
+}
+
+/**
+ * 对完整 UTF-8 文本计算 SHA-256，不受 canonical payload 尺寸限制。
+ * @param content - 候选、基础或 diff 文本
+ * @returns 小写十六进制 SHA-256
+ */
+export function hashAgentText(content: string): string {
+  return createHash('sha256').update(content, 'utf8').digest('hex');
 }
 
 /**

@@ -8,6 +8,7 @@ import type { RuntimeToolGuard, RuntimeToolGuardInput } from '../runtime/stream/
 import type { ChatRuntimeMainToolExecutor } from '../runtime/types.mjs';
 import type { AIToolExecutionResult, AITransportTool } from 'types/ai';
 import type { AgentExecutionPlanSnapshot } from 'types/chat-agent';
+import { AGENT_FILE_COMMIT_ADAPTER } from '../../../../../shared/ai/tools/AgentStagedFileTool/index.js';
 import { getToolRegistryEntry, type ToolRegistryEntry } from '../../../../../shared/ai/tools/index.js';
 import { readWorkspaceDirectory, readWorkspaceFile } from '../../workspace/read.mjs';
 import {
@@ -285,6 +286,8 @@ function validateToolPlan(toolName: string, plan: AgentExecutionPlanSnapshot): T
   const expectedResolver = CHILD_READ_RESOLVERS.get(toolName);
   const entry = getToolRegistryEntry(toolName);
   const frozenEffect = plan.toolEffectSet.find((effect): boolean => effect.toolName === toolName);
+  const hasCompatibleCommitPolicy =
+    plan.commitPolicy.mode === 'none' || (plan.commitPolicy.mode === 'staged' && plan.commitPolicy.adapter === AGENT_FILE_COMMIT_ADAPTER);
   if (
     !expectedResolver ||
     !entry ||
@@ -297,7 +300,7 @@ function validateToolPlan(toolName: string, plan: AgentExecutionPlanSnapshot): T
     return denyTool(toolName, 'registry_capability_unavailable');
   }
   if (
-    plan.commitPolicy.mode !== 'none' ||
+    !hasCompatibleCommitPolicy ||
     plan.permissionSnapshot.scopeIds.length === 0 ||
     !plan.capabilitySet.includes(toolName) ||
     frozenEffect?.effect !== 'pure_read'

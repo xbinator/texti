@@ -605,12 +605,13 @@ git commit -m "feat(chat): 持久化 Child 写入事实"
 - Create: `test/electron/main/modules/chat/agents/write-overlay.test.ts`
 - Create: `test/electron/main/modules/chat/agents/write-tools.test.ts`
 - Modify: `electron/main/modules/chat/agents/contracts.mts`
+- Modify: `electron/main/modules/chat/agents/read-tools.mts`
 
 **Interfaces:**
 - Consumes: write Execution Plan、真实 workspace root、Attempt/Runtime identity、staged tool registry。
 - Produces: `createAgentWriteOverlay()`、`createChildWriteTools()` 与 canonical `AgentChangesetSnapshot`；任何 staged 调用都不修改真实目标。
 
-- [ ] **Step 1: Write failing overlay isolation tests**
+- [x] **Step 1: Write failing overlay isolation tests**
 
 核心测试：
 
@@ -655,7 +656,7 @@ expect(changeset.operationSetHash).toMatch(/^[a-f0-9]{64}$/);
 - 第 33 个 operation、超过 4 MiB 的单文件、超过 16 MiB 的候选总量和超过 256 KiB 的 diff 都在持久化或确认前失败。
 - `dispose()` 只删除该 Attempt 的精确 overlay 目录。
 
-- [ ] **Step 2: Run overlay tests and verify RED**
+- [x] **Step 2: Run overlay tests and verify RED**
 
 Run:
 
@@ -665,7 +666,7 @@ pnpm exec vitest run test/electron/main/modules/chat/agents/write-overlay.test.t
 
 Expected: FAIL，因为 overlay 和 staged tool executor 尚不存在。
 
-- [ ] **Step 3: Implement canonical hashes and protected references**
+- [x] **Step 3: Implement canonical hashes and protected references**
 
 使用现有 `hashAgentPayload()`，完整性计算固定为：
 
@@ -728,7 +729,7 @@ const baseRevision = hashAgentPayload({
 
 create operation 使用 `exists: false`、真实父目录和空内容 hash；replace operation 使用目标 realpath、`fs.stat()` 的 size/mtimeMs 和完整内容 hash。
 
-- [ ] **Step 4: Implement overlay operations**
+- [x] **Step 4: Implement overlay operations**
 
 公开边界固定为：
 
@@ -770,7 +771,7 @@ export async function createAgentWriteOverlay(
 
 首次访问文件时解析 realpath 或最近存在父目录的 realpath，验证 scope 后冻结 `{ exists, contentHash, revision }`。后续操作只读写 overlay 候选。`prepare()` 再读取真实目标并比较基础 revision，按 targetPath 排序生成不可变 operation 集合。
 
-- [ ] **Step 5: Add guarded Child staged tools**
+- [x] **Step 5: Add guarded Child staged tools**
 
 `createChildWriteTools()` 同时暴露计划内 pure-read 工具与 staged 工具：
 
@@ -786,7 +787,7 @@ export interface ChildWriteTools {
 
 每次调用重新验证 registry 仍是 `main/direct/staged_file_write/atomic-file-v1`，plan 仍含工具和 `commitPolicy.mode === 'staged'`，目标仍在冻结 scope，signal 未取消。executor 只能调用 overlay 方法，不能导入 Runtime `FileTool` 的立即写盘分支。
 
-- [ ] **Step 6: Run overlay and tool tests**
+- [x] **Step 6: Run overlay and tool tests**
 
 Run:
 
@@ -796,10 +797,10 @@ pnpm exec vitest run test/electron/main/modules/chat/agents/write-overlay.test.t
 
 Expected: PASS，并由测试明确证明真实工作区内容在 changeset prepared 后仍未改变。
 
-- [ ] **Step 7: Commit Task 3**
+- [x] **Step 7: Commit Task 3**
 
 ```bash
-git add electron/main/modules/chat/agents/write-overlay.mts electron/main/modules/chat/agents/write-tools.mts electron/main/modules/chat/agents/contracts.mts test/electron/main/modules/chat/agents/write-overlay.test.ts test/electron/main/modules/chat/agents/write-tools.test.ts changelog/2026-07-27.md
+git add electron/main/modules/chat/agents/write-overlay.mts electron/main/modules/chat/agents/write-tools.mts electron/main/modules/chat/agents/contracts.mts electron/main/modules/chat/agents/read-tools.mts test/electron/main/modules/chat/agents/write-overlay.test.ts test/electron/main/modules/chat/agents/write-tools.test.ts docs/superpowers/plans/2026-07-27-child-agent-controlled-write.md changelog/2026-07-27.md
 git commit -m "feat(chat): 生成 Child 文件 changeset"
 ```
 
