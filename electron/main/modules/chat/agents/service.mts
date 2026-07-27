@@ -179,6 +179,11 @@ export interface ChatAgentDelegationServiceDependencies {
   publishCheckpoint: (event: ChatAgentApplicationEvent) => void;
   /** Main-owned 持久化 confirmation queue；隔离测试可省略以保持旧只读 fixture。 */
   confirmationQueue?: AgentConfirmationQueue;
+  /**
+   * 删除 Main 私有目录中尚未进入 durable journal 的 write overlay。
+   * 启动恢复专用；缺省表示隔离实例没有磁盘 overlay。
+   */
+  discardWriteOverlays?: () => Promise<void>;
   /** Main-owned 委派灰度配置；缺省时受控写入保持关闭。 */
   featureConfig?: Readonly<PrimaryDelegationFeatureConfig>;
   /**
@@ -294,6 +299,11 @@ export interface ChatAgentDelegationService {
    * @returns 不可变上下文 clone
    */
   getContinuationContext(checkpointId: string): ContinuationRuntimeContext | undefined;
+  /**
+   * 启动时撤销无 journal write confirmation、清理 overlay 并中断不可恢复聚合。
+   * @returns 被中断的 Checkpoint 数
+   */
+  recoverInterruptedWrites(): Promise<number>;
   /**
    * 启动时中断无法跨进程恢复的 Checkpoint。
    * @returns 被中断的 Checkpoint 数
@@ -529,8 +539,8 @@ function isSettledStatus(
   return status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'interrupted';
 }
 
-/** 首版 Child Runtime 显式允许的本地纯读工具。 */
-const CHILD_READ_TOOL_NAMES = new Set(['glob', 'grep', 'read_directory', 'read_file']);
+/** Child Runtime 允许进入冻结计划的本地 pure-read 与 staged-file 工具。 */
+const CHILD_TOOL_NAMES = new Set(['glob', 'grep', 'read_directory', 'read_file', 'stage_file_edit', 'stage_file_write']);
 
 /** Main-owned 单 Turn Child/Primary 共享 token ceiling。 */
 const DEFAULT_TURN_BUDGET: AgentBudgetSnapshot = Object.freeze({
@@ -578,7 +588,7 @@ function compileDefaultPlan(input: AgentPlanCompileInput): AgentPlanCompileResul
   return compileAgentPlan(input, {
     resolveScopes: resolveAgentScopes,
     getToolEntry: getToolRegistryEntry,
-    isToolAllowed: (toolName: string): boolean => CHILD_READ_TOOL_NAMES.has(toolName),
+    isToolAllowed: (toolName: string): boolean => CHILD_TOOL_NAMES.has(toolName),
     // 当前输入本身来自一次已发生的 delegate_task tool-call，因此冻结模型已证明支持工具调用。
     isModelToolCapable: (): boolean => input.checkpoint.continuationSnapshot.orderedToolCalls.length > 0
   });
@@ -1042,6 +1052,60 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
     return cancelWithReason(input.checkpointId, 'user_cancelled');
   }
 
+  /**
+   * 中断所有不能跨进程恢复的活动聚合，并维护预算与 continuation fence。
+   * @returns 被中断的 Checkpoint 数
+   */
+  function interruptActiveCheckpoints(): number {
+    const activeBeforeInterrupt = dependencies.store.listActive();
+    const interruptedCount = dependencies.store.interruptActive({
+      code: 'runtime_interrupted',
+      phase: 'recovery',
+      category: 'runtime',
+      retryable: false,
+      message: '主进程重启后不自动恢复模型执行',
+      details: { reason: 'process_restart' }
+    });
+    const survivors = dependencies.store.listActive();
+    const survivorIds = new Set(survivors.map((snapshot): string => snapshot.checkpoint.checkpointId));
+    activeBeforeInterrupt.forEach((snapshot): void => {
+      if (!survivorIds.has(snapshot.checkpoint.checkpointId)) {
+        dependencies.budgetLedger?.releaseCheckpoint(snapshot.checkpoint.checkpointId);
+      }
+    });
+
+    // 只有已被 Store 收敛为终态的 Checkpoint 可以释放旧 fence。
+    fenceHandles.forEach((handle, checkpointId): void => {
+      if (survivorIds.has(checkpointId)) return;
+      handle.release();
+      fenceHandles.delete(checkpointId);
+    });
+    continuationContexts.clear();
+
+    // journal 阻塞的 survivor 必须继续持有或重建 fence，但绝不恢复易失 Runtime 上下文。
+    survivors.forEach((snapshot): void => {
+      const { checkpoint } = snapshot;
+      const scope = getSessionHistoryScope(checkpoint.sessionId);
+      const existingFence = dependencies.locks.getContinuationFence(scope);
+      if (existingFence) {
+        if (existingFence.checkpointId !== checkpoint.checkpointId) {
+          throw createFenceError(checkpoint.checkpointId, 'startup_survivor_fence_conflict');
+        }
+        return;
+      }
+
+      const fence = dependencies.locks.acquireContinuationFence({
+        scope,
+        checkpointId: checkpoint.checkpointId
+      });
+      if (!fence) {
+        throw createFenceError(checkpoint.checkpointId, 'startup_survivor_fence_conflict');
+      }
+      fenceHandles.set(checkpoint.checkpointId, fence);
+    });
+    return interruptedCount;
+  }
+
   return {
     prepareDelegation(input: ChatRuntimeDelegationPrepareInput): ChatRuntimeDelegationPrepareAck {
       assertPrimaryRuntime(input);
@@ -1232,54 +1296,25 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
       return context ? structuredClone(context) : undefined;
     },
 
+    async recoverInterruptedWrites(): Promise<number> {
+      const activeWrites = dependencies.store
+        .listActive()
+        .flatMap((snapshot): AgentTaskRecord[] => snapshot.tasks)
+        .filter(
+          (task): boolean =>
+            task.contractSnapshot.mode === 'write' &&
+            task.unfinishedJournalCount === 0 &&
+            !['completed', 'failed', 'cancelled', 'deadline_exceeded', 'commit_failed', 'interrupted'].includes(task.status)
+        );
+      activeWrites.forEach((task): void => {
+        dependencies.confirmationQueue?.revokeTask(task.taskId, 'process_restart');
+      });
+      await dependencies.discardWriteOverlays?.();
+      return interruptActiveCheckpoints();
+    },
+
     interruptUnrecoverableCheckpoints(): number {
-      const activeBeforeInterrupt = dependencies.store.listActive();
-      const interruptedCount = dependencies.store.interruptActive({
-        code: 'runtime_interrupted',
-        phase: 'recovery',
-        category: 'runtime',
-        retryable: false,
-        message: '主进程重启后不自动恢复模型执行',
-        details: { reason: 'process_restart' }
-      });
-      const survivors = dependencies.store.listActive();
-      const survivorIds = new Set(survivors.map((snapshot): string => snapshot.checkpoint.checkpointId));
-      activeBeforeInterrupt.forEach((snapshot): void => {
-        if (!survivorIds.has(snapshot.checkpoint.checkpointId)) {
-          dependencies.budgetLedger?.releaseCheckpoint(snapshot.checkpoint.checkpointId);
-        }
-      });
-
-      // 只有已被 Store 收敛为终态的 Checkpoint 可以释放旧 fence。
-      fenceHandles.forEach((handle, checkpointId): void => {
-        if (survivorIds.has(checkpointId)) return;
-        handle.release();
-        fenceHandles.delete(checkpointId);
-      });
-      continuationContexts.clear();
-
-      // journal 阻塞的 survivor 必须继续持有或重建 fence，但绝不恢复易失 Runtime 上下文。
-      survivors.forEach((snapshot): void => {
-        const { checkpoint } = snapshot;
-        const scope = getSessionHistoryScope(checkpoint.sessionId);
-        const existingFence = dependencies.locks.getContinuationFence(scope);
-        if (existingFence) {
-          if (existingFence.checkpointId !== checkpoint.checkpointId) {
-            throw createFenceError(checkpoint.checkpointId, 'startup_survivor_fence_conflict');
-          }
-          return;
-        }
-
-        const fence = dependencies.locks.acquireContinuationFence({
-          scope,
-          checkpointId: checkpoint.checkpointId
-        });
-        if (!fence) {
-          throw createFenceError(checkpoint.checkpointId, 'startup_survivor_fence_conflict');
-        }
-        fenceHandles.set(checkpoint.checkpointId, fence);
-      });
-      return interruptedCount;
+      return interruptActiveCheckpoints();
     },
 
     async drainOutbox(): Promise<void> {
@@ -1346,7 +1381,7 @@ function publishAssistant(message: ChatMessageRecord, checkpoint: AgentCheckpoin
 const defaultAgentStore = createAgentDelegationStore(agentStoreDatabase);
 
 /** 主进程默认持久化 confirmation queue。 */
-const defaultConfirmationQueue = createAgentConfirmationQueue({
+export const chatAgentConfirmationQueue = createAgentConfirmationQueue({
   store: defaultAgentStore,
   readUnifiedDiff: (reference: string): string => readFileSync(reference, 'utf8'),
   publish: publishCheckpoint,
@@ -1380,22 +1415,46 @@ async function ensureAgentDirectory(kind: 'overlays' | 'journals'): Promise<stri
   return fs.realpath(directory);
 }
 
+/**
+ * 删除所有尚未进入 journal 的易失 write overlay，并重新创建私有根目录。
+ */
+async function resetAgentOverlays(): Promise<void> {
+  const directory = path.join(app.getPath('userData'), 'agent-runtime', 'overlays');
+  await fs.rm(directory, { recursive: true, force: true });
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+}
+
+/** 延迟创建的 durable file committer，commit 与 recover 必须共享同一 Store 和 journal 根。 */
+let fileCommitterPromise: Promise<AgentFileCommitter> | null = null;
+
+/**
+ * 返回主进程共享 file committer。
+ * @returns 绑定 durable journal 根的单例
+ */
+function getFileCommitter(): Promise<AgentFileCommitter> {
+  if (!fileCommitterPromise) {
+    fileCommitterPromise = ensureAgentDirectory('journals').then(
+      (journalRoot): AgentFileCommitter =>
+        createAgentFileCommitter({
+          store: defaultAgentStore,
+          journalRoot,
+          now: (): string => new Date().toISOString(),
+          createId: (): string => `journal-${nanoid()}`,
+          // 生产 write flag 默认关闭；启用前必须把此处替换为当前权限事实，而不是恢复时猜测升级。
+          getPermissionScopeIds: (): readonly string[] => []
+        })
+    );
+  }
+  return fileCommitterPromise;
+}
+
 /** 延迟解析 userData 的默认 durable file committer。 */
-const defaultFileCommitter: AgentFileCommitter = {
+export const chatAgentFileCommitter: AgentFileCommitter = {
   async commit(input: AgentFileCommitInput): Promise<AgentFileCommitResult> {
-    const journalRoot = await ensureAgentDirectory('journals');
-    return createAgentFileCommitter({
-      store: defaultAgentStore,
-      journalRoot,
-      now: (): string => new Date().toISOString(),
-      createId: (): string => `journal-${nanoid()}`,
-      // 生产 write flag 当前固定关闭；Task 8 接入权限恢复后才允许返回当前 write scopes。
-      getPermissionScopeIds: (): readonly string[] => []
-    }).commit(input);
+    return (await getFileCommitter()).commit(input);
   },
-  async recover(): Promise<[]> {
-    // Task 8 在启动恢复阶段接入共享 committer；Task 7 不自动重放 write journal。
-    return [];
+  async recover(): ReturnType<AgentFileCommitter['recover']> {
+    return (await getFileCommitter()).recover();
   }
 };
 
@@ -1403,14 +1462,16 @@ const defaultFileCommitter: AgentFileCommitter = {
 let defaultCoordinator: AgentCoordinator | null = null;
 
 /**
- * 返回当前 Main registry 中实际可执行的本地 pure-read 工具。
+ * 返回当前 Main registry 中实际可执行的本地 pure-read 与 staged-file 工具。
  * @returns 已排序的安全工具集合
  */
-function listChildReadTools(): string[] {
-  return [...CHILD_READ_TOOL_NAMES]
+function listChildTools(): string[] {
+  return [...CHILD_TOOL_NAMES]
     .filter((toolName): boolean => {
       const entry = getToolRegistryEntry(toolName);
-      return entry?.runtime === 'main' && entry.executionClass === 'direct' && entry.effect.effect === 'pure_read';
+      return (
+        entry?.runtime === 'main' && entry.executionClass === 'direct' && (entry.effect.effect === 'pure_read' || entry.effect.effect === 'staged_file_write')
+      );
     })
     .sort();
 }
@@ -1436,7 +1497,8 @@ export const chatAgentDelegationService = createChatAgentDelegationService({
     }
   },
   publishCheckpoint,
-  confirmationQueue: defaultConfirmationQueue,
+  confirmationQueue: chatAgentConfirmationQueue,
+  discardWriteOverlays: resetAgentOverlays,
   featureConfig: {
     enabled: process.env.TIBIS_PRIMARY_DELEGATION_ENABLED === '1',
     pureReadChildEnabled: true,
@@ -1452,7 +1514,7 @@ export const chatAgentDelegationService = createChatAgentDelegationService({
       return resolveDefaultLimits(task, checkpoint, context);
     }
     return {
-      availableToolNames: listChildReadTools(),
+      availableToolNames: listChildTools(),
       permissionScopeIds: ['workspace:read'],
       budget: DEFAULT_CHILD_BUDGET
     };
@@ -1463,6 +1525,9 @@ export const chatAgentDelegationService = createChatAgentDelegationService({
     return chatRuntimeService.resumePrimary(input);
   }
 });
+
+/** durable journal 和 orphan write 恢复完成前，默认 Coordinator 不得启动 write Runtime。 */
+let controlledWriteReady = false;
 
 /** 主进程默认无消息持久化 Child executor。 */
 const defaultChildExecutor = createChildRuntimeExecutor({
@@ -1500,10 +1565,12 @@ export const chatAgentCoordinator = createAgentCoordinator({
   releaseBudget: (taskId: string): void => defaultBudgetLedger.releaseTask(taskId),
   executor: defaultChildExecutor,
   prepareChangeset: (input) => defaultAgentStore.prepareChangeset(input),
-  confirmationQueue: defaultConfirmationQueue,
+  confirmationQueue: chatAgentConfirmationQueue,
+  isControlledWriteReady: (): boolean => controlledWriteReady,
   getConfirmation: (confirmationId: string) => defaultAgentStore.getConfirmation(confirmationId),
+  getChangeset: (changesetId: string) => defaultAgentStore.getChangeset(changesetId),
   queueCommit: (input) => defaultAgentStore.queueCommit(input),
-  fileCommitter: defaultFileCommitter,
+  fileCommitter: chatAgentFileCommitter,
   createConfirmationId: (task: AgentTaskRecord): string => `confirmation-${task.taskId}-${nanoid()}`,
   getTask: (taskId: string): AgentTaskRecord | null => defaultAgentStore.getTask(taskId),
   createRuntimeId: (task: AgentTaskRecord): string => `runtime-${task.taskId}-${nanoid()}`,
@@ -1515,3 +1582,16 @@ export const chatAgentCoordinator = createAgentCoordinator({
   registry: defaultChildRegistry
 });
 defaultCoordinator = chatAgentCoordinator;
+
+/**
+ * 按 durable journal、orphan write、Coordinator 的固定顺序恢复 Child Agent。
+ * 任一步失败都会保持 write gate 关闭，且 Main 不会继续开放 IPC。
+ */
+export async function recoverChatAgentDelegations(): Promise<void> {
+  controlledWriteReady = false;
+  await chatAgentFileCommitter.recover();
+  chatAgentConfirmationQueue.recover();
+  await chatAgentDelegationService.recoverInterruptedWrites();
+  controlledWriteReady = true;
+  await chatAgentCoordinator.recover();
+}

@@ -118,15 +118,15 @@ describe('chat runtime main boundary', (): void => {
     expect(`${preloadSource}\n${apiTypes}`).not.toMatch(/chatAgent(?:Transcript|Send|Continue|Message)/);
   });
 
-  it('initializes the database and interrupts unrecoverable checkpoints before opening IPC', async (): Promise<void> => {
+  it('initializes the database and recovers Agent delegations before opening IPC', async (): Promise<void> => {
     const mainSource = await readSource('electron/main/index.mts');
     const databaseIndex = mainSource.indexOf('await initDatabase()');
-    const interruptIndex = mainSource.indexOf('chatAgentDelegationService.interruptUnrecoverableCheckpoints()');
+    const recoveryIndex = mainSource.indexOf('await recoverChatAgentDelegations()');
     const ipcIndex = mainSource.indexOf('registerAllIpcHandlers()');
 
     expect(databaseIndex).toBeGreaterThan(-1);
-    expect(interruptIndex).toBeGreaterThan(databaseIndex);
-    expect(ipcIndex).toBeGreaterThan(interruptIndex);
+    expect(recoveryIndex).toBeGreaterThan(databaseIndex);
+    expect(ipcIndex).toBeGreaterThan(recoveryIndex);
   });
 
   it('limits renderer resume input to identities and prevents model or tool snapshot overrides', async (): Promise<void> => {

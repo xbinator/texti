@@ -3,6 +3,7 @@
  * @description 验证 Main Child 启动恢复顺序、预算释放、Outbox eligibility 与 Renderer 重载隔离。
  */
 import { readFileSync } from 'node:fs';
+import type { AgentConfirmationQueue } from '../../../../../../electron/main/modules/chat/agents/confirmation-store.mjs';
 import type {
   AgentCheckpointRecord,
   AgentDelegationRecoverySnapshot,
@@ -10,6 +11,7 @@ import type {
   AgentTaskRecord
 } from '../../../../../../electron/main/modules/chat/agents/types.mjs';
 import type { ChatMessageRecord } from 'types/chat';
+import type { AgentConfirmationDecision } from 'types/chat-agent';
 import { describe, expect, it, vi } from 'vitest';
 import { createChildActorRegistry } from '../../../../../../electron/main/modules/chat/agents/child-registry.mjs';
 import {
@@ -114,6 +116,39 @@ function createTask(): AgentTaskRecord {
 }
 
 /**
+ * 创建已生成 changeset、等待确认且没有 journal 的 write Task。
+ * @returns 启动时必须撤销并中断的 write Task
+ */
+function createWriteTask(): AgentTaskRecord {
+  const task = createTask();
+  const plan = task.executionPlanSnapshot;
+  if (!plan) throw new Error('Recovery write fixture requires an execution plan');
+  return {
+    ...task,
+    currentAttemptId: 'attempt-recovery',
+    contractSnapshot: {
+      ...task.contractSnapshot,
+      task: 'Update the recovery file',
+      mode: 'write',
+      requestedTools: ['read_file', 'stage_file_edit']
+    },
+    executionPlanSnapshot: {
+      ...plan,
+      policyVersion: 'controlled-write-v1',
+      capabilitySet: ['read_file', 'stage_file_edit'],
+      permissionSnapshot: { scopeIds: ['workspace:write'] },
+      toolEffectSet: [
+        { toolName: 'read_file', effect: 'pure_read' },
+        { toolName: 'stage_file_edit', effect: 'staged_file_write' }
+      ],
+      commitPolicy: { mode: 'staged', adapter: 'atomic-file-v1' }
+    },
+    status: 'waiting_confirmation',
+    queuePhase: undefined
+  };
+}
+
+/**
  * 创建 pending delegation.created Outbox。
  * @returns 恢复交付事实
  */
@@ -152,11 +187,16 @@ function createDependencies(
   dispatchInternal: ReturnType<typeof vi.fn>;
   publish: ReturnType<typeof vi.fn>;
   markOutboxDelivered: ReturnType<typeof vi.fn>;
+  revokeTask: ReturnType<typeof vi.fn>;
+  discardWriteOverlays: ReturnType<typeof vi.fn>;
+  recoveryOrder: string[];
 } {
   let active = initialActive;
   let outboxes = pendingOutbox;
+  const recoveryOrder: string[] = [];
   const checkpoints = new Map(initialActive.map((entry): [string, AgentCheckpointRecord] => [entry.checkpoint.checkpointId, entry.checkpoint]));
   const interruptActive = vi.fn((): number => {
+    recoveryOrder.push('interrupt-unrecoverable-write-attempts');
     const interruptedCount = active.length;
     active.forEach((entry): void => {
       checkpoints.set(entry.checkpoint.checkpointId, { ...entry.checkpoint, status: 'interrupted', version: entry.checkpoint.version + 1 });
@@ -198,6 +238,25 @@ function createDependencies(
   const releaseCheckpoint = vi.fn();
   const dispatchInternal = vi.fn(async (): Promise<void> => undefined);
   const publish = vi.fn();
+  const revokeTask = vi.fn(() => {
+    recoveryOrder.push('revoke-orphan-confirmations');
+    return [];
+  });
+  const confirmationQueue: AgentConfirmationQueue = {
+    request: vi.fn(async (): Promise<AgentConfirmationDecision> => ({ decision: 'rejected', version: 1 })),
+    resolve: vi.fn(() => {
+      throw new Error('Confirmation resolution is not part of startup recovery');
+    }),
+    revokeTask,
+    invalidate: vi.fn(() => {
+      throw new Error('Single confirmation invalidation is not part of startup recovery');
+    }),
+    listPending: vi.fn(() => []),
+    recover: vi.fn()
+  };
+  const discardWriteOverlays = vi.fn(async (): Promise<void> => {
+    recoveryOrder.push('discard-unjournaled-overlays');
+  });
   return {
     dependencies: {
       store,
@@ -208,6 +267,8 @@ function createDependencies(
       publish,
       dispatchInternal,
       publishCheckpoint: (): void => undefined,
+      confirmationQueue,
+      discardWriteOverlays,
       createId: (kind: string, index = 1): string => `${kind}-${index}`,
       now: (): string => RECOVERY_TIME,
       budgetLedger: {
@@ -224,7 +285,10 @@ function createDependencies(
     releaseCheckpoint,
     dispatchInternal,
     publish,
-    markOutboxDelivered
+    markOutboxDelivered,
+    revokeTask,
+    discardWriteOverlays,
+    recoveryOrder
   };
 }
 
@@ -247,6 +311,25 @@ describe('agent startup recovery', (): void => {
     expect(fixture.dispatchInternal).not.toHaveBeenCalled();
     expect(fixture.publish).not.toHaveBeenCalled();
     expect(fixture.markOutboxDelivered).not.toHaveBeenCalled();
+  });
+
+  it('revokes orphan write confirmations and discards overlays before interruption', async (): Promise<void> => {
+    const checkpoint = createCheckpoint();
+    const writeTask = createWriteTask();
+    const fixture = createDependencies([
+      {
+        checkpoint,
+        tasks: [writeTask],
+        eventSequence: 4
+      }
+    ]);
+    const service = createChatAgentDelegationService(fixture.dependencies);
+
+    await expect(service.recoverInterruptedWrites()).resolves.toBe(1);
+
+    expect(fixture.revokeTask).toHaveBeenCalledWith(writeTask.taskId, 'process_restart');
+    expect(fixture.discardWriteOverlays).toHaveBeenCalledOnce();
+    expect(fixture.recoveryOrder).toEqual(['revoke-orphan-confirmations', 'discard-unjournaled-overlays', 'interrupt-unrecoverable-write-attempts']);
   });
 
   it('replays an eligible same-process pending Outbox exactly once', async (): Promise<void> => {
@@ -292,19 +375,26 @@ describe('agent startup recovery', (): void => {
   });
 
   it('keeps the startup order before IPC registration and window creation', (): void => {
-    const source = readFileSync('electron/main/index.mts', 'utf8');
-    const databaseIndex = source.indexOf('await initDatabase()');
-    const interruptIndex = source.indexOf('chatAgentDelegationService.interruptUnrecoverableCheckpoints()');
-    const recoverIndex = source.indexOf('await chatAgentCoordinator.recover()');
-    const drainIndex = source.indexOf('await chatAgentDelegationService.drainOutbox()');
-    const ipcIndex = source.indexOf('registerAllIpcHandlers()');
-    const windowIndex = source.indexOf('createWindow()', ipcIndex);
+    const mainSource = readFileSync('electron/main/index.mts', 'utf8');
+    const serviceSource = readFileSync('electron/main/modules/chat/agents/service.mts', 'utf8');
+    const databaseIndex = mainSource.indexOf('await initDatabase()');
+    const recoveryIndex = mainSource.indexOf('await recoverChatAgentDelegations()');
+    const drainIndex = mainSource.indexOf('await chatAgentDelegationService.drainOutbox()');
+    const ipcIndex = mainSource.indexOf('registerAllIpcHandlers()');
+    const windowIndex = mainSource.indexOf('createWindow()', ipcIndex);
+    const journalIndex = serviceSource.indexOf('await chatAgentFileCommitter.recover()');
+    const confirmationIndex = serviceSource.indexOf('chatAgentConfirmationQueue.recover()', journalIndex);
+    const interruptIndex = serviceSource.indexOf('await chatAgentDelegationService.recoverInterruptedWrites()', confirmationIndex);
+    const coordinatorIndex = serviceSource.indexOf('await chatAgentCoordinator.recover()', interruptIndex);
 
     expect(databaseIndex).toBeGreaterThan(-1);
-    expect(interruptIndex).toBeGreaterThan(databaseIndex);
-    expect(recoverIndex).toBeGreaterThan(interruptIndex);
-    expect(drainIndex).toBeGreaterThan(recoverIndex);
+    expect(recoveryIndex).toBeGreaterThan(databaseIndex);
+    expect(drainIndex).toBeGreaterThan(recoveryIndex);
     expect(ipcIndex).toBeGreaterThan(drainIndex);
     expect(windowIndex).toBeGreaterThan(ipcIndex);
+    expect(journalIndex).toBeGreaterThan(-1);
+    expect(confirmationIndex).toBeGreaterThan(journalIndex);
+    expect(interruptIndex).toBeGreaterThan(confirmationIndex);
+    expect(coordinatorIndex).toBeGreaterThan(interruptIndex);
   });
 });

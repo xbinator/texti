@@ -24,7 +24,7 @@
     "shell:pty:packaged-smoke": "node ./scripts/shell/pty-packaged-smoke.mjs",
     "postinstall": "electron-rebuild --only better-sqlite3,node-pty",
     "test": "cross-env HOST=127.0.0.1 vitest run && pnpm run test:database",
-    "test:database": "cross-env ELECTRON_RUN_AS_NODE=1 HOST=127.0.0.1 electron node_modules/vitest/vitest.mjs run test/electron/main/modules/database/session-metadata-migration.test.ts test/electron/main/modules/database/agent-task-migration.test.ts test/electron/main/modules/chat/agents/store.test.ts test/electron/main/modules/chat/agents/delegation-foundation.test.ts test/electron/main/modules/chat/agents/read-runtime.test.ts",
+    "test:database": "cross-env ELECTRON_RUN_AS_NODE=1 HOST=127.0.0.1 electron node_modules/vitest/vitest.mjs run test/electron/main/modules/database/session-metadata-migration.test.ts test/electron/main/modules/database/agent-task-migration.test.ts test/electron/main/modules/chat/agents/store.test.ts test/electron/main/modules/chat/agents/delegation-foundation.test.ts test/electron/main/modules/chat/agents/read-runtime.test.ts test/electron/main/modules/chat/agents/startup-recovery.test.ts test/electron/main/modules/chat/agents/write-runtime.test.ts",
     "lint": "eslint src --ext .vue,.ts,.tsx,.js,.jsx,.mts --fix",
     "lint:style": "stylelint 'src/**/*.{vue,less,css}' --fix"
   },

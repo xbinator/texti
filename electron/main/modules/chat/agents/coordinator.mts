@@ -111,11 +111,22 @@ export interface AgentCoordinatorDependencies {
   /** write Task 的 Main-owned 持久化确认队列。 */
   confirmationQueue?: Pick<AgentConfirmationQueue, 'request' | 'invalidate'>;
   /**
+   * 判断启动恢复是否已经完成；恢复前 write Task 只能保持 queued。
+   * 缺省为 true，避免改变显式隔离实例与只读 fixture。
+   */
+  isControlledWriteReady?: () => boolean;
+  /**
    * 读取 confirmation 权威记录。
    * @param confirmationId - confirmation 身份
    * @returns 当前 CAS 记录
    */
   getConfirmation?: (confirmationId: string) => AgentConfirmationRecord | null;
+  /**
+   * 在 approval 后重新读取 changeset 权威状态。
+   * @param changesetId - changeset 身份
+   * @returns 当前 Store 投影
+   */
+  getChangeset?: (changesetId: string) => AgentChangesetRecord | null;
   /**
    * 把批准的 write Task 放入 commit 队列。
    * @param input - confirmation CAS 事实
@@ -210,6 +221,8 @@ interface CoordinatorWriteDependencies {
   readonly confirmationQueue: NonNullable<AgentCoordinatorDependencies['confirmationQueue']>;
   /** confirmation 权威读取。 */
   readonly getConfirmation: NonNullable<AgentCoordinatorDependencies['getConfirmation']>;
+  /** changeset 权威读取。 */
+  readonly getChangeset: NonNullable<AgentCoordinatorDependencies['getChangeset']>;
   /** commit queue Store boundary。 */
   readonly queueCommit: NonNullable<AgentCoordinatorDependencies['queueCommit']>;
   /** durable commit boundary。 */
@@ -231,6 +244,7 @@ function readWriteDependencies(dependencies: AgentCoordinatorDependencies): Coor
     !dependencies.prepareChangeset ||
     !dependencies.confirmationQueue ||
     !dependencies.getConfirmation ||
+    !dependencies.getChangeset ||
     !dependencies.queueCommit ||
     !dependencies.fileCommitter ||
     !dependencies.createConfirmationId
@@ -241,6 +255,7 @@ function readWriteDependencies(dependencies: AgentCoordinatorDependencies): Coor
     prepareChangeset: dependencies.prepareChangeset,
     confirmationQueue: dependencies.confirmationQueue,
     getConfirmation: dependencies.getConfirmation,
+    getChangeset: dependencies.getChangeset,
     queueCommit: dependencies.queueCommit,
     fileCommitter: dependencies.fileCommitter,
     createConfirmationId: dependencies.createConfirmationId
@@ -1003,6 +1018,26 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
       return;
     }
     const commitTask = queueOutcome.value;
+    const commitChangeset = writeDependencies.getChangeset(prepared.changeset.snapshot.changesetId);
+    if (!commitChangeset || commitChangeset.snapshotHash !== prepared.changeset.snapshotHash) {
+      await commitTaskResult(
+        commitTask,
+        createFailureResult(
+          { task: commitTask, attempt: prepared.attempt },
+          'failed',
+          {
+            code: 'protocol_error',
+            phase: 'commit_validation',
+            category: 'integrity',
+            retryable: false,
+            details: { reason: 'approved_changeset_projection_invalid' }
+          },
+          prepared.draft.usage
+        )
+      );
+      await Promise.allSettled([dependencies.executor.discard(prepared.attempt.currentRuntimeId)]);
+      return;
+    }
     const [leaseOutcome] = await Promise.allSettled([
       dependencies.scheduler.enqueue(createScheduleRequest(commitTask, checkpoint, dependencies.now(), systemChildTimeoutMs, 'commit'))
     ]);
@@ -1021,7 +1056,7 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
         writeDependencies.fileCommitter.commit({
           task: commitTask,
           attempt: prepared.attempt,
-          changeset: prepared.changeset,
+          changeset: commitChangeset,
           confirmation,
           resultDraft: prepared.draft,
           lease
@@ -1185,11 +1220,17 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
       return;
     }
 
-    authorizedTasks.forEach((task): void => {
+    const runnableTasks = authorizedTasks.filter((task): boolean => task.contractSnapshot.mode === 'read' || (dependencies.isControlledWriteReady?.() ?? true));
+    const hasDeferredWrite = runnableTasks.length !== authorizedTasks.length;
+    runnableTasks.forEach((task): void => {
       dependencies.registry.ensureActor(task);
       startScheduledTask(task, recovery.checkpoint);
     });
     const hasOutstandingWork = authorizedTasks.length > 0 || tasks.some((task): boolean => !settledTaskIds.has(task.taskId) && !isTaskTerminal(task.status));
+    if (hasDeferredWrite) {
+      setState(payload.checkpointId, 'idle');
+      return;
+    }
     setState(payload.checkpointId, latestCheckpoint.status === 'ready_to_resume' || !hasOutstandingWork ? 'terminal' : 'running');
   }
 

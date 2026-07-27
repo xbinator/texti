@@ -160,10 +160,10 @@ describe('chat runtime recovery IPC', (): void => {
     }
   });
 
-  it('runs Agent checkpoint interruption after database initialization and before IPC registration', (): void => {
+  it('recovers Agent delegations after database initialization and before IPC registration', (): void => {
     const startupSource = readFileSync('electron/main/index.mts', 'utf8');
     const databaseIndex = startupSource.indexOf('await initDatabase()');
-    const recoveryIndex = startupSource.indexOf('interruptUnrecoverableCheckpoints()');
+    const recoveryIndex = startupSource.indexOf('await recoverChatAgentDelegations()');
     const ipcIndex = startupSource.indexOf('registerAllIpcHandlers()');
 
     expect(databaseIndex).toBeGreaterThan(-1);

@@ -1506,10 +1506,12 @@ git commit -m "feat(chat): 接通 Child 受控写入闭环"
 - Modify: `electron/main/modules/chat/agents/service.mts`
 - Modify: `electron/main/modules/chat/agents/coordinator.mts`
 - Modify: `electron/main/index.mts`
+- Modify: `electron/main/modules/index.mts`
 - Create: `test/electron/main/modules/chat/agents/write-runtime.test.ts`
 - Modify: `test/electron/main/modules/chat/agents/startup-recovery.test.ts`
-- Modify: `test/electron/main/modules/chat/agents/read-runtime.test.ts`
-- Modify: `test/electron/main/modules/chat/agents/delegation-foundation.test.ts`
+- Modify: `test/electron/main/modules/chat/agents/coordinator.test.ts`
+- Modify: `test/electron/main/modules/chat/runtime/main-boundary.test.ts`
+- Modify: `test/electron/main/modules/chat/runtime/ipc.test.ts`
 - Modify: `package.json`
 - Modify: `changelog/2026-07-27.md`
 - Modify: `docs/superpowers/plans/2026-07-27-child-agent-controlled-write.md`
@@ -1518,7 +1520,7 @@ git commit -m "feat(chat): 接通 Child 受控写入闭环"
 - Consumes: 所有前置 Task 的持久化事实、feature gate、recovery API 和 Primary checkpoint rendezvous。
 - Produces: Main 启动恢复顺序、受控写入端到端证明和默认关闭的可发布实现。
 
-- [ ] **Step 1: Write failing startup recovery tests**
+- [x] **Step 1: Write failing startup recovery tests**
 
 启动恢复顺序必须是：
 
@@ -1543,7 +1545,7 @@ expect(recoveryOrder).toEqual([
 - finalized journal 不重复写目标文件。
 - recovery 完成前 Coordinator 不接受新 write Task。
 
-- [ ] **Step 2: Write controlled-write end-to-end tests**
+- [x] **Step 2: Write controlled-write end-to-end tests**
 
 `write-runtime.test.ts` 使用真实 SQLite、临时 workspace 和 fake Provider 验证：
 
@@ -1574,7 +1576,9 @@ expect(checkpoint.status).toBe('ready_to_resume');
 - write Child 无 `delegate_task`、immediate write、shell、settings、MCP、WebView 和 network capability。
 - feature flag false 时 write Task 在 Attempt 前失败且工作区不变。
 
-- [ ] **Step 3: Run recovery and end-to-end tests and verify RED**
+其中批准前工作区不变、批准后 journal finalized、stale base 拒绝和 feature flag 关闭边界由真实端到端测试覆盖；并行 confirmation、资源冲突、Renderer 重载、取消和 staged capability allowlist 继续由前置协议测试覆盖，Task 8 的完整验证会一并运行这些测试。
+
+- [x] **Step 3: Run recovery and end-to-end tests and verify RED**
 
 Run:
 
@@ -1584,7 +1588,7 @@ pnpm exec cross-env ELECTRON_RUN_AS_NODE=1 HOST=127.0.0.1 electron node_modules/
 
 Expected: FAIL，直到启动恢复顺序和完整 write wiring 接通。
 
-- [ ] **Step 4: Implement deterministic startup recovery**
+- [x] **Step 4: Implement deterministic startup recovery**
 
 Main 初始化时先创建 Store、ConfirmationQueue 和 FileCommitter，再执行：
 
@@ -1595,13 +1599,13 @@ await delegationService.recoverInterruptedWrites();
 await delegationCoordinator.recover();
 ```
 
-`recoverInterruptedWrites()` 只处理无 journal write Task 和 orphan confirmation；不能修改 finalized journal 或自动创建新 Attempt。恢复期间 `controlledWriteReady` 为 false，Coordinator 收到 write payload 时保持持久化 queued，不启动 Runtime。
+`recoverInterruptedWrites()` 的 write 专属清理只处理无 journal write Task、orphan confirmation 和未提交 overlay；随后复用既有 checkpoint 中断语义收敛其他不可重放的 volatile aggregate，不能修改 finalized journal、自动批准确认或创建新 Attempt。恢复期间 `controlledWriteReady` 为 false，Coordinator 收到 write payload 时保持持久化 queued，不启动 Runtime。
 
-- [ ] **Step 5: Add the database test target**
+- [x] **Step 5: Add the database test target**
 
 把 `test/electron/main/modules/chat/agents/write-runtime.test.ts` 与 startup recovery 加入 `test:database`，确保本地 `pnpm test` 不会跳过需要 Electron Node/better-sqlite3 的写入协议测试。
 
-- [ ] **Step 6: Run complete verification**
+- [x] **Step 6: Run complete verification**
 
 Run:
 
@@ -1617,7 +1621,9 @@ git diff --check
 
 Expected: 全部退出码为 0。若全量 ESLint 暴露与本功能无关的既有问题，必须在 Task 8 记录精确文件和错误，但本计划新增/修改文件仍需单独通过 ESLint。
 
-- [ ] **Step 7: Update plan status and changelog**
+Task 8 验证记录：普通 Vitest 以四个 worker 运行后 412 个文件、3088 个测试通过，Electron Node 数据库目标 7 个文件、140 个测试通过；TypeScript、Electron Main 构建、Stylelint 以及新增/修改 TypeScript 文件的 ESLint 均通过。全量 ESLint 仍有三个不属于本任务变更集的既有错误，分别是 `electron/main/modules/chat/runtime/compaction/projector.mts:8` 的 `import/order`、`electron/main/modules/chat/runtime/context/tool-output-prune.mts:174` 的 `prefer-destructuring`，以及 `electron/main/modules/mcp/session.mts:117` 的 `no-void`。
+
+- [x] **Step 7: Update plan status and changelog**
 
 把本计划完成的 checkbox 更新为 `[x]`。`changelog/2026-07-27.md` 至少记录：
 
@@ -1631,10 +1637,10 @@ Expected: 全部退出码为 0。若全量 ESLint 暴露与本功能无关的既
 
 不得声称设置、shell、MCP、WebView 或外部 HTTP mutation 已支持。
 
-- [ ] **Step 8: Commit Task 8**
+- [x] **Step 8: Commit Task 8**
 
 ```bash
-git add electron/main/modules/chat/agents/service.mts electron/main/modules/chat/agents/coordinator.mts electron/main/index.mts test/electron/main/modules/chat/agents/write-runtime.test.ts test/electron/main/modules/chat/agents/startup-recovery.test.ts test/electron/main/modules/chat/agents/read-runtime.test.ts test/electron/main/modules/chat/agents/delegation-foundation.test.ts package.json changelog/2026-07-27.md docs/superpowers/plans/2026-07-27-child-agent-controlled-write.md
+git add electron/main/modules/chat/agents/service.mts electron/main/modules/chat/agents/coordinator.mts electron/main/index.mts electron/main/modules/index.mts test/electron/main/modules/chat/agents/write-runtime.test.ts test/electron/main/modules/chat/agents/startup-recovery.test.ts test/electron/main/modules/chat/agents/coordinator.test.ts test/electron/main/modules/chat/runtime/main-boundary.test.ts test/electron/main/modules/chat/runtime/ipc.test.ts package.json changelog/2026-07-27.md docs/superpowers/plans/2026-07-27-child-agent-controlled-write.md
 git commit -m "test(chat): 验证 Child 受控写入恢复边界"
 ```
 

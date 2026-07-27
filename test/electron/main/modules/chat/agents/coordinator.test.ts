@@ -976,6 +976,13 @@ describe('agent coordinator', (): void => {
       invalidate: vi.fn()
     };
     fixture.dependencies.getConfirmation = vi.fn((): AgentConfirmationRecord => confirmation);
+    fixture.dependencies.getChangeset = vi.fn(
+      (): AgentChangesetRecord => ({
+        ...changeset,
+        status: 'approved',
+        confirmationId: confirmation.confirmationId
+      })
+    );
     fixture.dependencies.queueCommit = vi.fn((): AgentTaskRecord => {
       order.push('commit-queued');
       return { ...runningProjection.task, status: 'queued', queuePhase: 'commit' };
@@ -1025,6 +1032,28 @@ describe('agent coordinator', (): void => {
     expect(fixture.discardRuntime).toHaveBeenCalledWith(runtimeId);
   });
 
+  it('keeps write Tasks queued until controlled-write startup recovery completes', async (): Promise<void> => {
+    const task = createWriteTask();
+    const fixture = createDependencies([task]);
+    let controlledWriteReady = false;
+    fixture.authorizeTask.mockReturnValue(authorizeWriteTask(task));
+    fixture.dependencies.isControlledWriteReady = (): boolean => controlledWriteReady;
+    const coordinator = createAgentCoordinator(fixture.dependencies);
+
+    await coordinator.accept(payload);
+
+    expect(fixture.authorizeTask).toHaveBeenCalledWith(task.taskId);
+    expect(fixture.enqueueTask).not.toHaveBeenCalled();
+    expect(coordinator.getCheckpointState(payload.checkpointId)).toBe('idle');
+
+    controlledWriteReady = true;
+    await coordinator.recover();
+
+    await vi.waitFor((): void => {
+      expect(fixture.enqueueTask).toHaveBeenCalledOnce();
+    });
+  });
+
   it('preserves a deadline rejection while acquiring the exclusive commit lease', async (): Promise<void> => {
     const task = createWriteTask();
     const fixture = createDependencies([task]);
@@ -1063,6 +1092,13 @@ describe('agent coordinator', (): void => {
       invalidate: vi.fn()
     };
     fixture.dependencies.getConfirmation = vi.fn((): AgentConfirmationRecord => confirmation);
+    fixture.dependencies.getChangeset = vi.fn(
+      (): AgentChangesetRecord => ({
+        ...createChangeset(authorized, 'attempt-runtime-task-1', 'runtime-task-1'),
+        status: 'approved',
+        confirmationId: confirmation.confirmationId
+      })
+    );
     fixture.dependencies.queueCommit = vi.fn(
       (): AgentTaskRecord => ({
         ...authorized,
@@ -1147,6 +1183,7 @@ describe('agent coordinator', (): void => {
           updatedAt: '2026-07-27T00:00:01.000Z'
         } as AgentConfirmationRecord)
     );
+    fixture.dependencies.getChangeset = vi.fn((): AgentChangesetRecord | null => null);
     fixture.dependencies.queueCommit = vi.fn();
     fixture.dependencies.createConfirmationId = (): string => 'confirmation-1';
     fixture.dependencies.fileCommitter = {
