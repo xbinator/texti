@@ -191,7 +191,7 @@ describe('agent result validation', (): void => {
       ...createResult(),
       changeset: {
         changesetId: 'changeset-1',
-        baseRevision: 'revision-1',
+        baseRevision: 'a'.repeat(64),
         diffHash: 'b'.repeat(64),
         operationSetHash: 'c'.repeat(64),
         planHash: executionPlanSnapshot.planHash

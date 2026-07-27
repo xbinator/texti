@@ -176,7 +176,10 @@ describeWithSqlite('agent task additive migration', (): void => {
         'chat_agent_delegation_checkpoints',
         'chat_agent_events',
         'chat_agent_outbox',
-        'chat_agent_budget_reservations'
+        'chat_agent_budget_reservations',
+        'chat_agent_changesets',
+        'chat_agent_confirmations',
+        'chat_agent_commit_journals'
       ])
     );
     expect(indexNames).toEqual(
@@ -189,6 +192,118 @@ describeWithSqlite('agent task additive migration', (): void => {
       ])
     );
     expect(dbSelect<{ title: string }>('SELECT title FROM chat_sessions WHERE id = ?', ['legacy-session'])).toEqual([{ title: 'Legacy' }]);
+  });
+
+  it('protects immutable write facts while allowing only their mutable projections', async (): Promise<void> => {
+    await seedAgentFacts();
+    dbExecute(
+      `INSERT INTO chat_agent_changesets (
+        changeset_id, task_id, attempt_id, agent_id, runtime_id, plan_hash,
+        snapshot_json, snapshot_hash, base_revision, diff_hash, operation_set_hash,
+        status, record_state, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        'changeset-protected',
+        'task-protected',
+        'attempt-protected',
+        'child-protected',
+        'runtime-initial',
+        'b'.repeat(64),
+        '{"changesetSchemaVersion":1}',
+        'e'.repeat(64),
+        'f'.repeat(64),
+        '1'.repeat(64),
+        '2'.repeat(64),
+        'prepared',
+        'active',
+        '2026-07-23T08:00:00.000Z',
+        '2026-07-23T08:00:00.000Z'
+      ]
+    );
+    dbExecute(
+      `INSERT INTO chat_agent_confirmations (
+        confirmation_id, changeset_id, request_json, request_hash, status,
+        version, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        'confirmation-protected',
+        'changeset-protected',
+        '{"confirmationSchemaVersion":1}',
+        '3'.repeat(64),
+        'pending',
+        1,
+        '2026-07-23T08:00:00.000Z',
+        '2026-07-23T08:00:00.000Z'
+      ]
+    );
+    dbExecute(
+      `INSERT INTO chat_agent_commit_journals (
+        journal_id, task_id, attempt_id, changeset_id, confirmation_id,
+        confirmation_version, plan_hash, intent_json, intent_hash, status,
+        operation_progress_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        'journal-protected',
+        'task-protected',
+        'attempt-protected',
+        'changeset-protected',
+        'confirmation-protected',
+        1,
+        'b'.repeat(64),
+        '{"journalSchemaVersion":1}',
+        '4'.repeat(64),
+        'created',
+        '[]',
+        '2026-07-23T08:00:00.000Z',
+        '2026-07-23T08:00:00.000Z'
+      ]
+    );
+
+    expect((): void => {
+      dbExecute('UPDATE chat_agent_changesets SET snapshot_hash = ? WHERE changeset_id = ?', ['9'.repeat(64), 'changeset-protected']);
+    }).toThrowError(/agent_changeset_immutable/i);
+    expect((): void => {
+      dbExecute('UPDATE chat_agent_confirmations SET request_hash = ? WHERE confirmation_id = ?', ['9'.repeat(64), 'confirmation-protected']);
+    }).toThrowError(/agent_confirmation_immutable/i);
+    expect((): void => {
+      dbExecute('UPDATE chat_agent_commit_journals SET intent_hash = ? WHERE journal_id = ?', ['9'.repeat(64), 'journal-protected']);
+    }).toThrowError(/agent_commit_journal_immutable/i);
+
+    expect(
+      dbExecute('UPDATE chat_agent_changesets SET status = ?, updated_at = ? WHERE changeset_id = ?', [
+        'awaiting_confirmation',
+        '2026-07-23T08:01:00.000Z',
+        'changeset-protected'
+      ]).changes
+    ).toBe(1);
+    expect(
+      dbExecute('UPDATE chat_agent_confirmations SET status = ?, version = ?, decision_json = ?, resolved_at = ?, updated_at = ? WHERE confirmation_id = ?', [
+        'approved',
+        2,
+        '{"decision":"approved","version":2}',
+        '2026-07-23T08:01:00.000Z',
+        '2026-07-23T08:01:00.000Z',
+        'confirmation-protected'
+      ]).changes
+    ).toBe(1);
+    expect(
+      dbExecute('UPDATE chat_agent_commit_journals SET status = ?, operation_progress_json = ?, updated_at = ? WHERE journal_id = ?', [
+        'applying',
+        '[]',
+        '2026-07-23T08:01:00.000Z',
+        'journal-protected'
+      ]).changes
+    ).toBe(1);
+
+    for (const [tableName, idColumn, id] of [
+      ['chat_agent_changesets', 'changeset_id', 'changeset-protected'],
+      ['chat_agent_confirmations', 'confirmation_id', 'confirmation-protected'],
+      ['chat_agent_commit_journals', 'journal_id', 'journal-protected']
+    ] as const) {
+      expect((): void => {
+        dbExecute(`DELETE FROM ${tableName} WHERE ${idColumn} = ?`, [id]);
+      }).toThrowError(/agent_fact_delete_forbidden/i);
+    }
   });
 
   it('rejects event aggregate identity mismatches', async (): Promise<void> => {

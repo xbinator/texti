@@ -7,13 +7,17 @@ import { createHash } from 'node:crypto';
 import type {
   AgentArtifactReference,
   AgentBudgetSnapshot,
+  AgentChangesetSnapshot,
   AgentCommitPolicy,
+  AgentCommitIntentSnapshot,
+  AgentConfirmationRequestSnapshot,
   AgentCriteriaResult,
   AgentDelegationContinuationSnapshot,
   AgentDelegationCreatedPayload,
   AgentDelegationReadyPayload,
   AgentEvidenceReference,
   AgentExecutionPlanSnapshot,
+  AgentFileOperationSnapshot,
   AgentModelSnapshot,
   AgentOrderedToolCallSnapshot,
   AgentPlanToolEffect,
@@ -26,6 +30,7 @@ import type {
   AgentTaskPriority,
   AgentTaskWarning,
   AgentUsageAccounting,
+  AgentWriteResultDraft,
   ChatAgentCheckpointEventType,
   ChatAgentEvent,
   ChatAgentEventPayloadMap,
@@ -58,6 +63,15 @@ export const AGENT_READ_PLAN_POLICY_VERSION = 'read-runtime-v1';
 
 /** 当前受控写入 Child Execution Plan 的安全策略版本。 */
 export const AGENT_WRITE_PLAN_POLICY_VERSION = 'controlled-write-v1';
+
+/** 当前 changeset snapshot Schema 版本。 */
+export const AGENT_CHANGESET_SCHEMA_VERSION = 1;
+
+/** 当前 confirmation request Schema 版本。 */
+export const AGENT_CONFIRMATION_SCHEMA_VERSION = 1;
+
+/** 当前 commit intent Schema 版本。 */
+export const AGENT_COMMIT_JOURNAL_SCHEMA_VERSION = 1;
 
 /** 单个契约允许的最大验收标准数量。 */
 export const AGENT_MAX_ACCEPTANCE_CRITERIA = 16;
@@ -142,6 +156,25 @@ export interface ExecutionPlanValidationFailure {
 
 /** Execution Plan runtime 校验结果。 */
 export type ExecutionPlanValidation = ExecutionPlanValidationSuccess | ExecutionPlanValidationFailure;
+
+/** write snapshot 成功校验结果。 */
+export interface WriteSnapshotValidationSuccess<TSnapshot> {
+  /** 校验是否成功。 */
+  ok: true;
+  /** 深冻结且 hash-bound 的 snapshot。 */
+  snapshot: Readonly<TSnapshot>;
+}
+
+/** write snapshot 失败校验结果。 */
+export interface WriteSnapshotValidationFailure {
+  /** 校验是否成功。 */
+  ok: false;
+  /** 稳定 snapshot 校验错误。 */
+  error: AgentTaskError;
+}
+
+/** write snapshot runtime 校验结果。 */
+export type WriteSnapshotValidation<TSnapshot> = WriteSnapshotValidationSuccess<TSnapshot> | WriteSnapshotValidationFailure;
 
 /** Continuation Snapshot 成功校验结果。 */
 export interface ContinuationValidationSuccess {
@@ -579,6 +612,19 @@ function canonicalize(value: unknown, ancestors: ReadonlySet<object> = new Set()
 }
 
 /**
+ * 检测结构化输出中不得跨边界持久化的敏感键和值。
+ * @param value - 已要求 JSON-safe 的结构化值
+ * @returns 是否包含凭据形态
+ */
+function hasSensitiveOutput(value: unknown): boolean {
+  if (typeof value === 'string') return redactSecretValues(value) !== value;
+  if (Array.isArray(value)) return value.some(hasSensitiveOutput);
+  if (!isPlainRecord(value)) return false;
+  const sensitiveKey = /^(?:authorization|proxyAuthorization|apiKey|accessToken|refreshToken|clientSecret|password|cookie|environment)$/i;
+  return Object.entries(value).some(([key, nested]): boolean => sensitiveKey.test(key) || hasSensitiveOutput(nested));
+}
+
+/**
  * 校验证据引用 allowlist。
  * @param value - 未可信证据
  * @returns 规范化证据，非法时返回 null
@@ -724,7 +770,7 @@ function matchesResultError(status: ChatAgentResult['executionStatus'], error: A
       );
     case 'commit_failed':
       return (
-        error.code === 'commit_failed' &&
+        (error.code === 'commit_failed' || error.code === 'manual_recovery_required') &&
         (error.phase === 'commit_validation' || error.phase === 'commit' || error.phase === 'recovery') &&
         (error.category === 'resource' || error.category === 'runtime' || error.category === 'integrity')
       );
@@ -743,6 +789,37 @@ function normalizeWarning(value: unknown): AgentTaskWarning | null {
   const code = normalizeAgentIdentity(value.code);
   const message = normalizeDisplayText(value.message);
   return code && message ? { code, message } : null;
+}
+
+/**
+ * 校验 SHA-256 十六进制 hash。
+ * @param value - 未可信 hash
+ * @returns 是否为规范化 SHA-256
+ */
+function isSha256(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+}
+
+/**
+ * 校验结果信封中的 changeset 完整性引用。
+ * @param value - 未可信 changeset 结果
+ * @returns allowlist 引用或 null
+ */
+function normalizeChangesetResult(value: unknown): ChatAgentResult['changeset'] | null {
+  if (!isPlainRecord(value) || !hasOnlyKeys(value, new Set(['changesetId', 'baseRevision', 'diffHash', 'operationSetHash', 'planHash']))) {
+    return null;
+  }
+  const changesetId = normalizeAgentIdentity(value.changesetId);
+  if (!changesetId || !isSha256(value.baseRevision) || !isSha256(value.diffHash) || !isSha256(value.operationSetHash) || !isSha256(value.planHash)) {
+    return null;
+  }
+  return {
+    changesetId,
+    baseRevision: value.baseRevision,
+    diffHash: value.diffHash,
+    operationSetHash: value.operationSetHash,
+    planHash: value.planHash
+  };
 }
 
 /**
@@ -901,15 +978,6 @@ export function hashExecutionPlanSnapshot(contractSnapshot: AgentTaskContractSna
 }
 
 /**
- * 校验 SHA-256 十六进制 hash。
- * @param value - 未可信 hash
- * @returns 是否为规范化 SHA-256
- */
-function isSha256(value: unknown): value is string {
-  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
-}
-
-/**
  * 校验并规范化字符串集合。
  * @param value - 未可信数组
  * @param maxItems - 最大元素数量
@@ -961,6 +1029,407 @@ function normalizeBudgetSnapshot(value: unknown): AgentBudgetSnapshot | null {
     costLimitUsd: value.costLimitUsd,
     pricingVersion
   };
+}
+
+/**
+ * 规范化 changeset 中单个文件操作。
+ * @param value - 未可信操作快照
+ * @returns allowlist 操作或 null
+ */
+function normalizeFileOperation(value: unknown): AgentFileOperationSnapshot | null {
+  const allowedKeys = new Set([
+    'operationId',
+    'kind',
+    'displayPath',
+    'targetPath',
+    'resourceScope',
+    'baseRevision',
+    'baseContentHash',
+    'targetContentHash',
+    'candidateReference',
+    'rollbackReference',
+    'byteLength'
+  ]);
+  if (!isPlainRecord(value) || !hasOnlyKeys(value, allowedKeys) || Object.keys(value).length !== allowedKeys.size) return null;
+  const operationId = normalizeAgentIdentity(value.operationId);
+  const displayPath = normalizeAgentIdentity(value.displayPath);
+  const targetPath = normalizeAgentIdentity(value.targetPath);
+  const resourceScope = normalizeAgentIdentity(value.resourceScope);
+  const candidateReference = normalizeAgentIdentity(value.candidateReference);
+  const rollbackReference = normalizeAgentIdentity(value.rollbackReference);
+  if (
+    !operationId ||
+    (value.kind !== 'create' && value.kind !== 'replace') ||
+    !displayPath ||
+    !targetPath ||
+    !resourceScope ||
+    !isSha256(value.baseRevision) ||
+    !isSha256(value.baseContentHash) ||
+    !isSha256(value.targetContentHash) ||
+    !candidateReference ||
+    !rollbackReference ||
+    !Number.isInteger(value.byteLength) ||
+    (value.byteLength as number) < 0
+  ) {
+    return null;
+  }
+  return {
+    operationId,
+    kind: value.kind,
+    displayPath,
+    targetPath,
+    resourceScope,
+    baseRevision: value.baseRevision,
+    baseContentHash: value.baseContentHash,
+    targetContentHash: value.targetContentHash,
+    candidateReference,
+    rollbackReference,
+    byteLength: value.byteLength as number
+  };
+}
+
+/**
+ * 规范化 write result draft。
+ * @param value - 未可信结果草稿
+ * @returns allowlist 草稿或 null
+ */
+function normalizeWriteDraft(value: unknown): AgentWriteResultDraft | null {
+  if (!isPlainRecord(value) || !hasOnlyKeys(value, new Set(['taskId', 'agentId', 'attemptId', 'summary', 'output', 'criteria', 'warnings', 'usage']))) {
+    return null;
+  }
+  const taskId = normalizeAgentIdentity(value.taskId);
+  const agentId = normalizeAgentIdentity(value.agentId);
+  const attemptId = normalizeAgentIdentity(value.attemptId);
+  const summary = normalizeDisplayText(value.summary);
+  if (!taskId || !agentId || !attemptId || !summary || !Array.isArray(value.criteria) || !Array.isArray(value.warnings)) return null;
+  const criteria = value.criteria.map(normalizeCriteria);
+  const warnings = value.warnings.map(normalizeWarning);
+  const usage = normalizeUsage(value.usage);
+  if (
+    criteria.some((criterion): boolean => criterion === null) ||
+    warnings.some((warning): boolean => warning === null) ||
+    new Set((criteria as AgentCriteriaResult[]).map((criterion): number => criterion.criterionIndex)).size !== criteria.length ||
+    !usage
+  ) {
+    return null;
+  }
+  let output: unknown;
+  if (value.output !== undefined) {
+    try {
+      if (hasSensitiveOutput(value.output)) return null;
+      hashAgentPayload(value.output);
+      output = structuredClone(value.output);
+    } catch {
+      return null;
+    }
+  }
+  return {
+    taskId,
+    agentId,
+    attemptId,
+    summary,
+    ...(value.output !== undefined ? { output } : {}),
+    criteria: criteria as AgentCriteriaResult[],
+    warnings: warnings as AgentTaskWarning[],
+    usage
+  };
+}
+
+/**
+ * 对 changeset snapshot 计算版本化 hash。
+ * @param changeset - 已规范化 changeset
+ * @returns snapshot SHA-256
+ */
+export function hashChangesetSnapshot(changeset: AgentChangesetSnapshot): string {
+  return hashAgentPayload({
+    schemaVersion: changeset.changesetSchemaVersion,
+    changeset
+  });
+}
+
+/**
+ * 对 confirmation request snapshot 计算版本化 hash。
+ * @param request - 已规范化确认请求
+ * @returns request SHA-256
+ */
+export function hashConfirmationRequestSnapshot(request: AgentConfirmationRequestSnapshot): string {
+  return hashAgentPayload({
+    schemaVersion: request.confirmationSchemaVersion,
+    request
+  });
+}
+
+/**
+ * 对 commit intent snapshot 计算版本化 hash。
+ * @param intent - 已规范化提交意图
+ * @returns intent SHA-256
+ */
+export function hashCommitIntentSnapshot(intent: AgentCommitIntentSnapshot): string {
+  return hashAgentPayload({
+    schemaVersion: intent.journalSchemaVersion,
+    intent
+  });
+}
+
+/**
+ * 校验、重算并深冻结 changeset snapshot。
+ * @param input - 未可信 changeset
+ * @param expectedHash - 持久化 snapshot hash
+ * @returns hash-bound changeset 或稳定错误
+ */
+export function validateChangesetSnapshot(input: unknown, expectedHash: string): WriteSnapshotValidation<AgentChangesetSnapshot> {
+  const fail = (reason: string, message: string): WriteSnapshotValidationFailure => ({
+    ok: false,
+    error: validationError('result_validation', reason, message)
+  });
+  const allowedKeys = new Set([
+    'changesetSchemaVersion',
+    'changesetId',
+    'taskId',
+    'attemptId',
+    'agentId',
+    'runtimeId',
+    'planHash',
+    'baseRevision',
+    'diffReference',
+    'diffHash',
+    'operationSetHash',
+    'resourceScopes',
+    'operations',
+    'createdAt'
+  ]);
+  if (
+    !isPlainRecord(input) ||
+    !hasOnlyKeys(input, allowedKeys) ||
+    Object.keys(input).length !== allowedKeys.size ||
+    input.changesetSchemaVersion !== AGENT_CHANGESET_SCHEMA_VERSION ||
+    !isSha256(expectedHash)
+  ) {
+    return fail('changeset_schema_invalid', 'Changeset snapshot schema is invalid');
+  }
+  const changesetId = normalizeAgentIdentity(input.changesetId);
+  const taskId = normalizeAgentIdentity(input.taskId);
+  const attemptId = normalizeAgentIdentity(input.attemptId);
+  const agentId = normalizeAgentIdentity(input.agentId);
+  const runtimeId = normalizeAgentIdentity(input.runtimeId);
+  const diffReference = normalizeAgentIdentity(input.diffReference);
+  const resourceScopes = normalizeStringSet(input.resourceScopes, AGENT_MAX_RESOURCES, false);
+  const createdAt = normalizeTimestamp(input.createdAt);
+  if (
+    !changesetId ||
+    !taskId ||
+    !attemptId ||
+    !agentId ||
+    !runtimeId ||
+    !isSha256(input.planHash) ||
+    !isSha256(input.baseRevision) ||
+    !diffReference ||
+    !isSha256(input.diffHash) ||
+    !isSha256(input.operationSetHash) ||
+    !resourceScopes ||
+    !createdAt ||
+    !Array.isArray(input.operations) ||
+    input.operations.length === 0 ||
+    input.operations.length > AGENT_MAX_RESOURCES
+  ) {
+    return fail('changeset_field_invalid', 'Changeset snapshot fields are invalid');
+  }
+  const operations = input.operations.map(normalizeFileOperation);
+  if (
+    operations.some((operation): boolean => operation === null) ||
+    new Set(operations.map((operation): string | null => operation?.operationId ?? null)).size !== operations.length ||
+    new Set(operations.map((operation): string | null => operation?.targetPath ?? null)).size !== operations.length
+  ) {
+    return fail('changeset_operation_invalid', 'Changeset operations are invalid or duplicated');
+  }
+  const changeset: AgentChangesetSnapshot = {
+    changesetSchemaVersion: AGENT_CHANGESET_SCHEMA_VERSION,
+    changesetId,
+    taskId,
+    attemptId,
+    agentId,
+    runtimeId,
+    planHash: input.planHash,
+    baseRevision: input.baseRevision,
+    diffReference,
+    diffHash: input.diffHash,
+    operationSetHash: input.operationSetHash,
+    resourceScopes,
+    operations: operations as AgentFileOperationSnapshot[],
+    createdAt
+  };
+  if (hashChangesetSnapshot(changeset) !== expectedHash) {
+    return fail('changeset_hash_mismatch', 'Changeset snapshot hash does not match its content');
+  }
+  return { ok: true, snapshot: deepFreeze(changeset) };
+}
+
+/**
+ * 校验、重算并深冻结 confirmation request snapshot。
+ * @param input - 未可信确认请求
+ * @param expectedHash - 持久化 request hash
+ * @returns hash-bound request 或稳定错误
+ */
+export function validateConfirmationRequestSnapshot(input: unknown, expectedHash: string): WriteSnapshotValidation<AgentConfirmationRequestSnapshot> {
+  const fail = (reason: string, message: string): WriteSnapshotValidationFailure => ({
+    ok: false,
+    error: validationError('confirmation', reason, message)
+  });
+  const allowedKeys = new Set([
+    'confirmationSchemaVersion',
+    'confirmationId',
+    'sessionId',
+    'turnId',
+    'taskId',
+    'attemptId',
+    'agentId',
+    'runtimeId',
+    'toolCallId',
+    'changesetId',
+    'planHash',
+    'baseRevision',
+    'diffHash',
+    'operationSetHash',
+    'resourceScopes',
+    'displayPaths',
+    'unifiedDiffReference',
+    'riskLevel',
+    'createdAt'
+  ]);
+  if (
+    !isPlainRecord(input) ||
+    !hasOnlyKeys(input, allowedKeys) ||
+    Object.keys(input).length !== allowedKeys.size ||
+    input.confirmationSchemaVersion !== AGENT_CONFIRMATION_SCHEMA_VERSION ||
+    !isSha256(expectedHash)
+  ) {
+    return fail('confirmation_schema_invalid', 'Confirmation request schema is invalid');
+  }
+  const identities = [
+    input.confirmationId,
+    input.sessionId,
+    input.turnId,
+    input.taskId,
+    input.attemptId,
+    input.agentId,
+    input.runtimeId,
+    input.toolCallId,
+    input.changesetId
+  ].map(normalizeAgentIdentity);
+  const resourceScopes = normalizeStringSet(input.resourceScopes, AGENT_MAX_RESOURCES, false);
+  const displayPaths = normalizeStringSet(input.displayPaths, AGENT_MAX_RESOURCES, false);
+  const unifiedDiffReference = normalizeAgentIdentity(input.unifiedDiffReference);
+  const createdAt = normalizeTimestamp(input.createdAt);
+  if (
+    identities.some((identity): boolean => identity === null) ||
+    !isSha256(input.planHash) ||
+    !isSha256(input.baseRevision) ||
+    !isSha256(input.diffHash) ||
+    !isSha256(input.operationSetHash) ||
+    !resourceScopes ||
+    !displayPaths ||
+    !unifiedDiffReference ||
+    (input.riskLevel !== 'write' && input.riskLevel !== 'dangerous') ||
+    !createdAt
+  ) {
+    return fail('confirmation_field_invalid', 'Confirmation request fields are invalid');
+  }
+  const [confirmationId, sessionId, turnId, taskId, attemptId, agentId, runtimeId, toolCallId, changesetId] = identities as string[];
+  const request: AgentConfirmationRequestSnapshot = {
+    confirmationSchemaVersion: AGENT_CONFIRMATION_SCHEMA_VERSION,
+    confirmationId,
+    sessionId,
+    turnId,
+    taskId,
+    attemptId,
+    agentId,
+    runtimeId,
+    toolCallId,
+    changesetId,
+    planHash: input.planHash,
+    baseRevision: input.baseRevision,
+    diffHash: input.diffHash,
+    operationSetHash: input.operationSetHash,
+    resourceScopes,
+    displayPaths,
+    unifiedDiffReference,
+    riskLevel: input.riskLevel,
+    createdAt
+  };
+  if (hashConfirmationRequestSnapshot(request) !== expectedHash) {
+    return fail('confirmation_hash_mismatch', 'Confirmation request hash does not match its content');
+  }
+  return { ok: true, snapshot: deepFreeze(request) };
+}
+
+/**
+ * 校验、重算并深冻结 commit intent snapshot。
+ * @param input - 未可信提交意图
+ * @param expectedHash - 持久化 intent hash
+ * @returns hash-bound intent 或稳定错误
+ */
+export function validateCommitIntentSnapshot(input: unknown, expectedHash: string): WriteSnapshotValidation<AgentCommitIntentSnapshot> {
+  const fail = (reason: string, message: string): WriteSnapshotValidationFailure => ({
+    ok: false,
+    error: validationError('commit_validation', reason, message)
+  });
+  const allowedKeys = new Set([
+    'journalSchemaVersion',
+    'changesetSnapshotHash',
+    'confirmationId',
+    'confirmationVersion',
+    'planHash',
+    'resultDraft',
+    'operations',
+    'createdAt'
+  ]);
+  if (
+    !isPlainRecord(input) ||
+    !hasOnlyKeys(input, allowedKeys) ||
+    Object.keys(input).length !== allowedKeys.size ||
+    input.journalSchemaVersion !== AGENT_COMMIT_JOURNAL_SCHEMA_VERSION ||
+    !isSha256(expectedHash)
+  ) {
+    return fail('commit_intent_schema_invalid', 'Commit intent schema is invalid');
+  }
+  const confirmationId = normalizeAgentIdentity(input.confirmationId);
+  const resultDraft = normalizeWriteDraft(input.resultDraft);
+  const createdAt = normalizeTimestamp(input.createdAt);
+  if (
+    !isSha256(input.changesetSnapshotHash) ||
+    !confirmationId ||
+    !Number.isInteger(input.confirmationVersion) ||
+    (input.confirmationVersion as number) <= 0 ||
+    !isSha256(input.planHash) ||
+    !resultDraft ||
+    !Array.isArray(input.operations) ||
+    input.operations.length === 0 ||
+    input.operations.length > AGENT_MAX_RESOURCES ||
+    !createdAt
+  ) {
+    return fail('commit_intent_field_invalid', 'Commit intent fields are invalid');
+  }
+  const operations = input.operations.map(normalizeFileOperation);
+  if (
+    operations.some((operation): boolean => operation === null) ||
+    new Set(operations.map((operation): string | null => operation?.operationId ?? null)).size !== operations.length
+  ) {
+    return fail('commit_intent_operation_invalid', 'Commit intent operations are invalid');
+  }
+  const intent: AgentCommitIntentSnapshot = {
+    journalSchemaVersion: AGENT_COMMIT_JOURNAL_SCHEMA_VERSION,
+    changesetSnapshotHash: input.changesetSnapshotHash,
+    confirmationId,
+    confirmationVersion: input.confirmationVersion as number,
+    planHash: input.planHash,
+    resultDraft,
+    operations: operations as AgentFileOperationSnapshot[],
+    createdAt
+  };
+  if (hashCommitIntentSnapshot(intent) !== expectedHash) {
+    return fail('commit_intent_hash_mismatch', 'Commit intent hash does not match its content');
+  }
+  return { ok: true, snapshot: deepFreeze(intent) };
 }
 
 /**
@@ -1299,7 +1768,7 @@ function normalizeEventPayload(type: ChatAgentEventType, input: unknown): ChatAg
         hasExactKeys(input, ['planHash', 'planSchemaVersion', 'policyVersion']) &&
         isSha256(input.planHash) &&
         input.planSchemaVersion === AGENT_PLAN_SCHEMA_VERSION &&
-        input.policyVersion === AGENT_READ_PLAN_POLICY_VERSION;
+        (input.policyVersion === AGENT_READ_PLAN_POLICY_VERSION || input.policyVersion === AGENT_WRITE_PLAN_POLICY_VERSION);
       break;
     case 'task.queued':
       valid = hasExactKeys(input, ['queuePhase']) && (input.queuePhase === 'start' || input.queuePhase === 'commit');
@@ -1328,20 +1797,35 @@ function normalizeEventPayload(type: ChatAgentEventType, input: unknown): ChatAg
       break;
     }
     case 'confirmation.requested':
-      valid = hasEventStrings(input, ['requestId', 'diffHash']);
+      valid =
+        hasExactKeys(input, ['requestId', 'requestHash', 'diffHash', 'version']) &&
+        typeof input.requestId === 'string' &&
+        normalizeAgentIdentity(input.requestId) !== null &&
+        isSha256(input.requestHash) &&
+        isSha256(input.diffHash) &&
+        Number.isInteger(input.version) &&
+        (input.version as number) > 0;
       break;
     case 'confirmation.resolved':
       valid =
-        hasExactKeys(input, ['requestId', 'decision', 'diffHash']) &&
+        hasExactKeys(input, ['requestId', 'decision', 'diffHash', 'version']) &&
         typeof input.requestId === 'string' &&
         normalizeAgentIdentity(input.requestId) !== null &&
         (input.decision === 'approved' || input.decision === 'rejected') &&
-        isSha256(input.diffHash);
+        isSha256(input.diffHash) &&
+        Number.isInteger(input.version) &&
+        (input.version as number) > 0;
       break;
     case 'confirmation.invalidated': {
-      const normalized = normalizeEventReason(input, ['requestId']);
-      valid = normalized !== null;
-      if (normalized) normalizedInput = normalized;
+      const requestId = normalizeAgentIdentity(input.requestId);
+      const reason = normalizeDisplayText(input.reason);
+      valid =
+        hasExactKeys(input, ['requestId', 'reason', 'version']) &&
+        requestId !== null &&
+        reason !== null &&
+        Number.isInteger(input.version) &&
+        (input.version as number) > 0;
+      if (valid) normalizedInput = { requestId, reason, version: input.version };
       break;
     }
     case 'tool.started':
@@ -1358,13 +1842,22 @@ function normalizeEventPayload(type: ChatAgentEventType, input: unknown): ChatAg
       break;
     case 'changeset.prepared':
       valid =
-        hasExactKeys(input, ['changesetId', 'diffHash']) &&
+        hasExactKeys(input, ['changesetId', 'snapshotHash', 'diffHash']) &&
         typeof input.changesetId === 'string' &&
         normalizeAgentIdentity(input.changesetId) !== null &&
+        isSha256(input.snapshotHash) &&
         isSha256(input.diffHash);
       break;
     case 'commit.journal_created':
-      valid = hasEventStrings(input, ['journalId', 'changesetId']);
+      valid =
+        hasExactKeys(input, ['journalId', 'changesetId', 'intentHash', 'confirmationVersion']) &&
+        typeof input.journalId === 'string' &&
+        normalizeAgentIdentity(input.journalId) !== null &&
+        typeof input.changesetId === 'string' &&
+        normalizeAgentIdentity(input.changesetId) !== null &&
+        isSha256(input.intentHash) &&
+        Number.isInteger(input.confirmationVersion) &&
+        (input.confirmationVersion as number) > 0;
       break;
     case 'commit.mutation_applied':
       valid =
@@ -1764,8 +2257,9 @@ export function validateChatAgentResult(input: unknown): ChatAgentResultValidati
   if (!usage) {
     return resultFailure('result_usage_invalid', 'Usage must include token, round, duration, request, and cost accounting');
   }
-  if (input.changeset !== undefined) {
-    return resultFailure('result_changeset_unsupported', 'Foundation read results cannot contain a changeset');
+  const changeset = input.changeset === undefined ? undefined : normalizeChangesetResult(input.changeset);
+  if (input.changeset !== undefined && !changeset) {
+    return resultFailure('result_changeset_invalid', 'Changeset results must bind all integrity hashes');
   }
   const error = input.error === undefined ? undefined : normalizeTaskError(input.error);
   if (input.error !== undefined && !error) {
@@ -1781,8 +2275,17 @@ export function validateChatAgentResult(input: unknown): ChatAgentResultValidati
   if (error && !matchesResultError(executionStatus, error)) {
     return resultFailure('result_error_status_mismatch', 'Result error code, phase, or category does not match execution status');
   }
+  let output: unknown;
   if (input.output !== undefined) {
-    return resultFailure('result_output_unsupported', 'Foundation results must use allowlisted artifacts instead of output');
+    try {
+      if (hasSensitiveOutput(input.output)) {
+        return resultFailure('result_output_sensitive', 'Structured output cannot contain sensitive keys or credential-shaped values');
+      }
+      hashAgentPayload(input.output);
+      output = structuredClone(input.output);
+    } catch {
+      return resultFailure('result_output_invalid', 'Structured output must be canonical payload safe');
+    }
   }
 
   const result: ChatAgentResult = {
@@ -1795,8 +2298,10 @@ export function validateChatAgentResult(input: unknown): ChatAgentResultValidati
       criteria: criteria as AgentCriteriaResult[]
     },
     summary,
+    ...(input.output !== undefined ? { output } : {}),
     warnings: warnings as AgentTaskWarning[],
     artifacts: artifacts as AgentArtifactReference[],
+    ...(changeset ? { changeset } : {}),
     usage,
     ...(error ? { error } : {})
   };

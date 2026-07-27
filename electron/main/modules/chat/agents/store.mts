@@ -4,6 +4,12 @@
  */
 import type {
   AgentCheckpointStatus,
+  AgentChangesetRecord,
+  AgentCommitIntentSnapshot,
+  AgentCommitJournalRecord,
+  AgentCommitJournalStatus,
+  AgentConfirmationRecord,
+  AgentConfirmationStatus,
   AgentDelegationContinuationSnapshot,
   AgentExecutionPlanSnapshot,
   AgentPreAttemptFailureResult,
@@ -24,6 +30,9 @@ import {
   validateAgentTaskError,
   validateChatAgentEvent,
   validateChatAgentResult,
+  validateChangesetSnapshot,
+  validateCommitIntentSnapshot,
+  validateConfirmationRequestSnapshot,
   validateContinuationSnapshot,
   validateExecutionPlanSnapshot,
   validateFoundationContract,
@@ -47,13 +56,22 @@ import {
   type BeginAgentAttemptInput,
   type CancelCheckpointInput,
   type ClaimCheckpointInput,
+  type CreateAgentCommitJournalInput,
+  type CreateAgentConfirmationInput,
   type DeliverAgentOutboxInput,
+  type FinalizeAgentCommitInput,
   type FinalizeCheckpointInput,
   type InterruptAgentCheckpointInput,
   type MarkAgentAttemptInput,
+  type MarkAgentJournalFailureInput,
+  type MarkAgentJournalInput,
+  type MarkAgentJournalOperationInput,
+  type PrepareAgentChangesetInput,
   type PrepareDelegationInput,
+  type QueueAgentCommitInput,
   type RecordPreAttemptFailureInput,
   type RecordTaskResultInput,
+  type ResolveAgentConfirmationInput,
   type TombstoneAgentTaskInput,
   type TransitionAgentTaskInput
 } from './types.mjs';
@@ -159,6 +177,67 @@ interface AttemptRow {
   created_at: unknown;
 }
 
+/** SQLite Changeset 查询行。 */
+interface ChangesetRow {
+  changeset_id: unknown;
+  task_id: unknown;
+  attempt_id: unknown;
+  agent_id: unknown;
+  runtime_id: unknown;
+  plan_hash: unknown;
+  snapshot_json: unknown;
+  snapshot_hash: unknown;
+  base_revision: unknown;
+  diff_hash: unknown;
+  operation_set_hash: unknown;
+  status: unknown;
+  confirmation_id: unknown;
+  record_state: unknown;
+  created_at: unknown;
+  updated_at: unknown;
+}
+
+/** SQLite Confirmation 查询行。 */
+interface ConfirmationRow {
+  confirmation_id: unknown;
+  changeset_id: unknown;
+  request_json: unknown;
+  request_hash: unknown;
+  status: unknown;
+  version: unknown;
+  decision_json: unknown;
+  resolved_at: unknown;
+  created_at: unknown;
+  updated_at: unknown;
+}
+
+/** SQLite Commit Journal 查询行。 */
+interface CommitJournalRow {
+  journal_id: unknown;
+  task_id: unknown;
+  attempt_id: unknown;
+  changeset_id: unknown;
+  confirmation_id: unknown;
+  confirmation_version: unknown;
+  plan_hash: unknown;
+  intent_json: unknown;
+  intent_hash: unknown;
+  status: unknown;
+  operation_progress_json: unknown;
+  error_json: unknown;
+  created_at: unknown;
+  updated_at: unknown;
+  finalized_at: unknown;
+}
+
+/** journal 内单个已应用操作的恢复进度。 */
+interface JournalOperationProgress {
+  /** 操作身份。 */
+  operationId: string;
+  /** 应用后内容 hash。 */
+  targetContentHash: string;
+}
+
 /** 经 Checkpoint、Task 和终态结果交叉校验的委派聚合。 */
 interface ValidatedAgentAggregate {
   /** 聚合根 Checkpoint。 */
@@ -215,6 +294,24 @@ const TASK_RUNNING_ATTEMPT_STATUSES = new Set<AgentTaskStatus>(['running', 'wait
 
 /** 必须持有结构化错误的 Attempt 失败终态。 */
 const ATTEMPT_ERROR_REQUIRED_STATUSES = new Set<AgentAttemptStatus>(['failed', 'deadline_exceeded', 'interrupted']);
+
+/** Changeset 可变状态 allowlist。 */
+const CHANGESET_STATUSES = new Set<AgentChangesetRecord['status']>([
+  'prepared',
+  'awaiting_confirmation',
+  'approved',
+  'rejected',
+  'revoked',
+  'committing',
+  'committed',
+  'discarded'
+]);
+
+/** Confirmation 可变状态 allowlist。 */
+const CONFIRMATION_STATUSES = new Set<AgentConfirmationStatus>(['pending', 'approved', 'rejected', 'revoked']);
+
+/** Commit journal 可变状态 allowlist。 */
+const JOURNAL_STATUSES = new Set<AgentCommitJournalStatus>(['created', 'applying', 'applied', 'finalized', 'cancelled', 'manual_recovery']);
 
 /** 由 task.failed Event 表达的 Task 失败终态。 */
 const TASK_FAILURE_STATUSES = new Set<AgentTaskStatus>(['failed', 'deadline_exceeded', 'commit_failed']);
@@ -437,6 +534,9 @@ function parseTask(row: TaskRow): AgentTaskRecord {
       parsedResult.agentId !== agentId ||
       (!isPreAttemptFailure(parsedResult) && (currentAttemptId === undefined || parsedResult.attemptId !== currentAttemptId)) ||
       (isPreAttemptFailure(parsedResult) && currentAttemptId !== undefined) ||
+      (!isPreAttemptFailure(parsedResult) &&
+        ((validation.contractSnapshot.mode === 'read' && parsedResult.changeset !== undefined) ||
+          (validation.contractSnapshot.mode === 'write' && parsedResult.executionStatus === 'completed' && parsedResult.changeset === undefined))) ||
       !hasExactCriteria(parsedResult, validation.contractSnapshot.acceptanceCriteria)
     ) {
       throw new AgentStoreProtocolError('task_result_identity_invalid', 'Persisted Task result identity or criteria do not match its Task row');
@@ -542,6 +642,186 @@ function parseAttempt(row: AttemptRow): AgentAttemptRecord {
     ...(error ? { error } : {}),
     createdAt: requireString(row.created_at, 'attempt created at')
   };
+}
+
+/**
+ * 校验 Changeset 行的不可变 snapshot 与可变投影。
+ * @param row - SQLite Changeset 行
+ * @returns 可信 Changeset 记录
+ */
+function parseChangeset(row: ChangesetRow): AgentChangesetRecord {
+  const snapshotHash = requireString(row.snapshot_hash, 'changeset snapshot hash');
+  const validation = validateChangesetSnapshot(parseJson(row.snapshot_json, 'changeset snapshot'), snapshotHash);
+  if (!validation.ok) {
+    throw new AgentStoreProtocolError(validation.error.details?.reason?.toString() ?? 'changeset_snapshot_invalid', validation.error.message);
+  }
+  const { snapshot } = validation;
+  const status = requireString(row.status, 'changeset status');
+  const recordState = requireString(row.record_state, 'changeset record state');
+  const confirmationId = optionalString(row.confirmation_id, 'changeset confirmation id');
+  if (!CHANGESET_STATUSES.has(status as AgentChangesetRecord['status']) || (recordState !== 'active' && recordState !== 'tombstoned')) {
+    throw new AgentStoreProtocolError('changeset_projection_invalid', 'Changeset status or record state is invalid');
+  }
+  if (
+    snapshot.changesetId !== row.changeset_id ||
+    snapshot.taskId !== row.task_id ||
+    snapshot.attemptId !== row.attempt_id ||
+    snapshot.agentId !== row.agent_id ||
+    snapshot.runtimeId !== row.runtime_id ||
+    snapshot.planHash !== row.plan_hash ||
+    snapshot.baseRevision !== row.base_revision ||
+    snapshot.diffHash !== row.diff_hash ||
+    snapshot.operationSetHash !== row.operation_set_hash ||
+    snapshot.createdAt !== row.created_at
+  ) {
+    throw new AgentStoreProtocolError('changeset_row_mismatch', 'Changeset columns do not match the immutable snapshot');
+  }
+  if (status !== 'prepared' && status !== 'discarded' && !confirmationId) {
+    throw new AgentStoreProtocolError('changeset_confirmation_missing', 'Changeset state requires a confirmation identity');
+  }
+  return Object.freeze({
+    snapshot,
+    snapshotHash,
+    status: status as AgentChangesetRecord['status'],
+    ...(confirmationId ? { confirmationId } : {}),
+    recordState: recordState as AgentChangesetRecord['recordState'],
+    updatedAt: requireString(row.updated_at, 'changeset updated at')
+  });
+}
+
+/**
+ * 校验 Confirmation 行的不可变 request 与 CAS 投影。
+ * @param row - SQLite Confirmation 行
+ * @returns 可信 Confirmation 记录
+ */
+function parseConfirmation(row: ConfirmationRow): AgentConfirmationRecord {
+  const requestHash = requireString(row.request_hash, 'confirmation request hash');
+  const validation = validateConfirmationRequestSnapshot(parseJson(row.request_json, 'confirmation request'), requestHash);
+  if (!validation.ok) {
+    throw new AgentStoreProtocolError(validation.error.details?.reason?.toString() ?? 'confirmation_request_invalid', validation.error.message);
+  }
+  const request = validation.snapshot;
+  const status = requireString(row.status, 'confirmation status');
+  const version = requireInteger(row.version, 'confirmation version');
+  const resolvedAt = optionalString(row.resolved_at, 'confirmation resolved at');
+  if (!CONFIRMATION_STATUSES.has(status as AgentConfirmationStatus) || version === 0) {
+    throw new AgentStoreProtocolError('confirmation_projection_invalid', 'Confirmation status or version is invalid');
+  }
+  let decision: 'approved' | 'rejected' | undefined;
+  if (row.decision_json !== null) {
+    const parsedDecision = parseJson(row.decision_json, 'confirmation decision');
+    if (
+      !isRecord(parsedDecision) ||
+      !hasOnlyKeys(parsedDecision, ['decision', 'version']) ||
+      (parsedDecision.decision !== 'approved' && parsedDecision.decision !== 'rejected') ||
+      parsedDecision.version !== version
+    ) {
+      throw new AgentStoreProtocolError('confirmation_decision_invalid', 'Confirmation decision does not match its CAS projection');
+    }
+    decision = parsedDecision.decision;
+  }
+  if (
+    request.confirmationId !== row.confirmation_id ||
+    request.changesetId !== row.changeset_id ||
+    (status === 'pending' && (decision !== undefined || resolvedAt !== undefined)) ||
+    ((status === 'approved' || status === 'rejected') && (decision !== status || !resolvedAt)) ||
+    (status === 'revoked' && decision !== undefined)
+  ) {
+    throw new AgentStoreProtocolError('confirmation_row_mismatch', 'Confirmation columns do not match its immutable request or decision');
+  }
+  return Object.freeze({
+    confirmationId: request.confirmationId,
+    changesetId: request.changesetId,
+    request,
+    requestHash,
+    status: status as AgentConfirmationStatus,
+    version,
+    ...(decision ? { decision } : {}),
+    createdAt: requireString(row.created_at, 'confirmation created at'),
+    updatedAt: requireString(row.updated_at, 'confirmation updated at')
+  });
+}
+
+/**
+ * 校验 journal 操作进度。
+ * @param value - 未可信 operation progress JSON
+ * @param intent - journal 冻结意图
+ * @returns 有序进度
+ */
+function parseJournalProgress(value: unknown, intent: AgentCommitIntentSnapshot): JournalOperationProgress[] {
+  if (!Array.isArray(value)) throw new AgentStoreProtocolError('journal_progress_invalid', 'Journal progress must be an array');
+  const expectedOperations = new Map(intent.operations.map((operation): [string, string] => [operation.operationId, operation.targetContentHash]));
+  const progress = value.map((entry): JournalOperationProgress => {
+    if (
+      !isRecord(entry) ||
+      !hasOnlyKeys(entry, ['operationId', 'targetContentHash']) ||
+      typeof entry.operationId !== 'string' ||
+      typeof entry.targetContentHash !== 'string' ||
+      expectedOperations.get(entry.operationId) !== entry.targetContentHash
+    ) {
+      throw new AgentStoreProtocolError('journal_progress_invalid', 'Journal operation progress is outside the immutable intent');
+    }
+    return {
+      operationId: entry.operationId,
+      targetContentHash: entry.targetContentHash
+    };
+  });
+  if (new Set(progress.map((entry): string => entry.operationId)).size !== progress.length) {
+    throw new AgentStoreProtocolError('journal_progress_duplicate', 'Journal operation progress contains duplicates');
+  }
+  return progress;
+}
+
+/**
+ * 校验 Commit Journal 行的不可变 intent 与恢复投影。
+ * @param row - SQLite Commit Journal 行
+ * @returns 可信 Commit Journal 记录
+ */
+function parseCommitJournal(row: CommitJournalRow): AgentCommitJournalRecord {
+  const intentHash = requireString(row.intent_hash, 'commit intent hash');
+  const validation = validateCommitIntentSnapshot(parseJson(row.intent_json, 'commit intent'), intentHash);
+  if (!validation.ok) {
+    throw new AgentStoreProtocolError(validation.error.details?.reason?.toString() ?? 'commit_intent_invalid', validation.error.message);
+  }
+  const intent = validation.snapshot;
+  const status = requireString(row.status, 'commit journal status');
+  const confirmationVersion = requireInteger(row.confirmation_version, 'commit confirmation version');
+  if (!JOURNAL_STATUSES.has(status as AgentCommitJournalStatus) || confirmationVersion === 0) {
+    throw new AgentStoreProtocolError('commit_journal_projection_invalid', 'Commit journal status or confirmation version is invalid');
+  }
+  const progress = parseJournalProgress(parseJson(row.operation_progress_json, 'journal operation progress'), intent);
+  let error;
+  if (row.error_json !== null) {
+    error = validateAgentTaskError(parseJson(row.error_json, 'commit journal error'));
+    if (!error) throw new AgentStoreProtocolError('commit_journal_error_invalid', 'Commit journal error is invalid');
+  }
+  const finalizedAt = optionalString(row.finalized_at, 'commit journal finalized at');
+  if (
+    intent.confirmationId !== row.confirmation_id ||
+    intent.confirmationVersion !== confirmationVersion ||
+    intent.planHash !== row.plan_hash ||
+    (status === 'finalized') !== (finalizedAt !== undefined) ||
+    (status === 'manual_recovery') !== (error !== undefined)
+  ) {
+    throw new AgentStoreProtocolError('commit_journal_row_mismatch', 'Commit journal columns do not match its immutable intent or state');
+  }
+  return Object.freeze({
+    journalId: requireString(row.journal_id, 'commit journal id'),
+    taskId: requireString(row.task_id, 'commit journal task id'),
+    attemptId: requireString(row.attempt_id, 'commit journal attempt id'),
+    changesetId: requireString(row.changeset_id, 'commit journal changeset id'),
+    confirmationId: requireString(row.confirmation_id, 'commit journal confirmation id'),
+    confirmationVersion,
+    planHash: requireString(row.plan_hash, 'commit journal plan hash'),
+    intent,
+    intentHash,
+    status: status as AgentCommitJournalStatus,
+    appliedOperationIds: Object.freeze(progress.map((entry): string => entry.operationId)),
+    ...(error ? { error } : {}),
+    createdAt: requireString(row.created_at, 'commit journal created at'),
+    updatedAt: requireString(row.updated_at, 'commit journal updated at'),
+    ...(finalizedAt ? { finalizedAt } : {})
+  });
 }
 
 /**
@@ -1000,6 +1280,46 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       ]
     );
     return event;
+  }
+
+  /**
+   * 按身份读取 Changeset。
+   * @param changesetId - changeset ID
+   * @returns Changeset，不存在时为 null
+   */
+  private getChangeset(changesetId: string): AgentChangesetRecord | null {
+    const row = this.database.select<ChangesetRow>('SELECT * FROM chat_agent_changesets WHERE changeset_id = ?', [changesetId])[0];
+    return row ? parseChangeset(row) : null;
+  }
+
+  /**
+   * 按 Attempt 读取唯一 Changeset。
+   * @param attemptId - Attempt ID
+   * @returns Changeset，不存在时为 null
+   */
+  private getAttemptChangeset(attemptId: string): AgentChangesetRecord | null {
+    const row = this.database.select<ChangesetRow>('SELECT * FROM chat_agent_changesets WHERE attempt_id = ?', [attemptId])[0];
+    return row ? parseChangeset(row) : null;
+  }
+
+  /**
+   * 按身份读取 Confirmation。
+   * @param confirmationId - confirmation ID
+   * @returns Confirmation，不存在时为 null
+   */
+  private getConfirmation(confirmationId: string): AgentConfirmationRecord | null {
+    const row = this.database.select<ConfirmationRow>('SELECT * FROM chat_agent_confirmations WHERE confirmation_id = ?', [confirmationId])[0];
+    return row ? parseConfirmation(row) : null;
+  }
+
+  /**
+   * 按身份读取 Commit Journal。
+   * @param journalId - journal ID
+   * @returns Commit Journal，不存在时为 null
+   */
+  private getCommitJournal(journalId: string): AgentCommitJournalRecord | null {
+    const row = this.database.select<CommitJournalRow>('SELECT * FROM chat_agent_commit_journals WHERE journal_id = ?', [journalId])[0];
+    return row ? parseCommitJournal(row) : null;
   }
 
   /**
@@ -1487,11 +1807,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       const task = this.getTask(input.taskId);
       if (!task) throw new AgentStoreProtocolError('task_not_found', 'Task does not exist');
       if (task.recordState !== 'active') throw new AgentStoreProtocolError('task_tombstoned', 'Task is tombstoned');
-      if (
-        input.executionPlanSnapshot.planHash !== input.executionPlanSnapshotHash ||
-        task.contractSnapshot.mode !== 'read' ||
-        !Number.isFinite(Date.parse(input.occurredAt))
-      ) {
+      if (input.executionPlanSnapshot.planHash !== input.executionPlanSnapshotHash || !Number.isFinite(Date.parse(input.occurredAt))) {
         throw new AgentStoreProtocolError('authorization_input_invalid', 'Authorization envelope or plan hash is invalid');
       }
       const planValidation = validateExecutionPlanSnapshot(task.contractSnapshot, input.executionPlanSnapshot);
@@ -1545,15 +1861,15 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         throw new AgentStoreProtocolError('authorization_aggregate_invalid', 'Authorization plan does not match its active Checkpoint');
       }
       if (
-        !canTransitionTask('created', 'planning', { mode: 'read' }) ||
+        !canTransitionTask('created', 'planning', { mode: task.contractSnapshot.mode }) ||
         !canTransitionTask('planning', 'authorized', {
-          mode: 'read',
+          mode: task.contractSnapshot.mode,
           executionPlanSnapshot: planValidation.plan,
           contractSnapshot: task.contractSnapshot
         }) ||
-        !canTransitionTask('authorized', 'queued', { mode: 'read', queuePhase: 'start' })
+        !canTransitionTask('authorized', 'queued', { mode: task.contractSnapshot.mode, queuePhase: 'start' })
       ) {
-        throw new AgentStoreProtocolError('authorization_protocol_invalid', 'Read authorization transitions are not legal');
+        throw new AgentStoreProtocolError('authorization_protocol_invalid', 'Authorization transitions are not legal');
       }
 
       const planningUpdate = this.database.execute(
@@ -1765,6 +2081,876 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       }
       return Object.freeze({ task: updatedTask, attempt: updatedAttempt });
     });
+  }
+
+  /** @inheritdoc */
+  prepareChangeset(input: PrepareAgentChangesetInput): AgentChangesetRecord {
+    const validation = validateChangesetSnapshot(input.snapshot, input.snapshotHash);
+    if (!validation.ok || !Number.isFinite(Date.parse(input.occurredAt))) {
+      throw new AgentStoreProtocolError(
+        validation.ok ? 'changeset_input_invalid' : validation.error.details?.reason?.toString() ?? 'changeset_snapshot_invalid',
+        validation.ok ? 'Changeset timestamp is invalid' : validation.error.message,
+        'commit_validation'
+      );
+    }
+    const { snapshot } = validation;
+    return this.database.transaction((): AgentChangesetRecord => {
+      const existingByAttempt = this.getAttemptChangeset(snapshot.attemptId);
+      const existingById = this.getChangeset(snapshot.changesetId);
+      const existing = existingByAttempt ?? existingById;
+      if (existing) {
+        if (
+          existing.snapshot.changesetId === snapshot.changesetId &&
+          existing.snapshot.attemptId === snapshot.attemptId &&
+          existing.snapshotHash === input.snapshotHash
+        ) {
+          return existing;
+        }
+        throw new AgentStoreProtocolError('changeset_replay_conflict', 'Attempt already owns a different immutable changeset', 'commit_validation');
+      }
+
+      const task = this.getTask(snapshot.taskId);
+      const attempt = this.getAttempt(snapshot.attemptId);
+      if (
+        !task ||
+        !attempt ||
+        task.recordState !== 'active' ||
+        task.contractSnapshot.mode !== 'write' ||
+        task.status !== 'running' ||
+        task.currentAttemptId !== snapshot.attemptId ||
+        !task.executionPlanSnapshot ||
+        !task.executionPlanSnapshotHash
+      ) {
+        throw new AgentStoreProtocolError('changeset_task_invalid', 'Changeset requires the current running write Task', 'commit_validation');
+      }
+      if (
+        attempt.taskId !== task.taskId ||
+        attempt.status !== 'running' ||
+        attempt.planHash !== task.executionPlanSnapshotHash ||
+        snapshot.planHash !== task.executionPlanSnapshotHash ||
+        snapshot.agentId !== task.agentId
+      ) {
+        throw new AgentStoreProtocolError('changeset_attempt_mismatch', 'Changeset does not match the current Attempt or frozen plan', 'commit_validation');
+      }
+      if (attempt.currentRuntimeId !== snapshot.runtimeId) {
+        throw new AgentStoreProtocolError('changeset_runtime_mismatch', 'Changeset Runtime does not own the current Attempt', 'commit_validation');
+      }
+      if (
+        task.executionPlanSnapshot.commitPolicy.mode !== 'staged' ||
+        snapshot.resourceScopes.some((scope): boolean => !task.executionPlanSnapshot?.resourceScopes.includes(scope))
+      ) {
+        throw new AgentStoreProtocolError('changeset_scope_invalid', 'Changeset exceeds the frozen staged-write resource scopes', 'resource_validation');
+      }
+
+      const insert = this.database.execute(
+        `INSERT INTO chat_agent_changesets (
+          changeset_id, task_id, attempt_id, agent_id, runtime_id, plan_hash,
+          snapshot_json, snapshot_hash, base_revision, diff_hash, operation_set_hash,
+          status, record_state, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          snapshot.changesetId,
+          snapshot.taskId,
+          snapshot.attemptId,
+          snapshot.agentId,
+          snapshot.runtimeId,
+          snapshot.planHash,
+          JSON.stringify(snapshot),
+          input.snapshotHash,
+          snapshot.baseRevision,
+          snapshot.diffHash,
+          snapshot.operationSetHash,
+          'prepared',
+          'active',
+          snapshot.createdAt,
+          input.occurredAt
+        ]
+      );
+      if (insert.changes !== 1) {
+        throw new AgentStoreProtocolError('changeset_write_failed', 'Changeset fact was not persisted', 'commit_validation');
+      }
+      this.appendEvent(
+        'task',
+        task.taskId,
+        'changeset.prepared',
+        { changesetId: snapshot.changesetId, snapshotHash: input.snapshotHash, diffHash: snapshot.diffHash },
+        input.occurredAt,
+        'child',
+        { attemptId: attempt.attemptId, runtimeId: attempt.currentRuntimeId }
+      );
+      const prepared = this.getChangeset(snapshot.changesetId);
+      if (!prepared) throw new AgentStoreProtocolError('changeset_projection_missing', 'Prepared Changeset projection is missing');
+      return prepared;
+    });
+  }
+
+  /** @inheritdoc */
+  createConfirmation(input: CreateAgentConfirmationInput): AgentConfirmationRecord {
+    const validation = validateConfirmationRequestSnapshot(input.request, input.requestHash);
+    if (!validation.ok || !Number.isFinite(Date.parse(input.occurredAt))) {
+      throw new AgentStoreProtocolError(
+        validation.ok ? 'confirmation_input_invalid' : validation.error.details?.reason?.toString() ?? 'confirmation_request_invalid',
+        validation.ok ? 'Confirmation timestamp is invalid' : validation.error.message,
+        'confirmation'
+      );
+    }
+    const request = validation.snapshot;
+    return this.database.transaction((): AgentConfirmationRecord => {
+      const existingRow = this.database.select<ConfirmationRow>('SELECT * FROM chat_agent_confirmations WHERE changeset_id = ?', [request.changesetId])[0];
+      if (existingRow) {
+        const existing = parseConfirmation(existingRow);
+        if (existing.confirmationId === request.confirmationId && existing.requestHash === input.requestHash) return existing;
+        throw new AgentStoreProtocolError('confirmation_replay_conflict', 'Changeset already owns a different confirmation request', 'confirmation');
+      }
+      if (this.getConfirmation(request.confirmationId)) {
+        throw new AgentStoreProtocolError('confirmation_replay_conflict', 'Confirmation identity is already bound', 'confirmation');
+      }
+
+      const changeset = this.getChangeset(request.changesetId);
+      const task = changeset ? this.getTask(changeset.snapshot.taskId) : null;
+      const attempt = changeset ? this.getAttempt(changeset.snapshot.attemptId) : null;
+      if (
+        !changeset ||
+        !task ||
+        !attempt ||
+        changeset.status !== 'prepared' ||
+        changeset.recordState !== 'active' ||
+        task.status !== 'running' ||
+        task.contractSnapshot.mode !== 'write' ||
+        task.currentAttemptId !== attempt.attemptId ||
+        attempt.status !== 'running'
+      ) {
+        throw new AgentStoreProtocolError(
+          'confirmation_state_invalid',
+          'Confirmation requires a prepared changeset from the running write Attempt',
+          'confirmation'
+        );
+      }
+      const { snapshot } = changeset;
+      if (
+        request.sessionId !== task.sessionId ||
+        request.turnId !== task.turnId ||
+        request.taskId !== task.taskId ||
+        request.attemptId !== attempt.attemptId ||
+        request.agentId !== task.agentId ||
+        request.runtimeId !== attempt.currentRuntimeId ||
+        request.toolCallId !== task.toolCallId ||
+        request.planHash !== snapshot.planHash ||
+        request.baseRevision !== snapshot.baseRevision ||
+        request.diffHash !== snapshot.diffHash ||
+        request.operationSetHash !== snapshot.operationSetHash ||
+        hashAgentPayload(request.resourceScopes) !== hashAgentPayload(snapshot.resourceScopes) ||
+        request.unifiedDiffReference !== snapshot.diffReference
+      ) {
+        throw new AgentStoreProtocolError(
+          'confirmation_integrity_invalid',
+          'Confirmation request does not exactly bind the persisted changeset',
+          'confirmation'
+        );
+      }
+      if (!canTransitionTask('running', 'waiting_confirmation', { mode: 'write' })) {
+        throw new AgentStoreProtocolError('confirmation_transition_invalid', 'Write Task cannot enter confirmation', 'confirmation');
+      }
+
+      const insert = this.database.execute(
+        `INSERT INTO chat_agent_confirmations (
+          confirmation_id, changeset_id, request_json, request_hash, status,
+          version, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [request.confirmationId, request.changesetId, JSON.stringify(request), input.requestHash, 'pending', 1, request.createdAt, input.occurredAt]
+      );
+      const changesetUpdate = this.database.execute(
+        `UPDATE chat_agent_changesets
+         SET status = ?, confirmation_id = ?, updated_at = ?
+         WHERE changeset_id = ? AND status = ? AND confirmation_id IS NULL AND record_state = ?`,
+        ['awaiting_confirmation', request.confirmationId, input.occurredAt, request.changesetId, 'prepared', 'active']
+      );
+      const taskUpdate = this.database.execute(
+        `UPDATE chat_agent_tasks
+         SET status = ?, updated_at = ?
+         WHERE task_id = ? AND status = ? AND current_attempt_id = ? AND record_state = ?`,
+        ['waiting_confirmation', input.occurredAt, task.taskId, 'running', attempt.attemptId, 'active']
+      );
+      if (insert.changes !== 1 || changesetUpdate.changes !== 1 || taskUpdate.changes !== 1) {
+        throw new AgentStoreProtocolError('confirmation_write_conflict', 'Confirmation projections changed concurrently', 'confirmation');
+      }
+      const links = { attemptId: attempt.attemptId, runtimeId: attempt.currentRuntimeId };
+      this.appendEvent('task', task.taskId, 'task.status_changed', { from: 'running', to: 'waiting_confirmation' }, input.occurredAt, 'coordinator', links);
+      this.appendEvent(
+        'task',
+        task.taskId,
+        'confirmation.requested',
+        { requestId: request.confirmationId, requestHash: input.requestHash, diffHash: request.diffHash, version: 1 },
+        input.occurredAt,
+        'coordinator',
+        links
+      );
+      const confirmation = this.getConfirmation(request.confirmationId);
+      if (!confirmation) throw new AgentStoreProtocolError('confirmation_projection_missing', 'Confirmation projection is missing');
+      return confirmation;
+    });
+  }
+
+  /** @inheritdoc */
+  resolveConfirmation(input: ResolveAgentConfirmationInput): AgentConfirmationRecord {
+    return this.database.transaction((): AgentConfirmationRecord => {
+      if (
+        (input.decision !== 'approved' && input.decision !== 'rejected') ||
+        !Number.isInteger(input.expectedVersion) ||
+        input.expectedVersion <= 0 ||
+        !Number.isFinite(Date.parse(input.occurredAt))
+      ) {
+        throw new AgentStoreProtocolError('confirmation_resolution_invalid', 'Confirmation decision envelope is invalid', 'confirmation');
+      }
+      const confirmation = this.getConfirmation(input.confirmationId);
+      if (!confirmation) throw new AgentStoreProtocolError('confirmation_not_found', 'Confirmation does not exist', 'confirmation');
+      if (confirmation.status === input.decision && confirmation.decision === input.decision && confirmation.version === input.expectedVersion + 1) {
+        return confirmation;
+      }
+      if (confirmation.status !== 'pending' || confirmation.version !== input.expectedVersion) {
+        throw new AgentStoreProtocolError('confirmation_resolution_conflict', 'Confirmation CAS decision conflicts with persisted state', 'confirmation');
+      }
+      const changeset = this.getChangeset(confirmation.changesetId);
+      const task = changeset ? this.getTask(changeset.snapshot.taskId) : null;
+      const attempt = changeset ? this.getAttempt(changeset.snapshot.attemptId) : null;
+      if (
+        !changeset ||
+        !task ||
+        !attempt ||
+        changeset.status !== 'awaiting_confirmation' ||
+        changeset.confirmationId !== confirmation.confirmationId ||
+        task.status !== 'waiting_confirmation' ||
+        task.currentAttemptId !== attempt.attemptId ||
+        attempt.status !== 'running'
+      ) {
+        throw new AgentStoreProtocolError('confirmation_resolution_state_invalid', 'Confirmation aggregate is no longer eligible for decision', 'confirmation');
+      }
+      const nextVersion = confirmation.version + 1;
+      const confirmationUpdate = this.database.execute(
+        `UPDATE chat_agent_confirmations
+         SET status = ?, version = ?, decision_json = ?, resolved_at = ?, updated_at = ?
+         WHERE confirmation_id = ? AND status = ? AND version = ?`,
+        [
+          input.decision,
+          nextVersion,
+          JSON.stringify({ decision: input.decision, version: nextVersion }),
+          input.occurredAt,
+          input.occurredAt,
+          confirmation.confirmationId,
+          'pending',
+          input.expectedVersion
+        ]
+      );
+      const changesetUpdate = this.database.execute(
+        `UPDATE chat_agent_changesets
+         SET status = ?, updated_at = ?
+         WHERE changeset_id = ? AND status = ? AND confirmation_id = ?`,
+        [input.decision, input.occurredAt, changeset.snapshot.changesetId, 'awaiting_confirmation', confirmation.confirmationId]
+      );
+      if (confirmationUpdate.changes !== 1 || changesetUpdate.changes !== 1) {
+        throw new AgentStoreProtocolError('confirmation_resolution_conflict', 'Confirmation decision lost its CAS', 'confirmation');
+      }
+      this.appendEvent(
+        'task',
+        task.taskId,
+        'confirmation.resolved',
+        { requestId: confirmation.confirmationId, decision: input.decision, diffHash: changeset.snapshot.diffHash, version: nextVersion },
+        input.occurredAt,
+        'user',
+        { attemptId: attempt.attemptId, runtimeId: attempt.currentRuntimeId }
+      );
+      const resolved = this.getConfirmation(confirmation.confirmationId);
+      if (!resolved) throw new AgentStoreProtocolError('confirmation_projection_missing', 'Resolved confirmation is missing');
+      return resolved;
+    });
+  }
+
+  /** @inheritdoc */
+  revokeConfirmation(confirmationId: string, reason: string, occurredAt: string): AgentConfirmationRecord {
+    return this.database.transaction((): AgentConfirmationRecord => {
+      if (!reason.trim() || !Number.isFinite(Date.parse(occurredAt))) {
+        throw new AgentStoreProtocolError('confirmation_revoke_invalid', 'Confirmation revocation envelope is invalid', 'confirmation');
+      }
+      const confirmation = this.getConfirmation(confirmationId);
+      if (!confirmation) throw new AgentStoreProtocolError('confirmation_not_found', 'Confirmation does not exist', 'confirmation');
+      if (confirmation.status === 'revoked') return confirmation;
+      if (confirmation.status !== 'pending') {
+        throw new AgentStoreProtocolError('confirmation_revoke_conflict', 'Only a pending confirmation can be revoked', 'confirmation');
+      }
+      const changeset = this.getChangeset(confirmation.changesetId);
+      const task = changeset ? this.getTask(changeset.snapshot.taskId) : null;
+      if (!changeset || !task || changeset.status !== 'awaiting_confirmation') {
+        throw new AgentStoreProtocolError('confirmation_revoke_state_invalid', 'Confirmation aggregate is not revocable', 'confirmation');
+      }
+      const nextVersion = confirmation.version + 1;
+      const confirmationUpdate = this.database.execute(
+        `UPDATE chat_agent_confirmations
+         SET status = ?, version = ?, resolved_at = ?, updated_at = ?
+         WHERE confirmation_id = ? AND status = ? AND version = ?`,
+        ['revoked', nextVersion, occurredAt, occurredAt, confirmation.confirmationId, 'pending', confirmation.version]
+      );
+      const changesetUpdate = this.database.execute(
+        `UPDATE chat_agent_changesets
+         SET status = ?, updated_at = ?
+         WHERE changeset_id = ? AND status = ? AND confirmation_id = ?`,
+        ['revoked', occurredAt, changeset.snapshot.changesetId, 'awaiting_confirmation', confirmation.confirmationId]
+      );
+      if (confirmationUpdate.changes !== 1 || changesetUpdate.changes !== 1) {
+        throw new AgentStoreProtocolError('confirmation_revoke_conflict', 'Confirmation revocation lost its CAS', 'confirmation');
+      }
+      this.appendEvent(
+        'task',
+        task.taskId,
+        'confirmation.invalidated',
+        { requestId: confirmation.confirmationId, reason: reason.trim(), version: nextVersion },
+        occurredAt,
+        'coordinator',
+        { attemptId: changeset.snapshot.attemptId, runtimeId: changeset.snapshot.runtimeId }
+      );
+      const revoked = this.getConfirmation(confirmation.confirmationId);
+      if (!revoked) throw new AgentStoreProtocolError('confirmation_projection_missing', 'Revoked confirmation is missing');
+      return revoked;
+    });
+  }
+
+  /** @inheritdoc */
+  queueCommit(input: QueueAgentCommitInput): AgentTaskRecord {
+    return this.database.transaction((): AgentTaskRecord => {
+      if (!Number.isInteger(input.confirmationVersion) || input.confirmationVersion <= 0 || !Number.isFinite(Date.parse(input.occurredAt))) {
+        throw new AgentStoreProtocolError('commit_queue_input_invalid', 'Commit queue envelope is invalid', 'commit_validation');
+      }
+      const task = this.getTask(input.taskId);
+      const confirmation = this.getConfirmation(input.confirmationId);
+      const changeset = confirmation ? this.getChangeset(confirmation.changesetId) : null;
+      if (
+        task?.status === 'queued' &&
+        task.queuePhase === 'commit' &&
+        confirmation?.status === 'approved' &&
+        confirmation.version === input.confirmationVersion &&
+        changeset?.snapshot.taskId === task.taskId
+      ) {
+        return task;
+      }
+      if (
+        !task ||
+        !confirmation ||
+        !changeset ||
+        task.recordState !== 'active' ||
+        task.contractSnapshot.mode !== 'write' ||
+        task.status !== 'waiting_confirmation' ||
+        task.currentAttemptId !== changeset.snapshot.attemptId ||
+        confirmation.status !== 'approved' ||
+        confirmation.version !== input.confirmationVersion ||
+        changeset.status !== 'approved' ||
+        changeset.confirmationId !== confirmation.confirmationId ||
+        changeset.snapshot.taskId !== task.taskId ||
+        !canTransitionTask('waiting_confirmation', 'queued', { mode: 'write', queuePhase: 'commit' })
+      ) {
+        throw new AgentStoreProtocolError('commit_queue_state_invalid', 'Approved confirmation does not authorize this Task commit', 'commit_validation');
+      }
+      const update = this.database.execute(
+        `UPDATE chat_agent_tasks
+         SET status = ?, queue_phase = ?, updated_at = ?
+         WHERE task_id = ? AND status = ? AND current_attempt_id = ? AND record_state = ?`,
+        ['queued', 'commit', input.occurredAt, task.taskId, 'waiting_confirmation', changeset.snapshot.attemptId, 'active']
+      );
+      if (update.changes !== 1) throw new AgentStoreProtocolError('commit_queue_conflict', 'Commit queue projection changed concurrently', 'commit_validation');
+      const links = { attemptId: changeset.snapshot.attemptId, runtimeId: changeset.snapshot.runtimeId };
+      this.appendEvent(
+        'task',
+        task.taskId,
+        'task.status_changed',
+        { from: 'waiting_confirmation', to: 'queued', queuePhase: 'commit' },
+        input.occurredAt,
+        'coordinator',
+        links
+      );
+      this.appendEvent('task', task.taskId, 'task.queued', { queuePhase: 'commit' }, input.occurredAt, 'coordinator', links);
+      const queued = this.getTask(task.taskId);
+      if (!queued) throw new AgentStoreProtocolError('task_projection_missing', 'Commit-queued Task is missing');
+      return queued;
+    });
+  }
+
+  /** @inheritdoc */
+  createCommitJournal(input: CreateAgentCommitJournalInput): AgentCommitJournalRecord {
+    const validation = validateCommitIntentSnapshot(input.intent, input.intentHash);
+    if (!validation.ok || !Number.isInteger(input.confirmationVersion) || input.confirmationVersion <= 0 || !Number.isFinite(Date.parse(input.occurredAt))) {
+      throw new AgentStoreProtocolError(
+        validation.ok ? 'commit_journal_input_invalid' : validation.error.details?.reason?.toString() ?? 'commit_intent_invalid',
+        validation.ok ? 'Commit journal envelope is invalid' : validation.error.message,
+        'commit_validation'
+      );
+    }
+    const intent = validation.snapshot;
+    return this.database.transaction((): AgentCommitJournalRecord => {
+      const existingById = this.getCommitJournal(input.journalId);
+      const existingRow = this.database.select<CommitJournalRow>('SELECT * FROM chat_agent_commit_journals WHERE changeset_id = ?', [input.changesetId])[0];
+      const existing = existingById ?? (existingRow ? parseCommitJournal(existingRow) : null);
+      if (existing) {
+        if (
+          existing.journalId === input.journalId &&
+          existing.changesetId === input.changesetId &&
+          existing.confirmationId === input.confirmationId &&
+          existing.confirmationVersion === input.confirmationVersion &&
+          existing.intentHash === input.intentHash
+        ) {
+          return existing;
+        }
+        throw new AgentStoreProtocolError('commit_journal_replay_conflict', 'Changeset already owns a different commit journal', 'commit_validation');
+      }
+
+      const changeset = this.getChangeset(input.changesetId);
+      const confirmation = this.getConfirmation(input.confirmationId);
+      const task = changeset ? this.getTask(changeset.snapshot.taskId) : null;
+      const attempt = changeset ? this.getAttempt(changeset.snapshot.attemptId) : null;
+      if (
+        !changeset ||
+        !confirmation ||
+        !task ||
+        !attempt ||
+        task.recordState !== 'active' ||
+        task.contractSnapshot.mode !== 'write' ||
+        task.status !== 'queued' ||
+        task.queuePhase !== 'commit' ||
+        task.unfinishedJournalCount !== 0 ||
+        task.currentAttemptId !== attempt.attemptId ||
+        attempt.status !== 'running' ||
+        changeset.status !== 'approved' ||
+        changeset.confirmationId !== confirmation.confirmationId ||
+        confirmation.status !== 'approved' ||
+        confirmation.version !== input.confirmationVersion
+      ) {
+        throw new AgentStoreProtocolError('commit_journal_state_invalid', 'Commit journal requires one approved queued write aggregate', 'commit_validation');
+      }
+      if (
+        input.confirmationVersion !== intent.confirmationVersion ||
+        input.confirmationId !== intent.confirmationId ||
+        intent.confirmationId !== confirmation.confirmationId ||
+        intent.changesetSnapshotHash !== changeset.snapshotHash ||
+        intent.planHash !== changeset.snapshot.planHash ||
+        intent.planHash !== task.executionPlanSnapshotHash ||
+        intent.resultDraft.taskId !== task.taskId ||
+        intent.resultDraft.agentId !== task.agentId ||
+        intent.resultDraft.attemptId !== attempt.attemptId ||
+        hashAgentPayload(intent.operations) !== hashAgentPayload(changeset.snapshot.operations) ||
+        intent.resultDraft.criteria.length !== task.contractSnapshot.acceptanceCriteria.length ||
+        !intent.resultDraft.criteria.every((criterion, index): boolean => criterion.criterionIndex === index) ||
+        !canTransitionTask('queued', 'committing', { mode: 'write', queuePhase: 'commit' })
+      ) {
+        throw new AgentStoreProtocolError(
+          'commit_intent_binding_invalid',
+          'Commit intent does not exactly bind the approved immutable facts',
+          'commit_validation'
+        );
+      }
+
+      const insert = this.database.execute(
+        `INSERT INTO chat_agent_commit_journals (
+          journal_id, task_id, attempt_id, changeset_id, confirmation_id,
+          confirmation_version, plan_hash, intent_json, intent_hash, status,
+          operation_progress_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          input.journalId,
+          task.taskId,
+          attempt.attemptId,
+          changeset.snapshot.changesetId,
+          confirmation.confirmationId,
+          confirmation.version,
+          intent.planHash,
+          JSON.stringify(intent),
+          input.intentHash,
+          'created',
+          '[]',
+          intent.createdAt,
+          input.occurredAt
+        ]
+      );
+      const changesetUpdate = this.database.execute(
+        `UPDATE chat_agent_changesets
+         SET status = ?, updated_at = ?
+         WHERE changeset_id = ? AND status = ? AND confirmation_id = ?`,
+        ['committing', input.occurredAt, changeset.snapshot.changesetId, 'approved', confirmation.confirmationId]
+      );
+      const taskUpdate = this.database.execute(
+        `UPDATE chat_agent_tasks
+         SET status = ?, queue_phase = NULL,
+             unfinished_journal_count = unfinished_journal_count + 1, updated_at = ?
+         WHERE task_id = ? AND status = ? AND queue_phase = ?
+           AND unfinished_journal_count = 0 AND current_attempt_id = ? AND record_state = ?`,
+        ['committing', input.occurredAt, task.taskId, 'queued', 'commit', attempt.attemptId, 'active']
+      );
+      if (insert.changes !== 1 || changesetUpdate.changes !== 1 || taskUpdate.changes !== 1) {
+        throw new AgentStoreProtocolError('commit_journal_write_conflict', 'Commit journal projections changed concurrently', 'commit_validation');
+      }
+      const links = { attemptId: attempt.attemptId, runtimeId: attempt.currentRuntimeId };
+      this.appendEvent('task', task.taskId, 'task.status_changed', { from: 'queued', to: 'committing' }, input.occurredAt, 'coordinator', links);
+      this.appendEvent(
+        'task',
+        task.taskId,
+        'commit.journal_created',
+        {
+          journalId: input.journalId,
+          changesetId: changeset.snapshot.changesetId,
+          intentHash: input.intentHash,
+          confirmationVersion: confirmation.version
+        },
+        input.occurredAt,
+        'coordinator',
+        links
+      );
+      const journal = this.getCommitJournal(input.journalId);
+      if (!journal) throw new AgentStoreProtocolError('commit_journal_projection_missing', 'Created commit journal is missing');
+      return journal;
+    });
+  }
+
+  /** @inheritdoc */
+  markJournalApplying(input: MarkAgentJournalInput): AgentCommitJournalRecord {
+    return this.database.transaction((): AgentCommitJournalRecord => {
+      if (!Number.isFinite(Date.parse(input.occurredAt))) {
+        throw new AgentStoreProtocolError('commit_journal_input_invalid', 'Commit journal timestamp is invalid', 'commit');
+      }
+      const journal = this.getCommitJournal(input.journalId);
+      if (!journal) throw new AgentStoreProtocolError('commit_journal_not_found', 'Commit journal does not exist', 'commit');
+      if (journal.status === 'applying') return journal;
+      if (journal.status !== 'created') {
+        throw new AgentStoreProtocolError('commit_journal_state_invalid', 'Commit journal cannot enter applying', 'commit');
+      }
+      const update = this.database.execute(
+        `UPDATE chat_agent_commit_journals
+         SET status = ?, updated_at = ?
+         WHERE journal_id = ? AND status = ?`,
+        ['applying', input.occurredAt, journal.journalId, 'created']
+      );
+      if (update.changes !== 1) throw new AgentStoreProtocolError('commit_journal_update_conflict', 'Commit journal changed concurrently', 'commit');
+      const applying = this.getCommitJournal(journal.journalId);
+      if (!applying) throw new AgentStoreProtocolError('commit_journal_projection_missing', 'Applying journal is missing');
+      return applying;
+    });
+  }
+
+  /** @inheritdoc */
+  markJournalOperation(input: MarkAgentJournalOperationInput): AgentCommitJournalRecord {
+    return this.database.transaction((): AgentCommitJournalRecord => {
+      if (!Number.isFinite(Date.parse(input.occurredAt))) {
+        throw new AgentStoreProtocolError('commit_operation_input_invalid', 'Commit operation timestamp is invalid', 'commit');
+      }
+      const journal = this.getCommitJournal(input.journalId);
+      if (!journal) throw new AgentStoreProtocolError('commit_journal_not_found', 'Commit journal does not exist', 'commit');
+      const operation = journal.intent.operations.find((entry): boolean => entry.operationId === input.operationId);
+      if (!operation || operation.targetContentHash !== input.targetContentHash) {
+        throw new AgentStoreProtocolError(
+          'commit_operation_integrity_invalid',
+          'Applied operation is outside the immutable commit intent',
+          'commit_validation'
+        );
+      }
+      if (journal.appliedOperationIds.includes(input.operationId)) return journal;
+      if (journal.status !== 'applying') {
+        throw new AgentStoreProtocolError('commit_operation_state_invalid', 'Commit journal is not applying external mutations', 'commit');
+      }
+      const nextProgress: JournalOperationProgress[] = [
+        ...journal.appliedOperationIds.map((operationId): JournalOperationProgress => {
+          const applied = journal.intent.operations.find((entry): boolean => entry.operationId === operationId);
+          if (!applied) throw new AgentStoreProtocolError('journal_progress_invalid', 'Persisted journal progress is outside its intent');
+          return { operationId, targetContentHash: applied.targetContentHash };
+        }),
+        { operationId: operation.operationId, targetContentHash: operation.targetContentHash }
+      ];
+      const update = this.database.execute(
+        `UPDATE chat_agent_commit_journals
+         SET operation_progress_json = ?, updated_at = ?
+         WHERE journal_id = ? AND status = ? AND operation_progress_json = ?`,
+        [JSON.stringify(nextProgress), input.occurredAt, journal.journalId, 'applying', JSON.stringify(nextProgress.slice(0, -1))]
+      );
+      if (update.changes !== 1) throw new AgentStoreProtocolError('commit_operation_conflict', 'Commit operation progress changed concurrently', 'commit');
+      const attempt = this.getAttempt(journal.attemptId);
+      this.appendEvent(
+        'task',
+        journal.taskId,
+        'commit.mutation_applied',
+        { journalId: journal.journalId, operationId: operation.operationId, targetHash: operation.targetContentHash },
+        input.occurredAt,
+        'coordinator',
+        { attemptId: journal.attemptId, ...(attempt ? { runtimeId: attempt.currentRuntimeId } : {}) }
+      );
+      const updated = this.getCommitJournal(journal.journalId);
+      if (!updated) throw new AgentStoreProtocolError('commit_journal_projection_missing', 'Updated commit journal is missing');
+      return updated;
+    });
+  }
+
+  /** @inheritdoc */
+  markJournalApplied(input: MarkAgentJournalInput): AgentCommitJournalRecord {
+    return this.database.transaction((): AgentCommitJournalRecord => {
+      if (!Number.isFinite(Date.parse(input.occurredAt))) {
+        throw new AgentStoreProtocolError('commit_journal_input_invalid', 'Commit journal timestamp is invalid', 'commit');
+      }
+      const journal = this.getCommitJournal(input.journalId);
+      if (!journal) throw new AgentStoreProtocolError('commit_journal_not_found', 'Commit journal does not exist', 'commit');
+      if (journal.status === 'applied') return journal;
+      if (journal.status !== 'applying' || journal.appliedOperationIds.length !== journal.intent.operations.length) {
+        throw new AgentStoreProtocolError(
+          'commit_journal_incomplete',
+          'All immutable operations must be recorded before journal apply completes',
+          'commit_validation'
+        );
+      }
+      const update = this.database.execute(
+        `UPDATE chat_agent_commit_journals
+         SET status = ?, updated_at = ?
+         WHERE journal_id = ? AND status = ?`,
+        ['applied', input.occurredAt, journal.journalId, 'applying']
+      );
+      if (update.changes !== 1) throw new AgentStoreProtocolError('commit_journal_update_conflict', 'Commit journal changed concurrently', 'commit');
+      const applied = this.getCommitJournal(journal.journalId);
+      if (!applied) throw new AgentStoreProtocolError('commit_journal_projection_missing', 'Applied commit journal is missing');
+      return applied;
+    });
+  }
+
+  /** @inheritdoc */
+  finalizeCommit(input: FinalizeAgentCommitInput): AgentCheckpointRecord {
+    return this.database.transaction((): AgentCheckpointRecord => {
+      if (!/^[a-f0-9]{64}$/.test(input.finalHash) || !Number.isFinite(Date.parse(input.occurredAt))) {
+        throw new AgentStoreProtocolError('commit_finalize_input_invalid', 'Commit finalization envelope is invalid', 'commit_validation');
+      }
+      const journal = this.getCommitJournal(input.journalId);
+      if (!journal) throw new AgentStoreProtocolError('commit_journal_not_found', 'Commit journal does not exist', 'commit_validation');
+      const task = this.getTask(journal.taskId);
+      const attempt = this.getAttempt(journal.attemptId);
+      const changeset = this.getChangeset(journal.changesetId);
+      const confirmation = this.getConfirmation(journal.confirmationId);
+      const checkpoint = task ? this.getCheckpoint(task.checkpointId) : null;
+      if (!task || !attempt || !changeset || !confirmation || !checkpoint) {
+        throw new AgentStoreProtocolError('commit_finalize_target_missing', 'Commit aggregate is incomplete', 'commit_validation');
+      }
+      if (journal.status === 'finalized') {
+        if (task.resultHash === input.resultHash && hashAgentPayload(task.result) === input.resultHash) return checkpoint;
+        throw new AgentStoreProtocolError('commit_finalize_replay_conflict', 'Finalized journal conflicts with the supplied result', 'commit_validation');
+      }
+      const resultValidation = validateChatAgentResult(input.result);
+      if (!resultValidation.ok) {
+        throw new AgentStoreProtocolError(
+          resultValidation.error.details?.reason?.toString() ?? 'commit_result_invalid',
+          resultValidation.error.message,
+          'commit_validation'
+        );
+      }
+      const { result } = resultValidation;
+      const expectedChangeset = {
+        changesetId: changeset.snapshot.changesetId,
+        baseRevision: changeset.snapshot.baseRevision,
+        diffHash: changeset.snapshot.diffHash,
+        operationSetHash: changeset.snapshot.operationSetHash,
+        planHash: changeset.snapshot.planHash
+      };
+      const draftProjection = {
+        summary: result.summary,
+        ...(result.output === undefined ? {} : { output: result.output }),
+        criteria: result.completion.criteria,
+        warnings: result.warnings,
+        usage: result.usage
+      };
+      const frozenDraftProjection = {
+        summary: journal.intent.resultDraft.summary,
+        ...(journal.intent.resultDraft.output === undefined ? {} : { output: journal.intent.resultDraft.output }),
+        criteria: journal.intent.resultDraft.criteria,
+        warnings: journal.intent.resultDraft.warnings,
+        usage: journal.intent.resultDraft.usage
+      };
+      if (
+        journal.status !== 'applied' ||
+        task.status !== 'committing' ||
+        task.unfinishedJournalCount !== 1 ||
+        task.currentAttemptId !== attempt.attemptId ||
+        attempt.status !== 'running' ||
+        changeset.status !== 'committing' ||
+        confirmation.status !== 'approved' ||
+        confirmation.version !== journal.confirmationVersion ||
+        result.executionStatus !== 'completed' ||
+        result.error !== undefined ||
+        result.taskId !== task.taskId ||
+        result.agentId !== task.agentId ||
+        result.attemptId !== attempt.attemptId ||
+        hashAgentPayload(result) !== input.resultHash ||
+        !hasExactCriteria(result, task.contractSnapshot.acceptanceCriteria) ||
+        hashAgentPayload(result.changeset) !== hashAgentPayload(expectedChangeset) ||
+        hashAgentPayload(draftProjection) !== hashAgentPayload(frozenDraftProjection) ||
+        result.artifacts.length !== 0 ||
+        !canTransitionTask('committing', 'completed', { mode: 'write' })
+      ) {
+        throw new AgentStoreProtocolError(
+          'commit_finalize_integrity_invalid',
+          'Final result does not exactly bind the applied commit facts',
+          'commit_validation'
+        );
+      }
+
+      const attemptUpdate = this.database.execute(
+        `UPDATE chat_agent_attempts
+         SET status = ?, finished_at = ?
+         WHERE attempt_id = ? AND task_id = ? AND status = ?`,
+        ['completed', input.occurredAt, attempt.attemptId, task.taskId, 'running']
+      );
+      const taskUpdate = this.database.execute(
+        `UPDATE chat_agent_tasks
+         SET status = ?, result_json = ?, result_hash = ?,
+             unfinished_journal_count = unfinished_journal_count - 1, updated_at = ?
+         WHERE task_id = ? AND status = ? AND current_attempt_id = ?
+           AND result_hash IS NULL AND unfinished_journal_count = 1 AND record_state = ?`,
+        ['completed', JSON.stringify(result), input.resultHash, input.occurredAt, task.taskId, 'committing', attempt.attemptId, 'active']
+      );
+      const changesetUpdate = this.database.execute(
+        `UPDATE chat_agent_changesets
+         SET status = ?, updated_at = ?
+         WHERE changeset_id = ? AND status = ?`,
+        ['committed', input.occurredAt, changeset.snapshot.changesetId, 'committing']
+      );
+      const journalUpdate = this.database.execute(
+        `UPDATE chat_agent_commit_journals
+         SET status = ?, finalized_at = ?, updated_at = ?
+         WHERE journal_id = ? AND status = ?`,
+        ['finalized', input.occurredAt, input.occurredAt, journal.journalId, 'applied']
+      );
+      if (attemptUpdate.changes !== 1 || taskUpdate.changes !== 1 || changesetUpdate.changes !== 1 || journalUpdate.changes !== 1) {
+        throw new AgentStoreProtocolError('commit_finalize_conflict', 'Commit finalization projections changed concurrently', 'commit');
+      }
+      const links = { attemptId: attempt.attemptId, runtimeId: attempt.currentRuntimeId };
+      this.appendEvent(
+        'task',
+        task.taskId,
+        'commit.finalized',
+        { journalId: journal.journalId, finalHash: input.finalHash },
+        input.occurredAt,
+        'coordinator',
+        links
+      );
+      this.appendEvent('task', task.taskId, 'task.completed', { resultHash: input.resultHash }, input.occurredAt, 'coordinator', links);
+      return this.joinTerminalResult(task, checkpoint, result, input.resultHash, input.occurredAt, 'coordinator');
+    });
+  }
+
+  /** @inheritdoc */
+  markManualRecovery(input: MarkAgentJournalFailureInput): AgentCheckpointRecord {
+    return this.database.transaction((): AgentCheckpointRecord => {
+      const error = validateAgentTaskError(input.error);
+      if (
+        !error ||
+        error.code !== 'manual_recovery_required' ||
+        (error.phase !== 'commit_validation' && error.phase !== 'commit' && error.phase !== 'recovery') ||
+        (error.category !== 'runtime' && error.category !== 'integrity') ||
+        !Number.isFinite(Date.parse(input.occurredAt))
+      ) {
+        throw new AgentStoreProtocolError('manual_recovery_error_invalid', 'Manual recovery requires a manual_recovery_required error', 'recovery');
+      }
+      const journal = this.getCommitJournal(input.journalId);
+      if (!journal) throw new AgentStoreProtocolError('commit_journal_not_found', 'Commit journal does not exist', 'recovery');
+      const task = this.getTask(journal.taskId);
+      const attempt = this.getAttempt(journal.attemptId);
+      const changeset = this.getChangeset(journal.changesetId);
+      const checkpoint = task ? this.getCheckpoint(task.checkpointId) : null;
+      if (!task || !attempt || !changeset || !checkpoint) {
+        throw new AgentStoreProtocolError('manual_recovery_target_missing', 'Commit recovery aggregate is incomplete', 'recovery');
+      }
+      if (journal.status === 'manual_recovery' && task.status === 'commit_failed' && task.resultHash) return checkpoint;
+      if (
+        journal.status === 'finalized' ||
+        journal.status === 'cancelled' ||
+        task.status !== 'committing' ||
+        attempt.status !== 'running' ||
+        changeset.status !== 'committing'
+      ) {
+        throw new AgentStoreProtocolError('manual_recovery_state_invalid', 'Commit aggregate cannot enter manual recovery', 'recovery');
+      }
+      const criteria = [...journal.intent.resultDraft.criteria];
+      const satisfiedCount = criteria.filter((criterion): boolean => criterion.claim.status === 'satisfied').length;
+      const verifiedCount = criteria.filter((criterion): boolean => criterion.verification.status === 'verified').length;
+      let completionLevel: 'full' | 'partial' | 'none' = 'none';
+      if (satisfiedCount > 0) completionLevel = 'partial';
+      if (satisfiedCount === criteria.length && verifiedCount === criteria.length) completionLevel = 'full';
+      const resultCandidate = {
+        taskId: task.taskId,
+        agentId: task.agentId,
+        attemptId: attempt.attemptId,
+        executionStatus: 'commit_failed' as const,
+        completion: { level: completionLevel, criteria },
+        summary: journal.intent.resultDraft.summary,
+        ...(journal.intent.resultDraft.output === undefined ? {} : { output: journal.intent.resultDraft.output }),
+        warnings: [...journal.intent.resultDraft.warnings],
+        artifacts: [],
+        changeset: {
+          changesetId: changeset.snapshot.changesetId,
+          baseRevision: changeset.snapshot.baseRevision,
+          diffHash: changeset.snapshot.diffHash,
+          operationSetHash: changeset.snapshot.operationSetHash,
+          planHash: changeset.snapshot.planHash
+        },
+        usage: journal.intent.resultDraft.usage,
+        error
+      };
+      const resultValidation = validateChatAgentResult(resultCandidate);
+      if (!resultValidation.ok) {
+        throw new AgentStoreProtocolError(
+          resultValidation.error.details?.reason?.toString() ?? 'manual_recovery_result_invalid',
+          resultValidation.error.message,
+          'recovery'
+        );
+      }
+      const { result } = resultValidation;
+      const resultHash = hashAgentPayload(result);
+      const attemptUpdate = this.database.execute(
+        `UPDATE chat_agent_attempts
+         SET status = ?, finished_at = ?, error_json = ?
+         WHERE attempt_id = ? AND task_id = ? AND status = ?`,
+        ['failed', input.occurredAt, JSON.stringify(error), attempt.attemptId, task.taskId, 'running']
+      );
+      const taskUpdate = this.database.execute(
+        `UPDATE chat_agent_tasks
+         SET status = ?, result_json = ?, result_hash = ?, error_json = ?, updated_at = ?
+         WHERE task_id = ? AND status = ? AND result_hash IS NULL
+           AND unfinished_journal_count = 1 AND record_state = ?`,
+        ['commit_failed', JSON.stringify(result), resultHash, JSON.stringify(error), input.occurredAt, task.taskId, 'committing', 'active']
+      );
+      const journalUpdate = this.database.execute(
+        `UPDATE chat_agent_commit_journals
+         SET status = ?, error_json = ?, updated_at = ?
+         WHERE journal_id = ? AND status NOT IN (?, ?)`,
+        ['manual_recovery', JSON.stringify(error), input.occurredAt, journal.journalId, 'finalized', 'cancelled']
+      );
+      if (attemptUpdate.changes !== 1 || taskUpdate.changes !== 1 || journalUpdate.changes !== 1) {
+        throw new AgentStoreProtocolError('manual_recovery_conflict', 'Manual recovery projections changed concurrently', 'recovery');
+      }
+      const links = { attemptId: attempt.attemptId, runtimeId: attempt.currentRuntimeId };
+      this.appendEvent('task', task.taskId, 'task.failed', { error, resultHash }, input.occurredAt, 'coordinator', links);
+      return this.joinTerminalResult(task, checkpoint, result, resultHash, input.occurredAt, 'coordinator');
+    });
+  }
+
+  /** @inheritdoc */
+  listPendingConfirmations(): AgentConfirmationRecord[] {
+    return this.database
+      .select<ConfirmationRow>(
+        `SELECT * FROM chat_agent_confirmations
+         WHERE status = ?
+         ORDER BY created_at ASC, confirmation_id ASC`,
+        ['pending']
+      )
+      .map(parseConfirmation);
+  }
+
+  /** @inheritdoc */
+  listUnfinishedJournals(): AgentCommitJournalRecord[] {
+    return this.database
+      .select<CommitJournalRow>(
+        `SELECT * FROM chat_agent_commit_journals
+         WHERE status NOT IN (?, ?)
+         ORDER BY created_at ASC, journal_id ASC`,
+        ['finalized', 'cancelled']
+      )
+      .map(parseCommitJournal);
   }
 
   /**
@@ -2385,14 +3571,27 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
   /** @inheritdoc */
   tombstoneTask(input: TombstoneAgentTaskInput): AgentTaskRecord {
     return this.database.transaction((): AgentTaskRecord => {
+      if (!input.reason.trim() || !Number.isFinite(Date.parse(input.occurredAt))) {
+        throw new AgentStoreProtocolError('task_tombstone_input_invalid', 'Task tombstone envelope is invalid');
+      }
       const task = this.getTask(input.taskId);
       if (!task) throw new AgentStoreProtocolError('task_not_found', 'Task does not exist');
       if (task.recordState !== 'active') throw new AgentStoreProtocolError('task_already_tombstoned', 'Task is already tombstoned');
-      if (!isTaskTerminal(task.status)) {
-        throw new AgentStoreProtocolError('task_not_terminal', 'Only terminal Tasks can be tombstoned');
+      const pendingConfirmation = this.database.select<{ pending_count: unknown }>(
+        `SELECT COUNT(*) AS pending_count
+         FROM chat_agent_confirmations c
+         INNER JOIN chat_agent_changesets s ON s.changeset_id = c.changeset_id
+         WHERE s.task_id = ? AND c.status = ?`,
+        [task.taskId, 'pending']
+      )[0];
+      if (requireInteger(pendingConfirmation?.pending_count, 'pending confirmation count') !== 0) {
+        throw new AgentStoreProtocolError('task_confirmation_pending', 'Task owns a pending confirmation');
       }
       if (task.unfinishedJournalCount !== 0) {
         throw new AgentStoreProtocolError('task_journal_active', 'Task owns an unfinished commit journal');
+      }
+      if (!isTaskTerminal(task.status)) {
+        throw new AgentStoreProtocolError('task_not_terminal', 'Only terminal Tasks can be tombstoned');
       }
       const liveAttempt = this.database.select<{ live_count: unknown }>(
         `SELECT COUNT(*) AS live_count
@@ -2417,7 +3616,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       if (update.changes !== 1) {
         throw new AgentStoreProtocolError('task_tombstone_conflict', 'Task tombstone preconditions changed');
       }
-      this.appendEvent('task', task.taskId, 'task.tombstoned', { reason: input.reason }, input.occurredAt, input.source);
+      this.appendEvent('task', task.taskId, 'task.tombstoned', { reason: input.reason.trim() }, input.occurredAt, input.source);
       const updated = this.getTask(task.taskId);
       if (!updated) throw new AgentStoreProtocolError('task_projection_missing', 'Tombstoned Task is missing');
       return updated;

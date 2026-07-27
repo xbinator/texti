@@ -31,6 +31,15 @@ const validContract: DelegateTaskInput = {
   priority: 'normal'
 };
 
+/** 可被受控写入阶段接受的最小写契约。 */
+const validWriteContract: DelegateTaskInput = {
+  ...validContract,
+  task: 'Update CONTEXT.md',
+  acceptanceCriteria: ['Persist the approved project name'],
+  mode: 'write',
+  requestedTools: ['read_file', 'stage_file_edit']
+};
+
 /**
  * 把 better-sqlite3 实例适配为 Store 的窄数据库边界。
  * @param database - 真实内存 SQLite 实例
@@ -47,10 +56,11 @@ function createDatabaseAdapter(database: InstanceType<typeof Database>): AgentSt
 /**
  * 创建含不可变快照和有效 hash 的委派输入。
  * @param suffix - 用于隔离测试记录的标识后缀
+ * @param mode - Task 读写模式
  * @returns 可直接原子写入的委派事实
  */
-function createPreparedInput(suffix = '1'): PrepareDelegationInput {
-  const validation = validateFoundationContract(validContract);
+function createPreparedInput(suffix = '1', mode: 'read' | 'write' = 'read'): PrepareDelegationInput {
+  const validation = validateFoundationContract(mode === 'write' ? validWriteContract : validContract);
   if (!validation.ok) throw new Error('Fixture contract must be valid');
 
   const continuationSnapshot: AgentDelegationContinuationSnapshot = {
@@ -203,15 +213,21 @@ function allowResultCorruption(databaseAdapter: AgentStoreDatabase): void {
  * @returns hash 已校验的执行计划快照
  */
 function createExecutionPlan(input: PrepareDelegationInput): AgentExecutionPlanSnapshot {
-  const planWithoutHash = {
+  const isWrite = input.tasks[0].contractSnapshot.mode === 'write';
+  const planWithoutHash: Omit<AgentExecutionPlanSnapshot, 'planHash'> = {
     planSchemaVersion: 1,
-    policyVersion: 'read-runtime-v1',
-    capabilitySet: ['read_file'],
+    policyVersion: isWrite ? 'controlled-write-v1' : 'read-runtime-v1',
+    capabilitySet: isWrite ? ['read_file', 'stage_file_edit'] : ['read_file'],
     modelSnapshot: { providerId: 'openai', modelId: 'gpt-5' },
-    permissionSnapshot: { scopeIds: ['workspace-read'] },
+    permissionSnapshot: { scopeIds: [isWrite ? 'workspace-write' : 'workspace-read'] },
     resourceScopes: ['file:CONTEXT.md'],
-    toolEffectSet: [{ toolName: 'read_file', effect: 'pure_read' as const }],
-    commitPolicy: { mode: 'none' as const },
+    toolEffectSet: isWrite
+      ? [
+          { toolName: 'read_file', effect: 'pure_read' },
+          { toolName: 'stage_file_edit', effect: 'staged_file_write' }
+        ]
+      : [{ toolName: 'read_file', effect: 'pure_read' }],
+    commitPolicy: isWrite ? { mode: 'staged', adapter: 'atomic-file-v1' } : { mode: 'none' },
     budget: { tokenLimit: 1000, costLimitUsd: 0.1, pricingVersion: 'test-v1' }
   };
 
@@ -351,7 +367,7 @@ function createCancelledResult(taskId: string): ChatAgentResult {
 }
 
 /**
- * 把基础只读 Task 推进到 running。
+ * 把基础 Task 推进到 running。
  * @param store - 待操作 Store
  * @param input - Task 初始委派事实
  */
@@ -377,6 +393,171 @@ function startTask(store: AgentDelegationStore, input: PrepareDelegationInput): 
   store.markAttemptRunning({ taskId, attemptId, runtimeId, occurredAt });
 }
 
+/**
+ * 调用受控写 Store 方法并把完整返回值收窄到当前断言所需投影。
+ * @param store - Store 实例
+ * @param methodName - 目标 API 名称
+ * @param args - 方法参数
+ * @returns 目标方法结果
+ */
+function invokeWriteStore<TResult>(store: AgentDelegationStore, methodName: string, ...args: readonly unknown[]): TResult {
+  const method = Reflect.get(store, methodName);
+  if (typeof method !== 'function') throw new Error(`${methodName}_missing`);
+  return Reflect.apply(method, store, args) as TResult;
+}
+
+/**
+ * 创建并启动一个 write Task。
+ * @param store - 待操作 Store
+ * @param suffix - 测试身份后缀
+ * @returns write Task 的委派输入和运行中投影
+ */
+function startWriteTask(
+  store: AgentDelegationStore,
+  suffix: string
+): {
+  input: PrepareDelegationInput;
+  task: NonNullable<ReturnType<AgentDelegationStore['getTask']>>;
+} {
+  const input = createPreparedInput(suffix, 'write');
+  store.prepareDelegation(input, (): undefined => undefined);
+  startTask(store, input);
+  const task = store.getTask(input.tasks[0].taskId);
+  if (!task) throw new Error('Running write Task must exist');
+  return { input, task };
+}
+
+/**
+ * 创建与当前 write Attempt 绑定的不可变 changeset fixture。
+ * @param task - running write Task
+ * @returns changeset snapshot
+ */
+function createChangeset(task: NonNullable<ReturnType<AgentDelegationStore['getTask']>>) {
+  const attemptId = task.currentAttemptId;
+  const planHash = task.executionPlanSnapshotHash;
+  if (!attemptId || !planHash) throw new Error('Write Task must bind an Attempt and plan');
+  return {
+    changesetSchemaVersion: 1,
+    changesetId: `changeset-${task.taskId}`,
+    taskId: task.taskId,
+    attemptId,
+    agentId: task.agentId,
+    runtimeId: `runtime-${attemptId}`,
+    planHash,
+    baseRevision: '1'.repeat(64),
+    diffReference: `overlay/${task.taskId}/${attemptId}/changes.diff`,
+    diffHash: '2'.repeat(64),
+    operationSetHash: '3'.repeat(64),
+    resourceScopes: ['file:CONTEXT.md'],
+    operations: [
+      {
+        operationId: `operation-${task.taskId}`,
+        kind: 'replace' as const,
+        displayPath: 'CONTEXT.md',
+        targetPath: '/workspace/CONTEXT.md',
+        resourceScope: 'file:CONTEXT.md',
+        baseRevision: '4'.repeat(64),
+        baseContentHash: '5'.repeat(64),
+        targetContentHash: '6'.repeat(64),
+        candidateReference: `overlay/${task.taskId}/${attemptId}/candidate`,
+        rollbackReference: `overlay/${task.taskId}/${attemptId}/rollback`,
+        byteLength: 12
+      }
+    ],
+    createdAt: '2026-07-23T08:01:00.000Z'
+  };
+}
+
+/**
+ * 计算测试 changeset 的版本化快照 hash。
+ * @param snapshot - changeset snapshot
+ * @returns canonical hash
+ */
+function hashChangeset(snapshot: ReturnType<typeof createChangeset>): string {
+  return hashAgentPayload({ schemaVersion: snapshot.changesetSchemaVersion, changeset: snapshot });
+}
+
+/**
+ * 创建与 changeset 完整性字段精确绑定的确认请求。
+ * @param task - 当前 write Task
+ * @param changeset - 已持久化 changeset
+ * @returns confirmation request snapshot
+ */
+function createConfirmationRequest(task: NonNullable<ReturnType<AgentDelegationStore['getTask']>>, changeset: ReturnType<typeof createChangeset>) {
+  return {
+    confirmationSchemaVersion: 1,
+    confirmationId: `confirmation-${task.taskId}`,
+    sessionId: task.sessionId,
+    turnId: task.turnId,
+    taskId: task.taskId,
+    attemptId: changeset.attemptId,
+    agentId: task.agentId,
+    runtimeId: changeset.runtimeId,
+    toolCallId: task.toolCallId,
+    changesetId: changeset.changesetId,
+    planHash: changeset.planHash,
+    baseRevision: changeset.baseRevision,
+    diffHash: changeset.diffHash,
+    operationSetHash: changeset.operationSetHash,
+    resourceScopes: changeset.resourceScopes,
+    displayPaths: ['CONTEXT.md'],
+    unifiedDiffReference: changeset.diffReference,
+    riskLevel: 'write' as const,
+    createdAt: '2026-07-23T08:02:00.000Z'
+  };
+}
+
+/**
+ * 计算测试 confirmation request 的版本化 hash。
+ * @param request - confirmation request snapshot
+ * @returns canonical hash
+ */
+function hashConfirmation(request: ReturnType<typeof createConfirmationRequest>): string {
+  return hashAgentPayload({ schemaVersion: request.confirmationSchemaVersion, request });
+}
+
+/**
+ * 创建 journal 冻结的 write 结果草稿。
+ * @param task - 当前 write Task
+ * @returns 不含最终 changeset 证据的结果草稿
+ */
+function createWriteDraft(task: NonNullable<ReturnType<AgentDelegationStore['getTask']>>) {
+  const result = createTaskResult(task.taskId);
+  return {
+    taskId: result.taskId,
+    agentId: result.agentId,
+    attemptId: result.attemptId,
+    summary: 'Prepared one approved file update.',
+    criteria: result.completion.criteria,
+    warnings: result.warnings,
+    usage: result.usage
+  };
+}
+
+/**
+ * 创建与 changeset 和确认版本绑定的 commit intent。
+ * @param task - 当前 write Task
+ * @param changeset - 已批准 changeset
+ * @param confirmationVersion - 批准使用的 CAS 版本
+ * @returns commit intent snapshot
+ */
+function createCommitIntent(
+  task: NonNullable<ReturnType<AgentDelegationStore['getTask']>>,
+  changeset: ReturnType<typeof createChangeset>,
+  confirmationVersion: number
+) {
+  return {
+    journalSchemaVersion: 1,
+    changesetSnapshotHash: hashChangeset(changeset),
+    confirmationId: `confirmation-${changeset.taskId}`,
+    confirmationVersion,
+    planHash: changeset.planHash,
+    resultDraft: createWriteDraft(task),
+    operations: changeset.operations,
+    createdAt: '2026-07-23T08:03:00.000Z'
+  };
+}
+
 describeWithSqlite('agent delegation store', (): void => {
   let database: InstanceType<typeof Database>;
   let adapter: AgentStoreDatabase;
@@ -391,6 +572,287 @@ describeWithSqlite('agent delegation store', (): void => {
 
   afterEach((): void => {
     database.close();
+  });
+
+  it('persists the approved changeset and finalizes its commit journal atomically', (): void => {
+    const { task } = startWriteTask(store, 'write-commit');
+    const changeset = createChangeset(task);
+    const snapshotHash = hashChangeset(changeset);
+    const prepared = invokeWriteStore<{ status: string; snapshotHash: string }>(store, 'prepareChangeset', {
+      snapshot: changeset,
+      snapshotHash,
+      occurredAt: changeset.createdAt
+    });
+
+    expect(prepared).toMatchObject({ status: 'prepared', snapshotHash });
+    expect(
+      invokeWriteStore<{ status: string; snapshotHash: string }>(store, 'prepareChangeset', {
+        snapshot: changeset,
+        snapshotHash,
+        occurredAt: changeset.createdAt
+      })
+    ).toEqual(prepared);
+    expect((): void => {
+      const conflicting = { ...changeset, diffHash: '9'.repeat(64) };
+      invokeWriteStore(store, 'prepareChangeset', {
+        snapshot: conflicting,
+        snapshotHash: hashChangeset(conflicting),
+        occurredAt: changeset.createdAt
+      });
+    }).toThrowError(expect.objectContaining({ reason: 'changeset_replay_conflict' }));
+
+    const request = createConfirmationRequest(task, changeset);
+    const confirmation = invokeWriteStore<{ status: string; version: number }>(store, 'createConfirmation', {
+      request,
+      requestHash: hashConfirmation(request),
+      occurredAt: request.createdAt
+    });
+    expect(confirmation).toMatchObject({ status: 'pending', version: 1 });
+    expect(store.getTask(task.taskId)).toMatchObject({ status: 'waiting_confirmation' });
+
+    const approved = invokeWriteStore<{ status: string; version: number }>(store, 'resolveConfirmation', {
+      confirmationId: request.confirmationId,
+      expectedVersion: 1,
+      decision: 'approved',
+      occurredAt: '2026-07-23T08:02:30.000Z'
+    });
+    expect(approved).toMatchObject({ status: 'approved', version: 2, decision: 'approved' });
+    expect(
+      invokeWriteStore(store, 'resolveConfirmation', {
+        confirmationId: request.confirmationId,
+        expectedVersion: 1,
+        decision: 'approved',
+        occurredAt: '2026-07-23T08:02:30.000Z'
+      })
+    ).toEqual(approved);
+    expect((): void => {
+      invokeWriteStore(store, 'resolveConfirmation', {
+        confirmationId: request.confirmationId,
+        expectedVersion: 1,
+        decision: 'rejected',
+        occurredAt: '2026-07-23T08:02:30.000Z'
+      });
+    }).toThrowError(expect.objectContaining({ reason: 'confirmation_resolution_conflict' }));
+
+    expect(
+      invokeWriteStore(store, 'queueCommit', {
+        taskId: task.taskId,
+        confirmationId: request.confirmationId,
+        confirmationVersion: approved.version,
+        occurredAt: '2026-07-23T08:02:40.000Z'
+      })
+    ).toMatchObject({ status: 'queued', queuePhase: 'commit', unfinishedJournalCount: 0 });
+    const intent = createCommitIntent(task, changeset, approved.version);
+    const intentHash = hashAgentPayload({ schemaVersion: intent.journalSchemaVersion, intent });
+    const journal = invokeWriteStore<{ journalId: string; status: string }>(store, 'createCommitJournal', {
+      journalId: `journal-${task.taskId}`,
+      changesetId: changeset.changesetId,
+      confirmationId: request.confirmationId,
+      confirmationVersion: approved.version,
+      intent,
+      intentHash,
+      occurredAt: intent.createdAt
+    });
+    expect(journal).toMatchObject({ journalId: `journal-${task.taskId}`, status: 'created' });
+    expect(store.getTask(task.taskId)).toMatchObject({ status: 'committing', unfinishedJournalCount: 1 });
+    expect(invokeWriteStore(store, 'listUnfinishedJournals')).toHaveLength(1);
+
+    invokeWriteStore(store, 'markJournalApplying', {
+      journalId: journal.journalId,
+      occurredAt: '2026-07-23T08:03:10.000Z'
+    });
+    invokeWriteStore(store, 'markJournalOperation', {
+      journalId: journal.journalId,
+      operationId: changeset.operations[0].operationId,
+      targetContentHash: changeset.operations[0].targetContentHash,
+      occurredAt: '2026-07-23T08:03:20.000Z'
+    });
+    invokeWriteStore(store, 'markJournalApplied', {
+      journalId: journal.journalId,
+      occurredAt: '2026-07-23T08:03:30.000Z'
+    });
+    const result: ChatAgentResult = {
+      ...createTaskResult(task.taskId),
+      summary: intent.resultDraft.summary,
+      changeset: {
+        changesetId: changeset.changesetId,
+        baseRevision: changeset.baseRevision,
+        diffHash: changeset.diffHash,
+        operationSetHash: changeset.operationSetHash,
+        planHash: changeset.planHash
+      }
+    };
+    const resultHash = hashAgentPayload(result);
+    const checkpoint = invokeWriteStore<{ status: string }>(store, 'finalizeCommit', {
+      journalId: journal.journalId,
+      result,
+      resultHash,
+      finalHash: changeset.operations[0].targetContentHash,
+      occurredAt: '2026-07-23T08:03:40.000Z'
+    });
+
+    expect(checkpoint.status).toBe('ready_to_resume');
+    expect(store.getTask(task.taskId)).toMatchObject({
+      status: 'completed',
+      unfinishedJournalCount: 0,
+      resultHash
+    });
+    expect(invokeWriteStore(store, 'listUnfinishedJournals')).toEqual([]);
+    expect(
+      store
+        .listEvents('task', task.taskId)
+        .filter((event): boolean => ['changeset.prepared', 'confirmation.requested', 'confirmation.resolved', 'commit.journal_created'].includes(event.type))
+        .map((event): unknown => event.payload)
+    ).toEqual([
+      { changesetId: changeset.changesetId, snapshotHash, diffHash: changeset.diffHash },
+      { requestId: request.confirmationId, requestHash: hashConfirmation(request), diffHash: request.diffHash, version: 1 },
+      { requestId: request.confirmationId, decision: 'approved', diffHash: request.diffHash, version: 2 },
+      {
+        journalId: journal.journalId,
+        changesetId: changeset.changesetId,
+        intentHash,
+        confirmationVersion: approved.version
+      }
+    ]);
+  });
+
+  it('rejects changesets outside the current running write Attempt and blocks unsafe tombstones', (): void => {
+    const readInput = createPreparedInput('changeset-read');
+    store.prepareDelegation(readInput, (): undefined => undefined);
+    startTask(store, readInput);
+    const readTask = store.getTask(readInput.tasks[0].taskId);
+    if (!readTask) throw new Error('Running read Task must exist');
+    const readChangeset = createChangeset(readTask);
+    expect((): void => {
+      invokeWriteStore(store, 'prepareChangeset', {
+        snapshot: readChangeset,
+        snapshotHash: hashChangeset(readChangeset),
+        occurredAt: readChangeset.createdAt
+      });
+    }).toThrowError(expect.objectContaining({ reason: 'changeset_task_invalid' }));
+
+    const { task } = startWriteTask(store, 'changeset-write');
+    const changeset = createChangeset(task);
+    expect((): void => {
+      const forged = { ...changeset, runtimeId: 'runtime-forged' };
+      invokeWriteStore(store, 'prepareChangeset', {
+        snapshot: forged,
+        snapshotHash: hashChangeset(forged),
+        occurredAt: forged.createdAt
+      });
+    }).toThrowError(expect.objectContaining({ reason: 'changeset_runtime_mismatch' }));
+
+    invokeWriteStore(store, 'prepareChangeset', {
+      snapshot: changeset,
+      snapshotHash: hashChangeset(changeset),
+      occurredAt: changeset.createdAt
+    });
+    const request = createConfirmationRequest(task, changeset);
+    invokeWriteStore(store, 'createConfirmation', {
+      request,
+      requestHash: hashConfirmation(request),
+      occurredAt: request.createdAt
+    });
+    expect(invokeWriteStore(store, 'listPendingConfirmations')).toHaveLength(1);
+    expect((): void => {
+      store.tombstoneTask({ taskId: task.taskId, reason: 'unsafe cleanup', occurredAt, source: 'system' });
+    }).toThrowError(expect.objectContaining({ reason: 'task_confirmation_pending' }));
+  });
+
+  it('revokes a pending confirmation with CAS history and removes it from the recovery queue', (): void => {
+    const { task } = startWriteTask(store, 'confirmation-revoke');
+    const changeset = createChangeset(task);
+    invokeWriteStore(store, 'prepareChangeset', {
+      snapshot: changeset,
+      snapshotHash: hashChangeset(changeset),
+      occurredAt: changeset.createdAt
+    });
+    const request = createConfirmationRequest(task, changeset);
+    invokeWriteStore(store, 'createConfirmation', {
+      request,
+      requestHash: hashConfirmation(request),
+      occurredAt: request.createdAt
+    });
+
+    const revoked = invokeWriteStore<{ status: string; version: number }>(
+      store,
+      'revokeConfirmation',
+      request.confirmationId,
+      'base revision changed',
+      '2026-07-23T08:02:20.000Z'
+    );
+    expect(revoked).toMatchObject({ status: 'revoked', version: 2 });
+    expect(invokeWriteStore(store, 'revokeConfirmation', request.confirmationId, 'base revision changed', '2026-07-23T08:02:20.000Z')).toEqual(revoked);
+    expect(invokeWriteStore(store, 'listPendingConfirmations')).toEqual([]);
+    expect(store.listEvents('task', task.taskId).at(-1)).toMatchObject({
+      type: 'confirmation.invalidated',
+      payload: { requestId: request.confirmationId, reason: 'base revision changed', version: 2 }
+    });
+  });
+
+  it('preserves an unfinished journal when commit recovery requires manual repair', (): void => {
+    const { task } = startWriteTask(store, 'manual-recovery');
+    const changeset = createChangeset(task);
+    invokeWriteStore(store, 'prepareChangeset', {
+      snapshot: changeset,
+      snapshotHash: hashChangeset(changeset),
+      occurredAt: changeset.createdAt
+    });
+    const request = createConfirmationRequest(task, changeset);
+    invokeWriteStore(store, 'createConfirmation', {
+      request,
+      requestHash: hashConfirmation(request),
+      occurredAt: request.createdAt
+    });
+    const approved = invokeWriteStore<{ version: number }>(store, 'resolveConfirmation', {
+      confirmationId: request.confirmationId,
+      expectedVersion: 1,
+      decision: 'approved',
+      occurredAt: '2026-07-23T08:02:30.000Z'
+    });
+    invokeWriteStore(store, 'queueCommit', {
+      taskId: task.taskId,
+      confirmationId: request.confirmationId,
+      confirmationVersion: approved.version,
+      occurredAt: '2026-07-23T08:02:40.000Z'
+    });
+    const intent = createCommitIntent(task, changeset, approved.version);
+    const journal = invokeWriteStore<{ journalId: string }>(store, 'createCommitJournal', {
+      journalId: `journal-${task.taskId}`,
+      changesetId: changeset.changesetId,
+      confirmationId: request.confirmationId,
+      confirmationVersion: approved.version,
+      intent,
+      intentHash: hashAgentPayload({ schemaVersion: intent.journalSchemaVersion, intent }),
+      occurredAt: intent.createdAt
+    });
+    invokeWriteStore(store, 'markJournalApplying', {
+      journalId: journal.journalId,
+      occurredAt: '2026-07-23T08:03:10.000Z'
+    });
+    const error = {
+      code: 'manual_recovery_required' as const,
+      phase: 'recovery' as const,
+      category: 'integrity' as const,
+      retryable: false,
+      details: { reason: 'external_state_unknown' }
+    };
+    const checkpoint = invokeWriteStore<{ status: string }>(store, 'markManualRecovery', {
+      journalId: journal.journalId,
+      occurredAt: '2026-07-23T08:03:20.000Z',
+      error
+    });
+
+    expect(checkpoint.status).toBe('ready_to_resume');
+    expect(store.getTask(task.taskId)).toMatchObject({
+      status: 'commit_failed',
+      unfinishedJournalCount: 1,
+      error
+    });
+    expect(invokeWriteStore(store, 'listUnfinishedJournals')).toMatchObject([{ journalId: journal.journalId, status: 'manual_recovery', error }]);
+    expect((): void => {
+      store.tombstoneTask({ taskId: task.taskId, reason: 'unsafe cleanup', occurredAt, source: 'system' });
+    }).toThrowError(expect.objectContaining({ reason: 'task_journal_active' }));
   });
 
   it('atomically persists immutable facts, ordered events, and one outbox record', (): void => {

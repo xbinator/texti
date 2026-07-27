@@ -4,6 +4,7 @@
  */
 import type { AgentDelegationContinuationSnapshot, AgentExecutionPlanSnapshot, ChatAgentEvent, ChatAgentResult, DelegateTaskInput } from 'types/chat-agent';
 import { describe, expect, it } from 'vitest';
+import * as agentContracts from '../../../../../../electron/main/modules/chat/agents/contracts.mts';
 import {
   AGENT_CANONICAL_PAYLOAD_MAX_BYTES,
   AGENT_MAX_ACCEPTANCE_CRITERIA,
@@ -21,6 +22,16 @@ import {
   validateFoundationContract,
   validateFoundationOutbox
 } from '../../../../../../electron/main/modules/chat/agents/contracts.mts';
+
+/** Task 2 期望新增的 write snapshot 契约模块视图。 */
+type WriteSnapshotContracts = typeof agentContracts & {
+  /** 校验并冻结 changeset snapshot。 */
+  validateChangesetSnapshot?: (input: unknown, expectedHash: string) => { ok: boolean; changeset?: unknown };
+  /** 校验并冻结 confirmation request snapshot。 */
+  validateConfirmationRequestSnapshot?: (input: unknown, expectedHash: string) => { ok: boolean; request?: unknown };
+  /** 校验并冻结 commit intent snapshot。 */
+  validateCommitIntentSnapshot?: (input: unknown, expectedHash: string) => { ok: boolean; intent?: unknown };
+};
 
 /** 可被基础阶段接受的最小只读委派契约。 */
 const validContract: DelegateTaskInput = {
@@ -384,6 +395,104 @@ describe('foundation delegation contract', (): void => {
       ok: false,
       error: { details: { reason: 'plan_effect_invalid' } }
     });
+  });
+
+  it('validates immutable write snapshots and rejects hash-bound mutations', (): void => {
+    const writeContracts = agentContracts as WriteSnapshotContracts;
+    expect(typeof writeContracts.validateChangesetSnapshot).toBe('function');
+    expect(typeof writeContracts.validateConfirmationRequestSnapshot).toBe('function');
+    expect(typeof writeContracts.validateCommitIntentSnapshot).toBe('function');
+    if (!writeContracts.validateChangesetSnapshot || !writeContracts.validateConfirmationRequestSnapshot || !writeContracts.validateCommitIntentSnapshot) {
+      return;
+    }
+    const operation = {
+      operationId: 'operation-1',
+      kind: 'replace' as const,
+      displayPath: 'CONTEXT.md',
+      targetPath: '/workspace/CONTEXT.md',
+      resourceScope: 'file:/workspace/CONTEXT.md',
+      baseRevision: '1'.repeat(64),
+      baseContentHash: '2'.repeat(64),
+      targetContentHash: '3'.repeat(64),
+      candidateReference: 'overlay/task-1/attempt-1/candidate-1',
+      rollbackReference: 'overlay/task-1/attempt-1/rollback-1',
+      byteLength: 12
+    };
+    const changeset = {
+      changesetSchemaVersion: 1,
+      changesetId: 'changeset-1',
+      taskId: 'task-1',
+      attemptId: 'attempt-1',
+      agentId: 'child-1',
+      runtimeId: 'runtime-1',
+      planHash: '4'.repeat(64),
+      baseRevision: '5'.repeat(64),
+      diffReference: 'overlay/task-1/attempt-1/changes.diff',
+      diffHash: '6'.repeat(64),
+      operationSetHash: '7'.repeat(64),
+      resourceScopes: ['file:/workspace/CONTEXT.md'],
+      operations: [operation],
+      createdAt: '2026-07-27T08:00:00.000Z'
+    };
+    const changesetHash = hashAgentPayload({
+      schemaVersion: changeset.changesetSchemaVersion,
+      changeset
+    });
+    const request = {
+      confirmationSchemaVersion: 1,
+      confirmationId: 'confirmation-1',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      taskId: 'task-1',
+      attemptId: 'attempt-1',
+      agentId: 'child-1',
+      runtimeId: 'runtime-1',
+      toolCallId: 'tool-call-1',
+      changesetId: 'changeset-1',
+      planHash: changeset.planHash,
+      baseRevision: changeset.baseRevision,
+      diffHash: changeset.diffHash,
+      operationSetHash: changeset.operationSetHash,
+      resourceScopes: changeset.resourceScopes,
+      displayPaths: ['CONTEXT.md'],
+      unifiedDiffReference: changeset.diffReference,
+      riskLevel: 'write' as const,
+      createdAt: '2026-07-27T08:01:00.000Z'
+    };
+    const requestHash = hashAgentPayload({
+      schemaVersion: request.confirmationSchemaVersion,
+      request
+    });
+    const resultDraft = {
+      taskId: 'task-1',
+      agentId: 'child-1',
+      attemptId: 'attempt-1',
+      summary: 'Prepared one file update.',
+      criteria: validResult.completion.criteria,
+      warnings: [],
+      usage: validResult.usage
+    };
+    const intent = {
+      journalSchemaVersion: 1,
+      changesetSnapshotHash: changesetHash,
+      confirmationId: request.confirmationId,
+      confirmationVersion: 2,
+      planHash: changeset.planHash,
+      resultDraft,
+      operations: changeset.operations,
+      createdAt: '2026-07-27T08:02:00.000Z'
+    };
+    const intentHash = hashAgentPayload({
+      schemaVersion: intent.journalSchemaVersion,
+      intent
+    });
+
+    expect(writeContracts.validateChangesetSnapshot(changeset, changesetHash)).toMatchObject({ ok: true });
+    expect(writeContracts.validateConfirmationRequestSnapshot(request, requestHash)).toMatchObject({ ok: true });
+    expect(writeContracts.validateCommitIntentSnapshot(intent, intentHash)).toMatchObject({ ok: true });
+    expect(writeContracts.validateChangesetSnapshot({ ...changeset, diffHash: '8'.repeat(64) }, changesetHash)).toMatchObject({ ok: false });
+    expect(writeContracts.validateConfirmationRequestSnapshot({ ...request, operationSetHash: '8'.repeat(64) }, requestHash)).toMatchObject({ ok: false });
+    expect(writeContracts.validateCommitIntentSnapshot({ ...intent, confirmationVersion: 3 }, intentHash)).toMatchObject({ ok: false });
   });
 
   it('rejects forged, unsupported, or capability-expanding execution plans', (): void => {

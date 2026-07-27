@@ -16,7 +16,10 @@ type DatabaseTableName =
   | 'chat_agent_delegation_checkpoints'
   | 'chat_agent_events'
   | 'chat_agent_outbox'
-  | 'chat_agent_budget_reservations';
+  | 'chat_agent_budget_reservations'
+  | 'chat_agent_changesets'
+  | 'chat_agent_confirmations'
+  | 'chat_agent_commit_journals';
 
 interface DatabaseTableInfoRow {
   name: string;
@@ -218,6 +221,62 @@ export function createAgentTables(database: Pick<DatabaseInstance, 'exec'>): voi
       )
     );
 
+    CREATE TABLE IF NOT EXISTS chat_agent_changesets (
+      changeset_id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      attempt_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      runtime_id TEXT NOT NULL,
+      plan_hash TEXT NOT NULL,
+      snapshot_json TEXT NOT NULL,
+      snapshot_hash TEXT NOT NULL,
+      base_revision TEXT NOT NULL,
+      diff_hash TEXT NOT NULL,
+      operation_set_hash TEXT NOT NULL,
+      status TEXT NOT NULL,
+      confirmation_id TEXT,
+      record_state TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      CHECK (status IN ('prepared', 'awaiting_confirmation', 'approved', 'rejected', 'revoked', 'committing', 'committed', 'discarded')),
+      CHECK (record_state IN ('active', 'tombstoned'))
+    );
+
+    CREATE TABLE IF NOT EXISTS chat_agent_confirmations (
+      confirmation_id TEXT PRIMARY KEY,
+      changeset_id TEXT NOT NULL UNIQUE,
+      request_json TEXT NOT NULL,
+      request_hash TEXT NOT NULL,
+      status TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      decision_json TEXT,
+      resolved_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      CHECK (status IN ('pending', 'approved', 'rejected', 'revoked')),
+      CHECK (version > 0)
+    );
+
+    CREATE TABLE IF NOT EXISTS chat_agent_commit_journals (
+      journal_id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      attempt_id TEXT NOT NULL,
+      changeset_id TEXT NOT NULL UNIQUE,
+      confirmation_id TEXT NOT NULL,
+      confirmation_version INTEGER NOT NULL,
+      plan_hash TEXT NOT NULL,
+      intent_json TEXT NOT NULL,
+      intent_hash TEXT NOT NULL,
+      status TEXT NOT NULL,
+      operation_progress_json TEXT NOT NULL DEFAULT '[]',
+      error_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      finalized_at TEXT,
+      CHECK (confirmation_version > 0),
+      CHECK (status IN ('created', 'applying', 'applied', 'finalized', 'cancelled', 'manual_recovery'))
+    );
+
     CREATE TRIGGER IF NOT EXISTS trg_chat_agent_tasks_immutable
     BEFORE UPDATE OF
       task_id, session_id, turn_id, agent_id, parent_agent_id, root_runtime_id,
@@ -357,6 +416,62 @@ export function createAgentTables(database: Pick<DatabaseInstance, 'exec'>): voi
       SELECT RAISE(ABORT, 'agent_budget_immutable');
     END;
 
+    CREATE TRIGGER IF NOT EXISTS trg_chat_agent_changesets_immutable
+    BEFORE UPDATE OF
+      changeset_id, task_id, attempt_id, agent_id, runtime_id, plan_hash,
+      snapshot_json, snapshot_hash, base_revision, diff_hash, operation_set_hash, created_at
+    ON chat_agent_changesets
+    WHEN
+      NEW.changeset_id IS NOT OLD.changeset_id
+      OR NEW.task_id IS NOT OLD.task_id
+      OR NEW.attempt_id IS NOT OLD.attempt_id
+      OR NEW.agent_id IS NOT OLD.agent_id
+      OR NEW.runtime_id IS NOT OLD.runtime_id
+      OR NEW.plan_hash IS NOT OLD.plan_hash
+      OR NEW.snapshot_json IS NOT OLD.snapshot_json
+      OR NEW.snapshot_hash IS NOT OLD.snapshot_hash
+      OR NEW.base_revision IS NOT OLD.base_revision
+      OR NEW.diff_hash IS NOT OLD.diff_hash
+      OR NEW.operation_set_hash IS NOT OLD.operation_set_hash
+      OR NEW.created_at IS NOT OLD.created_at
+    BEGIN
+      SELECT RAISE(ABORT, 'agent_changeset_immutable');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_chat_agent_confirmations_immutable
+    BEFORE UPDATE OF
+      confirmation_id, changeset_id, request_json, request_hash, created_at
+    ON chat_agent_confirmations
+    WHEN
+      NEW.confirmation_id IS NOT OLD.confirmation_id
+      OR NEW.changeset_id IS NOT OLD.changeset_id
+      OR NEW.request_json IS NOT OLD.request_json
+      OR NEW.request_hash IS NOT OLD.request_hash
+      OR NEW.created_at IS NOT OLD.created_at
+    BEGIN
+      SELECT RAISE(ABORT, 'agent_confirmation_immutable');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_chat_agent_commit_journals_immutable
+    BEFORE UPDATE OF
+      journal_id, task_id, attempt_id, changeset_id, confirmation_id,
+      confirmation_version, plan_hash, intent_json, intent_hash, created_at
+    ON chat_agent_commit_journals
+    WHEN
+      NEW.journal_id IS NOT OLD.journal_id
+      OR NEW.task_id IS NOT OLD.task_id
+      OR NEW.attempt_id IS NOT OLD.attempt_id
+      OR NEW.changeset_id IS NOT OLD.changeset_id
+      OR NEW.confirmation_id IS NOT OLD.confirmation_id
+      OR NEW.confirmation_version IS NOT OLD.confirmation_version
+      OR NEW.plan_hash IS NOT OLD.plan_hash
+      OR NEW.intent_json IS NOT OLD.intent_json
+      OR NEW.intent_hash IS NOT OLD.intent_hash
+      OR NEW.created_at IS NOT OLD.created_at
+    BEGIN
+      SELECT RAISE(ABORT, 'agent_commit_journal_immutable');
+    END;
+
     CREATE TRIGGER IF NOT EXISTS trg_chat_agent_tasks_no_delete
     BEFORE DELETE ON chat_agent_tasks
     BEGIN
@@ -393,6 +508,24 @@ export function createAgentTables(database: Pick<DatabaseInstance, 'exec'>): voi
       SELECT RAISE(ABORT, 'agent_fact_delete_forbidden');
     END;
 
+    CREATE TRIGGER IF NOT EXISTS trg_chat_agent_changesets_no_delete
+    BEFORE DELETE ON chat_agent_changesets
+    BEGIN
+      SELECT RAISE(ABORT, 'agent_fact_delete_forbidden');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_chat_agent_confirmations_no_delete
+    BEFORE DELETE ON chat_agent_confirmations
+    BEGIN
+      SELECT RAISE(ABORT, 'agent_fact_delete_forbidden');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_chat_agent_commit_journals_no_delete
+    BEFORE DELETE ON chat_agent_commit_journals
+    BEGIN
+      SELECT RAISE(ABORT, 'agent_fact_delete_forbidden');
+    END;
+
     CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_agent_tasks_checkpoint_tool_call
     ON chat_agent_tasks(checkpoint_id, tool_call_id);
 
@@ -420,6 +553,18 @@ export function createAgentTables(database: Pick<DatabaseInstance, 'exec'>): voi
     CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_agent_budget_task
     ON chat_agent_budget_reservations(task_id)
     WHERE task_id IS NOT NULL;
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_agent_changesets_attempt
+    ON chat_agent_changesets(attempt_id);
+
+    CREATE INDEX IF NOT EXISTS idx_chat_agent_changesets_task_status
+    ON chat_agent_changesets(task_id, status);
+
+    CREATE INDEX IF NOT EXISTS idx_chat_agent_confirmations_status
+    ON chat_agent_confirmations(status, updated_at ASC);
+
+    CREATE INDEX IF NOT EXISTS idx_chat_agent_commit_journals_status
+    ON chat_agent_commit_journals(status, updated_at ASC);
   `);
 }
 

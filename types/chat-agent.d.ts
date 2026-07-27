@@ -345,6 +345,106 @@ export interface AgentChangesetResult {
   planHash: string;
 }
 
+/** changeset 中单个文件操作的不可变事实。 */
+export interface AgentFileOperationSnapshot {
+  /** 操作稳定身份。 */
+  readonly operationId: string;
+  /** 创建新文件或替换已有文件。 */
+  readonly kind: 'create' | 'replace';
+  /** 面向确认界面的工作区相对路径。 */
+  readonly displayPath: string;
+  /** Main 校验后的真实目标路径。 */
+  readonly targetPath: string;
+  /** 操作命中的冻结资源 scope。 */
+  readonly resourceScope: string;
+  /** 单文件基础修订 hash。 */
+  readonly baseRevision: string;
+  /** 基础内容 hash。 */
+  readonly baseContentHash: string;
+  /** 候选内容 hash。 */
+  readonly targetContentHash: string;
+  /** 私有 overlay 中的候选内容引用。 */
+  readonly candidateReference: string;
+  /** 私有 overlay 中的回滚内容引用。 */
+  readonly rollbackReference: string;
+  /** 候选内容 UTF-8 字节数。 */
+  readonly byteLength: number;
+}
+
+/** write Attempt 生成的不可变 changeset。 */
+export interface AgentChangesetSnapshot {
+  /** changeset Schema 版本。 */
+  readonly changesetSchemaVersion: number;
+  /** changeset 稳定身份。 */
+  readonly changesetId: string;
+  /** 所属 Task。 */
+  readonly taskId: string;
+  /** 产生 changeset 的 Attempt。 */
+  readonly attemptId: string;
+  /** 所属 Child Actor。 */
+  readonly agentId: string;
+  /** 产生 changeset 的 Runtime。 */
+  readonly runtimeId: string;
+  /** 绑定的 Execution Plan hash。 */
+  readonly planHash: string;
+  /** 全部基础文件事实的聚合修订。 */
+  readonly baseRevision: string;
+  /** 私有 overlay 中完整 unified diff 引用。 */
+  readonly diffReference: string;
+  /** 完整 diff 完整性 hash。 */
+  readonly diffHash: string;
+  /** 规范化操作集合 hash。 */
+  readonly operationSetHash: string;
+  /** changeset 命中的资源 scopes。 */
+  readonly resourceScopes: readonly string[];
+  /** 按目标路径规范化排序的文件操作。 */
+  readonly operations: readonly AgentFileOperationSnapshot[];
+  /** 不可变创建时间。 */
+  readonly createdAt: string;
+}
+
+/** 用户确认请求的不可变展示与完整性事实。 */
+export interface AgentConfirmationRequestSnapshot {
+  /** confirmation Schema 版本。 */
+  readonly confirmationSchemaVersion: number;
+  /** confirmation 稳定身份。 */
+  readonly confirmationId: string;
+  /** 所属会话。 */
+  readonly sessionId: string;
+  /** 所属 Turn。 */
+  readonly turnId: string;
+  /** 所属 Task。 */
+  readonly taskId: string;
+  /** 所属 Attempt。 */
+  readonly attemptId: string;
+  /** 所属 Child Actor。 */
+  readonly agentId: string;
+  /** 生成 changeset 的 Runtime。 */
+  readonly runtimeId: string;
+  /** 原始 delegate_task tool-call。 */
+  readonly toolCallId: string;
+  /** 待确认 changeset。 */
+  readonly changesetId: string;
+  /** 绑定的 Execution Plan hash。 */
+  readonly planHash: string;
+  /** 绑定的基础修订。 */
+  readonly baseRevision: string;
+  /** 绑定的 diff hash。 */
+  readonly diffHash: string;
+  /** 绑定的操作集合 hash。 */
+  readonly operationSetHash: string;
+  /** 确认覆盖的资源 scopes。 */
+  readonly resourceScopes: readonly string[];
+  /** 面向用户展示的文件路径。 */
+  readonly displayPaths: readonly string[];
+  /** 完整 unified diff 的受保护引用。 */
+  readonly unifiedDiffReference: string;
+  /** 确认风险等级。 */
+  readonly riskLevel: 'write' | 'dangerous';
+  /** 不可变创建时间。 */
+  readonly createdAt: string;
+}
+
 /** Task 实际资源与成本记账。 */
 export interface AgentUsageAccounting {
   /** Provider 输入 token。 */
@@ -374,6 +474,132 @@ export interface AgentUsageAccounting {
     /** Provider 返回的实际成本；不可用时为 unknown。 */
     actual: number | 'unknown';
   };
+}
+
+/** write Runtime 结束模型执行后冻结的结果草稿。 */
+export interface AgentWriteResultDraft {
+  /** 所属 Task。 */
+  readonly taskId: string;
+  /** 所属 Child Actor。 */
+  readonly agentId: string;
+  /** 所属 Attempt。 */
+  readonly attemptId: string;
+  /** 面向 Primary 的结果摘要。 */
+  readonly summary: string;
+  /** 经安全裁剪的可选结构化输出。 */
+  readonly output?: unknown;
+  /** 按契约顺序生成的验收结论。 */
+  readonly criteria: readonly AgentCriteriaResult[];
+  /** 不改变执行终态的警告。 */
+  readonly warnings: readonly AgentTaskWarning[];
+  /** write Attempt 已消费的成本。 */
+  readonly usage: AgentUsageAccounting;
+}
+
+/** commit journal 首次创建时冻结的完整提交意图。 */
+export interface AgentCommitIntentSnapshot {
+  /** journal intent Schema 版本。 */
+  readonly journalSchemaVersion: number;
+  /** 完整 changeset snapshot hash。 */
+  readonly changesetSnapshotHash: string;
+  /** 已批准 confirmation。 */
+  readonly confirmationId: string;
+  /** 已批准的 confirmation CAS 版本。 */
+  readonly confirmationVersion: number;
+  /** 绑定的 Execution Plan hash。 */
+  readonly planHash: string;
+  /** commit 完成后生成结果所需的不可变草稿。 */
+  readonly resultDraft: AgentWriteResultDraft;
+  /** 按 changeset 冻结的文件操作。 */
+  readonly operations: readonly AgentFileOperationSnapshot[];
+  /** 不可变创建时间。 */
+  readonly createdAt: string;
+}
+
+/** confirmation 可变状态。 */
+export type AgentConfirmationStatus = 'pending' | 'approved' | 'rejected' | 'revoked';
+
+/** confirmation CAS 决议。 */
+export type AgentConfirmationDecision = {
+  /** 用户批准或拒绝。 */
+  readonly decision: 'approved' | 'rejected';
+  /** 决议后版本。 */
+  readonly version: number;
+};
+
+/** commit journal 可变协议状态。 */
+export type AgentCommitJournalStatus = 'created' | 'applying' | 'applied' | 'finalized' | 'cancelled' | 'manual_recovery';
+
+/** changeset 的不可变快照与可变状态投影。 */
+export interface AgentChangesetRecord {
+  /** 不可变 changeset。 */
+  readonly snapshot: AgentChangesetSnapshot;
+  /** changeset snapshot hash。 */
+  readonly snapshotHash: string;
+  /** changeset 当前状态。 */
+  readonly status: 'prepared' | 'awaiting_confirmation' | 'approved' | 'rejected' | 'revoked' | 'committing' | 'committed' | 'discarded';
+  /** 绑定的 confirmation。 */
+  readonly confirmationId?: string;
+  /** 逻辑记录状态。 */
+  readonly recordState: AgentRecordState;
+  /** 投影更新时间。 */
+  readonly updatedAt: string;
+}
+
+/** confirmation 的不可变请求与 CAS 投影。 */
+export interface AgentConfirmationRecord {
+  /** confirmation 稳定身份。 */
+  readonly confirmationId: string;
+  /** 唯一绑定 changeset。 */
+  readonly changesetId: string;
+  /** 不可变确认请求。 */
+  readonly request: AgentConfirmationRequestSnapshot;
+  /** 请求快照 hash。 */
+  readonly requestHash: string;
+  /** 当前确认状态。 */
+  readonly status: AgentConfirmationStatus;
+  /** 当前 CAS 版本。 */
+  readonly version: number;
+  /** 已持久化决定。 */
+  readonly decision?: AgentConfirmationDecision['decision'];
+  /** 不可变创建时间。 */
+  readonly createdAt: string;
+  /** 投影更新时间。 */
+  readonly updatedAt: string;
+}
+
+/** commit journal 的不可变意图与可恢复进度。 */
+export interface AgentCommitJournalRecord {
+  /** journal 稳定身份。 */
+  readonly journalId: string;
+  /** 所属 Task。 */
+  readonly taskId: string;
+  /** 所属 Attempt。 */
+  readonly attemptId: string;
+  /** 唯一绑定 changeset。 */
+  readonly changesetId: string;
+  /** 已批准 confirmation。 */
+  readonly confirmationId: string;
+  /** 已批准 confirmation 版本。 */
+  readonly confirmationVersion: number;
+  /** 绑定的 Execution Plan hash。 */
+  readonly planHash: string;
+  /** 不可变提交意图。 */
+  readonly intent: AgentCommitIntentSnapshot;
+  /** 提交意图 hash。 */
+  readonly intentHash: string;
+  /** journal 当前状态。 */
+  readonly status: AgentCommitJournalStatus;
+  /** 已应用操作的有序身份。 */
+  readonly appliedOperationIds: readonly string[];
+  /** 可选结构化提交错误。 */
+  readonly error?: AgentTaskError;
+  /** 不可变创建时间。 */
+  readonly createdAt: string;
+  /** 投影更新时间。 */
+  readonly updatedAt: string;
+  /** journal 完成时间。 */
+  readonly finalizedAt?: string;
 }
 
 /** Primary Runtime B 消费的结构化终态结果。 */
@@ -549,19 +775,19 @@ export interface ChatAgentEventPayloadMap {
   /** 同一 Attempt 的 Runtime 被替换。 */
   'runtime.replaced': { previousRuntimeId: string; nextRuntimeId: string; reason: string };
   /** 用户确认请求已创建。 */
-  'confirmation.requested': { requestId: string; diffHash: string };
+  'confirmation.requested': { requestId: string; requestHash: string; diffHash: string; version: number };
   /** 用户确认已决议。 */
-  'confirmation.resolved': { requestId: string; decision: 'approved' | 'rejected'; diffHash: string };
+  'confirmation.resolved': { requestId: string; decision: 'approved' | 'rejected'; diffHash: string; version: number };
   /** 基础修订变化使确认失效。 */
-  'confirmation.invalidated': { requestId: string; reason: string };
+  'confirmation.invalidated': { requestId: string; reason: string; version: number };
   /** Child 工具开始执行。 */
   'tool.started': { toolCallId: string; toolName: string };
   /** Child 工具执行完成。 */
   'tool.completed': { toolCallId: string; toolName: string; resultHash: string };
   /** changeset 已准备。 */
-  'changeset.prepared': { changesetId: string; diffHash: string };
+  'changeset.prepared': { changesetId: string; snapshotHash: string; diffHash: string };
   /** commit journal 已创建。 */
-  'commit.journal_created': { journalId: string; changesetId: string };
+  'commit.journal_created': { journalId: string; changesetId: string; intentHash: string; confirmationVersion: number };
   /** 单个外部变更已应用。 */
   'commit.mutation_applied': { journalId: string; operationId: string; targetHash: string };
   /** commit journal 已验证并结束。 */

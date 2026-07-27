@@ -247,13 +247,14 @@ git commit -m "feat(chat): 冻结 Child 受控写入计划"
 - Modify: `electron/main/modules/chat/agents/store.mts`
 - Test: `test/electron/main/modules/database/agent-task-migration.test.ts`
 - Test: `test/electron/main/modules/chat/agents/contracts.test.ts`
+- Test: `test/electron/main/modules/chat/agents/result.test.ts`
 - Test: `test/electron/main/modules/chat/agents/store.test.ts`
 
 **Interfaces:**
 - Consumes: 现有 append-only Event、Task CAS 状态机、immutable snapshot trigger 和 `unfinished_journal_count`。
 - Produces: `AgentChangesetSnapshot`、`AgentConfirmationRecord`、`AgentCommitJournalRecord` 与 Store 的原子 prepare/resolve/journal transition API。
 
-- [ ] **Step 1: Write failing migration and immutability tests**
+- [x] **Step 1: Write failing migration and immutability tests**
 
 测试数据库升级后存在以下表和约束：
 
@@ -289,7 +290,7 @@ Store tests覆盖：
 - `finalizeCommit()` 同事务写入 result、journal finalized、`unfinished_journal_count - 1` 和 Task completed。
 - tombstone 在未决 confirmation 或 unfinished journal 存在时拒绝。
 
-- [ ] **Step 2: Run database and Store tests and verify RED**
+- [x] **Step 2: Run database and Store tests and verify RED**
 
 Run:
 
@@ -300,7 +301,7 @@ pnpm exec vitest run test/electron/main/modules/chat/agents/contracts.test.ts
 
 Expected: FAIL，因为三个事实表、共享类型和 Store API 尚不存在。
 
-- [ ] **Step 3: Define immutable snapshot types**
+- [x] **Step 3: Define immutable snapshot types**
 
 加入以下核心类型：
 
@@ -435,7 +436,7 @@ export interface AgentCommitJournalRecord {
 
 Confirmation immutable request 必须绑定 `sessionId/turnId/taskId/attemptId/agentId/runtimeId/toolCallId/changesetId/planHash/baseRevision/diffHash/operationSetHash/resourceScopes/riskLevel/requestHash`。Journal immutable intent 必须绑定 confirmation version 和完整 changeset snapshot hash。
 
-- [ ] **Step 4: Create fact tables and immutable triggers**
+- [x] **Step 4: Create fact tables and immutable triggers**
 
 表结构固定为以下字段：
 
@@ -498,7 +499,7 @@ CREATE TABLE IF NOT EXISTS chat_agent_commit_journals (
 
 为 identity/snapshot/intention/createdAt 添加 immutable trigger，为三个表添加 no-delete trigger；只允许 confirmation 的 status/version/decision、journal 的 status/progress/error/finalizedAt 和 changeset 的 mutable projection 变化。
 
-- [ ] **Step 5: Add narrow transactional Store APIs**
+- [x] **Step 5: Add narrow transactional Store APIs**
 
 Store 对外只暴露以下写入口：
 
@@ -576,7 +577,7 @@ listUnfinishedJournals(): AgentCommitJournalRecord[]
 
 每个方法都重新读取 Task、Attempt、changeset 和 plan hash，使用 CAS 更新投影，并在同一事务追加包含 `attemptId/runtimeId` 的 Event。Event payload 只保存 ID、hash、version、decision 和稳定错误码，不保存候选全文。
 
-- [ ] **Step 6: Run migration, contract and Store tests**
+- [x] **Step 6: Run migration, contract and Store tests**
 
 Run:
 
@@ -587,10 +588,10 @@ pnpm exec cross-env ELECTRON_RUN_AS_NODE=1 HOST=127.0.0.1 electron node_modules/
 
 Expected: PASS，且旧数据库可增量创建新表，已有 Task/Attempt/Event 事实不被重写。
 
-- [ ] **Step 7: Commit Task 2**
+- [x] **Step 7: Commit Task 2**
 
 ```bash
-git add types/chat-agent.d.ts electron/main/modules/database/service.mts electron/main/modules/chat/agents/types.mts electron/main/modules/chat/agents/contracts.mts electron/main/modules/chat/agents/store.mts test/electron/main/modules/database/agent-task-migration.test.ts test/electron/main/modules/chat/agents/contracts.test.ts test/electron/main/modules/chat/agents/store.test.ts changelog/2026-07-27.md
+git add types/chat-agent.d.ts electron/main/modules/database/service.mts electron/main/modules/chat/agents/types.mts electron/main/modules/chat/agents/contracts.mts electron/main/modules/chat/agents/store.mts test/electron/main/modules/database/agent-task-migration.test.ts test/electron/main/modules/chat/agents/contracts.test.ts test/electron/main/modules/chat/agents/result.test.ts test/electron/main/modules/chat/agents/store.test.ts changelog/2026-07-27.md
 git commit -m "feat(chat): 持久化 Child 写入事实"
 ```
 

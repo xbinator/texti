@@ -4,6 +4,12 @@
  */
 import type {
   AgentCheckpointStatus,
+  AgentChangesetRecord,
+  AgentChangesetSnapshot,
+  AgentCommitIntentSnapshot,
+  AgentCommitJournalRecord,
+  AgentConfirmationRecord,
+  AgentConfirmationRequestSnapshot,
   AgentDelegationCreatedPayload,
   AgentDelegationContinuationSnapshot,
   AgentDelegationReadyPayload,
@@ -358,7 +364,7 @@ export interface TransitionAgentTaskInput {
   source: ChatAgentEventSource;
 }
 
-/** 原子编译后授权一个只读 Task 的输入。 */
+/** 原子编译后授权一个 Task 的输入。 */
 export interface AuthorizeAgentTaskInput {
   /** created 状态的目标 Task。 */
   taskId: string;
@@ -496,6 +502,100 @@ export interface InterruptAgentCheckpointInput {
   occurredAt: string;
 }
 
+/** 原子持久化一个 write Attempt changeset 的输入。 */
+export interface PrepareAgentChangesetInput {
+  /** 完整不可变 changeset。 */
+  readonly snapshot: AgentChangesetSnapshot;
+  /** changeset snapshot hash。 */
+  readonly snapshotHash: string;
+  /** 写入时间。 */
+  readonly occurredAt: string;
+}
+
+/** 原子创建持久化确认请求的输入。 */
+export interface CreateAgentConfirmationInput {
+  /** 完整不可变确认请求。 */
+  readonly request: AgentConfirmationRequestSnapshot;
+  /** request snapshot hash。 */
+  readonly requestHash: string;
+  /** 写入时间。 */
+  readonly occurredAt: string;
+}
+
+/** confirmation CAS 决议输入。 */
+export interface ResolveAgentConfirmationInput {
+  /** 目标 confirmation。 */
+  readonly confirmationId: string;
+  /** 调用方观察到的版本。 */
+  readonly expectedVersion: number;
+  /** 用户决定。 */
+  readonly decision: 'approved' | 'rejected';
+  /** 决议时间。 */
+  readonly occurredAt: string;
+}
+
+/** 把已批准 Task 放入 commit 队列的输入。 */
+export interface QueueAgentCommitInput {
+  /** 目标 Task。 */
+  readonly taskId: string;
+  /** 已批准 confirmation。 */
+  readonly confirmationId: string;
+  /** 已批准 confirmation 版本。 */
+  readonly confirmationVersion: number;
+  /** 排队时间。 */
+  readonly occurredAt: string;
+}
+
+/** 原子创建 commit journal 的输入。 */
+export interface CreateAgentCommitJournalInput {
+  /** journal 稳定身份。 */
+  readonly journalId: string;
+  /** 唯一 changeset。 */
+  readonly changesetId: string;
+  /** 已批准 confirmation。 */
+  readonly confirmationId: string;
+  /** 已批准 confirmation 版本。 */
+  readonly confirmationVersion: number;
+  /** 完整不可变 commit intent。 */
+  readonly intent: AgentCommitIntentSnapshot;
+  /** commit intent hash。 */
+  readonly intentHash: string;
+  /** journal 创建时间。 */
+  readonly occurredAt: string;
+}
+
+/** commit journal 状态更新的共享输入。 */
+export interface MarkAgentJournalInput {
+  /** 目标 journal。 */
+  readonly journalId: string;
+  /** 状态更新时间。 */
+  readonly occurredAt: string;
+}
+
+/** 单个外部操作完成输入。 */
+export interface MarkAgentJournalOperationInput extends MarkAgentJournalInput {
+  /** 已应用操作身份。 */
+  readonly operationId: string;
+  /** 应用后的目标内容 hash。 */
+  readonly targetContentHash: string;
+}
+
+/** commit journal 成功终态输入。 */
+export interface FinalizeAgentCommitInput extends MarkAgentJournalInput {
+  /** 最终结构化 Task 结果。 */
+  readonly result: ChatAgentResult;
+  /** 最终结果 hash。 */
+  readonly resultHash: string;
+  /** 全部外部修改的最终完整性 hash。 */
+  readonly finalHash: string;
+}
+
+/** commit journal 人工恢复终态输入。 */
+export interface MarkAgentJournalFailureInput extends MarkAgentJournalInput {
+  /** 结构化恢复错误。 */
+  readonly error: AgentTaskError;
+}
+
 /** Renderer 重载恢复所需的持久化投影。 */
 export interface AgentDelegationRecoverySnapshot {
   /** 非终态 Checkpoint。 */
@@ -538,6 +638,80 @@ export interface AgentDelegationStore {
    * @returns 同事务更新后的 Task 与 Attempt
    */
   markAttemptRunning(input: MarkAgentAttemptInput): AgentAttemptProjection;
+  /**
+   * 原子持久化 running write Attempt 的不可变 changeset。
+   * @param input - changeset snapshot 与 hash
+   * @returns 持久化 changeset 投影
+   */
+  prepareChangeset(input: PrepareAgentChangesetInput): AgentChangesetRecord;
+  /**
+   * 创建确认请求并原子进入 waiting_confirmation。
+   * @param input - confirmation request 与 hash
+   * @returns pending confirmation
+   */
+  createConfirmation(input: CreateAgentConfirmationInput): AgentConfirmationRecord;
+  /**
+   * 使用 version CAS 决议 confirmation。
+   * @param input - 预期版本与决定
+   * @returns 决议后的 confirmation
+   */
+  resolveConfirmation(input: ResolveAgentConfirmationInput): AgentConfirmationRecord;
+  /**
+   * 撤销仍 pending 的 confirmation。
+   * @param confirmationId - 目标确认
+   * @param reason - 稳定撤销原因
+   * @param occurredAt - 撤销时间
+   * @returns revoked confirmation
+   */
+  revokeConfirmation(confirmationId: string, reason: string, occurredAt: string): AgentConfirmationRecord;
+  /**
+   * 把已批准 Task 放入 commit 队列。
+   * @param input - confirmation CAS 事实
+   * @returns queued(commit) Task
+   */
+  queueCommit(input: QueueAgentCommitInput): AgentTaskRecord;
+  /**
+   * 冻结 commit intent 并进入 committing。
+   * 调用前置条件是 Coordinator 已持有 scheduler 签发的 exclusive-commit lease；
+   * Store 只接受 Main 内部调用，并重新验证全部持久化事实，不把 Renderer 输入当作授权。
+   * @param input - journal 身份和完整意图
+   * @returns created journal
+   */
+  createCommitJournal(input: CreateAgentCommitJournalInput): AgentCommitJournalRecord;
+  /**
+   * 标记 journal 开始外部应用。
+   * @param input - journal 身份与时间
+   * @returns applying journal
+   */
+  markJournalApplying(input: MarkAgentJournalInput): AgentCommitJournalRecord;
+  /**
+   * 幂等记录单个已应用操作。
+   * @param input - 操作身份和目标 hash
+   * @returns 更新进度后的 journal
+   */
+  markJournalOperation(input: MarkAgentJournalOperationInput): AgentCommitJournalRecord;
+  /**
+   * 标记全部操作已应用。
+   * @param input - journal 身份与时间
+   * @returns applied journal
+   */
+  markJournalApplied(input: MarkAgentJournalInput): AgentCommitJournalRecord;
+  /**
+   * 原子完成 journal、Task、Attempt 和 Checkpoint 汇合。
+   * @param input - 最终结果和完整性 hash
+   * @returns 汇合后的 Checkpoint
+   */
+  finalizeCommit(input: FinalizeAgentCommitInput): AgentCheckpointRecord;
+  /**
+   * 把未知外部状态收敛到 manual_recovery。
+   * @param input - journal 与结构化错误
+   * @returns 当前 Checkpoint
+   */
+  markManualRecovery(input: MarkAgentJournalFailureInput): AgentCheckpointRecord;
+  /** @returns 全部 pending confirmation。 */
+  listPendingConfirmations(): AgentConfirmationRecord[];
+  /** @returns 全部未 finalized/cancelled journal。 */
+  listUnfinishedJournals(): AgentCommitJournalRecord[];
   /**
    * 幂等写入单个终态结果并推进 Checkpoint。
    * @param input - Child 结果
