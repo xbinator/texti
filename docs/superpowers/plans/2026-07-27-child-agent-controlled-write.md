@@ -1324,19 +1324,25 @@ git commit -m "feat(chat): 增加 Child 文件提交日志"
 - Modify: `electron/main/modules/chat/agents/executor.mts`
 - Modify: `electron/main/modules/chat/agents/result.mts`
 - Modify: `electron/main/modules/chat/agents/coordinator.mts`
+- Modify: `electron/main/modules/chat/agents/confirmation-store.mts`
+- Modify: `electron/main/modules/chat/agents/file-commit.mts`
 - Modify: `electron/main/modules/chat/agents/service.mts`
+- Modify: `electron/main/modules/chat/agents/state.mts`
+- Modify: `electron/main/modules/chat/agents/store.mts`
+- Modify: `electron/main/modules/chat/agents/types.mts`
 - Modify: `electron/main/modules/chat/runtime/service.mts`
-- Modify: `electron/main/index.mts`
 - Test: `test/electron/main/modules/chat/agents/executor.test.ts`
 - Test: `test/electron/main/modules/chat/agents/result.test.ts`
 - Test: `test/electron/main/modules/chat/agents/coordinator.test.ts`
+- Test: `test/electron/main/modules/chat/agents/file-commit.test.ts`
 - Test: `test/electron/main/modules/chat/agents/service.test.ts`
+- Test: `test/electron/main/modules/chat/agents/store.test.ts`
 
 **Interfaces:**
 - Consumes: write tools、resource scheduler、persistent confirmation queue、file committer 和现有 checkpoint rendezvous。
 - Produces: write Child 从 `queued(start)` 到 `completed/commit_failed/cancelled` 的完整状态机；Primary Runtime B 仍只在 finalized 结果后续接一次。
 
-- [ ] **Step 1: Write failing executor outcome tests**
+- [x] **Step 1: Write failing executor outcome tests**
 
 Executor 返回判别联合：
 
@@ -1359,7 +1365,7 @@ export type ChildExecutionOutcome =
 - no-op write 返回 completed/no changeset 终态。
 - write result draft 的 criteria 在 commit 前只能是 unverified。
 
-- [ ] **Step 2: Write failing Coordinator lifecycle tests**
+- [x] **Step 2: Write failing Coordinator lifecycle tests**
 
 断言精确顺序：
 
@@ -1384,7 +1390,7 @@ expect(callOrder).toEqual([
 
 再验证：
 
-- rejected/revoked confirmation 丢弃 overlay，Task cancelled，不申请 commit lease。
+- rejected confirmation 以 `confirmation_denied` 失败，cancel 导致的 revoked confirmation 以 cancelled 收敛；两者都丢弃 overlay 且不申请 commit lease。
 - waiting confirmation 时 `activeCount()` 不包含该 Task。
 - Task/Turn cancel 先持久化取消意图，再 revoke confirmation。
 - committing 收到 cancel 只设置 cancelRequested，不能 hard abort 原子替换。
@@ -1393,7 +1399,7 @@ expect(callOrder).toEqual([
 - required write Task 失败仍按现有 checkpoint required 策略汇合。
 - write Attempt 沿用 Task 已有 budget reservation，等待确认和 commit 不创建第二笔 reservation；实际 model usage 只结算一次。
 
-- [ ] **Step 3: Run executor and coordinator tests and verify RED**
+- [x] **Step 3: Run executor and coordinator tests and verify RED**
 
 Run:
 
@@ -1403,7 +1409,7 @@ pnpm exec vitest run test/electron/main/modules/chat/agents/executor.test.ts tes
 
 Expected: FAIL，因为 executor 只返回 read `ChatAgentResult`，Coordinator 尚无 write 生命周期。
 
-- [ ] **Step 4: Generalize executor without sharing immediate write paths**
+- [x] **Step 4: Generalize executor without sharing immediate write paths**
 
 write 分支创建 `ChildWriteTools`，read 分支继续使用 `ChildReadTools`。模型循环结束后：
 
@@ -1431,7 +1437,7 @@ return {
 
 `finally` 只做 Runtime/temporary stream 清理；write overlay 的持有权随 changeset 转移给 Coordinator，不能在 confirmation 前删除候选引用。
 
-- [ ] **Step 5: Implement the write state machine in Coordinator**
+- [x] **Step 5: Implement the write state machine in Coordinator**
 
 write start 使用 `write-intent`。收到 preparation 后必须：
 
@@ -1460,7 +1466,7 @@ changeset: {
 
 artifact owner 固定为当前 task/agent/attempt，visibility 首版为 `primary`；只有后续任务卡片策略可提升为 `user`。
 
-- [ ] **Step 6: Add a separate Main-owned write feature gate**
+- [x] **Step 6: Add a separate Main-owned write feature gate**
 
 扩展 feature 配置：
 
@@ -1475,7 +1481,7 @@ export interface PrimaryDelegationFeatureConfig {
 
 默认和生产环境解析均保持 `controlledWriteChildEnabled: false`。flag 为 false 时，write Contract 在 authorization 前稳定失败；Renderer 不能开启该 flag。测试环境必须显式注入 true 才能跑 write coordinator。
 
-- [ ] **Step 7: Run focused orchestration tests**
+- [x] **Step 7: Run focused orchestration tests**
 
 Run:
 
@@ -1485,10 +1491,10 @@ pnpm exec vitest run test/electron/main/modules/chat/agents/executor.test.ts tes
 
 Expected: PASS，且 read Child 行为、一次 Primary rendezvous 和预算结算保持不变。
 
-- [ ] **Step 8: Commit Task 7**
+- [x] **Step 8: Commit Task 7**
 
 ```bash
-git add types/chat-agent.d.ts electron/main/modules/chat/agents/executor.mts electron/main/modules/chat/agents/result.mts electron/main/modules/chat/agents/coordinator.mts electron/main/modules/chat/agents/service.mts electron/main/modules/chat/runtime/service.mts electron/main/index.mts test/electron/main/modules/chat/agents/executor.test.ts test/electron/main/modules/chat/agents/result.test.ts test/electron/main/modules/chat/agents/coordinator.test.ts test/electron/main/modules/chat/agents/service.test.ts changelog/2026-07-27.md
+git add types/chat-agent.d.ts electron/main/modules/chat/agents/confirmation-store.mts electron/main/modules/chat/agents/coordinator.mts electron/main/modules/chat/agents/executor.mts electron/main/modules/chat/agents/file-commit.mts electron/main/modules/chat/agents/result.mts electron/main/modules/chat/agents/service.mts electron/main/modules/chat/agents/state.mts electron/main/modules/chat/agents/store.mts electron/main/modules/chat/agents/types.mts electron/main/modules/chat/runtime/service.mts test/electron/main/modules/chat/agents/confirmation-store.test.ts test/electron/main/modules/chat/agents/coordinator.test.ts test/electron/main/modules/chat/agents/delegation-foundation.test.ts test/electron/main/modules/chat/agents/executor.test.ts test/electron/main/modules/chat/agents/file-commit.test.ts test/electron/main/modules/chat/agents/read-runtime.test.ts test/electron/main/modules/chat/agents/result.test.ts test/electron/main/modules/chat/agents/service.test.ts test/electron/main/modules/chat/agents/store.test.ts test/electron/main/modules/chat/runtime/main-boundary.test.ts changelog/2026-07-27.md docs/superpowers/plans/2026-07-27-child-agent-controlled-write.md
 git commit -m "feat(chat): 接通 Child 受控写入闭环"
 ```
 

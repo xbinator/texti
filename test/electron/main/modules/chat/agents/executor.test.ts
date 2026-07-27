@@ -9,9 +9,13 @@ import type { AgentAttemptRecord, AgentCheckpointRecord, AgentTaskRecord } from 
 import type { ChatModelResolution, ChatModelResolver } from '../../../../../../electron/main/modules/chat/runtime/model/resolver.mjs';
 import type { RuntimeStreamText } from '../../../../../../electron/main/modules/chat/runtime/stream/index.mjs';
 import type { AIStreamResult, AIToolExecutionResult } from 'types/ai';
-import type { AgentUsageAccounting } from 'types/chat-agent';
+import type { AgentUsageAccounting, ChatAgentResult } from 'types/chat-agent';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createChildRuntimeExecutor, type ChildTaskRuntimeExecutor } from '../../../../../../electron/main/modules/chat/agents/executor.mjs';
+import {
+  createChildRuntimeExecutor,
+  type ChildExecutionOutcome,
+  type ChildTaskRuntimeExecutor
+} from '../../../../../../electron/main/modules/chat/agents/executor.mjs';
 
 /** 当前测试创建、并在 afterEach 清理的隔离工作区。 */
 const temporaryRoots: string[] = [];
@@ -20,23 +24,29 @@ const temporaryRoots: string[] = [];
  * 创建隔离工作区与一个授权文件。
  * @returns 工作区根目录和文件真实路径
  */
-async function createWorkspace(): Promise<{ workspaceRoot: string; filePath: string }> {
+async function createWorkspace(): Promise<{ workspaceRoot: string; filePath: string; overlayRoot: string }> {
   const createdRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tibis-child-agent-'));
-  const workspaceRoot = await fs.realpath(createdRoot);
+  const workspacePath = path.join(createdRoot, 'workspace');
+  const overlayPath = path.join(createdRoot, 'overlays');
+  await Promise.all([fs.mkdir(workspacePath), fs.mkdir(overlayPath)]);
+  const workspaceRoot = await fs.realpath(workspacePath);
+  const overlayRoot = await fs.realpath(overlayPath);
   const filePath = path.join(workspaceRoot, 'CONTEXT.md');
   await fs.writeFile(filePath, '# Tibis\nChild runtime context.', 'utf8');
-  temporaryRoots.push(workspaceRoot);
-  return { workspaceRoot, filePath };
+  temporaryRoots.push(createdRoot);
+  return { workspaceRoot, filePath, overlayRoot };
 }
 
 /**
  * 创建冻结只读计划的运行中 Task。
  * @param filePath - 计划授权的真实文件路径
  * @param tokenLimit - Task token 上限
+ * @param mode - read 或受控 write
  * @returns 运行中 Task 投影
  */
-function createTask(filePath: string, tokenLimit = 100): AgentTaskRecord {
+function createTask(filePath: string, tokenLimit = 100, mode: 'read' | 'write' = 'read'): AgentTaskRecord {
   const planHash = 'a'.repeat(64);
+  const writeMode = mode === 'write';
   return {
     taskId: 'task-1',
     sessionId: 'session-1',
@@ -50,22 +60,28 @@ function createTask(filePath: string, tokenLimit = 100): AgentTaskRecord {
       contractSchemaVersion: 1,
       task: 'Inspect the project context',
       acceptanceCriteria: ['Return the project name'],
-      mode: 'read',
+      mode,
       resources: [{ kind: 'file', reference: 'CONTEXT.md' }],
-      requestedTools: ['read_file'],
+      requestedTools: writeMode ? ['read_file', 'stage_file_edit', 'stage_file_write'] : ['read_file'],
       required: true
     },
     contractSnapshotHash: 'b'.repeat(64),
     executionPlanSnapshot: {
       planHash,
       planSchemaVersion: 1,
-      policyVersion: 'read-runtime-v1',
-      capabilitySet: ['read_file'],
+      policyVersion: writeMode ? 'controlled-write-v1' : 'read-runtime-v1',
+      capabilitySet: writeMode ? ['read_file', 'stage_file_edit', 'stage_file_write'] : ['read_file'],
       modelSnapshot: { providerId: 'openai', modelId: 'gpt-5' },
-      permissionSnapshot: { scopeIds: ['workspace-read'] },
+      permissionSnapshot: { scopeIds: [writeMode ? 'workspace-write' : 'workspace-read'] },
       resourceScopes: [`file:${filePath}`],
-      toolEffectSet: [{ toolName: 'read_file', effect: 'pure_read' }],
-      commitPolicy: { mode: 'none' },
+      toolEffectSet: writeMode
+        ? [
+            { toolName: 'read_file', effect: 'pure_read' },
+            { toolName: 'stage_file_edit', effect: 'staged_file_write' },
+            { toolName: 'stage_file_write', effect: 'staged_file_write' }
+          ]
+        : [{ toolName: 'read_file', effect: 'pure_read' }],
+      commitPolicy: writeMode ? { mode: 'staged', adapter: 'atomic-file-v1' } : { mode: 'none' },
       budget: {
         tokenLimit,
         costLimitUsd: 0.01,
@@ -195,10 +211,13 @@ function createStreamResult(chunks: readonly unknown[]): [undefined, AIStreamRes
  * @returns Child executor
  */
 function createExecutor(workspaceRoot: string, streamText: RuntimeStreamText, resolver: ChatModelResolver = createResolver()): ChildTaskRuntimeExecutor {
+  const overlayRoot = path.resolve(workspaceRoot, '..', 'overlays');
   return createChildRuntimeExecutor({
     resolver,
     streamText,
     resolveWorkspaceRoot: (): string => workspaceRoot,
+    resolveOverlayRoot: (): string => overlayRoot,
+    createOverlayId: (kind): string => `${kind}-1`,
     calculateCost: (): AgentUsageAccounting['monetaryCost'] => {
       return {
         currency: 'USD',
@@ -209,6 +228,16 @@ function createExecutor(workspaceRoot: string, streamText: RuntimeStreamText, re
     },
     now: (): number => Date.parse('2026-07-27T00:00:02.000Z')
   });
+}
+
+/**
+ * 从 executor 判别结果中读取终态结果。
+ * @param outcome - Child executor 结果
+ * @returns terminal result
+ */
+function readTerminal(outcome: ChildExecutionOutcome): ChatAgentResult {
+  if (outcome.kind !== 'terminal') throw new Error('Expected terminal Child execution outcome');
+  return outcome.result;
 }
 
 afterEach(async (): Promise<void> => {
@@ -237,12 +266,13 @@ describe('child task runtime executor', (): void => {
     const executor = createExecutor(workspaceRoot, streamText, resolver);
     const task = createTask(filePath);
 
-    const result = await executor.execute({
+    const outcome = await executor.execute({
       task,
       attempt: createAttempt(),
       checkpoint: createCheckpoint(),
       signal: new AbortController().signal
     });
+    const result = readTerminal(outcome);
 
     expect(resolver.resolve).toHaveBeenCalledWith(task.executionPlanSnapshot?.modelSnapshot);
     expect(streamText).toHaveBeenCalledTimes(2);
@@ -285,12 +315,13 @@ describe('child task runtime executor', (): void => {
     const streamText = vi.fn<RuntimeStreamText>().mockResolvedValue(createStreamResult(chunks));
     const executor = createExecutor(workspaceRoot, streamText);
 
-    const result = await executor.execute({
+    const outcome = await executor.execute({
       task: createTask(filePath),
       attempt: createAttempt(),
       checkpoint: createCheckpoint(),
       signal: new AbortController().signal
     });
+    const result = readTerminal(outcome);
 
     expect(result).toMatchObject({
       executionStatus: 'failed',
@@ -307,12 +338,13 @@ describe('child task runtime executor', (): void => {
     const controller = new AbortController();
     controller.abort('primary_cancelled');
 
-    const result = await executor.execute({
+    const outcome = await executor.execute({
       task: createTask(filePath),
       attempt: createAttempt(),
       checkpoint: createCheckpoint(),
       signal: controller.signal
     });
+    const result = readTerminal(outcome);
 
     expect(streamText).not.toHaveBeenCalled();
     expect(result).toMatchObject({
@@ -332,17 +364,112 @@ describe('child task runtime executor', (): void => {
     );
     const executor = createExecutor(workspaceRoot, streamText);
 
-    const result = await executor.execute({
+    const outcome = await executor.execute({
       task: createTask(filePath, 100),
       attempt: createAttempt(),
       checkpoint: createCheckpoint(),
       signal: new AbortController().signal
     });
+    const result = readTerminal(outcome);
 
     expect(result).toMatchObject({
       executionStatus: 'failed',
       error: { code: 'budget_exceeded', phase: 'runtime', category: 'policy' },
       usage: { inputTokens: 80, outputTokens: 40, totalTokens: 120, modelCalls: 1 }
     });
+  });
+
+  it('returns a prepared write outcome and retains protected references until Coordinator discard', async (): Promise<void> => {
+    const { workspaceRoot, filePath } = await createWorkspace();
+    const streamText = vi.fn<RuntimeStreamText>();
+    streamText
+      .mockResolvedValueOnce(
+        createStreamResult([
+          {
+            type: 'tool-call',
+            toolCallId: 'write-1',
+            toolName: 'stage_file_edit',
+            input: { path: 'CONTEXT.md', oldString: 'Child runtime context.', newString: 'Controlled write context.', replaceAll: false }
+          },
+          { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 8, outputTokens: 2, totalTokens: 10 } }
+        ])
+      )
+      .mockResolvedValueOnce(
+        createStreamResult([
+          { type: 'text-delta', text: 'Prepared the requested controlled edit.' },
+          { type: 'finish', finishReason: 'stop', totalUsage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 } }
+        ])
+      );
+    const executor = createExecutor(workspaceRoot, streamText);
+    const task = createTask(filePath, 100, 'write');
+    const attempt = createAttempt();
+
+    const outcome = await executor.execute({
+      task,
+      attempt,
+      checkpoint: createCheckpoint(),
+      signal: new AbortController().signal
+    });
+
+    expect(outcome).toMatchObject({
+      kind: 'changeset_prepared',
+      changeset: {
+        taskId: task.taskId,
+        attemptId: attempt.attemptId,
+        runtimeId: attempt.currentRuntimeId,
+        operations: [{ displayPath: 'CONTEXT.md' }]
+      },
+      draft: {
+        taskId: task.taskId,
+        attemptId: attempt.attemptId,
+        summary: 'Prepared the requested controlled edit.',
+        criteria: [{ verification: { status: 'unverified', verifier: 'policy', evidence: [] } }]
+      }
+    });
+    if (outcome.kind !== 'changeset_prepared') throw new Error('Expected prepared changeset');
+    expect(await fs.readFile(filePath, 'utf8')).toBe('# Tibis\nChild runtime context.');
+    await expect(fs.readFile(outcome.changeset.operations[0]?.candidateReference as string, 'utf8')).resolves.toContain('Controlled write context.');
+
+    await executor.discard(attempt.currentRuntimeId);
+
+    await expect(fs.stat(outcome.changeset.operations[0]?.candidateReference as string)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('returns a completed terminal result without changeset for a no-op write', async (): Promise<void> => {
+    const { workspaceRoot, filePath } = await createWorkspace();
+    const streamText = vi.fn<RuntimeStreamText>();
+    streamText
+      .mockResolvedValueOnce(
+        createStreamResult([
+          {
+            type: 'tool-call',
+            toolCallId: 'write-noop-1',
+            toolName: 'stage_file_write',
+            input: { path: 'CONTEXT.md', content: '# Tibis\nChild runtime context.' }
+          },
+          { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 6, outputTokens: 2, totalTokens: 8 } }
+        ])
+      )
+      .mockResolvedValueOnce(
+        createStreamResult([
+          { type: 'text-delta', text: 'No file changes were required.' },
+          { type: 'finish', finishReason: 'stop', totalUsage: { inputTokens: 4, outputTokens: 4, totalTokens: 8 } }
+        ])
+      );
+    const executor = createExecutor(workspaceRoot, streamText);
+
+    const outcome = await executor.execute({
+      task: createTask(filePath, 100, 'write'),
+      attempt: createAttempt(),
+      checkpoint: createCheckpoint(),
+      signal: new AbortController().signal
+    });
+    const result = readTerminal(outcome);
+
+    expect(result).toMatchObject({
+      executionStatus: 'completed',
+      summary: 'No file changes were required.'
+    });
+    expect(result.changeset).toBeUndefined();
   });
 });

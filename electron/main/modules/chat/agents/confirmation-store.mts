@@ -61,6 +61,13 @@ export interface AgentConfirmationQueue {
    * @returns 已撤销的权威投影
    */
   revokeTask(taskId: string, reason: string): ChatAgentConfirmationSnapshot[];
+  /**
+   * 使 pending 或已批准但尚未创建 journal 的 confirmation 失效。
+   * @param confirmationId - 目标 confirmation
+   * @param reason - 稳定失效原因
+   * @returns revoked 权威投影
+   */
+  invalidate(confirmationId: string, reason: string): ChatAgentConfirmationSnapshot;
   /** @returns 当前全部 pending confirmation allowlist 投影。 */
   listPending(): ChatAgentConfirmationSnapshot[];
   /** 启动或 Renderer 恢复时重发全部 pending 事实，不创建 waiter。 */
@@ -223,6 +230,10 @@ export function createAgentConfirmationQueue(dependencies: AgentConfirmationQueu
           const revoked = dependencies.store.revokeConfirmation(record.confirmationId, reason, occurredAt);
           return projectRecord(revoked);
         });
+    },
+
+    invalidate(confirmationId: string, reason: string): ChatAgentConfirmationSnapshot {
+      return projectRecord(dependencies.store.revokeConfirmation(confirmationId, reason, dependencies.now()));
     },
 
     listPending(): ChatAgentConfirmationSnapshot[] {

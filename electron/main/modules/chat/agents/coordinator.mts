@@ -1,28 +1,37 @@
 /**
  * @file coordinator.mts
- * @description 消费持久化 delegation.created 事实，幂等授权并排队只读 Child Task。
+ * @description 消费持久化 delegation.created 事实，幂等协调只读与受控写入 Child Task。
  */
 import type { ChildActorRegistry } from './child-registry.mjs';
+import type { AgentConfirmationQueue } from './confirmation-store.mjs';
 import type { ChildTaskRuntimeExecutor } from './executor.mjs';
+import type { AgentFileCommitter } from './file-commit.mjs';
 import type { AgentResourceLease, AgentResourceScheduler, AgentScheduleRequest } from './scheduler.mjs';
 import type {
   AgentAttemptProjection,
+  AgentAttemptRecord,
   AgentCheckpointRecord,
   AgentDelegationRecoverySnapshot,
   AgentTaskRecord,
   BeginAgentAttemptInput,
-  MarkAgentAttemptInput
+  MarkAgentAttemptInput,
+  PrepareAgentChangesetInput,
+  QueueAgentCommitInput
 } from './types.mjs';
 import type {
   AgentBudgetSnapshot,
+  AgentChangesetRecord,
   AgentCheckpointStatus,
+  AgentConfirmationRecord,
+  AgentConfirmationRequestSnapshot,
   AgentDelegationCreatedPayload,
   AgentTaskError,
   AgentUsageAccounting,
+  AgentWriteResultDraft,
   ChatAgentResult
 } from 'types/chat-agent';
 import type { ChatRuntimeAddress } from 'types/chat-runtime';
-import { validateAgentTaskError } from './contracts.mjs';
+import { AGENT_CONFIRMATION_SCHEMA_VERSION, hashChangesetSnapshot, hashConfirmationRequestSnapshot, validateAgentTaskError } from './contracts.mjs';
 import { isTaskTerminal } from './state.mjs';
 
 /** 首版单个 Checkpoint 允许协调的最大 Task 数。 */
@@ -42,11 +51,11 @@ export interface AgentCoordinatorDependencies {
   /** @returns 全部持久化非终态 Checkpoint 聚合。 */
   listActive(): AgentDelegationRecoverySnapshot[];
   /**
-   * 编译、校验并冻结一个只读 Task 计划。
+   * 编译、校验并冻结一个 mode-aware Task 计划。
    * @param taskId - created Task
    * @returns queued(start) Task
    */
-  authorizeReadTask(taskId: string): AgentTaskRecord;
+  authorizeTask(taskId: string): AgentTaskRecord;
   /**
    * 原子记录不含 Attempt 的授权前失败。
    * @param task - 失败所属 Task
@@ -94,6 +103,39 @@ export interface AgentCoordinatorDependencies {
   releaseBudget(taskId: string): void;
   /** 无聊天消息持久化的 Child executor。 */
   executor: ChildTaskRuntimeExecutor;
+  /**
+   * 持久化 write Attempt 的不可变 changeset。
+   * 只读 Coordinator 测试可省略；write Task 缺失时稳定失败。
+   */
+  prepareChangeset?: (input: PrepareAgentChangesetInput) => AgentChangesetRecord;
+  /** write Task 的 Main-owned 持久化确认队列。 */
+  confirmationQueue?: Pick<AgentConfirmationQueue, 'request' | 'invalidate'>;
+  /**
+   * 读取 confirmation 权威记录。
+   * @param confirmationId - confirmation 身份
+   * @returns 当前 CAS 记录
+   */
+  getConfirmation?: (confirmationId: string) => AgentConfirmationRecord | null;
+  /**
+   * 把批准的 write Task 放入 commit 队列。
+   * @param input - confirmation CAS 事实
+   * @returns queued(commit) Task
+   */
+  queueCommit?: (input: QueueAgentCommitInput) => AgentTaskRecord;
+  /** durable file commit boundary。 */
+  fileCommitter?: AgentFileCommitter;
+  /**
+   * 创建 confirmation 身份。
+   * @param task - confirmation 所属 Task
+   * @returns 唯一 confirmation ID
+   */
+  createConfirmationId?: (task: AgentTaskRecord) => string;
+  /**
+   * 读取 Task 最新投影，用于 journal 后错误的安全收敛。
+   * @param taskId - Task 身份
+   * @returns 最新 Task
+   */
+  getTask?: (taskId: string) => AgentTaskRecord | null;
   /**
    * 创建一个新的 Child Runtime 身份。
    * @param task - Runtime 所属 Task
@@ -148,8 +190,62 @@ interface CoordinatorExecution {
   updatedAt: string;
 }
 
+/** write Runtime 已结束并持久化 changeset 后的进程内交接事实。 */
+interface PreparedWriteExecution {
+  /** waiting confirmation 前的 running Task 投影。 */
+  readonly task: AgentTaskRecord;
+  /** changeset 所属 Attempt。 */
+  readonly attempt: AgentAttemptRecord;
+  /** Store 权威 changeset。 */
+  readonly changeset: AgentChangesetRecord;
+  /** commit journal 最终结果草稿。 */
+  readonly draft: AgentWriteResultDraft;
+}
+
+/** Coordinator write 分支必需依赖的收窄投影。 */
+interface CoordinatorWriteDependencies {
+  /** changeset Store boundary。 */
+  readonly prepareChangeset: NonNullable<AgentCoordinatorDependencies['prepareChangeset']>;
+  /** 持久化 confirmation queue。 */
+  readonly confirmationQueue: NonNullable<AgentCoordinatorDependencies['confirmationQueue']>;
+  /** confirmation 权威读取。 */
+  readonly getConfirmation: NonNullable<AgentCoordinatorDependencies['getConfirmation']>;
+  /** commit queue Store boundary。 */
+  readonly queueCommit: NonNullable<AgentCoordinatorDependencies['queueCommit']>;
+  /** durable commit boundary。 */
+  readonly fileCommitter: NonNullable<AgentCoordinatorDependencies['fileCommitter']>;
+  /** confirmation ID 工厂。 */
+  readonly createConfirmationId: NonNullable<AgentCoordinatorDependencies['createConfirmationId']>;
+}
+
 /** Coordinator 同步授权调用的判别结果。 */
 type CoordinatorAuthorization = { ok: true; task: AgentTaskRecord } | { ok: false; error: unknown };
+
+/**
+ * 收窄 write Coordinator 依赖，避免 write Task 静默退化为 read。
+ * @param dependencies - Coordinator 全部依赖
+ * @returns 完整 write 依赖或 null
+ */
+function readWriteDependencies(dependencies: AgentCoordinatorDependencies): CoordinatorWriteDependencies | null {
+  if (
+    !dependencies.prepareChangeset ||
+    !dependencies.confirmationQueue ||
+    !dependencies.getConfirmation ||
+    !dependencies.queueCommit ||
+    !dependencies.fileCommitter ||
+    !dependencies.createConfirmationId
+  ) {
+    return null;
+  }
+  return {
+    prepareChangeset: dependencies.prepareChangeset,
+    confirmationQueue: dependencies.confirmationQueue,
+    getConfirmation: dependencies.getConfirmation,
+    queueCommit: dependencies.queueCommit,
+    fileCommitter: dependencies.fileCommitter,
+    createConfirmationId: dependencies.createConfirmationId
+  };
+}
 
 /**
  * 从抛出的 Error 或普通对象提取结构化 AgentTaskError。
@@ -252,16 +348,28 @@ function resolveDeadline(task: AgentTaskRecord, checkpoint: AgentCheckpointRecor
  * @param checkpoint - Task 所属 Checkpoint
  * @param now - 当前 ISO 时间
  * @param systemTimeoutMs - 系统 Child 相对时限
+ * @param phase - 模型启动或排他提交
  * @returns 不含可变 Runtime 状态的请求
  */
-function createScheduleRequest(task: AgentTaskRecord, checkpoint: AgentCheckpointRecord, now: string, systemTimeoutMs: number): AgentScheduleRequest {
-  if (!task.executionPlanSnapshot || task.contractSnapshot.mode !== 'read') {
+function createScheduleRequest(
+  task: AgentTaskRecord,
+  checkpoint: AgentCheckpointRecord,
+  now: string,
+  systemTimeoutMs: number,
+  phase: AgentScheduleRequest['phase'] = 'start'
+): AgentScheduleRequest {
+  if (!task.executionPlanSnapshot) {
     throw new Error('coordinator_execution_plan_missing');
   }
+  const writeMode = task.contractSnapshot.mode === 'write';
+  if (phase === 'commit' && !writeMode) throw new Error('coordinator_commit_mode_invalid');
+  let kind: AgentScheduleRequest['kind'] = 'shared-read';
+  if (writeMode) kind = 'write-intent';
+  if (phase === 'commit') kind = 'exclusive-commit';
   return {
     taskId: task.taskId,
-    phase: 'start',
-    kind: 'shared-read',
+    phase,
+    kind,
     priority: task.priority,
     deadlineAt: resolveDeadline(task, checkpoint, now, systemTimeoutMs),
     createdAt: task.createdAt,
@@ -316,9 +424,10 @@ function createZeroUsage(task: AgentTaskRecord): AgentUsageAccounting {
  * @param status - 失败、取消或 deadline 终态
  * @returns Primary 可见紧凑摘要
  */
-function createFailureSummary(status: Extract<ChatAgentResult['executionStatus'], 'failed' | 'cancelled' | 'deadline_exceeded'>): string {
+function createFailureSummary(status: Extract<ChatAgentResult['executionStatus'], 'failed' | 'cancelled' | 'deadline_exceeded' | 'commit_failed'>): string {
   if (status === 'cancelled') return 'Child execution was cancelled.';
   if (status === 'deadline_exceeded') return 'Child execution exceeded its deadline.';
+  if (status === 'commit_failed') return 'Child changeset could not be committed.';
   return 'Child execution failed.';
 }
 
@@ -327,12 +436,14 @@ function createFailureSummary(status: Extract<ChatAgentResult['executionStatus']
  * @param projection - 已持久化 Attempt 投影
  * @param status - 执行终态
  * @param error - 结构化错误
+ * @param usage - 可选已消费 Provider 用量
  * @returns 零 Provider 用量的安全结果
  */
 function createFailureResult(
   projection: AgentAttemptProjection,
-  status: Extract<ChatAgentResult['executionStatus'], 'failed' | 'cancelled' | 'deadline_exceeded'>,
-  error: AgentTaskError
+  status: Extract<ChatAgentResult['executionStatus'], 'failed' | 'cancelled' | 'deadline_exceeded' | 'commit_failed'>,
+  error: AgentTaskError,
+  usage?: AgentUsageAccounting
 ): ChatAgentResult {
   return {
     taskId: projection.task.taskId,
@@ -358,7 +469,7 @@ function createFailureResult(
     summary: createFailureSummary(status),
     warnings: [],
     artifacts: [],
-    usage: createZeroUsage(projection.task),
+    usage: usage ?? createZeroUsage(projection.task),
     error
   };
 }
@@ -463,6 +574,105 @@ function createRuntimeAddress(task: AgentTaskRecord, checkpoint: AgentCheckpoint
 }
 
 /**
+ * 从已持久化 changeset 构造完整性绑定确认请求。
+ * @param prepared - changeset 交接事实
+ * @param confirmationId - 新 confirmation 身份
+ * @param createdAt - 创建时间
+ * @returns 不含 Renderer 输入的确认快照
+ */
+function createConfirmationRequest(prepared: PreparedWriteExecution, confirmationId: string, createdAt: string): AgentConfirmationRequestSnapshot {
+  const { task, attempt, changeset } = prepared;
+  const { snapshot } = changeset;
+  return {
+    confirmationSchemaVersion: AGENT_CONFIRMATION_SCHEMA_VERSION,
+    confirmationId,
+    sessionId: task.sessionId,
+    turnId: task.turnId,
+    taskId: task.taskId,
+    attemptId: attempt.attemptId,
+    agentId: task.agentId,
+    runtimeId: attempt.currentRuntimeId,
+    toolCallId: task.toolCallId,
+    changesetId: snapshot.changesetId,
+    planHash: snapshot.planHash,
+    baseRevision: snapshot.baseRevision,
+    diffHash: snapshot.diffHash,
+    operationSetHash: snapshot.operationSetHash,
+    resourceScopes: [...snapshot.resourceScopes],
+    displayPaths: snapshot.operations.map((operation): string => operation.displayPath),
+    unifiedDiffReference: snapshot.diffReference,
+    riskLevel: 'write',
+    createdAt
+  };
+}
+
+/**
+ * 创建 confirmation 拒绝的终态错误。
+ * @returns 用户拒绝错误
+ */
+function createConfirmationError(): AgentTaskError {
+  return {
+    code: 'confirmation_denied',
+    phase: 'confirmation',
+    category: 'user',
+    retryable: false,
+    details: { reason: 'confirmation_rejected' }
+  };
+}
+
+/**
+ * 把未知 commit 异常收缩为可持久化 Agent 错误。
+ * @param error - file committer 或 scheduler 异常
+ * @returns 可信错误或稳定 commit_failed
+ */
+function createCommitError(error: unknown): AgentTaskError {
+  const structured = readAgentError(error);
+  if (structured) return structured;
+  if (typeof error === 'object' && error !== null) {
+    const source = error as Record<string, unknown>;
+    if (source.code === 'deadline_exceeded') {
+      return {
+        code: 'deadline_exceeded',
+        phase: 'commit',
+        category: 'policy',
+        retryable: false,
+        details: { reason: 'schedule_deadline_exceeded' }
+      };
+    }
+    if (source.code === 'cancelled') {
+      return {
+        code: 'cancelled',
+        phase: 'commit',
+        category: 'user',
+        retryable: false,
+        details: {
+          reason: typeof source.reason === 'string' && source.reason.trim() ? source.reason.trim() : 'schedule_cancelled'
+        }
+      };
+    }
+  }
+  return {
+    code: 'commit_failed',
+    phase: 'commit',
+    category: 'runtime',
+    retryable: false,
+    details: { reason: 'commit_execution_rejected' }
+  };
+}
+
+/**
+ * 从 commit 错误选择合法 Task 终态。
+ * @param error - 可信 commit 错误
+ * @returns failed、cancelled、deadline 或 commit_failed
+ */
+function readCommitStatus(error: AgentTaskError): Extract<ChatAgentResult['executionStatus'], 'failed' | 'cancelled' | 'deadline_exceeded' | 'commit_failed'> {
+  if (error.code === 'cancelled') return 'cancelled';
+  if (error.code === 'deadline_exceeded') return 'deadline_exceeded';
+  if (error.code === 'commit_failed' || error.code === 'manual_recovery_required') return 'commit_failed';
+  return 'failed';
+}
+
+/**
  * 创建 Main-owned Child Coordinator。
  * @param dependencies - Store、授权器、Registry 和调度入口
  * @returns 幂等 Coordinator
@@ -495,7 +705,7 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
    */
   function authorizeTask(taskId: string): CoordinatorAuthorization {
     try {
-      return { ok: true, task: dependencies.authorizeReadTask(taskId) };
+      return { ok: true, task: dependencies.authorizeTask(taskId) };
     } catch (error) {
       return { ok: false, error };
     }
@@ -581,12 +791,13 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
   }
 
   /**
-   * 在已取得 lease 后创建 Attempt、绑定 Runtime、执行并汇合结果。
+   * 在 start lease 内创建 Attempt、执行模型并持久化可选 changeset。
    * @param task - 已授权 Task
    * @param checkpoint - Task 所属 Checkpoint
-   * @param lease - 已取得的资源许可
+   * @param lease - shared-read 或 write-intent 许可
+   * @returns write 交接事实；read/终态路径为 null
    */
-  async function executeLease(task: AgentTaskRecord, checkpoint: AgentCheckpointRecord, lease: AgentResourceLease): Promise<void> {
+  async function executeLease(task: AgentTaskRecord, checkpoint: AgentCheckpointRecord, lease: AgentResourceLease): Promise<PreparedWriteExecution | null> {
     const runtimeId = dependencies.createRuntimeId(task);
     const attemptId = `attempt-${runtimeId}`;
     const beginInput: BeginAgentAttemptInput = {
@@ -599,7 +810,7 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
     const [beginOutcome] = await Promise.allSettled([Promise.resolve().then((): AgentAttemptProjection => dependencies.beginAttempt(beginInput))]);
     if (beginOutcome.status === 'rejected') {
       await cancelBeforeAttempt(task, checkpoint, 'attempt_start_rejected');
-      return;
+      return null;
     }
 
     let projection = beginOutcome.value;
@@ -622,7 +833,7 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
         ? createFailureResult(projection, abortResult.status, abortResult.error)
         : createFailureResult(projection, 'failed', createRuntimeError('starting', 'runtime_start_rejected', runtimeId));
       await commitTaskResult(projection.task, result);
-      return;
+      return null;
     }
     projection = startOutcome.value;
 
@@ -635,32 +846,226 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
       })
     ]);
     const abortResult = readAbortResult(lease.signal);
-    let result: ChatAgentResult;
-    if (executionOutcome.status === 'fulfilled') {
-      result = normalizeAbortResult(executionOutcome.value, lease.signal);
-    } else if (abortResult) {
-      result = createFailureResult(projection, abortResult.status, abortResult.error);
-    } else {
-      result = createFailureResult(projection, 'failed', createRuntimeError('runtime', 'runtime_execution_rejected', runtimeId));
+    if (executionOutcome.status === 'rejected') {
+      const result = abortResult
+        ? createFailureResult(projection, abortResult.status, abortResult.error)
+        : createFailureResult(projection, 'failed', createRuntimeError('runtime', 'runtime_execution_rejected', runtimeId));
+      await commitTaskResult(projection.task, result);
+      return null;
     }
-    await commitTaskResult(projection.task, result);
+    const execution = executionOutcome.value;
+    if (execution.kind === 'terminal') {
+      await commitTaskResult(projection.task, normalizeAbortResult(execution.result, lease.signal));
+      return null;
+    }
+    if (abortResult) {
+      await Promise.allSettled([dependencies.executor.discard(runtimeId)]);
+      await commitTaskResult(projection.task, createFailureResult(projection, abortResult.status, abortResult.error, execution.draft.usage));
+      return null;
+    }
+    const writeDependencies = readWriteDependencies(dependencies);
+    if (!writeDependencies) {
+      await Promise.allSettled([dependencies.executor.discard(runtimeId)]);
+      await commitTaskResult(
+        projection.task,
+        createFailureResult(
+          projection,
+          'failed',
+          {
+            code: 'capability_denied',
+            phase: 'plan_validation',
+            category: 'policy',
+            retryable: false,
+            details: { reason: 'write_orchestration_unavailable' }
+          },
+          execution.draft.usage
+        )
+      );
+      return null;
+    }
+    const [prepareOutcome] = await Promise.allSettled([
+      Promise.resolve().then(
+        (): AgentChangesetRecord =>
+          writeDependencies.prepareChangeset({
+            snapshot: execution.changeset,
+            snapshotHash: hashChangesetSnapshot(execution.changeset),
+            occurredAt: dependencies.now()
+          })
+      )
+    ]);
+    if (prepareOutcome.status === 'rejected') {
+      await Promise.allSettled([dependencies.executor.discard(runtimeId)]);
+      const error =
+        readAgentError(prepareOutcome.reason) ??
+        ({
+          code: 'protocol_error',
+          phase: 'commit_validation',
+          category: 'protocol',
+          retryable: false,
+          details: { reason: 'changeset_persistence_rejected' }
+        } satisfies AgentTaskError);
+      await commitTaskResult(projection.task, createFailureResult(projection, 'failed', error, execution.draft.usage));
+      return null;
+    }
+    return {
+      task: projection.task,
+      attempt: projection.attempt,
+      changeset: prepareOutcome.value,
+      draft: execution.draft
+    };
   }
 
   /**
-   * 在取得 lease 后执行完整 Child 链路，并保证所有退出路径只释放一次。
+   * 等待一次用户确认，并在批准后通过新排他 lease 提交 changeset。
+   * @param prepared - 已释放 write-intent 的 write 交接事实
+   * @param checkpoint - Task 所属 Checkpoint
+   */
+  async function commitPrepared(prepared: PreparedWriteExecution, checkpoint: AgentCheckpointRecord): Promise<void> {
+    const writeDependencies = readWriteDependencies(dependencies);
+    const projection: AgentAttemptProjection = { task: prepared.task, attempt: prepared.attempt };
+    if (!writeDependencies) {
+      await Promise.allSettled([dependencies.executor.discard(prepared.attempt.currentRuntimeId)]);
+      return;
+    }
+    const confirmationId = writeDependencies.createConfirmationId(prepared.task);
+    const request = createConfirmationRequest(prepared, confirmationId, dependencies.now());
+    const [decisionOutcome] = await Promise.allSettled([
+      writeDependencies.confirmationQueue.request({
+        request,
+        requestHash: hashConfirmationRequestSnapshot(request),
+        occurredAt: dependencies.now()
+      })
+    ]);
+    if (decisionOutcome.status === 'rejected') {
+      const error =
+        readAgentError(decisionOutcome.reason) ??
+        ({
+          code: 'protocol_error',
+          phase: 'confirmation',
+          category: 'protocol',
+          retryable: false,
+          details: { reason: 'confirmation_request_rejected' }
+        } satisfies AgentTaskError);
+      await commitTaskResult(prepared.task, createFailureResult(projection, 'failed', error, prepared.draft.usage));
+      await Promise.allSettled([dependencies.executor.discard(prepared.attempt.currentRuntimeId)]);
+      return;
+    }
+    const confirmation = writeDependencies.getConfirmation(confirmationId);
+    if (decisionOutcome.value.decision !== 'approved' || confirmation?.status !== 'approved') {
+      const revoked = confirmation?.status === 'revoked';
+      const error: AgentTaskError = revoked
+        ? {
+            code: 'cancelled',
+            phase: 'runtime',
+            category: 'user',
+            retryable: false,
+            details: { reason: 'confirmation_revoked' }
+          }
+        : createConfirmationError();
+      await commitTaskResult(prepared.task, createFailureResult(projection, revoked ? 'cancelled' : 'failed', error, prepared.draft.usage));
+      await Promise.allSettled([dependencies.executor.discard(prepared.attempt.currentRuntimeId)]);
+      return;
+    }
+    if (confirmation.version !== decisionOutcome.value.version || confirmation.changesetId !== prepared.changeset.snapshot.changesetId) {
+      await commitTaskResult(
+        prepared.task,
+        createFailureResult(
+          projection,
+          'failed',
+          {
+            code: 'protocol_error',
+            phase: 'confirmation',
+            category: 'protocol',
+            retryable: false,
+            details: { reason: 'confirmation_decision_mismatch' }
+          },
+          prepared.draft.usage
+        )
+      );
+      await Promise.allSettled([dependencies.executor.discard(prepared.attempt.currentRuntimeId)]);
+      return;
+    }
+    const [queueOutcome] = await Promise.allSettled([
+      Promise.resolve().then(
+        (): AgentTaskRecord =>
+          writeDependencies.queueCommit({
+            taskId: prepared.task.taskId,
+            confirmationId: confirmation.confirmationId,
+            confirmationVersion: confirmation.version,
+            occurredAt: dependencies.now()
+          })
+      )
+    ]);
+    if (queueOutcome.status === 'rejected') {
+      const error = createCommitError(queueOutcome.reason);
+      await commitTaskResult(prepared.task, createFailureResult(projection, readCommitStatus(error), error, prepared.draft.usage));
+      await Promise.allSettled([dependencies.executor.discard(prepared.attempt.currentRuntimeId)]);
+      return;
+    }
+    const commitTask = queueOutcome.value;
+    const [leaseOutcome] = await Promise.allSettled([
+      dependencies.scheduler.enqueue(createScheduleRequest(commitTask, checkpoint, dependencies.now(), systemChildTimeoutMs, 'commit'))
+    ]);
+    if (leaseOutcome.status === 'rejected') {
+      const error = createCommitError(leaseOutcome.reason);
+      await commitTaskResult(
+        commitTask,
+        createFailureResult({ task: commitTask, attempt: prepared.attempt }, readCommitStatus(error), error, prepared.draft.usage)
+      );
+      await Promise.allSettled([dependencies.executor.discard(prepared.attempt.currentRuntimeId)]);
+      return;
+    }
+    const lease = leaseOutcome.value;
+    try {
+      const [commitOutcome] = await Promise.allSettled([
+        writeDependencies.fileCommitter.commit({
+          task: commitTask,
+          attempt: prepared.attempt,
+          changeset: prepared.changeset,
+          confirmation,
+          resultDraft: prepared.draft,
+          lease
+        })
+      ]);
+      if (commitOutcome.status === 'fulfilled') {
+        await commitTaskResult(commitTask, commitOutcome.value.result);
+      } else {
+        const currentTask = dependencies.getTask?.(prepared.task.taskId);
+        if ((currentTask?.unfinishedJournalCount ?? 0) > 0) {
+          setState(prepared.task.checkpointId, 'idle');
+        } else {
+          const error = createCommitError(commitOutcome.reason);
+          if (error.code === 'stale_context' && error.phase === 'commit_validation') {
+            await Promise.allSettled([
+              Promise.resolve().then(() => writeDependencies.confirmationQueue.invalidate(confirmation.confirmationId, 'stale_context'))
+            ]);
+          }
+          await commitTaskResult(
+            commitTask,
+            createFailureResult({ task: commitTask, attempt: prepared.attempt }, readCommitStatus(error), error, prepared.draft.usage)
+          );
+        }
+      }
+    } finally {
+      await Promise.allSettled([Promise.resolve().then((): void => lease.release()), dependencies.executor.discard(prepared.attempt.currentRuntimeId)]);
+    }
+  }
+
+  /**
+   * 在取得 start lease 后执行 Child，并保证确认前释放 Runtime 与资源许可。
    * @param task - 已授权 Task
    * @param checkpoint - Task 所属 Checkpoint
    */
   async function runScheduledTask(task: AgentTaskRecord, checkpoint: AgentCheckpointRecord): Promise<void> {
     const [leaseOutcome] = await Promise.allSettled([
-      dependencies.scheduler.enqueue(createScheduleRequest(task, checkpoint, dependencies.now(), systemChildTimeoutMs))
+      dependencies.scheduler.enqueue(createScheduleRequest(task, checkpoint, dependencies.now(), systemChildTimeoutMs, 'start'))
     ]);
     if (leaseOutcome.status === 'rejected') {
       await cancelBeforeAttempt(task, checkpoint, readScheduleReason(leaseOutcome.reason));
       return;
     }
     const lease = leaseOutcome.value;
-    await Promise.allSettled([executeLease(task, checkpoint, lease)]);
+    const [executionOutcome] = await Promise.allSettled([executeLease(task, checkpoint, lease)]);
     clearAbortTimer(task.taskId);
     const runtimeId = runtimeIds.get(task.taskId);
     if (runtimeId) {
@@ -672,6 +1077,11 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
     }
     runtimeIds.delete(task.taskId);
     lease.release();
+    if (executionOutcome.status === 'fulfilled' && executionOutcome.value) {
+      await commitPrepared(executionOutcome.value, checkpoint);
+    } else if (executionOutcome.status === 'rejected') {
+      setState(task.checkpointId, 'idle');
+    }
   }
 
   /**

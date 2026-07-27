@@ -37,7 +37,7 @@ const TASK_TRANSITIONS: Readonly<Record<AgentTaskStatus, readonly AgentTaskStatu
   created: ['planning', 'failed', 'cancelling', 'deadline_exceeded'],
   planning: ['authorized', 'failed', 'cancelling', 'deadline_exceeded'],
   authorized: ['queued', 'failed', 'cancelling', 'deadline_exceeded'],
-  queued: ['queued', 'starting', 'committing', 'failed', 'cancelling', 'deadline_exceeded'],
+  queued: ['queued', 'starting', 'committing', 'failed', 'cancelling', 'deadline_exceeded', 'commit_failed'],
   starting: ['running', 'failed', 'cancelling', 'deadline_exceeded'],
   running: ['waiting_confirmation', 'queued', 'completed', 'failed', 'cancelling', 'deadline_exceeded'],
   waiting_confirmation: ['queued', 'failed', 'cancelling', 'deadline_exceeded'],

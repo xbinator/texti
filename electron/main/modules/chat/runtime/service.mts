@@ -19,7 +19,7 @@ import type {
 import type { ChatAgentPrimaryContinuationInput, ChatAgentPrimaryContinuationResult } from '../agents/service.mjs';
 import type { AIServiceError, AIToolExecutionResult, AITransportTool, AIUsage } from 'types/ai';
 import type { ChatMessageCompactionPart, ChatMessagePart, ChatMessageRecord, ChatPendingInteraction, CompactionModelSnapshot } from 'types/chat';
-import type { AgentTaskError } from 'types/chat-agent';
+import type { AgentTaskError, PrimaryDelegationFeatureConfig } from 'types/chat-agent';
 import type {
   ChatRuntimeAbortInput,
   ChatRuntimeAbortResult,
@@ -94,22 +94,15 @@ import { createRuntimeEventBase } from './types.mjs';
 /** Renderer 请求默认超时时间。 */
 const RUNTIME_RENDERER_REQUEST_TIMEOUT_MS = 30_000;
 
-/** Main-owned Primary 委派 feature 配置。 */
-export interface PrimaryDelegationFeatureConfig {
-  /** 是否向可信 Primary Runtime A 开放委派工具。 */
-  readonly enabled: boolean;
-  /** 首版只允许 pure-read Child。 */
-  readonly pureReadChildEnabled: boolean;
-  /** 首版固定最大并行 read Child 数。 */
-  readonly maxParallelReadChildren: number;
-}
-
 /** 默认关闭且不可由 Renderer 覆盖的 Primary 委派策略。 */
 const DEFAULT_PRIMARY_DELEGATION_FEATURE: Readonly<PrimaryDelegationFeatureConfig> = Object.freeze({
   enabled: false,
   pureReadChildEnabled: true,
+  controlledWriteChildEnabled: false,
   maxParallelReadChildren: 3
 });
+
+export type { PrimaryDelegationFeatureConfig } from 'types/chat-agent';
 
 export { ChatRuntimeError } from './errors.mjs';
 
@@ -231,6 +224,7 @@ function normalizeDelegationFeature(input: Readonly<PrimaryDelegationFeatureConf
   if (
     typeof feature.enabled !== 'boolean' ||
     feature.pureReadChildEnabled !== true ||
+    typeof feature.controlledWriteChildEnabled !== 'boolean' ||
     feature.maxParallelReadChildren !== DEFAULT_PRIMARY_DELEGATION_FEATURE.maxParallelReadChildren
   ) {
     throw new ChatRuntimeError('RUNTIME_INPUT_DENIED', 'Primary 委派策略不能扩大首版 Child 能力或并发上限');
@@ -238,6 +232,7 @@ function normalizeDelegationFeature(input: Readonly<PrimaryDelegationFeatureConf
   return Object.freeze({
     enabled: feature.enabled,
     pureReadChildEnabled: true,
+    controlledWriteChildEnabled: feature.controlledWriteChildEnabled,
     maxParallelReadChildren: DEFAULT_PRIMARY_DELEGATION_FEATURE.maxParallelReadChildren
   });
 }
@@ -1880,6 +1875,7 @@ export const chatRuntimeService = createChatRuntimeService(
   {
     enabled: process.env.TIBIS_PRIMARY_DELEGATION_ENABLED === '1',
     pureReadChildEnabled: true,
+    controlledWriteChildEnabled: false,
     maxParallelReadChildren: 3
   }
 );

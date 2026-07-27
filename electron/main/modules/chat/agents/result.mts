@@ -161,17 +161,29 @@ function validateIdentity(result: Readonly<ChatAgentResult>, context: AgentResul
 }
 
 /**
- * 校验 foundation 的只读 changeset 边界。
+ * 校验 read/write 结果与冻结 commit policy 的一致性。
  * @param result - 已规范化结果
  * @param context - Task 契约与冻结计划
  * @returns 越界时的失败结果
  */
 function validateChangeset(result: Readonly<ChatAgentResult>, context: AgentResultValidationContext): AgentResultValidationFailure | null {
-  if (context.contractSnapshot.mode !== 'read' || context.executionPlanSnapshot.commitPolicy.mode !== 'none') {
-    return resultFailure('result_write_unsupported', 'Foundation result validation accepts read-only Task plans');
+  if (context.contractSnapshot.mode === 'read') {
+    if (context.executionPlanSnapshot.commitPolicy.mode !== 'none') {
+      return resultFailure('result_commit_policy_mismatch', 'Read Task results require a none commit policy');
+    }
+    if (result.changeset !== undefined) {
+      return resultFailure('result_changeset_unsupported', 'Read Task results cannot contain a changeset');
+    }
+    return null;
   }
-  if (result.changeset !== undefined) {
-    return resultFailure('result_changeset_unsupported', 'Foundation read results cannot contain a changeset');
+  if (context.executionPlanSnapshot.commitPolicy.mode !== 'staged') {
+    return resultFailure('result_commit_policy_mismatch', 'Write Task results require the frozen staged commit policy');
+  }
+  if (result.changeset && result.changeset.planHash !== context.executionPlanSnapshot.planHash) {
+    return resultFailure('result_changeset_plan_mismatch', 'Write result changeset does not bind the frozen execution plan');
+  }
+  if (result.changeset && result.executionStatus !== 'completed') {
+    return resultFailure('result_changeset_status_invalid', 'Only finalized completed write results may expose a changeset');
   }
   return null;
 }

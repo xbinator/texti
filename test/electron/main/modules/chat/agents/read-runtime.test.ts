@@ -463,6 +463,8 @@ describeWithSqlite('real read child delegation runtime', (): void => {
       resolver: childResolver,
       streamText: childStream,
       resolveWorkspaceRoot: (): string => workspaceRoot,
+      resolveOverlayRoot: (): string => workspaceRoot,
+      createOverlayId: (kind): string => `${kind}-read-runtime`,
       calculateCost: (): AgentUsageAccounting['monetaryCost'] => ({
         currency: 'unknown',
         pricingVersion: 'unknown',
@@ -554,7 +556,7 @@ describeWithSqlite('real read child delegation runtime', (): void => {
     const generatedRuntimeIds: string[] = [];
     coordinator = createAgentCoordinator({
       listActive: () => store.listActive(),
-      authorizeReadTask: (taskId: string): AgentTaskRecord => agentService.authorizeReadTask(taskId),
+      authorizeTask: (taskId: string): AgentTaskRecord => agentService.authorizeTask(taskId),
       recordPreFailure: (task: AgentTaskRecord, error: AgentTaskError) => agentService.recordPreFailure(task, error),
       reserveResume: (checkpointId: string, budget: AgentBudgetSnapshot): void => budgetLedger.reserveResume(checkpointId, budget),
       scheduler,
@@ -600,6 +602,7 @@ describeWithSqlite('real read child delegation runtime', (): void => {
       {
         enabled: true,
         pureReadChildEnabled: true,
+        controlledWriteChildEnabled: false,
         maxParallelReadChildren: 3
       }
     );

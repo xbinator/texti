@@ -288,8 +288,15 @@ function createDependencies(): {
         request: vi.fn(),
         resolve: resolveConfirmation,
         revokeTask: revokeTaskConfirmations,
+        invalidate: vi.fn(),
         listPending: listConfirmations,
         recover: vi.fn()
+      },
+      featureConfig: {
+        enabled: true,
+        pureReadChildEnabled: true,
+        controlledWriteChildEnabled: true,
+        maxParallelReadChildren: 3
       },
       createId: (kind, index): string => `${kind}-${index ?? 1}`,
       now: (): string => '2026-07-23T00:00:01.000Z',
@@ -545,7 +552,7 @@ describe('chat agent delegation service', (): void => {
     fixture.compileReadPlan.mockReturnValue({ ok: true, plan });
     fixture.authorizeTask.mockReturnValue(queuedTask);
 
-    const result = service.authorizeReadTask(task.taskId);
+    const result = service.authorizeTask(task.taskId);
 
     expect(fixture.resolveReadLimits).toHaveBeenCalledWith(task, checkpoint, expect.objectContaining({ workspaceRoot: '/workspace' }));
     expect(fixture.compileReadPlan).toHaveBeenCalledWith({
@@ -570,7 +577,7 @@ describe('chat agent delegation service', (): void => {
     expect(result).toBe(queuedTask);
   });
 
-  it('authorizes a prepared write Task while the read compatibility method stays fail-closed', (): void => {
+  it('authorizes a prepared write Task only when the Main-owned controlled-write gate is enabled', (): void => {
     const fixture = createDependencies();
     fixture.resolveReadLimits.mockReturnValue({
       availableToolNames: ['read_file', 'stage_file_edit'],
@@ -610,14 +617,35 @@ describe('chat agent delegation service', (): void => {
     fixture.authorizeTask.mockReturnValue(queuedTask);
 
     expect(service.authorizeTask(task.taskId)).toBe(queuedTask);
+  });
+
+  it('rejects a write Task before plan compilation when the controlled-write gate is disabled', (): void => {
+    const fixture = createDependencies();
+    fixture.dependencies.featureConfig = {
+      enabled: true,
+      pureReadChildEnabled: true,
+      controlledWriteChildEnabled: false,
+      maxParallelReadChildren: 3
+    };
+    const service = createChatAgentDelegationService(fixture.dependencies);
+    const input = createInput('write');
+    service.prepareDelegation(input);
+    const prepared = fixture.prepareDelegation.mock.calls[0]?.[0] as PrepareDelegationInput | undefined;
+    if (!prepared) throw new Error('Prepare facts must be captured');
+    const task = createPreparedTask(prepared);
+    fixture.getTask.mockReturnValue(task);
+
     expect((): void => {
-      service.authorizeReadTask(task.taskId);
+      service.authorizeTask(task.taskId);
     }).toThrowError(
       expect.objectContaining({
         code: 'capability_denied',
-        details: expect.objectContaining({ reason: 'read_authorization_mode_invalid' })
+        phase: 'plan_validation',
+        details: expect.objectContaining({ reason: 'controlled_write_child_disabled' })
       })
     );
+    expect(fixture.compileReadPlan).not.toHaveBeenCalled();
+    expect(fixture.authorizeTask).not.toHaveBeenCalled();
   });
 
   it('releases a Task reservation when the Store cannot freeze the authorized projection', (): void => {
@@ -646,7 +674,7 @@ describe('chat agent delegation service', (): void => {
     });
 
     expect((): void => {
-      service.authorizeReadTask(task.taskId);
+      service.authorizeTask(task.taskId);
     }).toThrowError('authorization_write_failed');
 
     expect(fixture.reserveTask).toHaveBeenCalledWith(task.taskId, plan.budget);
@@ -675,7 +703,7 @@ describe('chat agent delegation service', (): void => {
     });
 
     expect((): void => {
-      service.authorizeReadTask(task.taskId);
+      service.authorizeTask(task.taskId);
     }).toThrowError(expect.objectContaining({ code: 'capability_denied', phase: 'plan_validation' }));
     expect(fixture.authorizeTask).not.toHaveBeenCalled();
     expect(task.status).toBe('created');
@@ -694,7 +722,7 @@ describe('chat agent delegation service', (): void => {
     fixture.getTask.mockReturnValue(task);
 
     expect((): void => {
-      service.authorizeReadTask(task.taskId);
+      service.authorizeTask(task.taskId);
     }).toThrowError(
       expect.objectContaining({
         code: 'capability_denied',

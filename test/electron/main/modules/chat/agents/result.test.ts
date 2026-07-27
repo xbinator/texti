@@ -44,6 +44,26 @@ const validationContext: AgentResultValidationContext = {
   executionPlanSnapshot
 };
 
+/** 测试使用的受控写入契约。 */
+const writeContractSnapshot: AgentTaskContractSnapshot = {
+  ...contractSnapshot,
+  mode: 'write',
+  requestedTools: ['read_file', 'stage_file_edit']
+};
+
+/** 测试使用的受控写入计划。 */
+const writePlanSnapshot: AgentExecutionPlanSnapshot = {
+  ...executionPlanSnapshot,
+  policyVersion: 'controlled-write-v1',
+  capabilitySet: ['read_file', 'stage_file_edit'],
+  permissionSnapshot: { scopeIds: ['workspace-write'] },
+  toolEffectSet: [
+    { toolName: 'read_file', effect: 'pure_read' },
+    { toolName: 'stage_file_edit', effect: 'staged_file_write' }
+  ],
+  commitPolicy: { mode: 'staged', adapter: 'atomic-file-v1' }
+};
+
 /**
  * 创建包含两条验收标准的合法 Child 结果。
  * @returns 可由主进程规范化的结果
@@ -201,6 +221,53 @@ describe('agent result validation', (): void => {
     expect(validateAgentResult(result, validationContext)).toMatchObject({
       ok: false,
       error: { phase: 'result_validation', details: { reason: 'result_changeset_unsupported' } }
+    });
+  });
+
+  it('accepts a finalized controlled-write result only when its changeset binds the frozen plan', (): void => {
+    const result = {
+      ...createResult(),
+      changeset: {
+        changesetId: 'changeset-1',
+        baseRevision: 'a'.repeat(64),
+        diffHash: 'b'.repeat(64),
+        operationSetHash: 'c'.repeat(64),
+        planHash: writePlanSnapshot.planHash
+      }
+    };
+    const context: AgentResultValidationContext = {
+      ...validationContext,
+      contractSnapshot: writeContractSnapshot,
+      executionPlanSnapshot: writePlanSnapshot
+    };
+
+    expect(validateAgentResult(result, context)).toMatchObject({
+      ok: true,
+      result: {
+        changeset: {
+          changesetId: 'changeset-1',
+          planHash: writePlanSnapshot.planHash
+        }
+      }
+    });
+
+    result.changeset.planHash = 'f'.repeat(64);
+    expect(validateAgentResult(result, context)).toMatchObject({
+      ok: false,
+      error: { phase: 'result_validation', details: { reason: 'result_changeset_plan_mismatch' } }
+    });
+  });
+
+  it('accepts a no-op controlled-write terminal result without a changeset', (): void => {
+    expect(
+      validateAgentResult(createResult(), {
+        ...validationContext,
+        contractSnapshot: writeContractSnapshot,
+        executionPlanSnapshot: writePlanSnapshot
+      })
+    ).toMatchObject({
+      ok: true,
+      result: { executionStatus: 'completed' }
     });
   });
 

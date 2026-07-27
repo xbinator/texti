@@ -69,6 +69,7 @@ export type AgentFileCommitStore = Pick<
   | 'listUnfinishedJournals'
   | 'getCommitJournal'
   | 'getChangeset'
+  | 'getTask'
 >;
 
 /** 单次文件提交输入。 */
@@ -747,9 +748,10 @@ function createCommitIntent(input: AgentFileCommitInput, operations: readonly Ag
  * 从冻结 draft、journal 与持久化 changeset 生成 canonical completed 结果。
  * @param journal - 已应用 journal
  * @param changeset - 原不可变 changeset
+ * @param task - 提交时最新 Task 投影
  * @returns 最终 Task 结果
  */
-function createCommitResult(journal: AgentCommitJournalRecord, changeset: AgentChangesetRecord): ChatAgentResult {
+function createCommitResult(journal: AgentCommitJournalRecord, changeset: AgentChangesetRecord, task: AgentTaskRecord): ChatAgentResult {
   const { resultDraft } = journal.intent;
   const verifiedCount = resultDraft.criteria.filter(
     (criterion): boolean => criterion.claim.status === 'satisfied' && criterion.verification.status === 'verified'
@@ -768,7 +770,17 @@ function createCommitResult(journal: AgentCommitJournalRecord, changeset: AgentC
     },
     summary: resultDraft.summary,
     ...(resultDraft.output === undefined ? {} : { output: resultDraft.output }),
-    warnings: [...resultDraft.warnings],
+    warnings: [
+      ...resultDraft.warnings,
+      ...(task.cancelRequestedAt
+        ? [
+            {
+              code: 'cancel_arrived_too_late',
+              message: 'Cancellation arrived after durable commit application had started; the approved changeset was finalized.'
+            }
+          ]
+        : [])
+    ],
     artifacts: [],
     changeset: {
       changesetId: changeset.snapshot.changesetId,
@@ -997,7 +1009,9 @@ export function createAgentFileCommitter(dependencies: AgentFileCommitDependenci
     if (!changeset || changeset.snapshotHash !== journal.intent.changesetSnapshotHash) {
       throw new AgentFileCommitError('journal_changeset_missing', 'Commit journal changeset projection is missing or changed');
     }
-    const result = createCommitResult(applied, changeset);
+    const task = dependencies.store.getTask(journal.taskId);
+    if (!task) throw new AgentFileCommitError('journal_task_missing', 'Commit journal Task projection is missing');
+    const result = createCommitResult(applied, changeset, task);
     finalizeJournal(dependencies, applied, result);
     return { journalId: journal.journalId, status: 'finalized', taskId: journal.taskId };
   }
@@ -1031,7 +1045,9 @@ export function createAgentFileCommitter(dependencies: AgentFileCommitDependenci
       dependencies.onPhase?.('journal-created');
       dependencies.injectCrash?.('after_journal_created');
       const applied = await applyJournal(dependencies, journal, false);
-      const result = createCommitResult(applied, input.changeset);
+      const task = dependencies.store.getTask(input.task.taskId);
+      if (!task) throw new AgentFileCommitError('commit_task_missing', 'Committed Task projection is missing');
+      const result = createCommitResult(applied, input.changeset, task);
       return finalizeJournal(dependencies, applied, result);
     },
 

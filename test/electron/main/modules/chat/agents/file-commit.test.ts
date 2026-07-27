@@ -69,6 +69,8 @@ interface MemoryCommitStore extends AgentFileCommitStore {
   taskStatus: AgentTaskRecord['status'];
   /** cancelled 收敛次数。 */
   cancelCount: number;
+  /** 模拟提交期间到达的取消时间。 */
+  cancelRequestedAt?: string;
 }
 
 /**
@@ -433,6 +435,13 @@ function createMemoryStore(changeset: AgentChangesetRecord): MemoryCommitStore {
     },
     getChangeset(changesetId: string): AgentChangesetRecord | null {
       return changesetId === changeset.snapshot.changesetId ? changeset : null;
+    },
+    getTask(taskId: string): AgentTaskRecord | null {
+      if (taskId !== changeset.snapshot.taskId) return null;
+      return {
+        taskId,
+        cancelRequestedAt: store.cancelRequestedAt
+      } as AgentTaskRecord;
     }
   };
   return store;
@@ -518,6 +527,21 @@ describe('agent file committer', (): void => {
       'targets-verified',
       'journal-finalized'
     ]);
+  });
+
+  it('keeps a finalized commit completed when cancellation arrives after durable application starts', async (): Promise<void> => {
+    const fixture = await createFixture();
+    const store = createMemoryStore(fixture.changeset);
+    store.cancelRequestedAt = '2026-07-27T00:00:01.000Z';
+    const committer = createCommitter(fixture, store);
+
+    const result = await committer.commit(createCommitInput(fixture));
+
+    expect(result.result).toMatchObject({
+      executionStatus: 'completed',
+      warnings: [{ code: 'cancel_arrived_too_late', message: expect.any(String) }]
+    });
+    expect(store.taskStatus).toBe('completed');
   });
 
   it('fails closed before journal creation and external mutation when the lease is not the current exclusive commit', async (): Promise<void> => {

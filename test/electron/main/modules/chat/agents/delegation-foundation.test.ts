@@ -361,6 +361,7 @@ describeWithSqlite('delegation foundation end to end', (): void => {
       {
         enabled: true,
         pureReadChildEnabled: true,
+        controlledWriteChildEnabled: false,
         maxParallelReadChildren: 3
       }
     );

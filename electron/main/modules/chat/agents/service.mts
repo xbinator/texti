@@ -3,6 +3,8 @@
  * @description Child Agent 委派契约校验、原子 prepare、continuation fence 与启动恢复服务。
  */
 import { readFileSync } from 'node:fs';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import type {
   AgentAttemptProjection,
   AgentCheckpointRecord,
@@ -29,6 +31,7 @@ import type {
   ChatAgentResolveConfirmationInput,
   AgentModelSnapshot,
   AgentOrderedToolCallSnapshot,
+  PrimaryDelegationFeatureConfig,
   AgentTaskError,
   AgentUsageAccounting,
   ChatAgentResult,
@@ -37,7 +40,7 @@ import type {
   DelegateTaskInput
 } from 'types/chat-agent';
 import type { ChatRuntimeAddress } from 'types/chat-runtime';
-import { BrowserWindow } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import { nanoid } from 'nanoid';
 import { getToolRegistryEntry } from '../../../../../shared/ai/tools/index.js';
 import { aiService } from '../../ai/service.mjs';
@@ -61,6 +64,7 @@ import {
 } from './contracts.mjs';
 import { createAgentCoordinator, type AgentCoordinator } from './coordinator.mjs';
 import { createChildRuntimeExecutor } from './executor.mjs';
+import { createAgentFileCommitter, type AgentFileCommitInput, type AgentFileCommitResult, type AgentFileCommitter } from './file-commit.mjs';
 import { compileAgentPlan, type AgentPlanCompileInput, type AgentPlanCompileResult } from './plan-compiler.mjs';
 import { resolveAgentScopes } from './resource-scopes.mjs';
 import { validateAgentResult } from './result.mjs';
@@ -175,6 +179,8 @@ export interface ChatAgentDelegationServiceDependencies {
   publishCheckpoint: (event: ChatAgentApplicationEvent) => void;
   /** Main-owned 持久化 confirmation queue；隔离测试可省略以保持旧只读 fixture。 */
   confirmationQueue?: AgentConfirmationQueue;
+  /** Main-owned 委派灰度配置；缺省时受控写入保持关闭。 */
+  featureConfig?: Readonly<PrimaryDelegationFeatureConfig>;
   /**
    * 创建稳定身份。
    * @param kind - 身份域
@@ -234,12 +240,6 @@ export interface ChatAgentDelegationService {
    * @returns queued(start) 状态的 Task
    */
   authorizeTask(taskId: string): AgentTaskRecord;
-  /**
-   * 兼容只读 Coordinator 的收缩授权入口；write Task 必须拒绝。
-   * @param taskId - created 状态的 Task
-   * @returns queued(start) 状态的 Task
-   */
-  authorizeReadTask(taskId: string): AgentTaskRecord;
   /**
    * 规范化并原子记录一个 Child 终态结果。
    * @param input - 不含 Child hash 的 Task 结果
@@ -907,6 +907,16 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
         details: { reason: 'authorization_context_missing', taskId: normalizedTaskId }
       });
     }
+    if (task.contractSnapshot.mode === 'write' && dependencies.featureConfig?.controlledWriteChildEnabled !== true) {
+      throw new ChatAgentDelegationError({
+        code: 'capability_denied',
+        phase: 'plan_validation',
+        category: 'policy',
+        retryable: false,
+        message: '受控写入 Child 尚未由主进程启用',
+        details: { reason: 'controlled_write_child_disabled', taskId: task.taskId }
+      });
+    }
     const context = continuationContexts.get(checkpoint.checkpointId);
     assertResumeContext(checkpoint, context);
     if (!context.workspaceRoot) {
@@ -946,27 +956,6 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
       dependencies.budgetLedger?.releaseTask(task.taskId);
       throw error;
     }
-  }
-
-  /**
-   * 保留 Coordinator 当前只读调用路径，防止它在 write runtime 接线前启动写 Task。
-   * @param taskId - 目标只读 Task
-   * @returns queued(start) Task
-   */
-  function authorizeReadTask(taskId: string): AgentTaskRecord {
-    const normalizedTaskId = taskId.trim();
-    const task = normalizedTaskId ? dependencies.store.getTask(normalizedTaskId) : null;
-    if (task?.contractSnapshot.mode === 'write') {
-      throw new ChatAgentDelegationError({
-        code: 'capability_denied',
-        phase: 'plan_validation',
-        category: 'policy',
-        retryable: false,
-        message: '只读授权入口不能启动 write Task',
-        details: { reason: 'read_authorization_mode_invalid', taskId: task.taskId }
-      });
-    }
-    return authorizeTask(taskId);
   }
 
   /**
@@ -1147,7 +1136,6 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
     },
 
     authorizeTask,
-    authorizeReadTask,
 
     recordPreFailure(task: AgentTaskRecord, error: AgentTaskError): ReturnType<AgentDelegationStore['recordPreAttemptFailure']> {
       const current = dependencies.store.getTask(task.taskId);
@@ -1381,6 +1369,36 @@ const defaultResourceScheduler = createAgentResourceScheduler();
 /** 主进程默认冻结模型解析器。 */
 const defaultChildModelResolver = createDefaultChatModelResolver();
 
+/**
+ * 创建并返回 Main userData 下的私有 Agent 目录。
+ * @param kind - overlay 或 journal 子目录
+ * @returns canonical 私有目录
+ */
+async function ensureAgentDirectory(kind: 'overlays' | 'journals'): Promise<string> {
+  const directory = path.join(app.getPath('userData'), 'agent-runtime', kind);
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  return fs.realpath(directory);
+}
+
+/** 延迟解析 userData 的默认 durable file committer。 */
+const defaultFileCommitter: AgentFileCommitter = {
+  async commit(input: AgentFileCommitInput): Promise<AgentFileCommitResult> {
+    const journalRoot = await ensureAgentDirectory('journals');
+    return createAgentFileCommitter({
+      store: defaultAgentStore,
+      journalRoot,
+      now: (): string => new Date().toISOString(),
+      createId: (): string => `journal-${nanoid()}`,
+      // 生产 write flag 当前固定关闭；Task 8 接入权限恢复后才允许返回当前 write scopes。
+      getPermissionScopeIds: (): readonly string[] => []
+    }).commit(input);
+  },
+  async recover(): Promise<[]> {
+    // Task 8 在启动恢复阶段接入共享 committer；Task 7 不自动重放 write journal。
+    return [];
+  }
+};
+
 /** 模块初始化完成后由默认内部 Outbox consumer 使用的 Coordinator。 */
 let defaultCoordinator: AgentCoordinator | null = null;
 
@@ -1419,6 +1437,12 @@ export const chatAgentDelegationService = createChatAgentDelegationService({
   },
   publishCheckpoint,
   confirmationQueue: defaultConfirmationQueue,
+  featureConfig: {
+    enabled: process.env.TIBIS_PRIMARY_DELEGATION_ENABLED === '1',
+    pureReadChildEnabled: true,
+    controlledWriteChildEnabled: false,
+    maxParallelReadChildren: 3
+  },
   createId(kind: ChatAgentDelegationIdKind): string {
     return `${kind}-${nanoid()}`;
   },
@@ -1445,6 +1469,8 @@ const defaultChildExecutor = createChildRuntimeExecutor({
   resolver: defaultChildModelResolver,
   streamText: aiService.streamText.bind(aiService),
   resolveWorkspaceRoot: (checkpointId: string): string | undefined => chatAgentDelegationService.getContinuationContext(checkpointId)?.workspaceRoot,
+  resolveOverlayRoot: async (): Promise<string> => ensureAgentDirectory('overlays'),
+  createOverlayId: (kind: 'changeset' | 'operation'): string => `${kind}-${nanoid()}`,
   calculateCost: (): AgentUsageAccounting['monetaryCost'] => ({
     currency: 'unknown',
     pricingVersion: 'unknown',
@@ -1457,7 +1483,7 @@ const defaultChildExecutor = createChildRuntimeExecutor({
 /** 主进程默认 Coordinator；Actor 创建和授权只消费持久化事实。 */
 export const chatAgentCoordinator = createAgentCoordinator({
   listActive: () => defaultAgentStore.listActive(),
-  authorizeReadTask: (taskId: string): AgentTaskRecord => chatAgentDelegationService.authorizeReadTask(taskId),
+  authorizeTask: (taskId: string): AgentTaskRecord => chatAgentDelegationService.authorizeTask(taskId),
   recordPreFailure: (task: AgentTaskRecord, error: AgentTaskError): AgentCheckpointRecord => chatAgentDelegationService.recordPreFailure(task, error),
   reserveResume: (checkpointId: string, budget: AgentBudgetSnapshot): void => defaultBudgetLedger.reserveResume(checkpointId, budget),
   scheduler: defaultResourceScheduler,
@@ -1473,6 +1499,13 @@ export const chatAgentCoordinator = createAgentCoordinator({
   settleTask: (taskId: string, usage: AgentUsageAccounting): void => defaultBudgetLedger.settleAttempt(taskId, usage),
   releaseBudget: (taskId: string): void => defaultBudgetLedger.releaseTask(taskId),
   executor: defaultChildExecutor,
+  prepareChangeset: (input) => defaultAgentStore.prepareChangeset(input),
+  confirmationQueue: defaultConfirmationQueue,
+  getConfirmation: (confirmationId: string) => defaultAgentStore.getConfirmation(confirmationId),
+  queueCommit: (input) => defaultAgentStore.queueCommit(input),
+  fileCommitter: defaultFileCommitter,
+  createConfirmationId: (task: AgentTaskRecord): string => `confirmation-${task.taskId}-${nanoid()}`,
+  getTask: (taskId: string): AgentTaskRecord | null => defaultAgentStore.getTask(taskId),
   createRuntimeId: (task: AgentTaskRecord): string => `runtime-${task.taskId}-${nanoid()}`,
   cancelCheckpoint(checkpointId: string, reason: string): ChatAgentCheckpointSnapshot {
     if (!reason.trim()) throw new Error('agent_coordinator_cancel_reason_invalid');

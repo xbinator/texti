@@ -734,6 +734,12 @@ export interface AgentDelegationStore {
    */
   getChangeset(changesetId: string): AgentChangesetRecord | null;
   /**
+   * 按身份读取 confirmation 权威记录。
+   * @param confirmationId - confirmation 身份
+   * @returns confirmation，不存在时为 null
+   */
+  getConfirmation(confirmationId: string): AgentConfirmationRecord | null;
+  /**
    * 幂等写入单个终态结果并推进 Checkpoint。
    * @param input - Child 结果
    * @returns 更新后的 Checkpoint

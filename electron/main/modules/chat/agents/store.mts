@@ -1339,7 +1339,8 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
    * @param confirmationId - confirmation ID
    * @returns Confirmation，不存在时为 null
    */
-  private getConfirmation(confirmationId: string): AgentConfirmationRecord | null {
+  /** @inheritdoc */
+  getConfirmation(confirmationId: string): AgentConfirmationRecord | null {
     const row = this.database.select<ConfirmationRow>('SELECT * FROM chat_agent_confirmations WHERE confirmation_id = ?', [confirmationId])[0];
     return row ? parseConfirmation(row) : null;
   }
@@ -2406,26 +2407,33 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       const confirmation = this.getConfirmation(confirmationId);
       if (!confirmation) throw new AgentStoreProtocolError('confirmation_not_found', 'Confirmation does not exist', 'confirmation');
       if (confirmation.status === 'revoked') return confirmation;
-      if (confirmation.status !== 'pending') {
-        throw new AgentStoreProtocolError('confirmation_revoke_conflict', 'Only a pending confirmation can be revoked', 'confirmation');
+      if (confirmation.status !== 'pending' && confirmation.status !== 'approved') {
+        throw new AgentStoreProtocolError('confirmation_revoke_conflict', 'Only a pending or uncommitted approved confirmation can be revoked', 'confirmation');
       }
       const changeset = this.getChangeset(confirmation.changesetId);
       const task = changeset ? this.getTask(changeset.snapshot.taskId) : null;
-      if (!changeset || !task || changeset.status !== 'awaiting_confirmation') {
+      const pendingState = confirmation.status === 'pending' && changeset?.status === 'awaiting_confirmation' && task?.status === 'waiting_confirmation';
+      const approvedState =
+        confirmation.status === 'approved' &&
+        changeset?.status === 'approved' &&
+        task?.status === 'queued' &&
+        task.queuePhase === 'commit' &&
+        task.unfinishedJournalCount === 0;
+      if (!changeset || !task || (!pendingState && !approvedState)) {
         throw new AgentStoreProtocolError('confirmation_revoke_state_invalid', 'Confirmation aggregate is not revocable', 'confirmation');
       }
       const nextVersion = confirmation.version + 1;
       const confirmationUpdate = this.database.execute(
         `UPDATE chat_agent_confirmations
-         SET status = ?, version = ?, resolved_at = ?, updated_at = ?
+         SET status = ?, version = ?, decision_json = NULL, resolved_at = ?, updated_at = ?
          WHERE confirmation_id = ? AND status = ? AND version = ?`,
-        ['revoked', nextVersion, occurredAt, occurredAt, confirmation.confirmationId, 'pending', confirmation.version]
+        ['revoked', nextVersion, occurredAt, occurredAt, confirmation.confirmationId, confirmation.status, confirmation.version]
       );
       const changesetUpdate = this.database.execute(
         `UPDATE chat_agent_changesets
          SET status = ?, updated_at = ?
          WHERE changeset_id = ? AND status = ? AND confirmation_id = ?`,
-        ['revoked', occurredAt, changeset.snapshot.changesetId, 'awaiting_confirmation', confirmation.confirmationId]
+        ['revoked', occurredAt, changeset.snapshot.changesetId, changeset.status, confirmation.confirmationId]
       );
       if (confirmationUpdate.changes !== 1 || changesetUpdate.changes !== 1) {
         throw new AgentStoreProtocolError('confirmation_revoke_conflict', 'Confirmation revocation lost its CAS', 'confirmation');
@@ -2897,7 +2905,17 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         summary: journal.intent.resultDraft.summary,
         ...(journal.intent.resultDraft.output === undefined ? {} : { output: journal.intent.resultDraft.output }),
         criteria: journal.intent.resultDraft.criteria,
-        warnings: journal.intent.resultDraft.warnings,
+        warnings: [
+          ...journal.intent.resultDraft.warnings,
+          ...(task.cancelRequestedAt
+            ? [
+                {
+                  code: 'cancel_arrived_too_late',
+                  message: 'Cancellation arrived after durable commit application had started; the approved changeset was finalized.'
+                }
+              ]
+            : [])
+        ],
         usage: journal.intent.resultDraft.usage
       };
       if (
@@ -3336,9 +3354,22 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       const targetStatus: AgentTaskStatus = result.executionStatus;
       const isStartFailureResult = targetStatus === 'failed' && result.error?.code === 'runtime_start_failed' && result.error.phase === 'starting';
       const isStartFailure = task.status === 'starting' && attempt.status === 'starting' && isStartFailureResult;
+      const waitingConfirmationFailure =
+        task.status === 'waiting_confirmation' &&
+        attempt.status === 'running' &&
+        targetStatus === 'failed' &&
+        result.error?.code === 'confirmation_denied' &&
+        result.error.phase === 'confirmation';
+      const queuedCommitFailure =
+        task.status === 'queued' &&
+        task.queuePhase === 'commit' &&
+        attempt.status === 'running' &&
+        (targetStatus === 'failed' || targetStatus === 'deadline_exceeded' || targetStatus === 'cancelled' || targetStatus === 'commit_failed');
       const attemptSourceMatches =
         isStartFailure ||
         ((task.status === 'running' || task.status === 'committing') && attempt.status === 'running') ||
+        waitingConfirmationFailure ||
+        queuedCommitFailure ||
         (task.status === 'cancelling' && (attempt.status === 'starting' || attempt.status === 'running'));
       if (isStartFailureResult && !isStartFailure) {
         throw new AgentStoreProtocolError('result_attempt_state_invalid', 'Runtime start failure requires a starting Task and Attempt', 'starting');
@@ -3347,7 +3378,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         throw new AgentStoreProtocolError('result_attempt_state_invalid', 'Task result does not match the current Attempt state');
       }
       if (
-        (!isStartFailure && !['running', 'cancelling', 'committing'].includes(task.status)) ||
+        (!isStartFailure && !['running', 'waiting_confirmation', 'queued', 'cancelling', 'committing'].includes(task.status)) ||
         !canTransitionTask(task.status, targetStatus, { mode: task.contractSnapshot.mode })
       ) {
         throw new AgentStoreProtocolError('result_source_state_invalid', 'Task cannot terminalize from its current state');
@@ -3368,6 +3399,20 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       );
       if (attemptUpdate.changes !== 1) {
         throw new AgentStoreProtocolError('result_attempt_conflict', 'Current Attempt changed concurrently');
+      }
+      if (task.contractSnapshot.mode === 'write' && targetStatus !== 'completed') {
+        const changeset = this.getAttemptChangeset(attempt.attemptId);
+        if (changeset && changeset.status !== 'committing' && changeset.status !== 'committed' && changeset.status !== 'discarded') {
+          const changesetUpdate = this.database.execute(
+            `UPDATE chat_agent_changesets
+             SET status = ?, updated_at = ?
+             WHERE changeset_id = ? AND status = ? AND record_state = ?`,
+            ['discarded', input.occurredAt, changeset.snapshot.changesetId, changeset.status, 'active']
+          );
+          if (changesetUpdate.changes !== 1) {
+            throw new AgentStoreProtocolError('result_changeset_discard_conflict', 'Terminal write result could not discard its changeset');
+          }
+        }
       }
       const taskUpdate = this.database.execute(
         `UPDATE chat_agent_tasks
@@ -3634,6 +3679,18 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       );
       activeTaskRows.map(parseTask).forEach((task): void => {
         if (isTaskTerminal(task.status) || task.status === 'cancelling') return;
+        if (task.status === 'committing') {
+          const commitCancelUpdate = this.database.execute(
+            `UPDATE chat_agent_tasks
+             SET cancel_requested_at = COALESCE(cancel_requested_at, ?), updated_at = ?
+             WHERE task_id = ? AND status = ? AND record_state = ?`,
+            [input.occurredAt, input.occurredAt, task.taskId, 'committing', 'active']
+          );
+          if (commitCancelUpdate.changes !== 1) {
+            throw new AgentStoreProtocolError('task_cancel_conflict', 'Committing Task cancellation changed concurrently');
+          }
+          return;
+        }
         if (!canTransitionTask(task.status, 'cancelling', { mode: task.contractSnapshot.mode })) return;
         const taskUpdate = this.database.execute(
           `UPDATE chat_agent_tasks

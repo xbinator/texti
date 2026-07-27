@@ -81,6 +81,7 @@ function createBoundaryService(enabled: boolean) {
     {
       enabled,
       pureReadChildEnabled: true,
+      controlledWriteChildEnabled: false,
       maxParallelReadChildren: 3
     }
   );
@@ -232,7 +233,8 @@ describe('chat runtime main boundary', (): void => {
         {
           enabled: true,
           pureReadChildEnabled: false,
-          maxParallelReadChildren: 4
+          controlledWriteChildEnabled: false,
+          maxParallelReadChildren: 4 as 3
         }
       )
     ).toThrowError(expect.objectContaining({ code: 'RUNTIME_INPUT_DENIED' }));

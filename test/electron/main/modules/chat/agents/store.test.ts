@@ -724,6 +724,86 @@ describeWithSqlite('agent delegation store', (): void => {
     ]);
   });
 
+  it('terminalizes a rejected write confirmation and discards its prepared changeset atomically', (): void => {
+    const { task } = startWriteTask(store, 'write-rejected');
+    const changeset = createChangeset(task);
+    store.prepareChangeset({
+      snapshot: changeset,
+      snapshotHash: hashChangeset(changeset),
+      occurredAt: changeset.createdAt
+    });
+    const request = createConfirmationRequest(task, changeset);
+    store.createConfirmation({
+      request,
+      requestHash: hashConfirmation(request),
+      occurredAt: request.createdAt
+    });
+    store.resolveConfirmation({
+      confirmationId: request.confirmationId,
+      expectedVersion: 1,
+      decision: 'rejected',
+      occurredAt: '2026-07-23T08:02:30.000Z'
+    });
+    const result: ChatAgentResult = {
+      ...createFailedResult(task.taskId),
+      summary: 'The proposed changeset was rejected.',
+      error: {
+        code: 'confirmation_denied',
+        phase: 'confirmation',
+        category: 'user',
+        retryable: false,
+        details: { reason: 'confirmation_rejected' }
+      }
+    };
+
+    const checkpoint = store.recordTaskResult({
+      taskId: task.taskId,
+      checkpointId: task.checkpointId,
+      toolCallId: task.toolCallId,
+      result,
+      resultHash: hashAgentPayload(result),
+      occurredAt: '2026-07-23T08:02:40.000Z'
+    });
+
+    expect(checkpoint.status).toBe('ready_to_resume');
+    expect(store.getTask(task.taskId)).toMatchObject({ status: 'failed', result });
+    expect(store.getChangeset(changeset.changesetId)).toMatchObject({ status: 'discarded' });
+  });
+
+  it('invalidates an approved confirmation before journal creation when commit validation finds stale context', (): void => {
+    const { task } = startWriteTask(store, 'write-stale');
+    const changeset = createChangeset(task);
+    store.prepareChangeset({
+      snapshot: changeset,
+      snapshotHash: hashChangeset(changeset),
+      occurredAt: changeset.createdAt
+    });
+    const request = createConfirmationRequest(task, changeset);
+    store.createConfirmation({
+      request,
+      requestHash: hashConfirmation(request),
+      occurredAt: request.createdAt
+    });
+    const approved = store.resolveConfirmation({
+      confirmationId: request.confirmationId,
+      expectedVersion: 1,
+      decision: 'approved',
+      occurredAt: '2026-07-23T08:02:30.000Z'
+    });
+    store.queueCommit({
+      taskId: task.taskId,
+      confirmationId: request.confirmationId,
+      confirmationVersion: approved.version,
+      occurredAt: '2026-07-23T08:02:40.000Z'
+    });
+
+    const revoked = store.revokeConfirmation(request.confirmationId, 'stale_context', '2026-07-23T08:02:50.000Z');
+
+    expect(revoked).toMatchObject({ status: 'revoked', version: 3 });
+    expect(store.getChangeset(changeset.changesetId)).toMatchObject({ status: 'revoked' });
+    expect(store.getTask(task.taskId)).toMatchObject({ status: 'queued', queuePhase: 'commit', unfinishedJournalCount: 0 });
+  });
+
   it('rejects changesets outside the current running write Attempt and blocks unsafe tombstones', (): void => {
     const readInput = createPreparedInput('changeset-read');
     store.prepareDelegation(readInput, (): undefined => undefined);

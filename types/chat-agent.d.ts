@@ -10,6 +10,18 @@ export type AgentTaskPriority = 'low' | 'normal' | 'high';
 /** 委派任务执行模式。 */
 export type AgentTaskMode = 'read' | 'write';
 
+/** Main-owned Primary 委派灰度能力；Renderer 不能覆盖。 */
+export interface PrimaryDelegationFeatureConfig {
+  /** 是否向可信 Primary Runtime A 暴露 delegate_task。 */
+  readonly enabled: boolean;
+  /** 是否允许 pure-read Child。 */
+  readonly pureReadChildEnabled: boolean;
+  /** 是否允许受控 staged-write Child。 */
+  readonly controlledWriteChildEnabled: boolean;
+  /** 首版固定最大并行 read Child 数。 */
+  readonly maxParallelReadChildren: 3;
+}
+
 /** Task 可变执行状态，与 tombstone 记录状态正交。 */
 export type AgentTaskStatus =
   | 'created'
