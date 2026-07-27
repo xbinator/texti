@@ -28,7 +28,7 @@ import { createAgentBudgetLedger } from '../../../../../../electron/main/modules
 import { createChildActorRegistry } from '../../../../../../electron/main/modules/chat/agents/child-registry.mjs';
 import { createAgentCoordinator } from '../../../../../../electron/main/modules/chat/agents/coordinator.mjs';
 import { createChildRuntimeExecutor } from '../../../../../../electron/main/modules/chat/agents/executor.mjs';
-import { createAgentReadScheduler } from '../../../../../../electron/main/modules/chat/agents/scheduler.mjs';
+import { createAgentResourceScheduler } from '../../../../../../electron/main/modules/chat/agents/scheduler.mjs';
 import { createChatAgentDelegationService } from '../../../../../../electron/main/modules/chat/agents/service.mjs';
 import { createAgentDelegationStore } from '../../../../../../electron/main/modules/chat/agents/store.mjs';
 import { createRuntimeLockRegistry } from '../../../../../../electron/main/modules/chat/runtime/infrastructure/locks.mjs';
@@ -398,7 +398,7 @@ describeWithSqlite('real read child delegation runtime', (): void => {
     const store = createAgentDelegationStore(adapter);
     const locks = createRuntimeLockRegistry();
     const registry = createChildActorRegistry();
-    const scheduler = createAgentReadScheduler();
+    const scheduler = createAgentResourceScheduler();
     const budgetLedger = createAgentBudgetLedger({
       database: adapter,
       resolveTurnBudget: (): AgentBudgetSnapshot => ({

@@ -1,11 +1,12 @@
 /**
  * @file scheduler.mts
- * @description 按资源范围确定性调度最多三个并行的共享只读 Child Task。
+ * @description 按 canonical resource scope 调度 shared-read、write-intent 与 exclusive-commit Child lease。
  */
 import type { AgentTaskPriority } from 'types/chat-agent';
+import { scopesOverlap } from './resource-scopes.mjs';
 
-/** 首版允许同时运行的共享只读 Child Task 数。 */
-const MAX_PARALLEL_READS = 3;
+/** 所有 Child execution/commit lease 共用的最大活动槽位数。 */
+const MAX_ACTIVE_LEASES = 3;
 
 /** JavaScript 计时器单次可安全等待的最大毫秒数。 */
 const MAX_TIMER_DELAY = 2_147_483_647;
@@ -17,50 +18,59 @@ const PRIORITY_WEIGHT: Readonly<Record<AgentTaskPriority, number>> = {
   high: 2
 };
 
-/** 调度器接受的冻结只读 Task 投影。 */
+/** 资源许可种类。 */
+export type AgentResourceLeaseKind = 'shared-read' | 'write-intent' | 'exclusive-commit';
+
+/** Scheduler 接受的冻结 Task/phase claim。 */
 export interface AgentScheduleRequest {
   /** Task 稳定身份。 */
   readonly taskId: string;
+  /** start model execution 或 commit 阶段。 */
+  readonly phase: 'start' | 'commit';
+  /** 资源许可种类。 */
+  readonly kind: AgentResourceLeaseKind;
   /** 持久化调度优先级。 */
   readonly priority: AgentTaskPriority;
   /** 覆盖排队和执行的绝对截止时间。 */
   readonly deadlineAt: string;
   /** Task 不可变创建时间。 */
   readonly createdAt: string;
-  /** 一次性获取的完整规范化资源范围。 */
+  /** 一次性获取的完整 canonical scopes。 */
   readonly resourceScopes: readonly string[];
-  /** 首版仅开放 read。 */
-  readonly mode: 'read';
 }
 
-/** 已取得的共享只读 lease。 */
-export interface AgentReadLease {
+/** 已取得的资源 lease。 */
+export interface AgentResourceLease {
   /** lease 所属 Task。 */
   readonly taskId: string;
+  /** lease 所属 Task phase。 */
+  readonly phase: AgentScheduleRequest['phase'];
+  /** 已取得的许可种类。 */
+  readonly kind: AgentResourceLeaseKind;
   /** deadline 或取消传播使用的协作中止信号。 */
   readonly signal: AbortSignal;
-  /** 幂等释放全部资源范围和并行名额。 */
+  /** 幂等释放全部 scopes 和全局活动槽位。 */
   release(): void;
 }
 
-/** 只读 Child Task 调度器边界。 */
-export interface AgentReadScheduler {
+/** resource-scoped Child Task 调度器边界。 */
+export interface AgentResourceScheduler {
   /**
-   * 幂等排队一个冻结 Task。
-   * @param request - 完整只读调度请求
-   * @returns 取得全部资源范围后的 lease
+   * 幂等排队一个冻结 Task phase。
+   * @param request - 完整资源调度请求
+   * @returns 原子取得全部 scopes 后的 lease
    */
-  enqueue(request: AgentScheduleRequest): Promise<AgentReadLease>;
+  enqueue(request: AgentScheduleRequest): Promise<AgentResourceLease>;
   /**
    * 取消排队 Task，或向活动 Task 传播协作中止。
    * @param taskId - Task 身份
    * @param reason - 稳定取消原因
-   * @returns 是否找到可取消的 Task
+   * @returns 是否找到可取消 Task
    */
   cancel(taskId: string, reason: string): boolean;
   /** @returns 当前活动 lease 数。 */
   activeCount(): number;
-  /** @returns 当前等待 lease 的 Task 数。 */
+  /** @returns 当前等待 lease 数。 */
   queuedCount(): number;
 }
 
@@ -91,32 +101,21 @@ export class AgentSchedulerError extends Error {
   }
 }
 
-/** 内部资源许可种类，保留后续写入和提交兼容判定位置。 */
-type ResourceLeaseKind = 'shared-read' | 'write-intent' | 'exclusive-commit';
-
-/** 一次性获取的资源许可声明。 */
-interface ResourceLeaseClaim {
-  /** 许可种类。 */
-  readonly kind: ResourceLeaseKind;
-  /** 已规范化并冻结的全部资源范围。 */
-  readonly scopes: readonly string[];
-}
-
 /** Scheduler 条目生命周期。 */
 type ScheduleEntryState = 'queued' | 'active' | 'released';
 
-/** 单个 Task 的进程内调度条目。 */
+/** 单个 Task phase 的进程内调度条目。 */
 interface ScheduleEntry {
   /** 规范化调度请求。 */
   readonly request: Readonly<AgentScheduleRequest>;
-  /** 资源许可声明。 */
-  readonly claim: ResourceLeaseClaim;
+  /** taskId:phase 幂等键。 */
+  readonly key: string;
   /** deadline 与取消共享的控制器。 */
   readonly controller: AbortController;
-  /** 重放 enqueue 返回的同一个 Promise。 */
-  readonly promise: Promise<AgentReadLease>;
+  /** 精确重放 enqueue 返回的同一个 Promise。 */
+  readonly promise: Promise<AgentResourceLease>;
   /** lease 成功回调。 */
-  readonly resolve: (lease: AgentReadLease) => void;
+  readonly resolve: (lease: AgentResourceLease) => void;
   /** 排队失败回调。 */
   readonly reject: (error: AgentSchedulerError) => void;
   /** 当前条目状态。 */
@@ -150,14 +149,33 @@ function normalizeTime(value: string, reason: string): string {
 }
 
 /**
- * 规范化、去重并排序资源范围。
+ * 规范化、验证、去重并排序 canonical scopes。
  * @param resourceScopes - 冻结计划范围
  * @returns 稳定资源范围集合
  */
 function normalizeScopes(resourceScopes: readonly string[]): readonly string[] {
-  const scopes = [...new Set(resourceScopes.map((scope): string => requireText(scope, 'schedule_resource_scope_invalid')))].sort();
+  if (!Array.isArray(resourceScopes)) throw new AgentSchedulerError('protocol_error', 'schedule_resource_scope_invalid');
+  const scopes = [...new Set(resourceScopes)].sort();
   if (scopes.length === 0) throw new AgentSchedulerError('protocol_error', 'schedule_resource_scope_empty');
+  for (const scope of scopes) {
+    if (typeof scope !== 'string') throw new AgentSchedulerError('protocol_error', 'schedule_resource_scope_invalid');
+    try {
+      scopesOverlap(scope, scope);
+    } catch {
+      throw new AgentSchedulerError('protocol_error', 'schedule_resource_scope_invalid');
+    }
+  }
   return Object.freeze(scopes);
+}
+
+/**
+ * 判断 phase 与 lease kind 是否形成合法协议组合。
+ * @param phase - 请求阶段
+ * @param kind - 许可种类
+ * @returns start 只允许 read/write-intent，commit 只允许 exclusive-commit
+ */
+function isPhaseKindValid(phase: AgentScheduleRequest['phase'], kind: AgentResourceLeaseKind): boolean {
+  return phase === 'commit' ? kind === 'exclusive-commit' : kind === 'shared-read' || kind === 'write-intent';
 }
 
 /**
@@ -166,32 +184,48 @@ function normalizeScopes(resourceScopes: readonly string[]): readonly string[] {
  * @returns 规范化请求
  */
 function normalizeRequest(request: AgentScheduleRequest): Readonly<AgentScheduleRequest> {
-  if (request.mode !== 'read' || !(request.priority in PRIORITY_WEIGHT)) {
+  if (
+    (request.phase !== 'start' && request.phase !== 'commit') ||
+    !['shared-read', 'write-intent', 'exclusive-commit'].includes(request.kind) ||
+    !isPhaseKindValid(request.phase, request.kind) ||
+    !(request.priority in PRIORITY_WEIGHT)
+  ) {
     throw new AgentSchedulerError('protocol_error', 'schedule_request_invalid');
   }
   return Object.freeze({
     taskId: requireText(request.taskId, 'schedule_task_id_invalid'),
+    phase: request.phase,
+    kind: request.kind,
     priority: request.priority,
     deadlineAt: normalizeTime(request.deadlineAt, 'schedule_deadline_invalid'),
     createdAt: normalizeTime(request.createdAt, 'schedule_created_at_invalid'),
-    resourceScopes: normalizeScopes(request.resourceScopes),
-    mode: 'read'
+    resourceScopes: normalizeScopes(request.resourceScopes)
   });
 }
 
 /**
- * 判断同一 Task 的重放请求是否保持不可变。
+ * 创建 Task phase 幂等键。
+ * @param request - 规范化请求
+ * @returns taskId:phase
+ */
+function createEntryKey(request: Pick<AgentScheduleRequest, 'taskId' | 'phase'>): string {
+  return `${request.taskId}:${request.phase}`;
+}
+
+/**
+ * 判断同一 Task phase 的重放请求是否保持不可变。
  * @param left - 已存在请求
  * @param right - 重放请求
- * @returns 请求是否完全一致
+ * @returns claim 是否完全一致
  */
 function requestsMatch(left: Readonly<AgentScheduleRequest>, right: Readonly<AgentScheduleRequest>): boolean {
   return (
     left.taskId === right.taskId &&
+    left.phase === right.phase &&
+    left.kind === right.kind &&
     left.priority === right.priority &&
     left.deadlineAt === right.deadlineAt &&
     left.createdAt === right.createdAt &&
-    left.mode === right.mode &&
     left.resourceScopes.length === right.resourceScopes.length &&
     left.resourceScopes.every((scope, index): boolean => scope === right.resourceScopes[index])
   );
@@ -212,21 +246,31 @@ function compareEntries(left: ScheduleEntry, right: ScheduleEntry): number {
 }
 
 /**
+ * 判断两个 claim 是否有任一 canonical scope 重叠。
+ * @param left - 左侧请求
+ * @param right - 右侧请求
+ * @returns 是否存在资源交集
+ */
+function claimsOverlap(left: Readonly<AgentScheduleRequest>, right: Readonly<AgentScheduleRequest>): boolean {
+  return left.resourceScopes.some((leftScope): boolean => right.resourceScopes.some((rightScope): boolean => scopesOverlap(leftScope, rightScope)));
+}
+
+/**
  * 判断两个资源许可是否可以同时持有。
  * @param left - 已活动许可
  * @param right - 待获取许可
- * @returns 当前阶段是否相容
+ * @returns scope 不重叠，或重叠但双方都是 shared-read
  */
-function claimsCompatible(left: ResourceLeaseClaim, right: ResourceLeaseClaim): boolean {
-  // 首版 shared-read 即使 scope 重叠也相容；后续写入阶段在此加入 scope 冲突判定。
+function claimsCompatible(left: Readonly<AgentScheduleRequest>, right: Readonly<AgentScheduleRequest>): boolean {
+  if (!claimsOverlap(left, right)) return true;
   return left.kind === 'shared-read' && right.kind === 'shared-read';
 }
 
 /**
- * 创建最多三个并行的只读资源调度器。
- * @returns 进程内确定性调度器
+ * 创建 resource-scoped Agent 调度器。
+ * @returns 最多三个活动 lease 的确定性调度器
  */
-export function createAgentReadScheduler(): AgentReadScheduler {
+export function createAgentResourceScheduler(): AgentResourceScheduler {
   const entries = new Map<string, ScheduleEntry>();
   const queued: ScheduleEntry[] = [];
   const active = new Map<string, ScheduleEntry>();
@@ -269,7 +313,7 @@ export function createAgentReadScheduler(): AgentReadScheduler {
     if (entry.state !== 'queued') return;
     entry.state = 'released';
     removeQueued(entry);
-    entries.delete(entry.request.taskId);
+    entries.delete(entry.key);
     clearDeadline(entry);
     entry.controller.abort(error);
     entry.reject(error);
@@ -285,9 +329,7 @@ export function createAgentReadScheduler(): AgentReadScheduler {
       rejectQueued(entry, error);
       return;
     }
-    if (entry.state === 'active' && !entry.controller.signal.aborted) {
-      entry.controller.abort(error);
-    }
+    if (entry.state === 'active' && !entry.controller.signal.aborted) entry.controller.abort(error);
   }
 
   /**
@@ -307,35 +349,59 @@ export function createAgentReadScheduler(): AgentReadScheduler {
   }
 
   /**
-   * 判断一个条目能否原子取得全部资源范围。
+   * 判断候选 reader 是否会越过排序在前的同级或更高优先级冲突 writer。
+   * @param candidate - 待读取候选
+   * @returns 是否必须为 writer fairness 留在队列
+   */
+  function isWriterBlocked(candidate: ScheduleEntry): boolean {
+    if (candidate.request.kind !== 'shared-read') return false;
+    const candidateIndex = queued.indexOf(candidate);
+    return queued
+      .slice(0, candidateIndex)
+      .some(
+        (writer): boolean =>
+          writer.request.kind !== 'shared-read' &&
+          PRIORITY_WEIGHT[writer.request.priority] >= PRIORITY_WEIGHT[candidate.request.priority] &&
+          claimsOverlap(writer.request, candidate.request)
+      );
+  }
+
+  /**
+   * 判断条目能否原子取得全部 scopes。
    * @param entry - 待启动条目
-   * @returns 是否具备并行名额且与活动许可相容
+   * @returns 是否具备槽位、活动兼容性和 writer fairness
    */
   function canAcquire(entry: ScheduleEntry): boolean {
-    return active.size < MAX_PARALLEL_READS && [...active.values()].every((activeEntry): boolean => claimsCompatible(activeEntry.claim, entry.claim));
+    return (
+      active.size < MAX_ACTIVE_LEASES &&
+      !isWriterBlocked(entry) &&
+      [...active.values()].every((activeEntry): boolean => claimsCompatible(activeEntry.request, entry.request))
+    );
   }
 
   /**
    * 激活条目并创建幂等 release lease。
-   * @param entry - 已排在队首的条目
+   * @param entry - 可取得资源的条目
    * @param continueQueue - 释放后继续填充队列
    */
   function activateEntry(entry: ScheduleEntry, continueQueue: () => void): void {
     if (entry.state !== 'queued') return;
     removeQueued(entry);
     entry.state = 'active';
-    active.set(entry.request.taskId, entry);
+    active.set(entry.key, entry);
     let released = false;
-    const lease: AgentReadLease = Object.freeze({
+    const lease: AgentResourceLease = Object.freeze({
       taskId: entry.request.taskId,
+      phase: entry.request.phase,
+      kind: entry.request.kind,
       signal: entry.controller.signal,
       release(): void {
         if (released) return;
         released = true;
         if (entry.state !== 'active') return;
         entry.state = 'released';
-        active.delete(entry.request.taskId);
-        entries.delete(entry.request.taskId);
+        active.delete(entry.key);
+        entries.delete(entry.key);
         clearDeadline(entry);
         continueQueue();
       }
@@ -343,10 +409,10 @@ export function createAgentReadScheduler(): AgentReadScheduler {
     entry.resolve(lease);
   }
 
-  /** 按确定顺序尽可能填满共享只读并行名额。 */
+  /** 按确定顺序尽可能填满全局活动槽位。 */
   function drainQueue(): void {
     queued.sort(compareEntries);
-    while (active.size < MAX_PARALLEL_READS && queued.length > 0) {
+    while (active.size < MAX_ACTIVE_LEASES && queued.length > 0) {
       const entry = queued.find((candidate): boolean => canAcquire(candidate));
       if (!entry) return;
       if (Date.parse(entry.request.deadlineAt) <= Date.now()) {
@@ -363,18 +429,15 @@ export function createAgentReadScheduler(): AgentReadScheduler {
    * @returns 未决条目
    */
   function createEntry(request: Readonly<AgentScheduleRequest>): ScheduleEntry {
-    let resolveLease: (lease: AgentReadLease) => void = (): void => undefined;
+    let resolveLease: (lease: AgentResourceLease) => void = (): void => undefined;
     let rejectLease: (error: AgentSchedulerError) => void = (): void => undefined;
-    const promise = new Promise<AgentReadLease>((resolve, reject): void => {
+    const promise = new Promise<AgentResourceLease>((resolve, reject): void => {
       resolveLease = resolve;
       rejectLease = reject;
     });
     return {
       request,
-      claim: {
-        kind: 'shared-read',
-        scopes: request.resourceScopes
-      },
+      key: createEntryKey(request),
       controller: new AbortController(),
       promise,
       resolve: resolveLease,
@@ -384,25 +447,28 @@ export function createAgentReadScheduler(): AgentReadScheduler {
   }
 
   return {
-    enqueue(request: AgentScheduleRequest): Promise<AgentReadLease> {
+    enqueue(request: AgentScheduleRequest): Promise<AgentResourceLease> {
       let normalized: Readonly<AgentScheduleRequest>;
       try {
         normalized = normalizeRequest(request);
       } catch (error) {
         return Promise.reject(error);
       }
-      const existing = entries.get(normalized.taskId);
+      const key = createEntryKey(normalized);
+      const existing = entries.get(key);
       if (existing) {
         if (!requestsMatch(existing.request, normalized)) {
           return Promise.reject(createScheduleError('protocol_error', 'schedule_replay_conflict'));
         }
         return existing.promise;
       }
+      const activePhase = [...entries.values()].find((entry): boolean => entry.request.taskId === normalized.taskId);
+      if (activePhase) return Promise.reject(createScheduleError('protocol_error', 'schedule_task_phase_conflict'));
       if (Date.parse(normalized.deadlineAt) <= Date.now()) {
         return Promise.reject(createScheduleError('deadline_exceeded', 'schedule_deadline_exceeded'));
       }
       const entry = createEntry(normalized);
-      entries.set(normalized.taskId, entry);
+      entries.set(entry.key, entry);
       queued.push(entry);
       scheduleDeadline(entry);
       drainQueue();
@@ -415,7 +481,7 @@ export function createAgentReadScheduler(): AgentReadScheduler {
       if (!normalizedTaskId || !normalizedReason) {
         throw createScheduleError('protocol_error', 'schedule_cancel_input_invalid');
       }
-      const entry = entries.get(normalizedTaskId);
+      const entry = [...entries.values()].find((candidate): boolean => candidate.request.taskId === normalizedTaskId);
       if (!entry || entry.state === 'released') return false;
       const error = createScheduleError('cancelled', normalizedReason);
       if (entry.state === 'queued') {

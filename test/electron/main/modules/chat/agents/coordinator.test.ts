@@ -3,7 +3,7 @@
  * @description 验证 Main-owned Coordinator 的幂等授权、失败汇合与 Actor 注册顺序。
  */
 import type { ChildRuntimeInput } from '../../../../../../electron/main/modules/chat/agents/executor.mjs';
-import type { AgentReadLease, AgentReadScheduler, AgentScheduleRequest } from '../../../../../../electron/main/modules/chat/agents/scheduler.mjs';
+import type { AgentResourceLease, AgentResourceScheduler, AgentScheduleRequest } from '../../../../../../electron/main/modules/chat/agents/scheduler.mjs';
 import type {
   AgentAttemptProjection,
   BeginAgentAttemptInput,
@@ -244,15 +244,17 @@ function createDependencies(tasks: AgentTaskRecord[]): {
     planHash: task.executionPlanSnapshotHash as string
   }));
   const releaseTask = vi.fn();
-  const enqueueTask = vi.fn(async (request: AgentScheduleRequest): Promise<AgentReadLease> => {
+  const enqueueTask = vi.fn(async (request: AgentScheduleRequest): Promise<AgentResourceLease> => {
     return {
       taskId: request.taskId,
+      phase: request.phase,
+      kind: request.kind,
       signal: new AbortController().signal,
       release: releaseTask
     };
   });
   const cancelTask = vi.fn((): boolean => true);
-  const scheduler: AgentReadScheduler = {
+  const scheduler: AgentResourceScheduler = {
     enqueue: enqueueTask,
     cancel: cancelTask,
     activeCount: (): number => 0,
@@ -447,7 +449,8 @@ describe('agent coordinator', (): void => {
       expect.objectContaining({
         taskId: tasks[1]?.taskId,
         priority: tasks[1]?.priority,
-        mode: 'read'
+        phase: 'start',
+        kind: 'shared-read'
       })
     );
     expect(coordinator.getCheckpointState(payload.checkpointId)).toBe('running');
@@ -458,10 +461,10 @@ describe('agent coordinator', (): void => {
     const fixture = createDependencies([task]);
     const controller = new AbortController();
     const release = vi.fn();
-    let grantLease: (lease: AgentReadLease) => void = (): void => undefined;
+    let grantLease: (lease: AgentResourceLease) => void = (): void => undefined;
     fixture.enqueueTask.mockImplementationOnce(
-      (): Promise<AgentReadLease> =>
-        new Promise<AgentReadLease>((resolve): void => {
+      (): Promise<AgentResourceLease> =>
+        new Promise<AgentResourceLease>((resolve): void => {
           grantLease = resolve;
         })
     );
@@ -471,7 +474,7 @@ describe('agent coordinator', (): void => {
 
     expect(fixture.beginAttempt).not.toHaveBeenCalled();
     expect(fixture.executeTask).not.toHaveBeenCalled();
-    grantLease({ taskId: task.taskId, signal: controller.signal, release });
+    grantLease({ taskId: task.taskId, phase: 'start', kind: 'shared-read', signal: controller.signal, release });
     await vi.waitFor((): void => {
       expect(fixture.beginAttempt).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -602,8 +605,8 @@ describe('agent coordinator', (): void => {
     const fixture = createDependencies([task]);
     let rejectLease: (error: unknown) => void = (): void => undefined;
     fixture.enqueueTask.mockImplementationOnce(
-      (): Promise<AgentReadLease> =>
-        new Promise<AgentReadLease>((_resolve, reject): void => {
+      (): Promise<AgentResourceLease> =>
+        new Promise<AgentResourceLease>((_resolve, reject): void => {
           rejectLease = reject;
         })
     );
@@ -632,7 +635,13 @@ describe('agent coordinator', (): void => {
     const fixture = createDependencies([task]);
     const controller = new AbortController();
     const release = vi.fn();
-    fixture.enqueueTask.mockResolvedValueOnce({ taskId: task.taskId, signal: controller.signal, release });
+    fixture.enqueueTask.mockResolvedValueOnce({
+      taskId: task.taskId,
+      phase: 'start',
+      kind: 'shared-read',
+      signal: controller.signal,
+      release
+    });
     fixture.cancelTask.mockImplementationOnce((): boolean => {
       controller.abort('user_cancelled');
       return true;
@@ -694,7 +703,13 @@ describe('agent coordinator', (): void => {
     const task = createTask(1);
     const fixture = createDependencies([task]);
     const controller = new AbortController();
-    fixture.enqueueTask.mockResolvedValueOnce({ taskId: task.taskId, signal: controller.signal, release: vi.fn() });
+    fixture.enqueueTask.mockResolvedValueOnce({
+      taskId: task.taskId,
+      phase: 'start',
+      kind: 'shared-read',
+      signal: controller.signal,
+      release: vi.fn()
+    });
     fixture.cancelTask.mockImplementationOnce((): boolean => {
       controller.abort('user_cancelled');
       return true;

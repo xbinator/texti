@@ -60,7 +60,7 @@ import { createChildRuntimeExecutor } from './executor.mjs';
 import { compileAgentPlan, type AgentPlanCompileInput, type AgentPlanCompileResult } from './plan-compiler.mjs';
 import { resolveAgentScopes } from './resource-scopes.mjs';
 import { validateAgentResult } from './result.mjs';
-import { createAgentReadScheduler } from './scheduler.mjs';
+import { createAgentResourceScheduler } from './scheduler.mjs';
 import { createAgentDelegationStore } from './store.mjs';
 
 /** Runtime B 续接允许保留的非敏感内存上下文。 */
@@ -1315,8 +1315,8 @@ const defaultBudgetLedger = createAgentBudgetLedger({
 /** 主进程默认稳定 Child Actor 注册表。 */
 const defaultChildRegistry = createChildActorRegistry();
 
-/** 主进程默认共享只读资源调度器。 */
-const defaultReadScheduler = createAgentReadScheduler();
+/** 主进程默认 resource-scoped Child 调度器。 */
+const defaultResourceScheduler = createAgentResourceScheduler();
 
 /** 主进程默认冻结模型解析器。 */
 const defaultChildModelResolver = createDefaultChatModelResolver();
@@ -1399,7 +1399,7 @@ export const chatAgentCoordinator = createAgentCoordinator({
   authorizeReadTask: (taskId: string): AgentTaskRecord => chatAgentDelegationService.authorizeReadTask(taskId),
   recordPreFailure: (task: AgentTaskRecord, error: AgentTaskError): AgentCheckpointRecord => chatAgentDelegationService.recordPreFailure(task, error),
   reserveResume: (checkpointId: string, budget: AgentBudgetSnapshot): void => defaultBudgetLedger.reserveResume(checkpointId, budget),
-  scheduler: defaultReadScheduler,
+  scheduler: defaultResourceScheduler,
   beginAttempt: (input: BeginAgentAttemptInput): AgentAttemptProjection => defaultAgentStore.beginAttempt(input),
   markAttemptRunning: (input: MarkAgentAttemptInput): AgentAttemptProjection => defaultAgentStore.markAttemptRunning(input),
   recordTaskResult: (task: AgentTaskRecord, result: ChatAgentResult): AgentCheckpointRecord =>

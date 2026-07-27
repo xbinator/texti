@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentResourceReference } from 'types/chat-agent';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resolveAgentScopes } from '../../../../../../electron/main/modules/chat/agents/resource-scopes.mjs';
+import { resolveAgentScopes, scopesOverlap } from '../../../../../../electron/main/modules/chat/agents/resource-scopes.mjs';
 
 describe('agent resource scopes', (): void => {
   let fixtureRoot: string;
@@ -87,4 +87,28 @@ describe('agent resource scopes', (): void => {
       }
     });
   });
+
+  it.each([
+    ['same file', 'file:/repo/a.md', 'file:/repo/a.md', true],
+    ['different files', 'file:/repo/a.md', 'file:/repo/b.md', false],
+    ['directory contains file', 'directory:/repo/**', 'file:/repo/a.md', true],
+    ['file is outside sibling directory', 'directory:/repo/a/**', 'file:/repo/b.md', false],
+    ['parent and child directories', 'directory:/repo/**', 'directory:/repo/src/**', true],
+    ['sibling directories', 'directory:/repo/a/**', 'directory:/repo/b/**', false]
+  ] as const)('detects overlap for %s', (_caseName, left, right, expected): void => {
+    expect(scopesOverlap(left, right)).toBe(expected);
+    expect(scopesOverlap(right, left)).toBe(expected);
+  });
+
+  it.each(['file:relative.md', 'directory:/repo/*', 'directory:relative/**', 'unknown:/repo/a.md', ' file:/repo/a.md'])(
+    'fails closed for invalid canonical scope %s',
+    (scope): void => {
+      expect((): boolean => scopesOverlap(scope, 'file:/repo/a.md')).toThrow(
+        expect.objectContaining({
+          code: 'protocol_error',
+          reason: 'canonical_resource_scope_invalid'
+        })
+      );
+    }
+  );
 });

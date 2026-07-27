@@ -3,9 +3,44 @@
  * @description 把 Child 契约资源解析为工作区内、realpath 规范化的只读范围。
  */
 import { realpathSync, statSync, type Stats } from 'node:fs';
-import { resolve } from 'node:path';
+import * as path from 'node:path';
 import type { AgentResourceReference, AgentTaskError } from 'types/chat-agent';
 import { isAbsoluteRuntimeFilePath, isRuntimePathInsideWorkspace, isRuntimeUnsavedPath } from '../runtime/tools/paths.mjs';
+
+/** Scheduler 接受的 canonical 本地 scope。 */
+interface CanonicalAgentScope {
+  /** 文件或递归目录。 */
+  readonly kind: 'file' | 'directory';
+  /** 不含 scope 前缀与通配后缀的 canonical 绝对路径。 */
+  readonly path: string;
+}
+
+/** 非 canonical scope 的稳定协议错误。 */
+export class AgentScopeProtocolError extends Error {
+  /** 机器错误码。 */
+  readonly code = 'protocol_error';
+
+  /** 资源 scope 解析阶段。 */
+  readonly phase = 'resource_validation';
+
+  /** 非 canonical scope 属于协议错误。 */
+  readonly category = 'protocol';
+
+  /** 稳定机器原因。 */
+  readonly reason = 'canonical_resource_scope_invalid';
+
+  /** 协议错误不可通过原请求自动重试。 */
+  readonly retryable = false;
+
+  /** 经 allowlist 裁剪的机器细节。 */
+  readonly details = Object.freeze({ reason: this.reason });
+
+  /** 创建不包含原始本地路径的 scope 协议错误。 */
+  constructor() {
+    super('Canonical resource scope is invalid');
+    this.name = 'AgentScopeProtocolError';
+  }
+}
 
 /** 资源范围解析成功结果。 */
 export interface AgentScopeResolution {
@@ -68,7 +103,7 @@ function resolveResourceScope(resource: AgentResourceReference, workspaceRealRoo
 
   let resourceRealPath: string;
   try {
-    resourceRealPath = realpathSync(resolve(workspaceRealRoot, reference));
+    resourceRealPath = realpathSync(path.resolve(workspaceRealRoot, reference));
   } catch {
     return createScopeError('resource_not_found', 'Child Runtime 资源不存在或不可读取');
   }
@@ -125,4 +160,70 @@ export function resolveAgentScopes(resources: readonly AgentResourceReference[],
     workspaceRealRoot,
     resourceScopes: [...new Set(resourceScopes)].sort()
   };
+}
+
+/**
+ * 选择当前 scope 路径使用的 path 实现。
+ * @param filePath - canonical 绝对路径
+ * @returns Windows 或当前平台 path API
+ */
+function selectPathApi(filePath: string): typeof path.posix {
+  return /^[a-zA-Z]:[\\/]/.test(filePath) || filePath.startsWith('\\\\') ? path.win32 : path.posix;
+}
+
+/**
+ * 解析严格 canonical 的 file/directory scope。
+ * @param resourceScope - 未可信 scope 字符串
+ * @returns canonical scope
+ */
+function parseCanonicalScope(resourceScope: string): CanonicalAgentScope {
+  if (!resourceScope || resourceScope.trim() !== resourceScope) throw new AgentScopeProtocolError();
+  let kind: CanonicalAgentScope['kind'];
+  let scopePath: string;
+  if (resourceScope.startsWith('file:')) {
+    kind = 'file';
+    scopePath = resourceScope.slice('file:'.length);
+  } else if (resourceScope.startsWith('directory:') && resourceScope.endsWith('/**')) {
+    kind = 'directory';
+    scopePath = resourceScope.slice('directory:'.length, -'/**'.length);
+  } else {
+    throw new AgentScopeProtocolError();
+  }
+  if (!scopePath || !isAbsoluteRuntimeFilePath(scopePath)) throw new AgentScopeProtocolError();
+  const pathApi = selectPathApi(scopePath);
+  if (pathApi.resolve(scopePath) !== scopePath || (kind === 'file' && scopePath.endsWith(pathApi.sep))) {
+    throw new AgentScopeProtocolError();
+  }
+  return { kind, path: scopePath };
+}
+
+/**
+ * 判断目标路径是否等于或位于目录路径内。
+ * @param targetPath - 文件或子目录 canonical 路径
+ * @param directoryPath - canonical 目录路径
+ * @returns 是否命中目录 scope
+ */
+function isPathWithin(targetPath: string, directoryPath: string): boolean {
+  const pathApi = selectPathApi(directoryPath);
+  const relativePath = pathApi.relative(directoryPath, targetPath);
+  return relativePath === '' || (relativePath !== '..' && !relativePath.startsWith(`..${pathApi.sep}`) && !pathApi.isAbsolute(relativePath));
+}
+
+/**
+ * 判断两个 canonical file/directory scope 是否有资源交集。
+ * @param left - 左侧 canonical scope
+ * @param right - 右侧 canonical scope
+ * @returns 两个范围是否重叠
+ */
+export function scopesOverlap(left: string, right: string): boolean {
+  const leftScope = parseCanonicalScope(left);
+  const rightScope = parseCanonicalScope(right);
+  if (selectPathApi(leftScope.path) !== selectPathApi(rightScope.path)) return false;
+  if (leftScope.kind === 'file' && rightScope.kind === 'file') return leftScope.path === rightScope.path;
+  if (leftScope.kind === 'directory' && rightScope.kind === 'directory') {
+    return isPathWithin(leftScope.path, rightScope.path) || isPathWithin(rightScope.path, leftScope.path);
+  }
+  const directory = leftScope.kind === 'directory' ? leftScope : rightScope;
+  const file = leftScope.kind === 'file' ? leftScope : rightScope;
+  return isPathWithin(file.path, directory.path);
 }

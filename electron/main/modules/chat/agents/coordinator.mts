@@ -4,7 +4,7 @@
  */
 import type { ChildActorRegistry } from './child-registry.mjs';
 import type { ChildTaskRuntimeExecutor } from './executor.mjs';
-import type { AgentReadLease, AgentReadScheduler, AgentScheduleRequest } from './scheduler.mjs';
+import type { AgentResourceLease, AgentResourceScheduler, AgentScheduleRequest } from './scheduler.mjs';
 import type {
   AgentAttemptProjection,
   AgentCheckpointRecord,
@@ -60,8 +60,8 @@ export interface AgentCoordinatorDependencies {
    * @param budget - 冻结续接预算
    */
   reserveResume(checkpointId: string, budget: AgentBudgetSnapshot): void;
-  /** 资源范围级共享只读调度器。 */
-  scheduler: AgentReadScheduler;
+  /** 资源范围级 read/write/commit 调度器。 */
+  scheduler: AgentResourceScheduler;
   /**
    * 原子创建 starting Attempt。
    * @param input - Task、Runtime 与父 Runtime 身份
@@ -260,11 +260,12 @@ function createScheduleRequest(task: AgentTaskRecord, checkpoint: AgentCheckpoin
   }
   return {
     taskId: task.taskId,
+    phase: 'start',
+    kind: 'shared-read',
     priority: task.priority,
     deadlineAt: resolveDeadline(task, checkpoint, now, systemTimeoutMs),
     createdAt: task.createdAt,
-    resourceScopes: task.executionPlanSnapshot.resourceScopes,
-    mode: 'read'
+    resourceScopes: task.executionPlanSnapshot.resourceScopes
   };
 }
 
@@ -583,9 +584,9 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
    * 在已取得 lease 后创建 Attempt、绑定 Runtime、执行并汇合结果。
    * @param task - 已授权 Task
    * @param checkpoint - Task 所属 Checkpoint
-   * @param lease - 已取得的共享读许可
+   * @param lease - 已取得的资源许可
    */
-  async function executeLease(task: AgentTaskRecord, checkpoint: AgentCheckpointRecord, lease: AgentReadLease): Promise<void> {
+  async function executeLease(task: AgentTaskRecord, checkpoint: AgentCheckpointRecord, lease: AgentResourceLease): Promise<void> {
     const runtimeId = dependencies.createRuntimeId(task);
     const attemptId = `attempt-${runtimeId}`;
     const beginInput: BeginAgentAttemptInput = {

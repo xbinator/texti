@@ -822,7 +822,7 @@ git commit -m "feat(chat): 生成 Child 文件 changeset"
 - Consumes: canonical `file:`/`directory:/**` scopes、Task priority/deadline。
 - Produces: `AgentResourceScheduler.enqueue()` 返回 `shared-read`、`write-intent` 或 `exclusive-commit` lease；等待确认时 Coordinator 不持有 lease。
 
-- [ ] **Step 1: Write failing compatibility and fairness tests**
+- [x] **Step 1: Write failing compatibility and fairness tests**
 
 测试矩阵：
 
@@ -851,9 +851,9 @@ await expect(writer).resolves.toMatchObject({ kind: 'write-intent' });
 - 高优先级不抢占已活动 lease。
 - deadline 和 cancel 对三类 lease 都有效。
 - 同一 Task 同一 phase 重放返回同一个 Promise，不同 claim 重放失败。
-- Coordinator write model 阶段只申请 write-intent，并在创建 confirmation 前释放。
+- Coordinator read model 请求迁移为 `start/shared-read`；write model 的 acquire/release 生命周期测试仍在 Task 7 与 confirmation 状态机一起完成，避免提前启动 write Task。
 
-- [ ] **Step 2: Run scheduler tests and verify RED**
+- [x] **Step 2: Run scheduler tests and verify RED**
 
 Run:
 
@@ -864,7 +864,7 @@ pnpm exec cross-env ELECTRON_RUN_AS_NODE=1 HOST=127.0.0.1 electron node_modules/
 
 Expected: FAIL，因为当前 scheduler 只接受 read mode，scope overlap 尚未参与许可兼容判断。
 
-- [ ] **Step 3: Export canonical scope overlap**
+- [x] **Step 3: Export canonical scope overlap**
 
 `resource-scopes.mts` 增加：
 
@@ -886,7 +886,7 @@ export function scopesOverlap(left: string, right: string): boolean {
 
 非法 canonical scope 直接抛 `AgentStoreProtocolError` 等价的稳定 protocol error，不能降级为“不冲突”。
 
-- [ ] **Step 4: Generalize scheduler request and lease**
+- [x] **Step 4: Generalize scheduler request and lease**
 
 ```ts
 export type AgentResourceLeaseKind = 'shared-read' | 'write-intent' | 'exclusive-commit';
@@ -919,11 +919,11 @@ export interface AgentResourceScheduler {
 
 兼容规则固定为：scope 不重叠时允许；scope 重叠时只有 `shared-read + shared-read` 允许。保留最多三个活动 Child execution slot；`exclusive-commit` 复用同一 slot，不额外扩大并行度。`service.mts`、Coordinator 与 read runtime 测试统一切换到 `createAgentResourceScheduler()`，Task 4 完成后删除旧 `AgentReadScheduler/AgentReadLease/createAgentReadScheduler` 名称。
 
-- [ ] **Step 5: Implement writer fairness and phase-aware replay**
+- [x] **Step 5: Implement writer fairness and phase-aware replay**
 
 队列排序仍按 priority、createdAt、taskId；dispatch 时若候选 reader 前存在同优先级或更高优先级的冲突 writer，则跳过该 reader。内部幂等键改为 `${taskId}:${phase}`，保证 start lease 释放后可以为同一 Task 申请 commit lease。
 
-- [ ] **Step 6: Run scheduler and coordinator tests**
+- [x] **Step 6: Run scheduler and coordinator tests**
 
 Run:
 
@@ -934,10 +934,10 @@ pnpm exec cross-env ELECTRON_RUN_AS_NODE=1 HOST=127.0.0.1 electron node_modules/
 
 Expected: PASS，且 read-only 三并行测试保持通过。
 
-- [ ] **Step 7: Commit Task 4**
+- [x] **Step 7: Commit Task 4**
 
 ```bash
-git add electron/main/modules/chat/agents/resource-scopes.mts electron/main/modules/chat/agents/scheduler.mts electron/main/modules/chat/agents/coordinator.mts electron/main/modules/chat/agents/service.mts test/electron/main/modules/chat/agents/resource-scopes.test.ts test/electron/main/modules/chat/agents/scheduler.test.ts test/electron/main/modules/chat/agents/coordinator.test.ts test/electron/main/modules/chat/agents/read-runtime.test.ts changelog/2026-07-27.md
+git add electron/main/modules/chat/agents/resource-scopes.mts electron/main/modules/chat/agents/scheduler.mts electron/main/modules/chat/agents/coordinator.mts electron/main/modules/chat/agents/service.mts test/electron/main/modules/chat/agents/resource-scopes.test.ts test/electron/main/modules/chat/agents/scheduler.test.ts test/electron/main/modules/chat/agents/coordinator.test.ts test/electron/main/modules/chat/agents/read-runtime.test.ts docs/superpowers/plans/2026-07-27-child-agent-controlled-write.md changelog/2026-07-27.md
 git commit -m "feat(chat): 增加 Child 写入资源门禁"
 ```
 
