@@ -642,7 +642,15 @@ describeWithSqlite('agent delegation store', (): void => {
         occurredAt: '2026-07-23T08:02:40.000Z'
       })
     ).toMatchObject({ status: 'queued', queuePhase: 'commit', unfinishedJournalCount: 0 });
-    const intent = createCommitIntent(task, changeset, approved.version);
+    const baseIntent = createCommitIntent(task, changeset, approved.version);
+    const intent = {
+      ...baseIntent,
+      operations: baseIntent.operations.map((operation) => ({
+        ...operation,
+        candidateReference: `journal/${task.taskId}/${operation.operationId}.candidate`,
+        rollbackReference: `journal/${task.taskId}/${operation.operationId}.rollback`
+      }))
+    };
     const intentHash = hashAgentPayload({ schemaVersion: intent.journalSchemaVersion, intent });
     const journal = invokeWriteStore<{ journalId: string; status: string }>(store, 'createCommitJournal', {
       journalId: `journal-${task.taskId}`,
@@ -853,6 +861,63 @@ describeWithSqlite('agent delegation store', (): void => {
     expect((): void => {
       store.tombstoneTask({ taskId: task.taskId, reason: 'unsafe cleanup', occurredAt, source: 'system' });
     }).toThrowError(expect.objectContaining({ reason: 'task_journal_active' }));
+  });
+
+  it('atomically cancels a created journal before any external operation was recorded', (): void => {
+    const { task } = startWriteTask(store, 'journal-cancel');
+    const changeset = createChangeset(task);
+    invokeWriteStore(store, 'prepareChangeset', {
+      snapshot: changeset,
+      snapshotHash: hashChangeset(changeset),
+      occurredAt: changeset.createdAt
+    });
+    const request = createConfirmationRequest(task, changeset);
+    invokeWriteStore(store, 'createConfirmation', {
+      request,
+      requestHash: hashConfirmation(request),
+      occurredAt: request.createdAt
+    });
+    const approved = invokeWriteStore<{ version: number }>(store, 'resolveConfirmation', {
+      confirmationId: request.confirmationId,
+      expectedVersion: 1,
+      decision: 'approved',
+      occurredAt: '2026-07-23T08:02:30.000Z'
+    });
+    invokeWriteStore(store, 'queueCommit', {
+      taskId: task.taskId,
+      confirmationId: request.confirmationId,
+      confirmationVersion: approved.version,
+      occurredAt: '2026-07-23T08:02:40.000Z'
+    });
+    const intent = createCommitIntent(task, changeset, approved.version);
+    const journal = invokeWriteStore<{ journalId: string }>(store, 'createCommitJournal', {
+      journalId: `journal-${task.taskId}`,
+      changesetId: changeset.changesetId,
+      confirmationId: request.confirmationId,
+      confirmationVersion: approved.version,
+      intent,
+      intentHash: hashAgentPayload({ schemaVersion: intent.journalSchemaVersion, intent }),
+      occurredAt: intent.createdAt
+    });
+
+    const checkpoint = invokeWriteStore<{ status: string }>(store, 'cancelCommitJournal', {
+      journalId: journal.journalId,
+      occurredAt: '2026-07-23T08:03:10.000Z'
+    });
+
+    expect(checkpoint.status).toBe('ready_to_resume');
+    expect(store.getTask(task.taskId)).toMatchObject({
+      status: 'cancelled',
+      unfinishedJournalCount: 0,
+      result: {
+        executionStatus: 'cancelled',
+        error: {
+          code: 'cancelled',
+          phase: 'recovery'
+        }
+      }
+    });
+    expect(invokeWriteStore(store, 'listUnfinishedJournals')).toEqual([]);
   });
 
   it('atomically persists immutable facts, ordered events, and one outbox record', (): void => {

@@ -580,6 +580,9 @@ export interface MarkAgentJournalOperationInput extends MarkAgentJournalInput {
   readonly targetContentHash: string;
 }
 
+/** 尚未产生外部 mutation 的 commit journal 安全取消输入。 */
+export type CancelAgentCommitJournalInput = MarkAgentJournalInput;
+
 /** commit journal 成功终态输入。 */
 export interface FinalizeAgentCommitInput extends MarkAgentJournalInput {
   /** 最终结构化 Task 结果。 */
@@ -697,6 +700,12 @@ export interface AgentDelegationStore {
    */
   markJournalApplied(input: MarkAgentJournalInput): AgentCommitJournalRecord;
   /**
+   * 原子取消仍处于 created 且没有外部操作进度的 journal。
+   * @param input - journal 身份与恢复时间
+   * @returns 汇合后的 Checkpoint
+   */
+  cancelCommitJournal(input: CancelAgentCommitJournalInput): AgentCheckpointRecord;
+  /**
    * 原子完成 journal、Task、Attempt 和 Checkpoint 汇合。
    * @param input - 最终结果和完整性 hash
    * @returns 汇合后的 Checkpoint
@@ -712,6 +721,18 @@ export interface AgentDelegationStore {
   listPendingConfirmations(): AgentConfirmationRecord[];
   /** @returns 全部未 finalized/cancelled journal。 */
   listUnfinishedJournals(): AgentCommitJournalRecord[];
+  /**
+   * 按身份读取 commit journal。
+   * @param journalId - journal 身份
+   * @returns journal，不存在时为 null
+   */
+  getCommitJournal(journalId: string): AgentCommitJournalRecord | null;
+  /**
+   * 按身份读取 changeset。
+   * @param changesetId - changeset 身份
+   * @returns changeset，不存在时为 null
+   */
+  getChangeset(changesetId: string): AgentChangesetRecord | null;
   /**
    * 幂等写入单个终态结果并推进 Checkpoint。
    * @param input - Child 结果

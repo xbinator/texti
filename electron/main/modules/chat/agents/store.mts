@@ -12,6 +12,7 @@ import type {
   AgentConfirmationStatus,
   AgentDelegationContinuationSnapshot,
   AgentExecutionPlanSnapshot,
+  AgentFileOperationSnapshot,
   AgentPreAttemptFailureResult,
   AgentRecordState,
   AgentTaskPriority,
@@ -22,7 +23,8 @@ import type {
   ChatAgentEvent,
   ChatAgentEventPayloadMap,
   ChatAgentEventSource,
-  ChatAgentEventType
+  ChatAgentEventType,
+  ChatAgentResult
 } from 'types/chat-agent';
 import {
   hashAgentPayload,
@@ -54,6 +56,7 @@ import {
   type AgentTerminalResultEnvelope,
   type AuthorizeAgentTaskInput,
   type BeginAgentAttemptInput,
+  type CancelAgentCommitJournalInput,
   type CancelCheckpointInput,
   type ClaimCheckpointInput,
   type CreateAgentCommitJournalInput,
@@ -236,6 +239,35 @@ interface JournalOperationProgress {
   operationId: string;
   /** 应用后内容 hash。 */
   targetContentHash: string;
+}
+
+/**
+ * 投影不包含可替换 protected reference 的 commit operation 事实。
+ * @param operation - changeset 或 journal 中的文件操作
+ * @returns 与用户批准内容绑定的不可变操作事实
+ */
+function projectCommitOperation(operation: AgentFileOperationSnapshot): Omit<AgentFileOperationSnapshot, 'candidateReference' | 'rollbackReference'> {
+  return {
+    operationId: operation.operationId,
+    kind: operation.kind,
+    displayPath: operation.displayPath,
+    targetPath: operation.targetPath,
+    resourceScope: operation.resourceScope,
+    baseRevision: operation.baseRevision,
+    baseContentHash: operation.baseContentHash,
+    targetContentHash: operation.targetContentHash,
+    byteLength: operation.byteLength
+  };
+}
+
+/**
+ * 判断 journal 复制后的 protected references 是否仍精确绑定 changeset 操作事实。
+ * @param intentOperations - journal 私有引用操作
+ * @param changesetOperations - overlay 引用操作
+ * @returns 除 protected references 外是否完全一致
+ */
+function matchCommitOperations(intentOperations: readonly AgentFileOperationSnapshot[], changesetOperations: readonly AgentFileOperationSnapshot[]): boolean {
+  return hashAgentPayload(intentOperations.map(projectCommitOperation)) === hashAgentPayload(changesetOperations.map(projectCommitOperation));
 }
 
 /** 经 Checkpoint、Task 和终态结果交叉校验的委派聚合。 */
@@ -1287,7 +1319,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
    * @param changesetId - changeset ID
    * @returns Changeset，不存在时为 null
    */
-  private getChangeset(changesetId: string): AgentChangesetRecord | null {
+  getChangeset(changesetId: string): AgentChangesetRecord | null {
     const row = this.database.select<ChangesetRow>('SELECT * FROM chat_agent_changesets WHERE changeset_id = ?', [changesetId])[0];
     return row ? parseChangeset(row) : null;
   }
@@ -1317,7 +1349,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
    * @param journalId - journal ID
    * @returns Commit Journal，不存在时为 null
    */
-  private getCommitJournal(journalId: string): AgentCommitJournalRecord | null {
+  getCommitJournal(journalId: string): AgentCommitJournalRecord | null {
     const row = this.database.select<CommitJournalRow>('SELECT * FROM chat_agent_commit_journals WHERE journal_id = ?', [journalId])[0];
     return row ? parseCommitJournal(row) : null;
   }
@@ -2533,7 +2565,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         intent.resultDraft.taskId !== task.taskId ||
         intent.resultDraft.agentId !== task.agentId ||
         intent.resultDraft.attemptId !== attempt.attemptId ||
-        hashAgentPayload(intent.operations) !== hashAgentPayload(changeset.snapshot.operations) ||
+        !matchCommitOperations(intent.operations, changeset.snapshot.operations) ||
         intent.resultDraft.criteria.length !== task.contractSnapshot.acceptanceCriteria.length ||
         !intent.resultDraft.criteria.every((criterion, index): boolean => criterion.criterionIndex === index) ||
         !canTransitionTask('queued', 'committing', { mode: 'write', queuePhase: 'commit' })
@@ -2708,6 +2740,113 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       const applied = this.getCommitJournal(journal.journalId);
       if (!applied) throw new AgentStoreProtocolError('commit_journal_projection_missing', 'Applied commit journal is missing');
       return applied;
+    });
+  }
+
+  /** @inheritdoc */
+  cancelCommitJournal(input: CancelAgentCommitJournalInput): AgentCheckpointRecord {
+    return this.database.transaction((): AgentCheckpointRecord => {
+      if (!Number.isFinite(Date.parse(input.occurredAt))) {
+        throw new AgentStoreProtocolError('commit_journal_input_invalid', 'Commit journal timestamp is invalid', 'recovery');
+      }
+      const journal = this.getCommitJournal(input.journalId);
+      if (!journal) throw new AgentStoreProtocolError('commit_journal_not_found', 'Commit journal does not exist', 'recovery');
+      const task = this.getTask(journal.taskId);
+      const attempt = this.getAttempt(journal.attemptId);
+      const changeset = this.getChangeset(journal.changesetId);
+      const checkpoint = task ? this.getCheckpoint(task.checkpointId) : null;
+      if (!task || !attempt || !changeset || !checkpoint) {
+        throw new AgentStoreProtocolError('commit_cancel_target_missing', 'Commit cancellation aggregate is incomplete', 'recovery');
+      }
+      if (journal.status === 'cancelled' && task.status === 'cancelled' && task.resultHash) return checkpoint;
+      if (
+        journal.status !== 'created' ||
+        journal.appliedOperationIds.length !== 0 ||
+        task.status !== 'committing' ||
+        task.unfinishedJournalCount !== 1 ||
+        task.currentAttemptId !== attempt.attemptId ||
+        attempt.status !== 'running' ||
+        changeset.status !== 'committing' ||
+        !canTransitionTask('committing', 'cancelled', { mode: 'write' })
+      ) {
+        throw new AgentStoreProtocolError('commit_cancel_state_invalid', 'Only an unapplied created journal can be cancelled', 'recovery');
+      }
+      const criteria = [...journal.intent.resultDraft.criteria];
+      const verifiedCount = criteria.filter(
+        (criterion): boolean => criterion.claim.status === 'satisfied' && criterion.verification.status === 'verified'
+      ).length;
+      let completionLevel: ChatAgentResult['completion']['level'] = 'partial';
+      if (verifiedCount === 0) completionLevel = 'none';
+      if (verifiedCount === criteria.length) completionLevel = 'full';
+      const error: AgentTaskError = {
+        code: 'cancelled',
+        phase: 'recovery',
+        category: 'runtime',
+        retryable: false,
+        details: { reason: 'journal_unapplied_after_restart' }
+      };
+      const resultCandidate: ChatAgentResult = {
+        taskId: task.taskId,
+        agentId: task.agentId,
+        attemptId: attempt.attemptId,
+        executionStatus: 'cancelled',
+        completion: { level: completionLevel, criteria },
+        summary: journal.intent.resultDraft.summary,
+        ...(journal.intent.resultDraft.output === undefined ? {} : { output: journal.intent.resultDraft.output }),
+        warnings: [...journal.intent.resultDraft.warnings],
+        artifacts: [],
+        changeset: {
+          changesetId: changeset.snapshot.changesetId,
+          baseRevision: changeset.snapshot.baseRevision,
+          diffHash: changeset.snapshot.diffHash,
+          operationSetHash: changeset.snapshot.operationSetHash,
+          planHash: changeset.snapshot.planHash
+        },
+        usage: journal.intent.resultDraft.usage,
+        error
+      };
+      const resultValidation = validateChatAgentResult(resultCandidate);
+      if (!resultValidation.ok) {
+        throw new AgentStoreProtocolError(
+          resultValidation.error.details?.reason?.toString() ?? 'commit_cancel_result_invalid',
+          resultValidation.error.message,
+          'recovery'
+        );
+      }
+      const { result } = resultValidation;
+      const resultHash = hashAgentPayload(result);
+      const attemptUpdate = this.database.execute(
+        `UPDATE chat_agent_attempts
+         SET status = ?, finished_at = ?, error_json = ?
+         WHERE attempt_id = ? AND task_id = ? AND status = ?`,
+        ['cancelled', input.occurredAt, JSON.stringify(error), attempt.attemptId, task.taskId, 'running']
+      );
+      const taskUpdate = this.database.execute(
+        `UPDATE chat_agent_tasks
+         SET status = ?, result_json = ?, result_hash = ?, error_json = ?,
+             unfinished_journal_count = unfinished_journal_count - 1, updated_at = ?
+         WHERE task_id = ? AND status = ? AND current_attempt_id = ?
+           AND result_hash IS NULL AND unfinished_journal_count = 1 AND record_state = ?`,
+        ['cancelled', JSON.stringify(result), resultHash, JSON.stringify(error), input.occurredAt, task.taskId, 'committing', attempt.attemptId, 'active']
+      );
+      const changesetUpdate = this.database.execute(
+        `UPDATE chat_agent_changesets
+         SET status = ?, updated_at = ?
+         WHERE changeset_id = ? AND status = ?`,
+        ['discarded', input.occurredAt, changeset.snapshot.changesetId, 'committing']
+      );
+      const journalUpdate = this.database.execute(
+        `UPDATE chat_agent_commit_journals
+         SET status = ?, finalized_at = ?, updated_at = ?
+         WHERE journal_id = ? AND status = ? AND operation_progress_json = ?`,
+        ['cancelled', input.occurredAt, input.occurredAt, journal.journalId, 'created', '[]']
+      );
+      if (attemptUpdate.changes !== 1 || taskUpdate.changes !== 1 || changesetUpdate.changes !== 1 || journalUpdate.changes !== 1) {
+        throw new AgentStoreProtocolError('commit_cancel_conflict', 'Commit cancellation projections changed concurrently', 'recovery');
+      }
+      const links = { attemptId: attempt.attemptId, runtimeId: attempt.currentRuntimeId };
+      this.appendEvent('task', task.taskId, 'task.cancelled', { resultHash }, input.occurredAt, 'coordinator', links);
+      return this.joinTerminalResult(task, checkpoint, result, resultHash, input.occurredAt, 'coordinator');
     });
   }
 

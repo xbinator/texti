@@ -1162,7 +1162,7 @@ git commit -m "feat(chat): 持久化 Child 确认队列"
 - Consumes: approved confirmation、exclusive-commit lease、immutable changeset、`atomically`。
 - Produces: `AgentFileCommitter.commit()` 与 `recover()`；每次真实 mutation 前必须已有 durable journal。
 
-- [ ] **Step 1: Write failing commit validation tests**
+- [x] **Step 1: Write failing commit validation tests**
 
 ```ts
 await expect(
@@ -1199,7 +1199,7 @@ expect(callOrder).toEqual([
 - 当前内容既不匹配 base hash 也不匹配 target hash。
 - journal 未创建时 `writeFileAtomically` 从未调用。
 
-- [ ] **Step 2: Write crash-injection recovery tests**
+- [x] **Step 2: Write crash-injection recovery tests**
 
 为每个注入点创建独立测试：
 
@@ -1220,7 +1220,7 @@ const points: AgentCommitCrashPoint[] = [
 - 任一目标同时不匹配 base/target：`manual_recovery_required`，Task `commit_failed`。
 - 重复 `recover()` 幂等，不重复写已匹配 target 的文件。
 
-- [ ] **Step 3: Run commit tests and verify RED**
+- [x] **Step 3: Run commit tests and verify RED**
 
 Run:
 
@@ -1231,7 +1231,7 @@ pnpm exec cross-env ELECTRON_RUN_AS_NODE=1 HOST=127.0.0.1 electron node_modules/
 
 Expected: FAIL，因为 journal adapter 与 crash recovery 尚不存在。
 
-- [ ] **Step 4: Implement pre-commit validation**
+- [x] **Step 4: Implement pre-commit validation**
 
 `commit()` 开头按以下顺序验证：
 
@@ -1247,7 +1247,7 @@ validateProtectedReferences(input.changeset.operations);
 
 只有全部成功后才能调用 `store.createCommitJournal()`。Journal intent 把候选内容和回滚内容复制到 journalRoot 的 task/journal 私有目录，计算 intent hash 后持久化；不能依赖易失 overlay 才能恢复。
 
-- [ ] **Step 5: Implement serial atomic application and finalization**
+- [x] **Step 5: Implement serial atomic application and finalization**
 
 公开边界：
 
@@ -1297,7 +1297,7 @@ store.markJournalOperation({
 
 所有 operation applied 后再次验证全体 target hash，先 mark applied，再根据 journal 中冻结的 `resultDraft` 生成 commit evidence 和 canonical `ChatAgentResult`。最后通过 `store.finalizeCommit()` 在一个 SQLite 事务中写入 journal finalized、Task result、Task completed、Checkpoint rendezvous 和必要 Outbox。任何异常都保留 journal 与 protected content，不在未知状态删除恢复材料。
 
-- [ ] **Step 6: Run commit, Store and atomic write tests**
+- [x] **Step 6: Run commit, Store and atomic write tests**
 
 Run:
 
@@ -1308,7 +1308,7 @@ pnpm exec cross-env ELECTRON_RUN_AS_NODE=1 HOST=127.0.0.1 electron node_modules/
 
 Expected: PASS，所有 crash point 都收敛为 finalized、cancelled 或 manual_recovery，不留下 Task completed + unfinished journal 的矛盾状态。
 
-- [ ] **Step 7: Commit Task 6**
+- [x] **Step 7: Commit Task 6**
 
 ```bash
 git add electron/main/modules/chat/agents/file-commit.mts electron/main/modules/chat/agents/store.mts test/electron/main/modules/chat/agents/file-commit.test.ts test/electron/main/modules/chat/agents/store.test.ts test/electron/main/modules/chat/runtime/atomic-write.test.ts changelog/2026-07-27.md
