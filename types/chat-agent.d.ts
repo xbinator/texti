@@ -409,6 +409,41 @@ export interface ChatAgentResult {
   error?: AgentTaskError;
 }
 
+/**
+ * Coordinator 在 Runtime/Attempt 创建前生成的失败结果。
+ * 该结果显式没有 attemptId，避免把授权或资源裁决伪装成一次执行。
+ */
+export interface AgentPreAttemptFailureResult {
+  /** 判别授权前失败与真实 Attempt 结果。 */
+  resultKind: 'pre_attempt_failure';
+  /** 结果所属 Task。 */
+  taskId: string;
+  /** 稳定 Child Actor ID。 */
+  agentId: string;
+  /** 授权前失败统一映射为 Task failed。 */
+  executionStatus: 'failed';
+  /** 未开始执行时所有验收标准只能是未完成。 */
+  completion: {
+    /** 授权前失败不能声明部分或完整完成。 */
+    level: 'none';
+    /** 与不可变 acceptanceCriteria 精确对齐的未知结论。 */
+    criteria: AgentCriteriaResult[];
+  };
+  /** 面向 Primary 的紧凑失败摘要。 */
+  summary: string;
+  /** 授权前失败不产生非终止性警告。 */
+  warnings: AgentTaskWarning[];
+  /** 授权前失败不拥有 Runtime 产物。 */
+  artifacts: AgentArtifactReference[];
+  /** 未启动 Runtime 的零成本记账。 */
+  usage: AgentUsageAccounting;
+  /** 不可重试的授权、计划或资源错误。 */
+  error: AgentTaskError;
+}
+
+/** Checkpoint rendezvous 可消费的真实 Attempt 结果或授权前失败。 */
+export type AgentTaskResult = ChatAgentResult | AgentPreAttemptFailureResult;
+
 /** 基础阶段 delegation.created Outbox 的唯一 payload。 */
 export interface AgentDelegationCreatedPayload {
   /** 已原子持久化的 Checkpoint。 */
@@ -533,7 +568,7 @@ export interface ChatAgentEventPayloadMap {
   'commit.finalized': { journalId: string; finalHash: string };
   /** 幂等写入收到与已持久化事实冲突的协议输入。 */
   'protocol.error': { reason: string; expectedHash: string; actualHash: string };
-  /** Child 终态结果已按 tool-call ID 写入。 */
+  /** Child 或 Coordinator 终态结果已按 tool-call ID 写入。 */
   'child.result_recorded': { toolCallId: string; resultHash: string };
   /** 所有结果已汇合。 */
   'delegation.ready': { resultCount: number };

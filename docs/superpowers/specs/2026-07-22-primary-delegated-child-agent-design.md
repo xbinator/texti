@@ -752,6 +752,30 @@ interface ChatAgentResult {
 }
 ```
 
+授权、计划或资源校验也可能在任何 Attempt 创建前失败。该路径不能伪造 `attemptId`，而是使用独立判别结果：
+
+```ts
+interface AgentPreAttemptFailureResult {
+  resultKind: 'pre_attempt_failure';
+  taskId: string;
+  agentId: string;
+  executionStatus: 'failed';
+  completion: {
+    level: 'none';
+    criteria: AgentCriteriaResult[];
+  };
+  summary: string;
+  warnings: [];
+  artifacts: [];
+  usage: AgentUsageAccounting;
+  error: AgentTaskError;
+}
+
+type AgentTaskResult = ChatAgentResult | AgentPreAttemptFailureResult;
+```
+
+`AgentPreAttemptFailureResult` 只允许不可重试的 `plan_validation` 或 `resource_validation` 错误；criteria 必须全部保持 `unknown/unverified`，usage 必须为零，不能产生 artifact、changeset 或执行证据。Store 在同一事务中写入 Task failed 投影、审计 Event、Checkpoint terminal result 与必要的 ready Outbox。该结果证明“任务在执行前被拒绝”，不证明存在一次 Attempt。
+
 ```ts
 interface AgentCriteriaResult {
   criterionIndex: number;

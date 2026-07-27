@@ -1309,6 +1309,53 @@ describeWithSqlite('agent delegation store', (): void => {
     });
   });
 
+  it('records a pre-Attempt authorization failure without fabricating an Attempt', (): void => {
+    const input = createPreparedInput('pre-attempt-failure');
+    const task = input.tasks[0];
+    const error = {
+      code: 'capability_denied',
+      phase: 'plan_validation',
+      category: 'policy',
+      retryable: false,
+      details: { reason: 'plan_permission_empty' }
+    } as const;
+    store.prepareDelegation(input, (): undefined => undefined);
+
+    const checkpoint = store.recordPreAttemptFailure({
+      taskId: task.taskId,
+      checkpointId: input.checkpoint.checkpointId,
+      toolCallId: task.toolCallId,
+      error,
+      occurredAt
+    });
+
+    expect(checkpoint.status).toBe('ready_to_resume');
+    expect(checkpoint.terminalResults[task.toolCallId]?.result).toMatchObject({
+      resultKind: 'pre_attempt_failure',
+      taskId: task.taskId,
+      agentId: task.agentId,
+      executionStatus: 'failed',
+      completion: { level: 'none' },
+      error
+    });
+    expect(store.getTask(task.taskId)).toMatchObject({
+      status: 'failed',
+      result: expect.objectContaining({ resultKind: 'pre_attempt_failure' }),
+      error
+    });
+    expect(store.getTask(task.taskId)?.currentAttemptId).toBeUndefined();
+    expect(store.listTaskAttempts(task.taskId)).toEqual([]);
+    expect(store.listEvents('task', task.taskId).at(-1)).toMatchObject({
+      type: 'task.failed',
+      source: 'coordinator',
+      payload: { error }
+    });
+    expect(store.listEvents('checkpoint', input.checkpoint.checkpointId).at(-2)).toMatchObject({
+      type: 'child.result_recorded',
+      source: 'coordinator'
+    });
+  });
+
   it.each(['completed', 'failed', 'cancelled', 'deadline_exceeded', 'commit_failed'] as const)(
     'rejects generic transitionTask terminalization to %s',
     (terminalStatus): void => {

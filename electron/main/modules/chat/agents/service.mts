@@ -5,6 +5,7 @@
 import type {
   AgentCheckpointRecord,
   AgentDelegationStore,
+  AgentOutboxRecord,
   AgentStoreDatabase,
   AgentTaskRecord,
   PrepareAgentTaskInput,
@@ -36,6 +37,7 @@ import { chatRuntimeLocks, getSessionHistoryScope, type RuntimeContinuationFence
 import { finishAssistantMessageInterrupted } from '../runtime/messages/finalizer.mjs';
 import { getRuntimeTaskDeadlineAt } from '../runtime/task-clock.mjs';
 import { chatSessionManager } from '../service.mjs';
+import { createChildActorRegistry } from './child-registry.mjs';
 import {
   AGENT_CHECKPOINT_SCHEMA_VERSION,
   AGENT_FOUNDATION_POLICY_VERSION,
@@ -45,6 +47,7 @@ import {
   validateContinuationSnapshot,
   validateFoundationContract
 } from './contracts.mjs';
+import { createAgentCoordinator, type AgentCoordinator } from './coordinator.mjs';
 import { compileAgentPlan, type AgentPlanCompileInput, type AgentPlanCompileResult } from './plan-compiler.mjs';
 import { resolveAgentScopes } from './resource-scopes.mjs';
 import { validateAgentResult } from './result.mjs';
@@ -58,6 +61,7 @@ export type ChatAgentDelegationStore = Pick<
   AgentDelegationStore,
   | 'prepareDelegation'
   | 'authorizeTask'
+  | 'recordPreAttemptFailure'
   | 'recordTaskResult'
   | 'getTask'
   | 'getCheckpoint'
@@ -142,6 +146,15 @@ export interface ChatAgentDelegationServiceDependencies {
    */
   publish: (eventType: 'delegation.created' | 'delegation.ready', payload: AgentDelegationCreatedPayload | AgentDelegationReadyPayload) => void;
   /**
+   * 在 Renderer 投影之前交付强制 Main 内部消费者。
+   * @param eventType - 持久化 Outbox 事件类型
+   * @param payload - allowlist payload
+   */
+  dispatchInternal?: (
+    eventType: 'delegation.created' | 'delegation.ready',
+    payload: AgentDelegationCreatedPayload | AgentDelegationReadyPayload
+  ) => Promise<void>;
+  /**
    * 发布已持久化的公开 Checkpoint 投影。
    * @param event - 单调 application event
    */
@@ -210,6 +223,13 @@ export interface ChatAgentDelegationService {
    */
   recordTaskResult(input: ChatAgentRecordTaskResultInput): ReturnType<AgentDelegationStore['recordTaskResult']>;
   /**
+   * 原子记录一个不伪造 Attempt 的授权前失败。
+   * @param task - 失败所属持久化 Task
+   * @param error - 不可重试的计划或资源错误
+   * @returns 最新 Checkpoint 投影
+   */
+  recordPreFailure(task: AgentTaskRecord, error: AgentTaskError): ReturnType<AgentDelegationStore['recordPreAttemptFailure']>;
+  /**
    * 使用当前 ready 版本 CAS claim 唯一 Runtime B。
    * @param checkpointId - ready Checkpoint
    * @returns claim 成功后的 Checkpoint，竞争失败为 null
@@ -240,6 +260,8 @@ export interface ChatAgentDelegationService {
    * @returns 被中断的 Checkpoint 数
    */
   interruptUnrecoverableCheckpoints(): number;
+  /** 重放全部待交付 Outbox，并等待强制内部消费者接受。 */
+  drainOutbox(): Promise<void>;
 }
 
 /** 可直接抛给 Runtime 的结构化委派错误。 */
@@ -517,6 +539,70 @@ function compileDefaultPlan(input: AgentPlanCompileInput): AgentPlanCompileResul
 export function createChatAgentDelegationService(dependencies: ChatAgentDelegationServiceDependencies): ChatAgentDelegationService {
   const continuationContexts = new Map<string, ContinuationRuntimeContext>();
   const fenceHandles = new Map<string, RuntimeContinuationFenceHandle>();
+  const deliveryInFlight = new Map<string, Promise<void>>();
+  let deliveryTail = Promise.resolve();
+
+  /**
+   * 先交付强制 Main 内部消费者，再发布 Renderer 投影并确认 Outbox。
+   * @param outbox - 已持久化 Outbox
+   */
+  async function deliverOutbox(outbox: AgentOutboxRecord): Promise<void> {
+    if (outbox.deliveryStatus === 'delivered') return;
+    const existing = deliveryInFlight.get(outbox.outboxId);
+    if (existing) return existing;
+    const delivery = (async (): Promise<void> => {
+      if (outbox.eventType === 'delegation.created') {
+        if (dependencies.dispatchInternal) {
+          await dependencies.dispatchInternal('delegation.created', outbox.payload);
+        }
+        dependencies.publish('delegation.created', outbox.payload);
+      } else {
+        if (dependencies.dispatchInternal) {
+          await dependencies.dispatchInternal('delegation.ready', outbox.payload);
+        }
+        dependencies.publish('delegation.ready', outbox.payload);
+      }
+      dependencies.store.markOutboxDelivered({
+        outboxId: outbox.outboxId,
+        deliveredAt: dependencies.now()
+      });
+    })().finally((): void => {
+      deliveryInFlight.delete(outbox.outboxId);
+    });
+    deliveryInFlight.set(outbox.outboxId, delivery);
+    return delivery;
+  }
+
+  /**
+   * 后台尝试交付 Outbox；失败记录保持 pending，供恢复流程重放。
+   * @param outbox - 已持久化 Outbox
+   */
+  function queueOutbox(outbox: AgentOutboxRecord): void {
+    const scheduled = deliveryTail.then((): Promise<void> => deliverOutbox(outbox));
+    deliveryTail = scheduled.catch((): void => {
+      // transactional Outbox 失败时不修改交付状态，后续按 dedupeKey 重放。
+    });
+  }
+
+  /**
+   * 读取 Checkpoint 事务内创建的 delegation.ready Outbox。
+   * @param checkpoint - 已 ready 的 Checkpoint
+   * @returns 对应待交付或已交付 Outbox
+   */
+  function findReadyOutbox(checkpoint: AgentCheckpointRecord): AgentOutboxRecord {
+    const readyOutbox = dependencies.store.getOutbox(`delegation.ready:${checkpoint.checkpointId}`);
+    if (!readyOutbox || readyOutbox.eventType !== 'delegation.ready') {
+      throw new ChatAgentDelegationError({
+        code: 'protocol_error',
+        phase: 'recovery',
+        category: 'protocol',
+        retryable: false,
+        message: 'Ready Checkpoint is missing its transactional Outbox fact',
+        details: { reason: 'delegation_ready_outbox_missing', checkpointId: checkpoint.checkpointId }
+      });
+    }
+    return readyOutbox;
+  }
 
   /**
    * 在 Checkpoint 已安全终态化后释放内存上下文与 fence。
@@ -899,21 +985,47 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
       const preparedCheckpoint = dependencies.store.getCheckpoint(checkpointId);
       if (!preparedCheckpoint) throw createFenceError(checkpointId, 'prepared_checkpoint_missing');
       publishCheckpointSnapshot(preparedCheckpoint);
-
-      try {
-        dependencies.publish('delegation.created', outboxPayload);
-      } catch {
-        return { prepared: true };
+      const createdOutbox = dependencies.store.getOutbox(`delegation.created:${checkpointId}`);
+      if (!createdOutbox || createdOutbox.eventType !== 'delegation.created' || createdOutbox.outboxId !== outboxId) {
+        throw createFenceError(checkpointId, 'delegation_created_outbox_missing');
       }
-      try {
-        dependencies.store.markOutboxDelivered({ outboxId, deliveredAt: occurredAt });
-      } catch {
-        // 已发布但尚未确认交付的 Outbox 保持 pending，后续可按 dedupeKey 重放。
-      }
+      queueOutbox(createdOutbox);
       return { prepared: true };
     },
 
     authorizeReadTask,
+
+    recordPreFailure(task: AgentTaskRecord, error: AgentTaskError): ReturnType<AgentDelegationStore['recordPreAttemptFailure']> {
+      const current = dependencies.store.getTask(task.taskId);
+      const validatedError = validateAgentTaskError(error);
+      if (
+        !current ||
+        current.checkpointId !== task.checkpointId ||
+        current.toolCallId !== task.toolCallId ||
+        !validatedError ||
+        validatedError.retryable ||
+        (validatedError.phase !== 'plan_validation' && validatedError.phase !== 'resource_validation')
+      ) {
+        throw new ChatAgentDelegationError({
+          code: 'protocol_error',
+          phase: 'plan_validation',
+          category: 'protocol',
+          retryable: false,
+          message: 'Coordinator pre-Attempt failure does not match one persisted Task',
+          details: { reason: 'pre_attempt_failure_context_invalid', taskId: task.taskId, checkpointId: task.checkpointId }
+        });
+      }
+      const checkpoint = dependencies.store.recordPreAttemptFailure({
+        taskId: current.taskId,
+        checkpointId: current.checkpointId,
+        toolCallId: current.toolCallId,
+        error: validatedError,
+        occurredAt: dependencies.now()
+      });
+      publishCheckpointSnapshot(checkpoint);
+      if (checkpoint.status === 'ready_to_resume') queueOutbox(findReadyOutbox(checkpoint));
+      return checkpoint;
+    },
 
     recordTaskResult(input: ChatAgentRecordTaskResultInput): ReturnType<AgentDelegationStore['recordTaskResult']> {
       const task = dependencies.store.getTask(input.taskId);
@@ -947,28 +1059,8 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
       publishCheckpointSnapshot(checkpoint);
       if (checkpoint.status !== 'ready_to_resume') return checkpoint;
 
-      const readyOutbox = dependencies.store.getOutbox(`delegation.ready:${checkpoint.checkpointId}`);
-      if (!readyOutbox || readyOutbox.eventType !== 'delegation.ready') {
-        throw new ChatAgentDelegationError({
-          code: 'protocol_error',
-          phase: 'recovery',
-          category: 'protocol',
-          retryable: false,
-          message: 'Ready Checkpoint is missing its transactional Outbox fact',
-          details: { reason: 'delegation_ready_outbox_missing', checkpointId: checkpoint.checkpointId }
-        });
-      }
-      if (readyOutbox.deliveryStatus === 'delivered') return checkpoint;
-      try {
-        dependencies.publish(readyOutbox.eventType, readyOutbox.payload);
-      } catch {
-        return checkpoint;
-      }
-      try {
-        dependencies.store.markOutboxDelivered({ outboxId: readyOutbox.outboxId, deliveredAt: occurredAt });
-      } catch {
-        // 已发布但尚未确认交付的 ready Outbox 保持 pending，按 dedupeKey 安全重放。
-      }
+      const readyOutbox = findReadyOutbox(checkpoint);
+      queueOutbox(readyOutbox);
       return checkpoint;
     },
 
@@ -1027,6 +1119,11 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
         fenceHandles.set(checkpoint.checkpointId, fence);
       });
       return interruptedCount;
+    },
+
+    async drainOutbox(): Promise<void> {
+      const pending = dependencies.store.listPendingOutbox();
+      await pending.reduce((previous, outbox): Promise<void> => previous.then((): Promise<void> => deliverOutbox(outbox)), Promise.resolve());
     }
   };
 }
@@ -1084,9 +1181,29 @@ function publishAssistant(message: ChatMessageRecord, checkpoint: AgentCheckpoin
   });
 }
 
+/** 主进程默认 Agent Store，供 Service 与 Coordinator 共享同一事实源。 */
+const defaultAgentStore = createAgentDelegationStore(agentStoreDatabase);
+
+/** 主进程默认稳定 Child Actor 注册表。 */
+const defaultChildRegistry = createChildActorRegistry();
+
+/** Task 4 调度器接管前保存已授权的最小 start queue 身份。 */
+const pendingReadTaskIds = new Set<string>();
+
+/** 模块初始化完成后由默认内部 Outbox consumer 使用的 Coordinator。 */
+let defaultCoordinator: AgentCoordinator | null = null;
+
+/**
+ * 暂存一个已授权 read Task，后续 resource-scope scheduler 将消费该集合。
+ * @param taskId - queued(start) Task
+ */
+function enqueueReadTask(taskId: string): void {
+  pendingReadTaskIds.add(taskId);
+}
+
 /** 主进程默认 Child Agent 委派服务。 */
 export const chatAgentDelegationService = createChatAgentDelegationService({
-  store: createAgentDelegationStore(agentStoreDatabase),
+  store: defaultAgentStore,
   locks: chatRuntimeLocks,
   persistAssistant(message: ChatMessageRecord, ownerCheckpointId?: string): undefined {
     chatSessionManager.updateMessage(message, ownerCheckpointId);
@@ -1095,6 +1212,15 @@ export const chatAgentDelegationService = createChatAgentDelegationService({
   readMessages: (sessionId: string): ChatMessageRecord[] => chatSessionManager.getAllMessages(sessionId),
   publishAssistant,
   publish: publishDelegation,
+  async dispatchInternal(
+    eventType: 'delegation.created' | 'delegation.ready',
+    payload: AgentDelegationCreatedPayload | AgentDelegationReadyPayload
+  ): Promise<void> {
+    if (!defaultCoordinator) throw new Error('agent_coordinator_not_initialized');
+    if (eventType === 'delegation.created') {
+      await defaultCoordinator.accept(payload as AgentDelegationCreatedPayload);
+    }
+  },
   publishCheckpoint,
   createId(kind: ChatAgentDelegationIdKind): string {
     return `${kind}-${nanoid()}`;
@@ -1105,3 +1231,24 @@ export const chatAgentDelegationService = createChatAgentDelegationService({
     return chatRuntimeService.resumePrimary(input);
   }
 });
+
+/** 主进程默认 Coordinator；Actor 创建和授权只消费持久化事实。 */
+export const chatAgentCoordinator = createAgentCoordinator({
+  listActive: () => defaultAgentStore.listActive(),
+  authorizeReadTask: (taskId: string): AgentTaskRecord => chatAgentDelegationService.authorizeReadTask(taskId),
+  recordPreFailure: (task: AgentTaskRecord, error: AgentTaskError): AgentCheckpointRecord => chatAgentDelegationService.recordPreFailure(task, error),
+  enqueueTask: enqueueReadTask,
+  cancelCheckpoint(checkpointId: string, reason: string): void {
+    if (!reason.trim()) throw new Error('agent_coordinator_cancel_reason_invalid');
+    defaultAgentStore
+      .listActive()
+      .find((recovery): boolean => recovery.checkpoint.checkpointId === checkpointId)
+      ?.tasks.forEach((task): void => {
+        pendingReadTaskIds.delete(task.taskId);
+      });
+    chatAgentDelegationService.cancelCheckpoint({ checkpointId });
+  },
+  now: (): string => new Date().toISOString(),
+  registry: defaultChildRegistry
+});
+defaultCoordinator = chatAgentCoordinator;

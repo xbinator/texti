@@ -6,15 +6,17 @@ import type {
   AgentCheckpointStatus,
   AgentDelegationContinuationSnapshot,
   AgentExecutionPlanSnapshot,
+  AgentPreAttemptFailureResult,
   AgentRecordState,
   AgentTaskPriority,
   AgentTaskQueuePhase,
+  AgentTaskError,
+  AgentTaskResult,
   AgentTaskStatus,
   ChatAgentEvent,
   ChatAgentEventPayloadMap,
   ChatAgentEventSource,
-  ChatAgentEventType,
-  ChatAgentResult
+  ChatAgentEventType
 } from 'types/chat-agent';
 import {
   hashAgentPayload,
@@ -25,7 +27,8 @@ import {
   validateContinuationSnapshot,
   validateExecutionPlanSnapshot,
   validateFoundationContract,
-  validateFoundationOutbox
+  validateFoundationOutbox,
+  validatePreAttemptFailure
 } from './contracts.mjs';
 import { canTransitionCheckpoint, canTransitionTask, isCheckpointTerminal, isTaskTerminal } from './state.mjs';
 import {
@@ -49,6 +52,7 @@ import {
   type InterruptAgentCheckpointInput,
   type MarkAgentAttemptInput,
   type PrepareDelegationInput,
+  type RecordPreAttemptFailureInput,
   type RecordTaskResultInput,
   type TombstoneAgentTaskInput,
   type TransitionAgentTaskInput
@@ -322,11 +326,36 @@ function parseContinuation(value: unknown, expectedHash: string): AgentDelegatio
  * @param acceptanceCriteria - Task 契约中的有序验收标准
  * @returns 是否严格覆盖 0..N-1 且无缺失或额外项
  */
-function hasExactCriteria(result: ChatAgentResult, acceptanceCriteria: readonly string[]): boolean {
+function hasExactCriteria(result: AgentTaskResult, acceptanceCriteria: readonly string[]): boolean {
   return (
     result.completion.criteria.length === acceptanceCriteria.length &&
     result.completion.criteria.every((criterion, index): boolean => criterion.criterionIndex === index)
   );
+}
+
+/**
+ * 判断结果是否发生在任何 Attempt 创建之前。
+ * @param result - 已通过共享 validator 的 Task 结果
+ * @returns 是否为 Coordinator 授权前失败
+ */
+function isPreAttemptFailure(result: AgentTaskResult): result is AgentPreAttemptFailureResult {
+  return 'resultKind' in result && result.resultKind === 'pre_attempt_failure';
+}
+
+/**
+ * 校验持久化 Task 结果的判别式协议。
+ * @param value - SQLite 或 Checkpoint 中的未可信结果
+ * @returns 规范化真实 Attempt 结果或授权前失败
+ */
+function parseTaskResult(value: unknown): AgentTaskResult {
+  if (isRecord(value) && value.resultKind === 'pre_attempt_failure') {
+    const validation = validatePreAttemptFailure(value);
+    if (validation.ok) return validation.result;
+    throw new AgentStoreProtocolError(validation.error.details?.reason?.toString() ?? 'pre_attempt_result_invalid', validation.error.message);
+  }
+  const validation = validateChatAgentResult(value);
+  if (validation.ok) return validation.result;
+  throw new AgentStoreProtocolError(validation.error.details?.reason?.toString() ?? 'task_result_invalid', validation.error.message);
 }
 
 /**
@@ -394,25 +423,25 @@ function parseTask(row: TaskRow): AgentTaskRecord {
   const taskId = requireString(row.task_id, 'task id');
   const agentId = requireString(row.agent_id, 'task agent id');
   const resultHash = optionalString(row.result_hash, 'task result hash');
-  let result: ChatAgentResult | undefined;
+  let result: AgentTaskResult | undefined;
   if (row.result_json !== null || resultHash !== undefined) {
     if (row.result_json === null || !resultHash) {
       throw new AgentStoreProtocolError('task_result_pair_invalid', 'Task result and hash must coexist');
     }
-    const resultValidation = validateChatAgentResult(parseJson(row.result_json, 'task result'));
-    if (!resultValidation.ok || hashAgentPayload(resultValidation.result) !== resultHash) {
+    const parsedResult = parseTaskResult(parseJson(row.result_json, 'task result'));
+    if (hashAgentPayload(parsedResult) !== resultHash) {
       throw new AgentStoreProtocolError('task_result_invalid', 'Persisted Task result failed validation');
     }
     if (
-      resultValidation.result.taskId !== taskId ||
-      resultValidation.result.agentId !== agentId ||
-      currentAttemptId === undefined ||
-      resultValidation.result.attemptId !== currentAttemptId ||
-      !hasExactCriteria(resultValidation.result, validation.contractSnapshot.acceptanceCriteria)
+      parsedResult.taskId !== taskId ||
+      parsedResult.agentId !== agentId ||
+      (!isPreAttemptFailure(parsedResult) && (currentAttemptId === undefined || parsedResult.attemptId !== currentAttemptId)) ||
+      (isPreAttemptFailure(parsedResult) && currentAttemptId !== undefined) ||
+      !hasExactCriteria(parsedResult, validation.contractSnapshot.acceptanceCriteria)
     ) {
       throw new AgentStoreProtocolError('task_result_identity_invalid', 'Persisted Task result identity or criteria do not match its Task row');
     }
-    result = resultValidation.result;
+    result = parsedResult;
   }
   let error;
   if (row.error_json !== null) {
@@ -529,11 +558,11 @@ function parseTerminalResults(value: unknown): Record<string, AgentTerminalResul
       throw new AgentStoreProtocolError('terminal_result_envelope_invalid', 'Terminal result envelope is invalid');
     }
     const resultHash = requireString(envelope.resultHash, 'terminal result hash');
-    const resultValidation = validateChatAgentResult(envelope.result);
-    if (!resultValidation.ok || hashAgentPayload(resultValidation.result) !== resultHash) {
+    const result = parseTaskResult(envelope.result);
+    if (hashAgentPayload(result) !== resultHash) {
       throw new AgentStoreProtocolError('terminal_result_invalid', 'Terminal result failed validation');
     }
-    return [requireString(toolCallId, 'terminal result tool call id'), { result: resultValidation.result, resultHash }];
+    return [requireString(toolCallId, 'terminal result tool call id'), { result, resultHash }];
   });
   return Object.freeze(Object.fromEntries(entries));
 }
@@ -1262,23 +1291,23 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
     });
     const checkpointEvents = this.listEvents('checkpoint', checkpoint.checkpointId);
 
-    // 每个持久化终态结果必须与唯一同 tool-call、同 hash 的 Child 审计 Event 构成双射。
+    // 每个持久化终态结果必须与唯一同 tool-call、同 hash 的结果审计 Event 构成双射。
     const resultEntries = Object.entries(checkpoint.terminalResults);
     const resultEvents = checkpointEvents.filter((event): boolean => event.type === 'child.result_recorded');
     if (resultEvents.length !== resultEntries.length) {
-      throw new AgentStoreProtocolError('delegation_result_events_invalid', 'Terminal results and Child result Events are not an exact set');
+      throw new AgentStoreProtocolError('delegation_result_events_invalid', 'Terminal results and result Events are not an exact set');
     }
     const recordedToolCalls = new Set<string>();
     resultEvents.forEach((event): void => {
       const payload = event.payload as ChatAgentEventPayloadMap['child.result_recorded'];
       const envelope = checkpoint.terminalResults[payload.toolCallId];
       if (recordedToolCalls.has(payload.toolCallId) || !envelope || envelope.resultHash !== payload.resultHash) {
-        throw new AgentStoreProtocolError('delegation_result_events_invalid', 'Terminal results and Child result Events are not an exact set');
+        throw new AgentStoreProtocolError('delegation_result_events_invalid', 'Terminal results and result Events are not an exact set');
       }
       recordedToolCalls.add(payload.toolCallId);
     });
     if (resultEntries.some(([toolCallId]): boolean => !recordedToolCalls.has(toolCallId))) {
-      throw new AgentStoreProtocolError('delegation_result_events_invalid', 'Terminal results and Child result Events are not an exact set');
+      throw new AgentStoreProtocolError('delegation_result_events_invalid', 'Terminal results and result Events are not an exact set');
     }
 
     // currentAttemptId 必须解引用为与 Task 和冻结计划严格一致的真实 Attempt。
@@ -1323,7 +1352,9 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
             envelope.resultHash !== task.resultHash ||
             envelope.result.taskId !== task.taskId ||
             envelope.result.agentId !== task.agentId ||
-            envelope.result.attemptId !== task.currentAttemptId
+            (isPreAttemptFailure(envelope.result)
+              ? task.currentAttemptId !== undefined || !isPreAttemptFailure(task.result)
+              : isPreAttemptFailure(task.result) || envelope.result.attemptId !== task.currentAttemptId)
           );
         })
       ) {
@@ -1736,6 +1767,146 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
     });
   }
 
+  /**
+   * 创建一个不含 Attempt、产物和模型成本的规范化授权前失败。
+   * @param task - 尚未创建 Attempt 的 Task
+   * @param error - 已通过 allowlist 的不可重试授权错误
+   * @returns 可持久化并注入 Primary 的稳定结果
+   */
+  private createPreAttemptResult(task: AgentTaskRecord, error: AgentTaskError): Readonly<AgentPreAttemptFailureResult> {
+    const candidate: AgentPreAttemptFailureResult = {
+      resultKind: 'pre_attempt_failure',
+      taskId: task.taskId,
+      agentId: task.agentId,
+      executionStatus: 'failed',
+      completion: {
+        level: 'none',
+        criteria: task.contractSnapshot.acceptanceCriteria.map((_criterion, criterionIndex) => ({
+          criterionIndex,
+          claim: {
+            status: 'unknown',
+            summary: 'Authorization failed before this criterion could be evaluated.',
+            evidence: []
+          },
+          verification: {
+            status: 'unverified',
+            verifier: 'policy',
+            evidence: []
+          }
+        }))
+      },
+      summary: 'Task authorization failed before execution.',
+      warnings: [],
+      artifacts: [],
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        modelCalls: 0,
+        toolRounds: 0,
+        queueDurationMs: 0,
+        executionDurationMs: 0,
+        externalRequests: 0,
+        monetaryCost: {
+          currency: 'unknown',
+          pricingVersion: 'unknown',
+          estimated: 'unknown',
+          actual: 'unknown'
+        }
+      },
+      error
+    };
+    const validation = validatePreAttemptFailure(candidate);
+    if (!validation.ok) {
+      throw new AgentStoreProtocolError(
+        validation.error.details?.reason?.toString() ?? 'pre_attempt_result_invalid',
+        validation.error.message,
+        'plan_validation'
+      );
+    }
+    return validation.result;
+  }
+
+  /**
+   * 把一个已写入 Task 的终态结果汇合到 Checkpoint，并在完整时创建 ready Outbox。
+   * 调用方必须处于同一 Store 事务中。
+   * @param task - 结果所属 Task
+   * @param checkpoint - 仍在等待 Child 的 Checkpoint
+   * @param result - 已规范化 Task 结果
+   * @param resultHash - canonical 结果 hash
+   * @param occurredAt - 汇合时间
+   * @param source - 真实结果产生方
+   * @returns 汇合后的 Checkpoint
+   */
+  private joinTerminalResult(
+    task: AgentTaskRecord,
+    checkpoint: AgentCheckpointRecord,
+    result: AgentTaskResult,
+    resultHash: string,
+    occurredAt: string,
+    source: Extract<ChatAgentEventSource, 'child' | 'coordinator'>
+  ): AgentCheckpointRecord {
+    if (checkpoint.status !== 'waiting_children' || checkpoint.terminalResults[task.toolCallId]) {
+      throw new AgentStoreProtocolError('checkpoint_not_waiting', 'Checkpoint is not accepting a new Task result');
+    }
+    const terminalResults = {
+      ...checkpoint.terminalResults,
+      [task.toolCallId]: { result, resultHash }
+    };
+    const allTerminal = checkpoint.continuationSnapshot.orderedToolCalls.every((toolCall): boolean => terminalResults[toolCall.toolCallId] !== undefined);
+    const nextStatus: AgentCheckpointStatus = allTerminal ? 'ready_to_resume' : 'waiting_children';
+    const checkpointUpdate = this.database.execute(
+      `UPDATE chat_agent_delegation_checkpoints
+       SET terminal_results_json = ?, status = ?, version = version + 1, updated_at = ?
+       WHERE checkpoint_id = ? AND status = ? AND version = ? AND record_state = ?`,
+      [JSON.stringify(terminalResults), nextStatus, occurredAt, checkpoint.checkpointId, 'waiting_children', checkpoint.version, 'active']
+    );
+    if (checkpointUpdate.changes !== 1) {
+      throw new AgentStoreProtocolError('checkpoint_result_conflict', 'Checkpoint result projection changed concurrently');
+    }
+    this.appendEvent('checkpoint', checkpoint.checkpointId, 'child.result_recorded', { toolCallId: task.toolCallId, resultHash }, occurredAt, source);
+    if (allTerminal) {
+      this.appendEvent(
+        'checkpoint',
+        checkpoint.checkpointId,
+        'delegation.ready',
+        { resultCount: Object.keys(terminalResults).length },
+        occurredAt,
+        'coordinator'
+      );
+      const readyPayload = {
+        checkpointId: checkpoint.checkpointId,
+        sessionId: checkpoint.sessionId,
+        turnId: checkpoint.turnId,
+        resultCount: Object.keys(terminalResults).length
+      };
+      const outboxInsert = this.database.execute(
+        `INSERT INTO chat_agent_outbox (
+          outbox_id, dedupe_key, event_type, payload_json, payload_hash, schema_version,
+          delivery_status, attempt_count, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          `delegation-ready-${checkpoint.checkpointId}`,
+          `delegation.ready:${checkpoint.checkpointId}`,
+          'delegation.ready',
+          JSON.stringify(readyPayload),
+          hashAgentPayload(readyPayload),
+          1,
+          'pending',
+          0,
+          occurredAt,
+          occurredAt
+        ]
+      );
+      if (outboxInsert.changes !== 1) {
+        throw new AgentStoreProtocolError('ready_outbox_write_failed', 'Ready Outbox was not created with the terminal result');
+      }
+    }
+    const updated = this.getCheckpoint(checkpoint.checkpointId);
+    if (!updated) throw new AgentStoreProtocolError('checkpoint_projection_missing', 'Updated Checkpoint is missing');
+    return updated;
+  }
+
   /** @inheritdoc */
   recordTaskResult(input: RecordTaskResultInput): AgentCheckpointRecord {
     let replayConflict: AgentStoreProtocolError | undefined;
@@ -1776,8 +1947,10 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         const envelope = checkpoint.terminalResults[task.toolCallId];
         if (
           !task.result ||
+          isPreAttemptFailure(task.result) ||
           hashAgentPayload(task.result) !== task.resultHash ||
           !envelope ||
+          isPreAttemptFailure(envelope.result) ||
           envelope.resultHash !== task.resultHash ||
           hashAgentPayload(envelope.result) !== task.resultHash ||
           envelope.result.taskId !== task.taskId ||
@@ -1823,7 +1996,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         throw new AgentStoreProtocolError('result_attempt_invalid', 'Current Attempt identity, plan, or status is invalid');
       }
       if (checkpoint.status !== 'waiting_children') {
-        throw new AgentStoreProtocolError('checkpoint_not_waiting', 'Checkpoint is not accepting Child results');
+        throw new AgentStoreProtocolError('checkpoint_not_waiting', 'Checkpoint is not accepting Task results');
       }
 
       const targetStatus: AgentTaskStatus = result.executionStatus;
@@ -1898,66 +2071,100 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         );
       }
 
-      const terminalResults = {
-        ...checkpoint.terminalResults,
-        [task.toolCallId]: { result, resultHash: computedHash }
-      };
-      const allTerminal = checkpoint.continuationSnapshot.orderedToolCalls.every((toolCall): boolean => terminalResults[toolCall.toolCallId] !== undefined);
-      const nextStatus: AgentCheckpointStatus = allTerminal ? 'ready_to_resume' : 'waiting_children';
-      const checkpointUpdate = this.database.execute(
-        `UPDATE chat_agent_delegation_checkpoints
-         SET terminal_results_json = ?, status = ?, version = version + 1, updated_at = ?
-         WHERE checkpoint_id = ? AND status = ? AND version = ? AND record_state = ?`,
-        [JSON.stringify(terminalResults), nextStatus, input.occurredAt, checkpoint.checkpointId, 'waiting_children', checkpoint.version, 'active']
-      );
-      if (checkpointUpdate.changes !== 1) {
-        throw new AgentStoreProtocolError('checkpoint_result_conflict', 'Checkpoint result projection changed concurrently');
+      return this.joinTerminalResult(task, checkpoint, result, computedHash, input.occurredAt, 'child');
+    });
+    if (replayConflict) throw replayConflict;
+    return recordedCheckpoint;
+  }
+
+  /** @inheritdoc */
+  recordPreAttemptFailure(input: RecordPreAttemptFailureInput): AgentCheckpointRecord {
+    let replayConflict: AgentStoreProtocolError | undefined;
+    const recordedCheckpoint = this.database.transaction((): AgentCheckpointRecord => {
+      const task = this.getTask(input.taskId);
+      const checkpoint = this.getCheckpoint(input.checkpointId);
+      const error = validateAgentTaskError(input.error);
+      if (!task || !checkpoint) {
+        throw new AgentStoreProtocolError('pre_attempt_target_missing', 'Task or Checkpoint does not exist', 'plan_validation');
       }
-      this.appendEvent(
-        'checkpoint',
-        checkpoint.checkpointId,
-        'child.result_recorded',
-        { toolCallId: task.toolCallId, resultHash: computedHash },
-        input.occurredAt,
-        'child'
-      );
-      if (allTerminal) {
-        this.appendEvent(
-          'checkpoint',
-          checkpoint.checkpointId,
-          'delegation.ready',
-          { resultCount: Object.keys(terminalResults).length },
-          input.occurredAt,
-          'coordinator'
+      if (
+        task.checkpointId !== input.checkpointId ||
+        task.toolCallId !== input.toolCallId ||
+        task.recordState !== 'active' ||
+        checkpoint.recordState !== 'active'
+      ) {
+        throw new AgentStoreProtocolError('pre_attempt_target_mismatch', 'Pre-Attempt result target does not match persisted facts', 'plan_validation');
+      }
+      if (
+        !error ||
+        error.retryable ||
+        (error.phase !== 'plan_validation' && error.phase !== 'resource_validation') ||
+        !Number.isFinite(Date.parse(input.occurredAt))
+      ) {
+        throw new AgentStoreProtocolError(
+          'pre_attempt_error_invalid',
+          'Pre-Attempt failure requires a non-retryable plan or resource error',
+          'plan_validation'
         );
-        const readyPayload = {
-          checkpointId: checkpoint.checkpointId,
-          sessionId: checkpoint.sessionId,
-          turnId: checkpoint.turnId,
-          resultCount: Object.keys(terminalResults).length
-        };
-        this.database.execute(
-          `INSERT INTO chat_agent_outbox (
-            outbox_id, dedupe_key, event_type, payload_json, payload_hash, schema_version,
-            delivery_status, attempt_count, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            `delegation-ready-${checkpoint.checkpointId}`,
-            `delegation.ready:${checkpoint.checkpointId}`,
-            'delegation.ready',
-            JSON.stringify(readyPayload),
-            hashAgentPayload(readyPayload),
-            1,
-            'pending',
-            0,
+      }
+      const result = this.createPreAttemptResult(task, error);
+      const computedHash = hashAgentPayload(result);
+      if (task.resultHash) {
+        const envelope = checkpoint.terminalResults[task.toolCallId];
+        if (
+          !task.result ||
+          !isPreAttemptFailure(task.result) ||
+          !envelope ||
+          !isPreAttemptFailure(envelope.result) ||
+          task.resultHash !== envelope.resultHash ||
+          hashAgentPayload(task.result) !== task.resultHash ||
+          hashAgentPayload(envelope.result) !== task.resultHash
+        ) {
+          throw new AgentStoreProtocolError('pre_attempt_replay_conflict', 'Pre-Attempt replay conflicts with persisted Task or Checkpoint result');
+        }
+        if (task.resultHash !== computedHash) {
+          this.appendEvent(
+            'task',
+            task.taskId,
+            'protocol.error',
+            {
+              reason: 'pre_attempt_replay_conflict',
+              expectedHash: task.resultHash,
+              actualHash: computedHash
+            },
             input.occurredAt,
-            input.occurredAt
-          ]
-        );
+            'coordinator'
+          );
+          replayConflict = new AgentStoreProtocolError(
+            'pre_attempt_replay_conflict',
+            'Pre-Attempt replay conflicts with the already persisted canonical result',
+            'result_validation'
+          );
+        }
+        return checkpoint;
       }
-      const updated = this.getCheckpoint(checkpoint.checkpointId);
-      if (!updated) throw new AgentStoreProtocolError('checkpoint_projection_missing', 'Updated Checkpoint is missing');
-      return updated;
+      if (
+        checkpoint.status !== 'waiting_children' ||
+        task.currentAttemptId !== undefined ||
+        !canTransitionTask(task.status, 'failed', {
+          mode: task.contractSnapshot.mode,
+          queuePhase: task.queuePhase
+        })
+      ) {
+        throw new AgentStoreProtocolError('pre_attempt_state_invalid', 'Task is not eligible for pre-Attempt terminalization', 'plan_validation');
+      }
+      const taskUpdate = this.database.execute(
+        `UPDATE chat_agent_tasks
+         SET status = ?, queue_phase = NULL, result_json = ?, result_hash = ?, error_json = ?, updated_at = ?
+         WHERE task_id = ? AND status = ? AND current_attempt_id IS NULL
+           AND result_hash IS NULL AND record_state = ?`,
+        ['failed', JSON.stringify(result), computedHash, JSON.stringify(error), input.occurredAt, task.taskId, task.status, 'active']
+      );
+      if (taskUpdate.changes !== 1) {
+        throw new AgentStoreProtocolError('pre_attempt_write_conflict', 'Task changed before its pre-Attempt failure was recorded', 'plan_validation');
+      }
+      this.appendEvent('task', task.taskId, 'task.failed', { error, resultHash: computedHash }, input.occurredAt, 'coordinator');
+      return this.joinTerminalResult(task, checkpoint, result, computedHash, input.occurredAt, 'coordinator');
     });
     if (replayConflict) throw replayConflict;
     return recordedCheckpoint;
@@ -2244,7 +2451,10 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         !toolCall ||
         !task ||
         task.resultHash !== envelope.resultHash ||
-        task.result?.attemptId !== envelope.result.attemptId ||
+        !task.result ||
+        (isPreAttemptFailure(envelope.result)
+          ? !isPreAttemptFailure(task.result)
+          : isPreAttemptFailure(task.result) || task.result.attemptId !== envelope.result.attemptId) ||
         !hasExactCriteria(envelope.result, task.contractSnapshot.acceptanceCriteria)
       ) {
         throw new AgentStoreProtocolError('checkpoint_terminal_result_invalid', 'Checkpoint terminal result does not match its persisted Task projection');

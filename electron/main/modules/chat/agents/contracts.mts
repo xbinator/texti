@@ -17,6 +17,7 @@ import type {
   AgentModelSnapshot,
   AgentOrderedToolCallSnapshot,
   AgentPlanToolEffect,
+  AgentPreAttemptFailureResult,
   AgentResourceReference,
   AgentTaskContractSnapshot,
   AgentTaskError,
@@ -105,6 +106,17 @@ export interface ChatAgentResultFailure {
 
 /** Agent 结果 allowlist 校验结果。 */
 export type ChatAgentResultValidation = ChatAgentResultSuccess | ChatAgentResultFailure;
+
+/** 授权前失败结果成功校验。 */
+export interface PreAttemptFailureSuccess {
+  /** 校验是否成功。 */
+  ok: true;
+  /** 深冻结且不含 Attempt 身份的失败结果。 */
+  result: Readonly<AgentPreAttemptFailureResult>;
+}
+
+/** 授权前失败结果校验返回值。 */
+export type PreAttemptFailureValidation = PreAttemptFailureSuccess | ChatAgentResultFailure;
 
 /** Execution Plan 成功校验结果。 */
 export interface ExecutionPlanValidationSuccess {
@@ -1775,5 +1787,90 @@ export function validateChatAgentResult(input: unknown): ChatAgentResultValidati
   return {
     ok: true,
     result: deepFreeze(result)
+  };
+}
+
+/**
+ * 校验 Coordinator 在 Runtime 创建前生成的失败结果。
+ * 该协议只接受不可重试的计划或资源失败、零 usage、空产物和未验证 criteria。
+ * @param input - Store 生成或恢复读取的未可信结果
+ * @returns 深冻结失败结果或稳定协议错误
+ */
+export function validatePreAttemptFailure(input: unknown): PreAttemptFailureValidation {
+  const allowedKeys = new Set(['resultKind', 'taskId', 'agentId', 'executionStatus', 'completion', 'summary', 'warnings', 'artifacts', 'usage', 'error']);
+  if (!isPlainRecord(input) || !hasOnlyKeys(input, allowedKeys)) {
+    return resultFailure('pre_attempt_result_unknown_field', 'Pre-Attempt result contains unknown fields');
+  }
+  const taskId = normalizeAgentIdentity(input.taskId);
+  const agentId = normalizeAgentIdentity(input.agentId);
+  const summary = normalizeDisplayText(input.summary);
+  if (input.resultKind !== 'pre_attempt_failure' || input.executionStatus !== 'failed' || !taskId || !agentId || !summary) {
+    return resultFailure('pre_attempt_result_identity_invalid', 'Pre-Attempt result identity and discriminants are invalid');
+  }
+  if (
+    !isPlainRecord(input.completion) ||
+    !hasOnlyKeys(input.completion, new Set(['level', 'criteria'])) ||
+    input.completion.level !== 'none' ||
+    !Array.isArray(input.completion.criteria)
+  ) {
+    return resultFailure('pre_attempt_result_completion_invalid', 'Pre-Attempt completion must be none with ordered criteria');
+  }
+  const criteria = input.completion.criteria.map(normalizeCriteria);
+  if (
+    criteria.some((criterion): boolean => criterion === null) ||
+    new Set((criteria as AgentCriteriaResult[]).map((criterion): number => criterion.criterionIndex)).size !== criteria.length ||
+    (criteria as AgentCriteriaResult[]).some(
+      (criterion): boolean =>
+        criterion.claim.status !== 'unknown' ||
+        criterion.claim.evidence.length !== 0 ||
+        criterion.verification.status !== 'unverified' ||
+        criterion.verification.verifier !== 'policy' ||
+        criterion.verification.evidence.length !== 0
+    )
+  ) {
+    return resultFailure('pre_attempt_result_criteria_invalid', 'Pre-Attempt criteria cannot claim execution evidence');
+  }
+  if (!Array.isArray(input.warnings) || input.warnings.length !== 0 || !Array.isArray(input.artifacts) || input.artifacts.length !== 0) {
+    return resultFailure('pre_attempt_result_collections_invalid', 'Pre-Attempt results cannot contain warnings or artifacts');
+  }
+  const usage = normalizeUsage(input.usage);
+  if (
+    !usage ||
+    usage.inputTokens !== 0 ||
+    usage.outputTokens !== 0 ||
+    usage.totalTokens !== 0 ||
+    usage.modelCalls !== 0 ||
+    usage.toolRounds !== 0 ||
+    usage.queueDurationMs !== 0 ||
+    usage.executionDurationMs !== 0 ||
+    usage.externalRequests !== 0 ||
+    usage.monetaryCost.currency !== 'unknown' ||
+    usage.monetaryCost.pricingVersion !== 'unknown' ||
+    usage.monetaryCost.estimated !== 'unknown' ||
+    usage.monetaryCost.actual !== 'unknown'
+  ) {
+    return resultFailure('pre_attempt_result_usage_invalid', 'Pre-Attempt results require canonical zero usage');
+  }
+  const error = normalizeTaskError(input.error);
+  if (!error || error.retryable || (error.phase !== 'plan_validation' && error.phase !== 'resource_validation') || !matchesResultError('failed', error)) {
+    return resultFailure('pre_attempt_result_error_invalid', 'Pre-Attempt result requires a non-retryable planning or resource error');
+  }
+  return {
+    ok: true,
+    result: deepFreeze({
+      resultKind: 'pre_attempt_failure',
+      taskId,
+      agentId,
+      executionStatus: 'failed',
+      completion: {
+        level: 'none',
+        criteria: criteria as AgentCriteriaResult[]
+      },
+      summary,
+      warnings: [],
+      artifacts: [],
+      usage,
+      error
+    })
   };
 }

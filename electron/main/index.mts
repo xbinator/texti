@@ -13,6 +13,7 @@ import {
   initStore,
   initLogger,
   initMainErrorCollector,
+  chatAgentCoordinator,
   chatAgentDelegationService,
   cleanOldLogs,
   startLogMaintenanceTimer,
@@ -135,8 +136,10 @@ async function bootstrap(): Promise<void> {
   await initStore();
   // 初始化数据库
   await initDatabase();
-  // Runtime 事实只保留进程内 continuation context；IPC 开放前中断旧进程遗留的活动 Checkpoint。
+  // Runtime 事实只保留进程内 continuation context；先中断不可恢复执行，再由 Coordinator 收敛存活事实与 Outbox。
   chatAgentDelegationService.interruptUnrecoverableCheckpoints();
+  await chatAgentCoordinator.recover();
+  await chatAgentDelegationService.drainOutbox();
   registerAllIpcHandlers();
   ipcMain.handle('app:consume-open-files', () => pendingOpenFileQueue.consume());
 

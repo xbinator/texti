@@ -34,10 +34,10 @@ export const AGENT_CHECKPOINT_TERMINAL_STATES: readonly AgentCheckpointStatus[] 
 
 /** Task 基础迁移图，模式和 queue phase 约束在守卫中进一步收缩。 */
 const TASK_TRANSITIONS: Readonly<Record<AgentTaskStatus, readonly AgentTaskStatus[]>> = {
-  created: ['planning', 'cancelling', 'deadline_exceeded'],
+  created: ['planning', 'failed', 'cancelling', 'deadline_exceeded'],
   planning: ['authorized', 'failed', 'cancelling', 'deadline_exceeded'],
-  authorized: ['queued', 'cancelling', 'deadline_exceeded'],
-  queued: ['queued', 'starting', 'committing', 'cancelling', 'deadline_exceeded'],
+  authorized: ['queued', 'failed', 'cancelling', 'deadline_exceeded'],
+  queued: ['queued', 'starting', 'committing', 'failed', 'cancelling', 'deadline_exceeded'],
   starting: ['running', 'failed', 'cancelling', 'deadline_exceeded'],
   running: ['waiting_confirmation', 'queued', 'completed', 'failed', 'cancelling', 'deadline_exceeded'],
   waiting_confirmation: ['queued', 'failed', 'cancelling', 'deadline_exceeded'],

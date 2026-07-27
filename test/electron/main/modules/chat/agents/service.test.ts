@@ -176,6 +176,7 @@ function createDependencies(): {
   getTask: ReturnType<typeof vi.fn>;
   getCheckpoint: ReturnType<typeof vi.fn>;
   getOutbox: ReturnType<typeof vi.fn>;
+  recordPreAttemptFailure: ReturnType<typeof vi.fn>;
   recordTaskResult: ReturnType<typeof vi.fn>;
   claimResume: ReturnType<typeof vi.fn>;
   finalizeResume: ReturnType<typeof vi.fn>;
@@ -202,6 +203,7 @@ function createDependencies(): {
   const getTask = vi.fn();
   const getCheckpoint = vi.fn();
   const getOutbox = vi.fn();
+  const recordPreAttemptFailure = vi.fn();
   const recordTaskResult = vi.fn();
   const claimResume = vi.fn();
   const finalizeResume = vi.fn();
@@ -233,6 +235,17 @@ function createDependencies(): {
       updatedAt: preparedInput.occurredAt
     };
   });
+  getOutbox.mockImplementation((dedupeKey: string) => {
+    const preparedInput = prepareDelegation.mock.calls.at(-1)?.[0] as PrepareDelegationInput | undefined;
+    if (!preparedInput || preparedInput.outbox.dedupeKey !== dedupeKey) return null;
+    return {
+      ...preparedInput.outbox,
+      deliveryStatus: 'pending' as const,
+      attemptCount: 0,
+      createdAt: preparedInput.occurredAt,
+      updatedAt: preparedInput.occurredAt
+    };
+  });
   return {
     dependencies: {
       store: {
@@ -245,6 +258,7 @@ function createDependencies(): {
         getTask,
         getCheckpoint,
         getOutbox,
+        recordPreAttemptFailure,
         recordTaskResult,
         claimResume,
         finalizeResume,
@@ -273,6 +287,7 @@ function createDependencies(): {
     getTask,
     getCheckpoint,
     getOutbox,
+    recordPreAttemptFailure,
     recordTaskResult,
     claimResume,
     finalizeResume,
@@ -333,7 +348,7 @@ function createReadPlan(task: AgentTaskRecord, checkpoint: AgentCheckpointRecord
 }
 
 describe('chat agent delegation service', (): void => {
-  it('commits immutable facts before acquiring the fence and publishing the outbox', (): void => {
+  it('commits immutable facts before acquiring the fence and publishing the outbox', async (): Promise<void> => {
     const fixture = createDependencies();
     const service = createChatAgentDelegationService(fixture.dependencies);
 
@@ -380,6 +395,10 @@ describe('chat agent delegation service', (): void => {
         eventType: 'delegation.created'
       }
     });
+    await vi.waitFor((): void => {
+      expect(fixture.publish).toHaveBeenCalledOnce();
+      expect(fixture.markOutboxDelivered).toHaveBeenCalledOnce();
+    });
     expect(fixture.prepareDelegation.mock.invocationCallOrder[0]).toBeLessThan(fixture.publish.mock.invocationCallOrder[0]);
     expect(fixture.publish).toHaveBeenCalledWith(
       'delegation.created',
@@ -400,6 +419,40 @@ describe('chat agent delegation service', (): void => {
       scope: 'session:session-1/history',
       checkpointId: 'checkpoint-1'
     });
+  });
+
+  it('delivers the mandatory Main consumer before Renderer projection and Outbox acknowledgement', async (): Promise<void> => {
+    const fixture = createDependencies();
+    const dispatchInternal = vi.fn(async (): Promise<void> => undefined);
+    fixture.dependencies.dispatchInternal = dispatchInternal;
+    const service = createChatAgentDelegationService(fixture.dependencies);
+
+    service.prepareDelegation(createInput());
+
+    await vi.waitFor((): void => {
+      expect(fixture.markOutboxDelivered).toHaveBeenCalledOnce();
+    });
+    expect(dispatchInternal).toHaveBeenCalledWith('delegation.created', expect.objectContaining({ checkpointId: 'checkpoint-1' }));
+    expect(dispatchInternal.mock.invocationCallOrder[0]).toBeLessThan(fixture.publish.mock.invocationCallOrder[0] as number);
+    expect(fixture.publish.mock.invocationCallOrder[0]).toBeLessThan(fixture.markOutboxDelivered.mock.invocationCallOrder[0] as number);
+  });
+
+  it('keeps Outbox pending when the mandatory Main consumer rejects delivery', async (): Promise<void> => {
+    const fixture = createDependencies();
+    const dispatchInternal = vi.fn(async (): Promise<void> => {
+      throw new Error('coordinator_rejected');
+    });
+    fixture.dependencies.dispatchInternal = dispatchInternal;
+    const service = createChatAgentDelegationService(fixture.dependencies);
+
+    service.prepareDelegation(createInput());
+
+    await vi.waitFor((): void => {
+      expect(dispatchInternal).toHaveBeenCalledOnce();
+    });
+    await Promise.resolve();
+    expect(fixture.publish).not.toHaveBeenCalled();
+    expect(fixture.markOutboxDelivered).not.toHaveBeenCalled();
   });
 
   it('compiles trusted read limits and atomically authorizes one prepared Task', (): void => {
@@ -506,7 +559,7 @@ describe('chat agent delegation service', (): void => {
     expect(fixture.authorizeTask).not.toHaveBeenCalled();
   });
 
-  it('normalizes a Child result, computes its canonical hash, and publishes the persisted ready outbox', (): void => {
+  it('normalizes a Child result, computes its canonical hash, and publishes the persisted ready outbox', async (): Promise<void> => {
     const fixture = createDependencies();
     const prepared = createInput();
     const contractValidation = prepared.suspension.toolCalls[0];
@@ -598,7 +651,10 @@ describe('chat agent delegation service', (): void => {
       resultHash: expect.stringMatching(/^[a-f0-9]{64}$/),
       occurredAt: '2026-07-23T00:00:01.000Z'
     });
-    expect(fixture.publish).toHaveBeenCalledWith('delegation.ready', expect.objectContaining({ checkpointId: 'checkpoint-1', resultCount: 1 }));
+    await vi.waitFor((): void => {
+      expect(fixture.publish).toHaveBeenCalledWith('delegation.ready', expect.objectContaining({ checkpointId: 'checkpoint-1', resultCount: 1 }));
+      expect(fixture.markOutboxDelivered).toHaveBeenCalledOnce();
+    });
     expect(fixture.markOutboxDelivered).toHaveBeenCalledWith({
       outboxId: 'outbox-ready-checkpoint-1',
       deliveredAt: '2026-07-23T00:00:01.000Z'

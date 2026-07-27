@@ -14,6 +14,7 @@ import type {
   AgentTaskErrorPhase,
   AgentTaskPriority,
   AgentTaskQueuePhase,
+  AgentTaskResult,
   AgentTaskStatus,
   ChatAgentEvent,
   ChatAgentEventSource,
@@ -118,7 +119,7 @@ export interface AgentTaskRecord {
   /** cooperative cancellation 请求时间。 */
   cancelRequestedAt?: string;
   /** 结构化终态结果。 */
-  result?: ChatAgentResult;
+  result?: AgentTaskResult;
   /** 终态结果完整性 hash。 */
   resultHash?: string;
   /** 当前结构化错误。 */
@@ -176,8 +177,8 @@ export interface AgentAttemptProjection {
 
 /** Checkpoint 按 tool-call ID 保存的终态结果信封。 */
 export interface AgentTerminalResultEnvelope {
-  /** 结构化 Child 结果。 */
-  result: ChatAgentResult;
+  /** 真实 Attempt 结果或显式不含 Attempt 的授权前失败。 */
+  result: AgentTaskResult;
   /** 结果完整性 hash。 */
   resultHash: string;
 }
@@ -413,6 +414,20 @@ export interface RecordTaskResultInput {
   occurredAt: string;
 }
 
+/** 原子写入授权前失败结果的输入。 */
+export interface RecordPreAttemptFailureInput {
+  /** 失败所属 Task。 */
+  taskId: string;
+  /** 汇合结果的 Checkpoint。 */
+  checkpointId: string;
+  /** 原始 Provider tool-call ID。 */
+  toolCallId: string;
+  /** 不可重试的计划或资源错误。 */
+  error: AgentTaskError;
+  /** 失败发生时间。 */
+  occurredAt: string;
+}
+
 /** Checkpoint 单次 resume claim 输入。 */
 export interface ClaimCheckpointInput {
   /** 目标 Checkpoint。 */
@@ -529,6 +544,12 @@ export interface AgentDelegationStore {
    * @returns 更新后的 Checkpoint
    */
   recordTaskResult(input: RecordTaskResultInput): AgentCheckpointRecord;
+  /**
+   * 不创建 Attempt，原子写入一个授权前终态失败并推进 Checkpoint。
+   * @param input - Task、tool-call 与结构化授权错误
+   * @returns 更新后的 Checkpoint
+   */
+  recordPreAttemptFailure(input: RecordPreAttemptFailureInput): AgentCheckpointRecord;
   /**
    * 使用 CAS claim 唯一 Runtime B。
    * @param input - 预期版本和 Runtime ID

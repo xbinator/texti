@@ -337,14 +337,19 @@ git commit -m "feat(chat): 编译冻结只读 Child 执行计划"
 - Create: `electron/main/modules/chat/agents/child-registry.mts`
 - Create: `test/electron/main/modules/chat/agents/coordinator.test.ts`
 - Create: `test/electron/main/modules/chat/agents/child-registry.test.ts`
+- Modify: `types/chat-agent.d.ts`
+- Modify: `electron/main/modules/chat/agents/contracts.mts`
 - Modify: `electron/main/modules/chat/agents/service.mts`
+- Modify: `electron/main/modules/chat/agents/state.mts`
+- Modify: `electron/main/modules/chat/agents/store.mts`
+- Modify: `electron/main/modules/chat/agents/types.mts`
 - Modify: `electron/main/index.mts`
 
 **Interfaces:**
 - Consumes: persisted `delegation.created` Outbox、Task/Checkpoint recovery snapshot、`authorizeReadTask()`。
 - Produces: 按需创建的 Coordinator execution state，以及稳定 Actor/可替换 Runtime 分离的 Main-owned Child registry；同一 checkpoint 只协调一次，重放安全。
 
-- [ ] **Step 1: Write dispatcher idempotency tests**
+- [x] **Step 1: Write dispatcher idempotency tests**
 
 测试同一 `delegation.created` 同时来自实时 publish 和启动恢复时：
 
@@ -362,7 +367,7 @@ expect(coordinator.getCheckpointState('checkpoint-1')).toBe('running')
 
 Coordinator 接入 Outbox 前必须先定义 pre-Attempt authorization failure 协议：不可重试的计划/资源/权限失败需要写入 Task error、审计 Event 与可供 Checkpoint rendezvous 的终态工具结果，不能反复重试或永久停留在 `created`。该协议不得伪造一个已执行 Attempt。
 
-- [ ] **Step 2: Run coordinator tests and verify RED**
+- [x] **Step 2: Run coordinator tests and verify RED**
 
 Run:
 
@@ -372,14 +377,17 @@ pnpm exec vitest run test/electron/main/modules/chat/agents/coordinator.test.ts 
 
 Expected: FAIL，因为 Coordinator 尚不存在。
 
-- [ ] **Step 3: Implement Coordinator boundary**
+- [x] **Step 3: Implement Coordinator boundary**
 
 ```ts
 export interface AgentCoordinatorDependencies {
   listActive(): AgentDelegationRecoverySnapshot[]
   authorizeReadTask(taskId: string): AgentTaskRecord
+  recordPreFailure(task: AgentTaskRecord, error: AgentTaskError): AgentCheckpointRecord
   enqueueTask(taskId: string): void
+  cancelCheckpoint(checkpointId: string, reason: string): void
   now(): string
+  registry: ChildActorRegistry
 }
 
 export interface AgentCoordinator {
@@ -399,7 +407,7 @@ export interface ChildActorRegistry {
 
 使用 checkpoint ID 作为 in-flight 去重键。`recover()` 只处理持久化非终态 snapshot，不根据 Renderer 当前状态猜测计划或 Runtime。`agentId` 是稳定 Child Actor 身份；`runtimeId` 只能绑定到一个完整地址，Runtime replacement 不能覆盖 Actor 或 Attempt 历史。
 
-- [ ] **Step 4: Dispatch internally before Renderer delivery**
+- [x] **Step 4: Dispatch internally before Renderer delivery**
 
 `service.mts` 的 Outbox 发布拆成两个消费者：
 
@@ -408,7 +416,7 @@ export interface ChildActorRegistry {
 
 Outbox 的 delivered 仍表示所有强制内部消费者成功接收；没有窗口不能阻止 Main Coordinator。主进程启动时在 IPC 注册前调用 `coordinator.recover()`，但保持现有“Provider 调用不可跨进程恢复”的中断规则。
 
-- [ ] **Step 5: Run coordinator and foundation tests**
+- [x] **Step 5: Run coordinator and foundation tests**
 
 Run:
 
@@ -418,7 +426,7 @@ pnpm exec vitest run test/electron/main/modules/chat/agents/coordinator.test.ts 
 
 Expected: PASS。
 
-- [ ] **Step 6: Commit Task 3**
+- [x] **Step 6: Commit Task 3**
 
 ```bash
 git add electron/main/modules/chat/agents/coordinator.mts electron/main/modules/chat/agents/child-registry.mts electron/main/modules/chat/agents/service.mts electron/main/index.mts test/electron/main/modules/chat/agents/coordinator.test.ts test/electron/main/modules/chat/agents/child-registry.test.ts test/electron/main/modules/chat/agents/service.test.ts test/electron/main/modules/chat/agents/delegation-foundation.test.ts
