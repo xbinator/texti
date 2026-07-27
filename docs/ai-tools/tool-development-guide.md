@@ -2,6 +2,8 @@
 
 日期：2026-06-25
 
+更新：2026-07-27
+
 本文档说明如何在当前工具架构下新增或修改 AI 工具。现在工具定义和执行拆成两层：
 
 - `shared/ai/tools/index.ts` 是已迁移 ChatRuntime 工具的统一聚合入口，导出工具名、`TOOL_REGISTRY` 和 registry 查询函数。
@@ -167,7 +169,16 @@ export const exampleToolRegistryEntry = {
 
 ### Coordinator-owned 工具
 
-`runtime: 'coordinator'` 表示工具由 Main Coordinator 拥有，不由普通 main executor、renderer bridge 或 AI SDK 直接执行。此类工具必须同时具备专用契约解析、原子持久化、Checkpoint/Outbox、恢复与续接协议；仅增加 registry entry 不会自动获得这些能力。当前唯一实例是 `shared/ai/tools/DelegateTaskTool/index.ts`，真实 Child executor 尚未启用。
+`runtime: 'coordinator'` 表示工具由 Main Coordinator 拥有，不由普通 main executor、renderer bridge 或 AI SDK 直接执行。此类工具必须同时具备专用契约解析、原子持久化、Checkpoint/Outbox、恢复与续接协议；仅增加 registry entry 不会自动获得这些能力。当前唯一实例是 `shared/ai/tools/DelegateTaskTool/index.ts`。
+
+`delegate_task` 的首阶段执行边界固定为：
+
+- feature flag 默认关闭，只允许 Main 在公开 `send()` 完成 Renderer 输入校验后克隆注入 registry 定义。
+- 仅 Primary 可以委派；Child 的 capability 集合始终移除 `delegate_task`，不允许二层 Child。
+- Candidate Plan 依次与持久化契约、父 Runtime 工具、当前可用 Main 工具、权限、资源 scope 和只读策略求交集；恢复只能继续收缩。
+- Child 只允许 `glob`、`grep`、`read_directory`、`read_file` 中交集后的 `pure_read` 工具，`external_read`、写工具、Renderer bridge 与 provider-supplied 本地工具结果均 fail closed。
+- Coordinator 最多并行三个共享只读 lease；Child 使用冻结的 Primary 模型与最小任务包，不写 `chat_messages`。
+- 写入 Child、changeset、ConfirmationQueue 与 commit journal 尚未开放，不能通过新增 registry 元数据绕过。
 
 ### 3. 接入聚合入口
 
@@ -456,7 +467,7 @@ export async function executeExampleTool(input: ChatRuntimeMainToolExecutionInpu
 8. `electron/main/modules/chat/runtime/tools/constants.mts`
 9. `electron/main/modules/chat/runtime/tools/types.mts`
 10. 目标主进程执行分组，例如 `electron/main/modules/chat/runtime/tools/FileTool/index.mts`
-11. Coordinator 工具额外阅读 `shared/ai/tools/DelegateTaskTool/index.ts` 与 `electron/main/modules/chat/agents/service.mts`
+11. Coordinator 工具额外阅读 `shared/ai/tools/DelegateTaskTool/index.ts`、`electron/main/modules/chat/agents/service.mts`、`coordinator.mts`、`plan-compiler.mts`、`executor.mts` 与 `read-tools.mts`
 12. `src/components/BChat/utils/runtimeBridge.ts`
 
 这样能先建立“Tool 目录定义 -> `shared/ai/tools/index.ts` 聚合 -> renderer schema-only 暴露 -> 主进程执行 -> 必要时 bridge 到 renderer”的完整链路。

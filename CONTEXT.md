@@ -5,7 +5,7 @@ Tibis 是一款基于 Electron + Vue 3 + TypeScript 的桌面端 Markdown 编辑
 **核心能力**：
 - 双视图 Markdown 编辑器（富文本 TipTap + 源码 CodeMirror），支持 AI 行内补全
 - AI 聊天侧边栏（流式对话、主进程 ChatRuntime、工具调用、文件/图片 part 输入、上下文压缩与用量指示、语音输入）
-- 默认关闭的 Child Agent 持久化委派基础（Task/Attempt/Checkpoint/Event/Outbox、Primary 挂起与单次续接；真实 Child 执行尚未启用）
+- 默认关闭的单层只读 Child Agent 委派（Main-owned Actor/Runtime、Capability 收缩、最多三个并行纯读 Runtime、Primary 挂起与单次续接）
 - 多 AI 服务商支持（OpenAI / Anthropic / Google / DeepSeek / 阿里 / 智谱 / 月之暗面 / 火山引擎 / 小米 / MiniMax）
 - 文件系统操作（读写、工作区监听、未保存草稿管理）
 - MCP（Model Context Protocol）工具集成
@@ -610,7 +610,7 @@ electron/main/modules/chat/runtime/tools/
 | `main` | ChatRuntime 主进程直接执行 | `read_file`、`read_directory`、`glob`、`grep`、`write_file`、`edit_file`、`get_settings`、`update_settings`、`read_current_webpage`、`operate_webpage`、`open_resource`、MCP 工具 |
 | `renderer` | 通过 IPC bridge 到渲染进程执行 | `question_user`、`skill_*`、`memory`、`todo_write`、`shell_command`、`widget`、`open_widget` |
 | `sdk` | Vercel AI SDK 直接调用 | `mcp_*` |
-| `coordinator` | 主进程延迟协调协议；默认不向用户暴露 | `delegate_task`（已接入 Primary suspend/resume，尚无真实 Child executor） |
+| `coordinator` | 主进程延迟协调协议；默认不向用户暴露 | `delegate_task`（已接入 Primary suspend、只读 Child 调度与单次 resume） |
 
 ### 跨进程工具注册表
 
@@ -675,19 +675,23 @@ electron/main/modules/chat/runtime/
 6. 需要继续时自动 continuation（最多 25 轮），完成时返回 usage 并触发自动命名
 7. Assistant 草稿持久化 → 硬中断恢复（interruptedDraftRecovery）
 
-### Child Agent 委派基础（默认关闭）
+### Child Agent 单层只读委派（默认关闭）
 
-`electron/main/modules/chat/agents/` 已提供委派的持久化与续接基础：
+`electron/main/modules/chat/agents/` 已提供完整的首阶段只读委派闭环：
 
 - `electron/main/modules/chat/agents/contracts.mts` / `electron/main/modules/chat/agents/result.mts`：校验最小只读 Task Contract、不可变 Continuation/Execution Plan 快照和结构化 Child 结果。
 - `electron/main/modules/chat/agents/store.mts`：在 SQLite 中维护 Task、Attempt、Checkpoint、Event 与 Outbox；Task Contract 和 Continuation Snapshot 不可修改，Event 以 aggregate sequence 追加。
-- `electron/main/modules/chat/agents/service.mts`：作为 Coordinator 服务职责执行原子 prepare、`waiting_children` fence、结果汇合、Checkpoint CAS、Primary Runtime B 单次续接、Checkpoint/Task 合作式取消基础和主进程重启中断。
+- `electron/main/modules/chat/agents/service.mts`：执行原子 prepare、Capability Plan 编译、结果汇合、Checkpoint CAS、Primary Runtime B 单次续接、预算与启动恢复接线。
+- `electron/main/modules/chat/agents/coordinator.mts` / `scheduler.mts`：按持久化事实创建 Attempt，以 resource scope 门禁最多三个并行 `pure_read` Child，并处理 deadline 与 cooperative cancellation。
+- `electron/main/modules/chat/agents/child-registry.mts` / `executor.mts`：分离稳定 Child Actor 与可替换 Runtime 地址，以冻结模型和最小任务包执行不写普通消息的 Child。
 - `electron/main/modules/chat/agents/ipc.mts`：只暴露 `listActive`、`resumePrimary`、`cancelCheckpoint` 的精确 allowlist，不提供 Child transcript 或通用 Child Runtime 入口。
 - `types/chat-agent.d.ts`：定义 Task/Attempt/Event/Checkpoint、不可变快照、结构化结果、artifact ownership/visibility 与 usage/cost 公共类型。
 
-基础链路为 Runtime A → 原子 assistant/Task/Checkpoint/Event/Outbox → `waiting_children` → 内部结果写入 → Checkpoint `ready_to_resume` 与 `delegation.ready` Outbox → CAS → 无工具 `forceFinal` Runtime B。Renderer 重载时活动 Checkpoint 阻止把 source assistant 误写为硬中断；主进程重启则在开放 IPC 前把无法安全恢复的模型执行收敛为 `interrupted`。
+完整链路为 Runtime A → 原子 assistant/Task/Checkpoint/Event/Outbox → `waiting_children` → Coordinator 授权与预算预留 → 最多三个无消息 Child Runtime → 乱序结果按原 `toolCallId` 汇合 → `delegation.ready` → CAS → 无工具 `forceFinal` Runtime B。Renderer 重载不影响 Main Registry 中的 Child Actor/Runtime；主进程重启则在开放 IPC 前把无法安全恢复的 Provider 执行收敛为 `interrupted` 并释放 reservation。
 
-当前 `delegate_task` 仍为 `internal`，普通 Renderer Runtime 输入会在取得锁和写消息前拒绝它以及伪 Child lineage。当前没有真实 Child Actor/Runtime/executor、Child transcript、任务卡片、并行只读调度、Capability Intersection 生产编译、受控写入 adapter、ConfirmationQueue、commit journal 或 Child Runtime 取消信号。未来既有 Child 的有效能力必须满足 `persisted ∩ available ∩ role/policy` 并单调收缩；需要新增能力时必须创建新 Task，不能在恢复时升级旧 Task。
+`delegate_task` 仍为 `internal`，Primary 委派 feature 默认为关闭；公开 `send()` 先拒绝 Renderer 提供的 deferred 工具和伪 Child lineage，再由 Main 按固定 `pureReadChildEnabled=true`、`maxParallelReadChildren=3` 策略克隆注入可信定义。Child 有效能力满足 `persisted ∩ available ∩ role/policy` 并只能单调收缩，首阶段仅开放 `glob`、`grep`、`read_directory`、`read_file` 中同时被契约、父 Runtime、Registry、权限和资源范围允许的部分。
+
+当前仍不提供 Child transcript、轻量任务卡片、写入 adapter、ConfirmationQueue 或 commit journal。`external_read`、写工具、二层委派和 Renderer 自报模型/权限/计划均 fail closed；这些能力必须进入后续受控写入计划，不能扩展现有只读 Task。
 
 ### 上下文压缩（/compact）
 

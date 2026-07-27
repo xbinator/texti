@@ -861,16 +861,17 @@ git commit -m "feat(chat): 恢复 Child 状态并受控开放委派"
 
 **Files:**
 - Create: `test/electron/main/modules/chat/agents/read-runtime.test.ts`
+- Modify: `package.json`
 - Modify: `docs/development/chat-multi-session-and-multi-agent-extension.md`
 - Modify: `docs/ai-tools/tool-development-guide.md`
 - Modify: `CONTEXT.md`
-- Modify: `changelog/2026-07-24.md`
+- Modify: `changelog/2026-07-27.md`
 
 **Interfaces:**
 - Consumes: 完整只读 Child pipeline。
 - Produces: 一次 Primary A → 三个乱序 Child → 一个 Primary B 的真实 SQLite/Runtime 回归证据。
 
-- [ ] **Step 1: Write the end-to-end test**
+- [x] **Step 1: Write the end-to-end test**
 
 使用真实 SQLite 和可控 stream stub：
 
@@ -883,7 +884,7 @@ git commit -m "feat(chat): 恢复 Child 状态并受控开放委派"
 
 断言 `chat_messages` 只含 Primary user/assistant，`chat_agent_attempts` 含三个 Attempt，活动 scheduler/Runtime/lease 最终均为零。
 
-- [ ] **Step 2: Run end-to-end test and verify RED if any wiring is missing**
+- [x] **Step 2: Run end-to-end test and verify RED if any wiring is missing**
 
 Run:
 
@@ -893,11 +894,11 @@ pnpm exec cross-env ELECTRON_RUN_AS_NODE=1 HOST=127.0.0.1 electron node_modules/
 
 Expected before final wiring: FAIL 在具体缺失边界；修复只限本计划已定义接口。
 
-- [ ] **Step 3: Complete minimal integration wiring**
+- [x] **Step 3: Complete minimal integration wiring**
 
 接通 test 暴露的缺失依赖，不新增 `external_read`、写入、任务卡片 UI 或 commit journal 行为。
 
-- [ ] **Step 4: Update architecture documentation**
+- [x] **Step 4: Update architecture documentation**
 
 记录：
 
@@ -907,7 +908,7 @@ Expected before final wiring: FAIL 在具体缺失边界；修复只限本计划
 - feature flag 默认关闭和可信注入边界。
 - 写入 Child、ConfirmationQueue、commit journal 和轻量任务卡片仍属于下一计划。
 
-- [ ] **Step 5: Run focused and full verification**
+- [x] **Step 5: Run focused and full verification**
 
 Run:
 
@@ -923,7 +924,7 @@ pnpm test
 
 Expected: 全部通过；不存在 Child transcript、活动 lease、未终态 Attempt、重复 Primary B 或未说明的 lint 修复。
 
-- [ ] **Step 6: Audit invariants**
+- [x] **Step 6: Audit invariants**
 
 Run:
 
@@ -948,10 +949,10 @@ rg -n "\bany\b|skipMessages|delegate_task|external_read|staged_file_write" \
 - 结果顺序按原 toolCallId，而不是 Child 完成顺序。
 - tool exposure 仍为 registry `internal`，feature flag 默认关闭。
 
-- [ ] **Step 7: Commit Task 8**
+- [x] **Step 7: Commit Task 8**
 
 ```bash
-git add test/electron/main/modules/chat/agents/read-runtime.test.ts docs/development/chat-multi-session-and-multi-agent-extension.md docs/ai-tools/tool-development-guide.md CONTEXT.md changelog/2026-07-24.md
+git add test/electron/main/modules/chat/agents/read-runtime.test.ts package.json docs/development/chat-multi-session-and-multi-agent-extension.md docs/ai-tools/tool-development-guide.md CONTEXT.md changelog/2026-07-27.md
 git commit -m "test(chat): 验证只读 Child 委派闭环"
 ```
 
