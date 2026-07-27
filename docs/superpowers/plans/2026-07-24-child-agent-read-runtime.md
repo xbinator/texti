@@ -446,7 +446,7 @@ git commit -m "feat(chat): 增加主进程 Child 协调器"
 - Consumes: authorized `queued(start)` Task、冻结 `resourceScopes`、priority/deadline/createdAt。
 - Produces: 最多三个并行的共享 read lease、确定性队列和 AbortSignal。
 
-- [ ] **Step 1: Write deterministic scheduler tests**
+- [x] **Step 1: Write deterministic scheduler tests**
 
 覆盖：
 
@@ -468,7 +468,7 @@ expect(leases.filter((lease): boolean => lease.started)).toHaveLength(3)
 expect(scheduler.activeCount()).toBe(3)
 ```
 
-- [ ] **Step 2: Run scheduler tests and verify RED**
+- [x] **Step 2: Run scheduler tests and verify RED**
 
 Run:
 
@@ -478,7 +478,7 @@ pnpm exec vitest run test/electron/main/modules/chat/agents/scheduler.test.ts
 
 Expected: FAIL。
 
-- [ ] **Step 3: Implement scheduler**
+- [x] **Step 3: Implement scheduler**
 
 ```ts
 export interface AgentScheduleRequest {
@@ -506,11 +506,11 @@ export interface AgentReadScheduler {
 
 scope 先规范化和排序，lease 以 Task 为单位一次性获取全部 scope，避免部分持有。当前只有共享 read lease，因此 scope 重叠仍兼容；结构保留 `read/write-intent/exclusive-commit` 判定位置供下一阶段扩展。
 
-- [ ] **Step 4: Bind scheduler to Coordinator**
+- [x] **Step 4: Bind scheduler to Coordinator**
 
 Coordinator 只在 lease 已取得后调用 `beginAttempt()`，并把 lease 的 signal 传给 Child executor。Runtime 终态、启动失败、取消和 deadline 都必须在 `finally` 中释放一次 lease。
 
-- [ ] **Step 5: Run scheduler/coordinator tests**
+- [x] **Step 5: Run scheduler/coordinator tests**
 
 Run:
 
@@ -520,7 +520,7 @@ pnpm exec vitest run test/electron/main/modules/chat/agents/scheduler.test.ts te
 
 Expected: PASS。
 
-- [ ] **Step 6: Commit Task 4**
+- [x] **Step 6: Commit Task 4**
 
 ```bash
 git add electron/main/modules/chat/agents/scheduler.mts electron/main/modules/chat/agents/coordinator.mts test/electron/main/modules/chat/agents/scheduler.test.ts test/electron/main/modules/chat/agents/coordinator.test.ts
@@ -543,7 +543,7 @@ git commit -m "feat(chat): 调度并行只读 Child 任务"
 - Consumes: Attempt、frozen plan、minimal task package、model resolver、stream executor、restricted main read tool executor、AbortSignal。
 - Produces: `ChatAgentResult`，不写 `chat_messages`，不直接续接 Primary。
 
-- [ ] **Step 1: Write pre-tool guard tests**
+- [x] **Step 1: Write pre-tool guard tests**
 
 在 Runtime stream 测试中增加：
 
@@ -570,7 +570,7 @@ expect(assistantMessage.parts).toContainEqual(expect.objectContaining({
 
 Provider 自带 `tool-result` 也不能绕过计划：Child executor 不向 Provider 注册可执行工具，任何非本地执行来源都形成 `protocol_error`。
 
-- [ ] **Step 2: Run stream tests and verify RED**
+- [x] **Step 2: Run stream tests and verify RED**
 
 Run:
 
@@ -580,7 +580,7 @@ pnpm exec vitest run test/electron/main/modules/chat/runtime/stream.test.ts
 
 Expected: FAIL，因为 stream executor 尚无主进程工具授权回调。
 
-- [ ] **Step 3: Add the mandatory tool authorization hook**
+- [x] **Step 3: Add the mandatory tool authorization hook**
 
 ```ts
 export interface RuntimeToolGuardInput {
@@ -597,7 +597,7 @@ export type RuntimeToolGuard = (
 
 `stream/index.mts` 在读取 Provider tool-result 或调用任何 executor 之前检查。`null` 表示允许，返回规范化结果表示拒绝。默认 Primary adapter 不提供 guard；Child adapter 校验 capability、effect、resource scope、permission、deadline 和 signal。Provider 自带结果也不能绕过该门禁。
 
-- [ ] **Step 4: Write Child executor tests**
+- [x] **Step 4: Write Child executor tests**
 
 测试专用 stream 先调用 `read_file`，再输出最终摘要。断言：
 
@@ -608,7 +608,7 @@ export type RuntimeToolGuard = (
 - AbortSignal 中止后产生 `cancelled` 结果。
 - token 超限产生带真实 usage 的 `budget_exceeded` 结果。
 
-- [ ] **Step 5: Run Child executor tests and verify RED**
+- [x] **Step 5: Run Child executor tests and verify RED**
 
 Run:
 
@@ -618,7 +618,7 @@ pnpm exec vitest run test/electron/main/modules/chat/agents/executor.test.ts
 
 Expected: FAIL，因为 `executor.mts` 尚不存在。
 
-- [ ] **Step 6: Implement restricted read tool execution**
+- [x] **Step 6: Implement restricted read tool execution**
 
 `read-tools.mts` 仅分发 `read_file`、`read_directory`、`glob` 和 `grep`。每次调用：
 
@@ -628,7 +628,7 @@ Expected: FAIL，因为 `executor.mts` 尚不存在。
 4. 拒绝 `unsaved://`、工作区外确认、Bridge fallback 与全部非 `pure_read` 工具。
 5. 返回现有 `AIToolExecutionResult` allowlist。
 
-- [ ] **Step 7: Implement `ChildTaskRuntimeExecutor`**
+- [x] **Step 7: Implement `ChildTaskRuntimeExecutor`**
 
 ```ts
 export interface ChildRuntimeInput {
@@ -646,11 +646,11 @@ export interface ChildTaskRuntimeExecutor {
 
 使用最小系统约束、Task 目标、验收标准、资源引用和冻结 capability 构造内存 source messages。循环调用 `createRuntimeStreamExecutor()`，累计 usage/tool rounds，直到最终文本或预算/deadline/cancel 终态。默认 criteria verification 为 `unverified`；只有受信 tool evidence validator 可以升级为 `verified`。
 
-- [ ] **Step 8: Allow honest budget-exceeded accounting**
+- [x] **Step 8: Allow honest budget-exceeded accounting**
 
 修改结果预算校验：正常 completed 结果不得超过计划；`executionStatus === 'failed'` 且 `error.code === 'budget_exceeded'` 时允许持久化真实超限 usage，不能把实际值裁成预算上限或伪造为零。
 
-- [ ] **Step 9: Run executor and stream verification**
+- [x] **Step 9: Run executor and stream verification**
 
 Run:
 
@@ -660,7 +660,7 @@ pnpm exec vitest run test/electron/main/modules/chat/agents/executor.test.ts tes
 
 Expected: PASS。
 
-- [ ] **Step 10: Commit Task 5**
+- [x] **Step 10: Commit Task 5**
 
 ```bash
 git add electron/main/modules/chat/agents/executor.mts electron/main/modules/chat/agents/read-tools.mts electron/main/modules/chat/runtime/stream/types.mts electron/main/modules/chat/runtime/stream/index.mts electron/main/modules/chat/agents/result.mts test/electron/main/modules/chat/agents/executor.test.ts test/electron/main/modules/chat/runtime/stream.test.ts test/electron/main/modules/chat/agents/result.test.ts
@@ -686,7 +686,7 @@ git commit -m "feat(chat): 增加无消息持久化 Child 执行器"
 - Consumes: Scheduler lease、Attempt、executor result、existing `recordTaskResult()` 和 Checkpoint cancellation。
 - Produces: bounded cooperative cancellation、budget reservation/settlement、每个 Task 一个终态结果以及现有 Primary B rendezvous。
 
-- [ ] **Step 1: Write hierarchical budget tests**
+- [x] **Step 1: Write hierarchical budget tests**
 
 验证：
 
@@ -696,7 +696,7 @@ git commit -m "feat(chat): 增加无消息持久化 Child 执行器"
 - 拆分多个 Task 不产生新 Turn budget。
 - pricing unknown 保持 unknown。
 
-- [ ] **Step 2: Run budget tests and verify RED**
+- [x] **Step 2: Run budget tests and verify RED**
 
 Run:
 
@@ -706,7 +706,7 @@ pnpm exec vitest run test/electron/main/modules/chat/agents/budget.test.ts
 
 Expected: FAIL。
 
-- [ ] **Step 3: Implement budget ledger**
+- [x] **Step 3: Implement budget ledger**
 
 ```ts
 export interface AgentBudgetLedger {
@@ -722,7 +722,7 @@ export interface AgentBudgetLedger {
 
 Task 6 同时把 ledger 与父权限 ceiling 组合成生产 `resolveReadLimits` 依赖并注入默认 Agent service；在这一步完成前，Task 2 的生产默认 resolver 持续 fail-closed，Coordinator 测试只能显式注入可信 fixture。
 
-- [ ] **Step 4: Write cancellation/deadline integration tests**
+- [x] **Step 4: Write cancellation/deadline integration tests**
 
 覆盖排队、starting、running 三种取消：
 
@@ -733,11 +733,11 @@ Task 6 同时把 ledger 与父权限 ceiling 组合成生产 `resolveReadLimits`
 - cancel checkpoint 后仍允许 Child result 写入 `cancelling` checkpoint，全部终态后 checkpoint 收敛 cancelled，不再启动 Primary B。
 - deadline 使用 `min(task deadline, turn deadline, system child limit)`。
 
-- [ ] **Step 5: Fix cancellation/result state compatibility**
+- [x] **Step 5: Fix cancellation/result state compatibility**
 
 `recordTaskResult()` 必须接受 checkpoint `waiting_children` 或 `cancelling`。后者只汇合终态结果并推动取消收敛，绝不生成 `delegation.ready` 或启动 Runtime B。
 
-- [ ] **Step 6: Connect full execution**
+- [x] **Step 6: Connect full execution**
 
 Coordinator 对每个 Task 执行：
 
@@ -754,7 +754,7 @@ authorize/reserve
 
 所有异常都转换为完整 `ChatAgentResult`，不能让 required 或 optional Task 永久缺少 result envelope。
 
-- [ ] **Step 7: Run integration tests**
+- [x] **Step 7: Run integration tests**
 
 Run:
 
@@ -764,7 +764,7 @@ pnpm exec vitest run test/electron/main/modules/chat/agents/budget.test.ts test/
 
 Expected: PASS。
 
-- [ ] **Step 8: Commit Task 6**
+- [x] **Step 8: Commit Task 6**
 
 ```bash
 git add electron/main/modules/chat/agents/budget.mts electron/main/modules/database/service.mts electron/main/modules/chat/agents/coordinator.mts electron/main/modules/chat/agents/service.mts electron/main/modules/chat/agents/store.mts test/electron/main/modules/chat/agents/budget.test.ts test/electron/main/modules/database/agent-task-migration.test.ts test/electron/main/modules/chat/agents/coordinator.test.ts test/electron/main/modules/chat/agents/service.test.ts test/electron/main/modules/chat/agents/store.test.ts
