@@ -34,6 +34,9 @@ import type {
   ChatAgentResult,
   DelegateTaskInput
 } from 'types/chat-agent';
+import { AGENT_FILE_COMMIT_ADAPTER } from '../../../../../shared/ai/tools/AgentStagedFileTool/index.js';
+
+export { AGENT_FILE_COMMIT_ADAPTER };
 
 /** 当前 Task Contract Snapshot Schema 版本。 */
 export const AGENT_CONTRACT_SCHEMA_VERSION = 1;
@@ -52,6 +55,9 @@ export const AGENT_FOUNDATION_POLICY_VERSION = 'foundation-v1';
 
 /** 当前只读 Child Execution Plan 的安全策略版本。 */
 export const AGENT_READ_PLAN_POLICY_VERSION = 'read-runtime-v1';
+
+/** 当前受控写入 Child Execution Plan 的安全策略版本。 */
+export const AGENT_WRITE_PLAN_POLICY_VERSION = 'controlled-write-v1';
 
 /** 单个契约允许的最大验收标准数量。 */
 export const AGENT_MAX_ACCEPTANCE_CRITERIA = 16;
@@ -983,8 +989,8 @@ export function validateExecutionPlanSnapshot(contractSnapshot: AgentTaskContrac
   if (!isPlainRecord(input) || !hasOnlyKeys(input, allowedKeys)) {
     return fail('plan_schema_invalid', 'Execution plan contains unknown or missing structure');
   }
-  if (contractSnapshot.mode !== 'read') return fail('plan_mode_invalid', 'Read execution plans require a read Task contract');
-  if (input.planSchemaVersion !== AGENT_PLAN_SCHEMA_VERSION || input.policyVersion !== AGENT_READ_PLAN_POLICY_VERSION) {
+  const expectedPolicyVersion = contractSnapshot.mode === 'write' ? AGENT_WRITE_PLAN_POLICY_VERSION : AGENT_READ_PLAN_POLICY_VERSION;
+  if (input.planSchemaVersion !== AGENT_PLAN_SCHEMA_VERSION || input.policyVersion !== expectedPolicyVersion) {
     return fail('plan_version_unsupported', 'Execution plan schema or policy version is unsupported');
   }
   if (!isSha256(input.planHash)) return fail('plan_hash_invalid', 'Execution plan hash is invalid');
@@ -1004,7 +1010,7 @@ export function validateExecutionPlanSnapshot(contractSnapshot: AgentTaskContrac
   if (!Array.isArray(input.toolEffectSet) || input.toolEffectSet.length !== capabilitySet.length) {
     return fail('plan_effect_invalid', 'Execution plan tool effects must match the capability set');
   }
-  const allowedEffects = new Set<AgentPlanToolEffect['effect']>(['pure_read']);
+  const allowedEffects = new Set<AgentPlanToolEffect['effect']>(contractSnapshot.mode === 'write' ? ['pure_read', 'staged_file_write'] : ['pure_read']);
   const toolEffectSet = input.toolEffectSet.map((effect): AgentPlanToolEffect | null => {
     if (!isPlainRecord(effect) || !hasOnlyKeys(effect, new Set(['toolName', 'effect']))) return null;
     const toolName = normalizeAgentIdentity(effect.toolName);
@@ -1024,26 +1030,34 @@ export function validateExecutionPlanSnapshot(contractSnapshot: AgentTaskContrac
   ) {
     return fail('plan_effect_invalid', 'Execution plan tool effects are invalid');
   }
-  if (
-    !isPlainRecord(input.commitPolicy) ||
-    !hasOnlyKeys(input.commitPolicy, new Set(['mode', 'adapter'])) ||
-    input.commitPolicy.mode !== 'none' ||
-    input.commitPolicy.adapter !== undefined
-  ) {
+  const hasStagedEffect = toolEffectSet.some((effect): boolean => effect?.effect === 'staged_file_write');
+  if (!isPlainRecord(input.commitPolicy) || !hasOnlyKeys(input.commitPolicy, new Set(['mode', 'adapter']))) {
+    return fail('plan_commit_policy_invalid', 'Execution plan commit policy is invalid');
+  }
+  if (contractSnapshot.mode === 'read' && (input.commitPolicy.mode !== 'none' || input.commitPolicy.adapter !== undefined)) {
     return fail('plan_commit_policy_invalid', 'Read execution plans must use the no-write commit policy');
+  }
+  if (
+    contractSnapshot.mode === 'write' &&
+    (!hasStagedEffect || input.commitPolicy.mode !== 'staged' || input.commitPolicy.adapter !== AGENT_FILE_COMMIT_ADAPTER)
+  ) {
+    return hasStagedEffect
+      ? fail('plan_commit_policy_invalid', 'Write execution plans must use the registered staged commit adapter')
+      : fail('plan_effect_invalid', 'Write execution plans require at least one staged file capability');
   }
   const budget = normalizeBudgetSnapshot(input.budget);
   if (!budget) return fail('plan_budget_invalid', 'Execution plan budget is invalid');
 
+  const commitPolicy: AgentCommitPolicy = contractSnapshot.mode === 'write' ? { mode: 'staged', adapter: AGENT_FILE_COMMIT_ADAPTER } : { mode: 'none' };
   const body: AgentExecutionPlanBody = {
     planSchemaVersion: AGENT_PLAN_SCHEMA_VERSION,
-    policyVersion: AGENT_READ_PLAN_POLICY_VERSION,
+    policyVersion: expectedPolicyVersion,
     capabilitySet,
     modelSnapshot,
     permissionSnapshot: { scopeIds },
     resourceScopes,
     toolEffectSet: (toolEffectSet as AgentPlanToolEffect[]).sort((left, right): number => left.toolName.localeCompare(right.toolName)),
-    commitPolicy: { mode: 'none' } satisfies AgentCommitPolicy,
+    commitPolicy,
     budget
   };
   const computedHash = hashExecutionPlanSnapshot(contractSnapshot, body);
@@ -1582,7 +1596,7 @@ export function validateFoundationOutbox(input: unknown): FoundationOutboxValida
 }
 
 /**
- * 校验基础阶段可执行的只读最小任务包。
+ * 校验基础阶段可执行的最小任务包。
  * @param input - Provider 工具参数等未可信输入
  * @returns 深冻结规范化契约或稳定校验错误
  */
@@ -1597,9 +1611,6 @@ export function validateFoundationContract(input: unknown): FoundationContractVa
   if (input.mode !== 'read' && input.mode !== 'write') {
     return contractFailure('contract_mode_invalid', 'Task mode must be read or write');
   }
-  if (input.mode === 'write') {
-    return contractFailure('foundation_read_only', 'Foundation delegation accepts read tasks only', 'capability_denied');
-  }
   if (!Array.isArray(input.acceptanceCriteria) || input.acceptanceCriteria.length === 0 || input.acceptanceCriteria.length > AGENT_MAX_ACCEPTANCE_CRITERIA) {
     return contractFailure('contract_criteria_invalid', 'At least one acceptance criterion is required');
   }
@@ -1613,6 +1624,12 @@ export function validateFoundationContract(input: unknown): FoundationContractVa
   const resources = input.resources.map(normalizeResource);
   if (resources.some((resource): boolean => resource === null)) {
     return contractFailure('contract_resources_invalid', 'Resources must use the allowlisted schema');
+  }
+  if (
+    input.mode === 'write' &&
+    !(resources as AgentResourceReference[]).some((resource): boolean => resource.kind === 'file' || resource.kind === 'directory')
+  ) {
+    return contractFailure('write_resource_scope_invalid', 'Write tasks require at least one file or directory resource');
   }
   if (!Array.isArray(input.requestedTools) || input.requestedTools.length === 0 || input.requestedTools.length > AGENT_MAX_REQUESTED_TOOLS) {
     return contractFailure('contract_tools_invalid', 'At least one requested tool is required');
@@ -1640,7 +1657,7 @@ export function validateFoundationContract(input: unknown): FoundationContractVa
   const normalized: DelegateTaskInput = {
     task,
     acceptanceCriteria: acceptanceCriteria as string[],
-    mode: 'read',
+    mode: input.mode,
     resources: resources as AgentResourceReference[],
     requestedTools: [...toolNames].sort(),
     required: input.required,

@@ -6,6 +6,7 @@ import type { AIToolExecutor } from 'types/ai';
 import { describe, expect, it } from 'vitest';
 import * as runtimeTools from '@/ai/tools/catalog/runtimeTools';
 import { GLOB_TOOL_NAME, GREP_TOOL_NAME, READ_FILE_TOOL_NAME, createGlobTool, createGrepTool, createReadFileTool } from '@/ai/tools/catalog/runtimeTools';
+import { stageFileEditToolRegistryEntry, stageFileWriteToolRegistryEntry } from '../../../shared/ai/tools/AgentStagedFileTool/index.js';
 import { createDocumentToolRegistryEntry, readCurrentDocumentToolRegistryEntry } from '../../../shared/ai/tools/DocumentTool/index.js';
 import { getCurrentTimeToolRegistryEntry } from '../../../shared/ai/tools/EnvironmentTool/index.js';
 import { editFileToolRegistryEntry } from '../../../shared/ai/tools/FileEditTool/index.js';
@@ -61,6 +62,8 @@ describe('toolRegistry', (): void => {
       readDirectoryToolRegistryEntry,
       globToolRegistryEntry,
       grepToolRegistryEntry,
+      stageFileWriteToolRegistryEntry,
+      stageFileEditToolRegistryEntry,
       writeFileToolRegistryEntry,
       editFileToolRegistryEntry,
       queryLogsToolRegistryEntry,
@@ -188,6 +191,34 @@ describe('toolRegistry', (): void => {
       }
     });
     expect(TOOL_REGISTRY.every((entry) => Boolean(entry.executionClass) && Boolean(entry.effect))).toBe(true);
+  });
+
+  it('registers staged file mutations as internal reversible capabilities', (): void => {
+    expect(getToolRegistryEntry('stage_file_write')).toMatchObject({
+      runtime: 'main',
+      group: 'file',
+      exposure: 'internal',
+      executionClass: 'direct',
+      effect: {
+        effect: 'staged_file_write',
+        resourceScopeResolver: 'file-path',
+        commitAdapter: 'atomic-file-v1',
+        reversible: true
+      }
+    });
+    expect(getToolRegistryEntry('stage_file_edit')).toMatchObject({
+      runtime: 'main',
+      group: 'file',
+      exposure: 'internal',
+      executionClass: 'direct',
+      effect: {
+        effect: 'staged_file_write',
+        resourceScopeResolver: 'file-path',
+        commitAdapter: 'atomic-file-v1',
+        reversible: true
+      }
+    });
+    expect(getToolNamesByExposure('chat-default')).not.toEqual(expect.arrayContaining(['stage_file_write', 'stage_file_edit']));
   });
 
   it('classifies direct file mutations as immediate side effects until an overlay exists', (): void => {

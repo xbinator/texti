@@ -115,6 +115,35 @@ function createExecutionPlan(contract: DelegateTaskInput): AgentExecutionPlanSna
 }
 
 /**
+ * 创建与写入契约绑定的暂存执行计划。
+ * @param contract - 已规范化写入契约
+ * @returns 带 contract-bound hash 的暂存计划快照
+ */
+function createWritePlan(contract: DelegateTaskInput): AgentExecutionPlanSnapshot {
+  const validation = validateFoundationContract(contract);
+  if (!validation.ok) throw new Error('Fixture write contract must be valid');
+  const body = {
+    planSchemaVersion: 1,
+    policyVersion: 'controlled-write-v1',
+    capabilitySet: ['read_file', 'stage_file_edit'],
+    modelSnapshot: { providerId: 'openai', modelId: 'gpt-5' },
+    permissionSnapshot: { scopeIds: ['workspace-write'] },
+    resourceScopes: ['file:CONTEXT.md'],
+    toolEffectSet: [
+      { toolName: 'read_file', effect: 'pure_read' as const },
+      { toolName: 'stage_file_edit', effect: 'staged_file_write' as const }
+    ],
+    commitPolicy: { mode: 'staged' as const, adapter: 'atomic-file-v1' },
+    budget: { tokenLimit: 1000, costLimitUsd: 0.1, pricingVersion: 'test-v1' }
+  };
+
+  return {
+    ...body,
+    planHash: hashExecutionPlanSnapshot(validation.contractSnapshot, body)
+  };
+}
+
+/**
  * 创建合法的 Runtime A 续接快照。
  * @returns 可验证 hash 的续接快照
  */
@@ -163,7 +192,6 @@ describe('foundation delegation contract', (): void => {
   });
 
   it.each([
-    ['write mode', { mode: 'write' }],
     ['empty criteria', { acceptanceCriteria: [] }],
     ['empty resources', { resources: [] }],
     ['delegate recursion', { requestedTools: ['delegate_task'] }]
@@ -171,6 +199,40 @@ describe('foundation delegation contract', (): void => {
     expect(validateFoundationContract({ ...validContract, ...patch })).toMatchObject({
       ok: false,
       error: { phase: 'contract_validation', retryable: false }
+    });
+  });
+
+  it('accepts a bounded write contract with an explicit staged capability', (): void => {
+    const result = validateFoundationContract({
+      ...validContract,
+      mode: 'write',
+      requestedTools: ['read_file', 'stage_file_edit']
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      contractSnapshot: {
+        mode: 'write',
+        requestedTools: ['read_file', 'stage_file_edit']
+      }
+    });
+  });
+
+  it('rejects write contracts without a file or directory resource scope', (): void => {
+    expect(
+      validateFoundationContract({
+        ...validContract,
+        mode: 'write',
+        resources: [{ kind: 'webview', reference: 'active-webview' }],
+        requestedTools: ['stage_file_edit']
+      })
+    ).toMatchObject({
+      ok: false,
+      error: {
+        code: 'invalid_contract',
+        phase: 'contract_validation',
+        details: { reason: 'write_resource_scope_invalid' }
+      }
     });
   });
 
@@ -282,6 +344,46 @@ describe('foundation delegation contract', (): void => {
     expect(Object.isFrozen(validation.plan)).toBe(true);
     expect(Object.isFrozen(validation.plan.capabilitySet)).toBe(true);
     expect(Object.isFrozen(validation.plan.modelSnapshot)).toBe(true);
+  });
+
+  it('validates staged write plans and rejects effect or adapter mismatches', (): void => {
+    const contract: DelegateTaskInput = {
+      ...validContract,
+      mode: 'write',
+      requestedTools: ['read_file', 'stage_file_edit']
+    };
+    const contractValidation = validateFoundationContract(contract);
+    if (!contractValidation.ok) throw new Error('Fixture write contract must be valid');
+    const plan = createWritePlan(contract);
+    const missingAdapter = {
+      ...plan,
+      commitPolicy: { mode: 'staged' as const }
+    };
+    const unknownAdapter = {
+      ...plan,
+      commitPolicy: { mode: 'staged' as const, adapter: 'unknown-adapter' }
+    };
+    const noStagedEffect = {
+      ...plan,
+      toolEffectSet: [
+        { toolName: 'read_file', effect: 'pure_read' as const },
+        { toolName: 'stage_file_edit', effect: 'pure_read' as const }
+      ]
+    };
+
+    expect(validateExecutionPlanSnapshot(contractValidation.contractSnapshot, plan)).toMatchObject({ ok: true });
+    expect(validateExecutionPlanSnapshot(contractValidation.contractSnapshot, missingAdapter)).toMatchObject({
+      ok: false,
+      error: { details: { reason: 'plan_commit_policy_invalid' } }
+    });
+    expect(validateExecutionPlanSnapshot(contractValidation.contractSnapshot, unknownAdapter)).toMatchObject({
+      ok: false,
+      error: { details: { reason: 'plan_commit_policy_invalid' } }
+    });
+    expect(validateExecutionPlanSnapshot(contractValidation.contractSnapshot, noStagedEffect)).toMatchObject({
+      ok: false,
+      error: { details: { reason: 'plan_effect_invalid' } }
+    });
   });
 
   it('rejects forged, unsupported, or capability-expanding execution plans', (): void => {

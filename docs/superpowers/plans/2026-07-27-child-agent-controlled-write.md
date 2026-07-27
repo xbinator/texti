@@ -82,7 +82,7 @@
 - Consumes: `ToolRegistryEntry`、`AgentTaskContractSnapshot.mode`、现有 capability intersection 与 monotonic restore。
 - Produces: `STAGE_FILE_WRITE_TOOL_NAME`、`STAGE_FILE_EDIT_TOOL_NAME`、mode-aware `compileAgentPlan()`、`authorizeTask()`；read 计划仍为 `commitPolicy.mode = 'none'`，write 计划固定为 `{ mode: 'staged', adapter: 'atomic-file-v1' }`。
 
-- [ ] **Step 1: Write failing registry and plan tests**
+- [x] **Step 1: Write failing registry and plan tests**
 
 增加以下核心断言：
 
@@ -125,7 +125,7 @@ expect(result).toMatchObject({
 - restore 后 staged capability 只能保持或移除，不能新增。
 - `validateExecutionPlanSnapshot()` 拒绝 adapter 缺失、未知 adapter、effect 与 commit policy 不匹配。
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run:
 
@@ -135,7 +135,7 @@ pnpm exec vitest run test/ai/tools/tool-registry.test.ts test/electron/main/modu
 
 Expected: FAIL，因为 staged registry 条目、write plan 分支和 `authorizeTask()` 尚不存在。
 
-- [ ] **Step 3: Add internal staged tool definitions**
+- [x] **Step 3: Add internal staged tool definitions**
 
 创建以下精确 registry 条目；名称必须与 Child tool executor 保持一致：
 
@@ -176,7 +176,7 @@ export const stageFileWriteToolRegistryEntry = {
 
 `stage_file_edit` 参数固定为 `path/oldString/newString/replaceAll`，描述必须明确修改的是 overlay。两个条目只进入 registry，不进入 `chat-default` exposure。
 
-- [ ] **Step 4: Make plan validation mode-aware**
+- [x] **Step 4: Make plan validation mode-aware**
 
 用 mode 决定 effect 和 commit policy：
 
@@ -208,7 +208,7 @@ if (input.task.contractSnapshot.mode === 'write' && !hasStagedWrite) {
 
 生成计划时按实际 registry metadata 固化 `toolEffectSet`；write plan 固定 `commitPolicy: { mode: 'staged', adapter: WRITE_ADAPTER }`。校验器必须要求 mode、effect、adapter 三者完全一致。
 
-- [ ] **Step 5: Generalize service authorization without widening Renderer authority**
+- [x] **Step 5: Generalize service authorization without widening Renderer authority**
 
 把内部方法改为：
 
@@ -218,7 +218,7 @@ authorizeTask(taskId: string): AgentTaskRecord
 
 该方法仍从 Store、continuation context、Main feature、权限与预算 provider 读取输入；Renderer 不能传 mode、adapter、tool list 或模型覆盖。保留 `authorizeReadTask()` 作为一个版本内的兼容委托，并在 Coordinator 切换后删除。
 
-- [ ] **Step 6: Run focused tests and verify GREEN**
+- [x] **Step 6: Run focused tests and verify GREEN**
 
 Run:
 
@@ -228,7 +228,7 @@ pnpm exec vitest run test/ai/tools/tool-registry.test.ts test/electron/main/modu
 
 Expected: PASS，且现有 read plan 快照 hash 与恢复测试继续通过。
 
-- [ ] **Step 7: Commit Task 1**
+- [x] **Step 7: Commit Task 1**
 
 ```bash
 git add shared/ai/tools/AgentStagedFileTool/index.ts shared/ai/tools/index.ts shared/ai/tools/DelegateTaskTool/index.ts types/chat-agent.d.ts electron/main/modules/chat/agents/contracts.mts electron/main/modules/chat/agents/plan-compiler.mts electron/main/modules/chat/agents/service.mts test/ai/tools/tool-registry.test.ts test/electron/main/modules/chat/agents/contracts.test.ts test/electron/main/modules/chat/agents/plan-compiler.test.ts test/electron/main/modules/chat/agents/service.test.ts changelog/2026-07-27.md

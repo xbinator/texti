@@ -20,7 +20,8 @@ export const delegateTaskToolRegistryEntry = {
   },
   definition: {
     name: DELEGATE_TASK_TOOL_NAME,
-    description: '提交一个有边界的任务契约，交由受控 Child Agent 执行。',
+    description:
+      '提交一个有边界的任务契约，交由受控 Child Agent 执行。write 模式只能请求 stage_file_write 或 stage_file_edit 等暂存能力，不能请求会立即修改工作区的 write_file 或 edit_file。',
     source: 'builtin',
     riskLevel: 'read',
     requiresActiveDocument: false,

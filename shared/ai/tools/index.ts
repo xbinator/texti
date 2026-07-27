@@ -3,6 +3,7 @@
  * @description ChatRuntime 跨进程工具 registry 聚合出口。
  */
 import type { SharedToolDefinition, ToolExposureQuery, ToolRegistryEntry, ToolRuntimeGroup, ToolRuntimeOwner } from './types.js';
+import { stageFileEditToolRegistryEntry, stageFileWriteToolRegistryEntry } from './AgentStagedFileTool/index.js';
 import { delegateTaskToolRegistryEntry } from './DelegateTaskTool/index.js';
 import { createDocumentToolRegistryEntry, readCurrentDocumentToolRegistryEntry } from './DocumentTool/index.js';
 import { getCurrentTimeToolRegistryEntry } from './EnvironmentTool/index.js';
@@ -35,6 +36,7 @@ export type {
   ToolRuntimeGroup,
   ToolRuntimeOwner
 } from './types.js';
+export { AGENT_FILE_COMMIT_ADAPTER, STAGE_FILE_EDIT_TOOL_NAME, STAGE_FILE_WRITE_TOOL_NAME } from './AgentStagedFileTool/index.js';
 export { DELEGATE_TASK_TOOL_NAME } from './DelegateTaskTool/index.js';
 export { CREATE_DOCUMENT_TOOL_NAME, READ_CURRENT_DOCUMENT_TOOL_NAME } from './DocumentTool/index.js';
 export { GET_CURRENT_TIME_TOOL_NAME } from './EnvironmentTool/index.js';
@@ -62,6 +64,8 @@ export const TOOL_REGISTRY = [
   readDirectoryToolRegistryEntry,
   globToolRegistryEntry,
   grepToolRegistryEntry,
+  stageFileWriteToolRegistryEntry,
+  stageFileEditToolRegistryEntry,
   writeFileToolRegistryEntry,
   editFileToolRegistryEntry,
   queryLogsToolRegistryEntry,

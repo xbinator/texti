@@ -119,7 +119,7 @@ export interface AgentPlanToolEffect {
 export interface AgentCommitPolicy {
   /** 无写入或受控提交协议。 */
   readonly mode: 'none' | 'staged';
-  /** 写入协议使用的可选 adapter 注册名。 */
+  /** staged 模式必须冻结 adapter 注册名；none 模式必须省略。 */
   readonly adapter?: string;
 }
 

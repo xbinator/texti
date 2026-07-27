@@ -74,7 +74,7 @@ function createAssistant(mode: 'read' | 'write' = 'read'): ChatMessageRecord {
           acceptanceCriteria: ['返回摘要'],
           mode,
           resources: [{ kind: 'file', reference: 'CONTEXT.md' }],
-          requestedTools: ['read_file'],
+          requestedTools: mode === 'write' ? ['read_file', 'stage_file_edit'] : ['read_file'],
           required: true,
           priority: 'normal'
         }
@@ -364,6 +364,33 @@ function createReadPlan(task: AgentTaskRecord, checkpoint: AgentCheckpointRecord
   };
 }
 
+/**
+ * 创建与 prepared write Task 绑定的暂存计划。
+ * @param task - created write Task
+ * @param checkpoint - 冻结模型来源
+ * @returns 可交给 Store 的暂存计划
+ */
+function createWritePlan(task: AgentTaskRecord, checkpoint: AgentCheckpointRecord): AgentExecutionPlanSnapshot {
+  const planBody = {
+    planSchemaVersion: 1,
+    policyVersion: 'controlled-write-v1',
+    capabilitySet: ['read_file', 'stage_file_edit'],
+    modelSnapshot: { ...checkpoint.continuationSnapshot.modelSnapshot },
+    permissionSnapshot: { scopeIds: ['workspace:write'] },
+    resourceScopes: ['file:/workspace/CONTEXT.md'],
+    toolEffectSet: [
+      { toolName: 'read_file', effect: 'pure_read' as const },
+      { toolName: 'stage_file_edit', effect: 'staged_file_write' as const }
+    ],
+    commitPolicy: { mode: 'staged' as const, adapter: 'atomic-file-v1' },
+    budget: { tokenLimit: 800, costLimitUsd: 0.08, pricingVersion: 'test-v1' }
+  };
+  return {
+    ...planBody,
+    planHash: hashExecutionPlanSnapshot(task.contractSnapshot, planBody)
+  };
+}
+
 describe('chat agent delegation service', (): void => {
   it('commits immutable facts before acquiring the fence and publishing the outbox', async (): Promise<void> => {
     const fixture = createDependencies();
@@ -525,6 +552,56 @@ describe('chat agent delegation service', (): void => {
     expect(fixture.reserveTask.mock.invocationCallOrder[0]).toBeLessThan(fixture.authorizeTask.mock.invocationCallOrder[0] as number);
     expect(fixture.releaseBudget).not.toHaveBeenCalled();
     expect(result).toBe(queuedTask);
+  });
+
+  it('authorizes a prepared write Task while the read compatibility method stays fail-closed', (): void => {
+    const fixture = createDependencies();
+    fixture.resolveReadLimits.mockReturnValue({
+      availableToolNames: ['read_file', 'stage_file_edit'],
+      permissionScopeIds: ['workspace:write'],
+      budget: { tokenLimit: 800, costLimitUsd: 0.08, pricingVersion: 'test-v1' }
+    });
+    const service = createChatAgentDelegationService(fixture.dependencies);
+    const input = createInput('write');
+    input.runtime.tools = [
+      ...(input.runtime.tools ?? []),
+      { name: 'read_file', description: 'read a file', parameters: { type: 'object' } },
+      { name: 'stage_file_edit', description: 'stage an edit', parameters: { type: 'object' } }
+    ];
+    service.prepareDelegation(input);
+    const prepared = fixture.prepareDelegation.mock.calls[0]?.[0] as PrepareDelegationInput | undefined;
+    if (!prepared) throw new Error('Prepare facts must be captured');
+    const task = createPreparedTask(prepared);
+    const checkpoint: AgentCheckpointRecord = {
+      ...prepared.checkpoint,
+      status: 'waiting_children',
+      version: 1,
+      terminalResults: {},
+      recordState: 'active',
+      createdAt: prepared.occurredAt,
+      updatedAt: prepared.occurredAt
+    };
+    const plan = createWritePlan(task, checkpoint);
+    const queuedTask: AgentTaskRecord = {
+      ...task,
+      executionPlanSnapshot: plan,
+      executionPlanSnapshotHash: plan.planHash,
+      status: 'queued',
+      queuePhase: 'start'
+    };
+    fixture.getTask.mockReturnValue(task);
+    fixture.compileReadPlan.mockReturnValue({ ok: true, plan });
+    fixture.authorizeTask.mockReturnValue(queuedTask);
+
+    expect(service.authorizeTask(task.taskId)).toBe(queuedTask);
+    expect((): void => {
+      service.authorizeReadTask(task.taskId);
+    }).toThrowError(
+      expect.objectContaining({
+        code: 'capability_denied',
+        details: expect.objectContaining({ reason: 'read_authorization_mode_invalid' })
+      })
+    );
   });
 
   it('releases a Task reservation when the Store cannot freeze the authorized projection', (): void => {
@@ -1249,20 +1326,17 @@ describe('chat agent delegation service', (): void => {
     expect(fixture.dependencies.locks.getContinuationFence('session:session-1/history')).toBeUndefined();
   });
 
-  it('rejects write mode with capability_denied before creating a checkpoint', (): void => {
+  it('prepares write mode as an immutable Task contract', (): void => {
     const fixture = createDependencies();
     const service = createChatAgentDelegationService(fixture.dependencies);
 
-    expect((): void => {
-      service.prepareDelegation(createInput('write'));
-    }).toThrowError(
+    expect(service.prepareDelegation(createInput('write'))).toEqual({ prepared: true });
+    expect(fixture.prepareDelegation).toHaveBeenCalledWith(
       expect.objectContaining({
-        code: 'capability_denied',
-        phase: 'contract_validation'
-      })
+        tasks: [expect.objectContaining({ contractSnapshot: expect.objectContaining({ mode: 'write' }) })]
+      }),
+      expect.any(Function)
     );
-    expect(fixture.prepareDelegation).not.toHaveBeenCalled();
-    expect(fixture.dependencies.locks.getContinuationFence('session:session-1/history')).toBeUndefined();
   });
 
   it('rejects a reserved scope conflict before creating any persistent facts', (): void => {

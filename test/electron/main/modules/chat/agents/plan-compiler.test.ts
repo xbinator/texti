@@ -1,6 +1,6 @@
 /**
  * @file plan-compiler.test.ts
- * @description 验证 Child 只读计划的精确能力交集、模型继承和恢复单调性。
+ * @description 验证 Child read/write 计划的精确能力交集、模型继承和恢复单调性。
  */
 import type { AgentCheckpointRecord, AgentTaskRecord } from '../../../../../../electron/main/modules/chat/agents/types.mjs';
 import type { ToolRegistryEntry, ToolRuntimeOwner } from '../../../../../../shared/ai/tools/index.js';
@@ -23,9 +23,10 @@ const budget: AgentBudgetSnapshot = {
 /**
  * 创建最小可信 Task 投影。
  * @param requestedTools - 不可变契约请求的工具集合
- * @returns created 状态的只读 Task
+ * @param mode - Task 读写模式
+ * @returns created 状态的 Task
  */
-function createTask(requestedTools: readonly string[]): AgentTaskRecord {
+function createTask(requestedTools: readonly string[], mode: 'read' | 'write' = 'read'): AgentTaskRecord {
   return {
     taskId: 'task-1',
     sessionId: 'session-1',
@@ -39,7 +40,7 @@ function createTask(requestedTools: readonly string[]): AgentTaskRecord {
       contractSchemaVersion: 1,
       task: 'Inspect the explicit resources',
       acceptanceCriteria: ['Return a concise summary'],
-      mode: 'read',
+      mode,
       resources: [{ kind: 'file', reference: 'CONTEXT.md' }],
       requestedTools: [...requestedTools].sort(),
       required: true
@@ -104,6 +105,7 @@ function createCheckpoint(): AgentCheckpointRecord {
  * @param resolver - 资源解析器名称
  * @param runtime - Runtime owner
  * @param executionClass - 执行方式
+ * @param commitAdapter - staged 工具的提交适配器
  * @returns registry 条目
  */
 function createToolEntry(
@@ -111,7 +113,8 @@ function createToolEntry(
   effect: ToolRegistryEntry['effect']['effect'] = 'pure_read',
   resolver = 'file-path',
   runtime: ToolRuntimeOwner = 'main',
-  executionClass: ToolRegistryEntry['executionClass'] = 'direct'
+  executionClass: ToolRegistryEntry['executionClass'] = 'direct',
+  commitAdapter: string | undefined = undefined
 ): ToolRegistryEntry {
   return {
     runtime,
@@ -121,6 +124,7 @@ function createToolEntry(
     effect: {
       effect,
       resourceScopeResolver: resolver,
+      ...(commitAdapter ? { commitAdapter } : {}),
       reversible: true
     },
     definition: {
@@ -167,15 +171,15 @@ function createCompileInput(task: AgentTaskRecord): AgentPlanCompileInput {
   return {
     task,
     checkpoint: createCheckpoint(),
-    parentToolNames: ['delegate_task', 'external_tool', 'grep', 'read_file', 'unknown_tool', 'write_file'],
-    availableToolNames: ['delegate_task', 'external_tool', 'grep', 'read_file', 'unknown_tool', 'write_file'],
+    parentToolNames: ['delegate_task', 'external_tool', 'grep', 'read_file', 'stage_file_edit', 'stage_file_write', 'unknown_tool', 'write_file'],
+    availableToolNames: ['delegate_task', 'external_tool', 'grep', 'read_file', 'stage_file_edit', 'stage_file_write', 'unknown_tool', 'write_file'],
     permissionScopeIds: ['workspace:repo:read'],
     workspaceRoot: '/repo',
     budget
   };
 }
 
-describe('agent read plan compiler', (): void => {
+describe('agent plan compiler', (): void => {
   it('computes the exact sorted pure-read capability intersection and inherits the frozen model', (): void => {
     const task = createTask(['read_file', 'write_file', 'external_tool', 'unknown_tool']);
     const dependencies = createDependencies([
@@ -238,6 +242,63 @@ describe('agent read plan compiler', (): void => {
     expect(compileAgentPlan({ ...createCompileInput(task), availableToolNames: [] }, dependencies)).toMatchObject({
       ok: false,
       error: { code: 'capability_denied' }
+    });
+  });
+
+  it('compiles a write plan from pure-read and staged capabilities only', (): void => {
+    const task = createTask(['read_file', 'stage_file_edit'], 'write');
+    const dependencies = createDependencies([
+      createToolEntry('read_file'),
+      createToolEntry('stage_file_edit', 'staged_file_write', 'file-path', 'main', 'direct', 'atomic-file-v1')
+    ]);
+
+    expect(compileAgentPlan(createCompileInput(task), dependencies)).toMatchObject({
+      ok: true,
+      plan: {
+        policyVersion: 'controlled-write-v1',
+        capabilitySet: ['read_file', 'stage_file_edit'],
+        toolEffectSet: [
+          { toolName: 'read_file', effect: 'pure_read' },
+          { toolName: 'stage_file_edit', effect: 'staged_file_write' }
+        ],
+        commitPolicy: { mode: 'staged', adapter: 'atomic-file-v1' }
+      }
+    });
+  });
+
+  it('rejects write plans without a valid staged capability', (): void => {
+    const readOnlyTask = createTask(['read_file'], 'write');
+
+    expect(compileAgentPlan(createCompileInput(readOnlyTask), createDependencies([createToolEntry('read_file')]))).toMatchObject({
+      ok: false,
+      error: { code: 'capability_denied', phase: 'plan_validation' }
+    });
+    for (const toolName of ['write_file', 'edit_file', 'shell']) {
+      const immediateTask = createTask([toolName], 'write');
+      const immediateEntry = createToolEntry(toolName, 'immediate_side_effect', 'file-path', 'main', 'direct');
+      expect(
+        compileAgentPlan(
+          {
+            ...createCompileInput(immediateTask),
+            parentToolNames: [toolName],
+            availableToolNames: [toolName]
+          },
+          createDependencies([immediateEntry])
+        )
+      ).toMatchObject({
+        ok: false,
+        error: { code: 'capability_denied', phase: 'plan_validation' }
+      });
+    }
+  });
+
+  it('does not admit staged mutations into read plans', (): void => {
+    const task = createTask(['stage_file_edit']);
+    const stagedEntry = createToolEntry('stage_file_edit', 'staged_file_write', 'file-path', 'main', 'direct', 'atomic-file-v1');
+
+    expect(compileAgentPlan(createCompileInput(task), createDependencies([stagedEntry]))).toMatchObject({
+      ok: false,
+      error: { code: 'capability_denied', phase: 'plan_validation' }
     });
   });
 
@@ -394,6 +455,60 @@ describe('agent read plan compiler', (): void => {
 
     expect(drifted).toMatchObject({ ok: false, error: { phase: 'recovery', details: { reason: 'restore_tool_metadata_drift' } } });
     expect(unavailable).toMatchObject({ ok: false, error: { phase: 'recovery' } });
+  });
+
+  it('restores staged capabilities monotonically and rejects commit adapter drift', (): void => {
+    const task = createTask(['read_file', 'stage_file_edit'], 'write');
+    const readEntry = createToolEntry('read_file');
+    const stagedEntry = createToolEntry('stage_file_edit', 'staged_file_write', 'file-path', 'main', 'direct', 'atomic-file-v1');
+    const compiled = compileAgentPlan(createCompileInput(task), createDependencies([readEntry, stagedEntry]));
+    expect(compiled.ok).toBe(true);
+    if (!compiled.ok) return;
+    const persistedTask: AgentTaskRecord = {
+      ...task,
+      status: 'queued',
+      queuePhase: 'start',
+      executionPlanSnapshot: compiled.plan,
+      executionPlanSnapshotHash: compiled.plan.planHash
+    };
+    const restoreInput = {
+      task: persistedTask,
+      checkpoint: createCheckpoint(),
+      availableToolNames: ['stage_file_edit'],
+      permissionScopeIds: ['workspace:repo:read'],
+      resourceScopes: ['file:/repo/CONTEXT.md'],
+      budget,
+      previousEffective: null
+    };
+
+    const firstRestore = restoreAgentPlan(restoreInput, createDependencies([readEntry, stagedEntry]));
+    expect(firstRestore).toMatchObject({
+      ok: true,
+      restored: { effectiveCapabilitySet: ['stage_file_edit'] }
+    });
+    if (!firstRestore.ok) return;
+    expect(
+      restoreAgentPlan(
+        {
+          ...restoreInput,
+          availableToolNames: ['read_file', 'stage_file_edit'],
+          previousEffective: firstRestore.restored
+        },
+        createDependencies([readEntry, stagedEntry])
+      )
+    ).toMatchObject({
+      ok: true,
+      restored: { effectiveCapabilitySet: ['stage_file_edit'] }
+    });
+    expect(
+      restoreAgentPlan(
+        restoreInput,
+        createDependencies([readEntry, createToolEntry('stage_file_edit', 'staged_file_write', 'file-path', 'main', 'direct', 'other-adapter')])
+      )
+    ).toMatchObject({
+      ok: false,
+      error: { phase: 'recovery', details: { reason: 'restore_tool_metadata_drift' } }
+    });
   });
 
   it.each(['completed', 'failed', 'cancelled'] as const)('does not restore a terminal %s Task', (status): void => {

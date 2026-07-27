@@ -223,7 +223,13 @@ export interface ChatAgentDelegationService {
    */
   prepareDelegation(input: ChatRuntimeDelegationPrepareInput): ChatRuntimeDelegationPrepareAck;
   /**
-   * 从持久化事实和主进程可信依赖编译并原子授权一个只读 Task。
+   * 从持久化事实和主进程可信依赖编译并原子授权一个 Task。
+   * @param taskId - created 状态的 Task
+   * @returns queued(start) 状态的 Task
+   */
+  authorizeTask(taskId: string): AgentTaskRecord;
+  /**
+   * 兼容只读 Coordinator 的收缩授权入口；write Task 必须拒绝。
    * @param taskId - created 状态的 Task
    * @returns queued(start) 状态的 Task
    */
@@ -860,11 +866,11 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
   }
 
   /**
-   * 编译并原子授权一个 created read Task。
+   * 编译并原子授权一个 created Task。
    * @param taskId - 目标 Task
    * @returns queued(start) Task
    */
-  function authorizeReadTask(taskId: string): AgentTaskRecord {
+  function authorizeTask(taskId: string): AgentTaskRecord {
     const normalizedTaskId = taskId.trim();
     const task = normalizedTaskId ? dependencies.store.getTask(normalizedTaskId) : null;
     const checkpoint = task ? dependencies.store.getCheckpoint(task.checkpointId) : null;
@@ -874,7 +880,7 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
         phase: 'plan_validation',
         category: 'protocol',
         retryable: false,
-        message: '只读 Task 或所属 Checkpoint 不存在',
+        message: 'Task 或所属 Checkpoint 不存在',
         details: { reason: 'authorization_context_missing', taskId: normalizedTaskId }
       });
     }
@@ -886,7 +892,7 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
         phase: 'resource_validation',
         category: 'resource',
         retryable: false,
-        message: '只读 Child Task 缺少冻结工作区',
+        message: 'Child Task 缺少冻结工作区',
         details: { reason: 'workspace_root_missing', taskId: task.taskId }
       });
     }
@@ -917,6 +923,27 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
       dependencies.budgetLedger?.releaseTask(task.taskId);
       throw error;
     }
+  }
+
+  /**
+   * 保留 Coordinator 当前只读调用路径，防止它在 write runtime 接线前启动写 Task。
+   * @param taskId - 目标只读 Task
+   * @returns queued(start) Task
+   */
+  function authorizeReadTask(taskId: string): AgentTaskRecord {
+    const normalizedTaskId = taskId.trim();
+    const task = normalizedTaskId ? dependencies.store.getTask(normalizedTaskId) : null;
+    if (task?.contractSnapshot.mode === 'write') {
+      throw new ChatAgentDelegationError({
+        code: 'capability_denied',
+        phase: 'plan_validation',
+        category: 'policy',
+        retryable: false,
+        message: '只读授权入口不能启动 write Task',
+        details: { reason: 'read_authorization_mode_invalid', taskId: task.taskId }
+      });
+    }
+    return authorizeTask(taskId);
   }
 
   /**
@@ -1071,6 +1098,7 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
       return { prepared: true };
     },
 
+    authorizeTask,
     authorizeReadTask,
 
     recordPreFailure(task: AgentTaskRecord, error: AgentTaskError): ReturnType<AgentDelegationStore['recordPreAttemptFailure']> {

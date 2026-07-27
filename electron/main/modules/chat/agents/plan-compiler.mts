@@ -1,25 +1,29 @@
 /**
  * @file plan-compiler.mts
- * @description 编译并恢复只能单调收缩的本地 pure-read Child Execution Plan。
+ * @description 编译并恢复只能单调收缩的本地 read 或 staged-write Child Execution Plan。
  */
 import type { AgentScopeResult } from './resource-scopes.mjs';
 import type { AgentCheckpointRecord, AgentTaskRecord } from './types.mjs';
 import type { ToolRegistryEntry } from '../../../../../shared/ai/tools/index.js';
 import type { AgentBudgetSnapshot, AgentExecutionPlanSnapshot, AgentModelSnapshot, AgentResourceReference, AgentTaskError } from 'types/chat-agent';
 import {
+  AGENT_FILE_COMMIT_ADAPTER,
   AGENT_PLAN_SCHEMA_VERSION,
   AGENT_READ_PLAN_POLICY_VERSION,
+  AGENT_WRITE_PLAN_POLICY_VERSION,
   hashExecutionPlanSnapshot,
   validateExecutionPlanSnapshot,
   type AgentExecutionPlanBody
 } from './contracts.mjs';
 
-/** 首版 Child Runtime 允许的工具与冻结 resolver 映射。 */
-const CHILD_READ_RESOLVERS = new Map<string, string>([
+/** Child Runtime 允许的工具与冻结 resolver 映射。 */
+const CHILD_TOOL_RESOLVERS = new Map<string, string>([
   ['glob', 'glob-root'],
   ['grep', 'grep-root'],
   ['read_directory', 'directory-path'],
-  ['read_file', 'file-path']
+  ['read_file', 'file-path'],
+  ['stage_file_edit', 'file-path'],
+  ['stage_file_write', 'file-path']
 ]);
 
 /** 计划编译器外部可信依赖。 */
@@ -38,7 +42,7 @@ export interface AgentPlanCompilerDependencies {
    */
   getToolEntry(toolName: string): ToolRegistryEntry | undefined;
   /**
-   * 判断当前 Child read policy 是否允许工具。
+   * 判断当前 Child mode policy 是否允许工具。
    * @param toolName - 工具名称
    * @returns 是否允许
    */
@@ -192,33 +196,38 @@ function hasMatchingAggregate(task: AgentTaskRecord, checkpoint: AgentCheckpoint
 }
 
 /**
- * 判断 registry 条目是否仍满足首版本地纯读策略。
+ * 判断 registry 条目是否仍满足 Task mode 的本地能力策略。
  * @param toolName - 工具名称
  * @param entry - 当前 registry 条目
  * @param resources - Task 契约资源
+ * @param mode - Task 读写模式
  * @param dependencies - 当前安全策略依赖
  * @returns 是否可以进入有效能力集合
  */
-function isSafeReadTool(
+function isSafeTool(
   toolName: string,
   entry: ToolRegistryEntry | undefined,
   resources: readonly AgentResourceReference[],
+  mode: AgentTaskRecord['contractSnapshot']['mode'],
   dependencies: AgentPlanCompilerDependencies
 ): boolean {
-  const expectedResolver = CHILD_READ_RESOLVERS.get(toolName);
+  const expectedResolver = CHILD_TOOL_RESOLVERS.get(toolName);
+  const allowedEffects = mode === 'write' ? new Set(['pure_read', 'staged_file_write']) : new Set(['pure_read']);
   if (
     !entry ||
     !expectedResolver ||
     entry.definition.name !== toolName ||
     entry.runtime !== 'main' ||
     entry.executionClass !== 'direct' ||
-    entry.effect.effect !== 'pure_read' ||
+    !allowedEffects.has(entry.effect.effect) ||
     entry.effect.resourceScopeResolver !== expectedResolver ||
+    (entry.effect.effect === 'staged_file_write' && entry.effect.commitAdapter !== AGENT_FILE_COMMIT_ADAPTER) ||
     !dependencies.isToolAllowed(toolName)
   ) {
     return false;
   }
   const resourceKinds = new Set(resources.map((resource): AgentResourceReference['kind'] => resource.kind));
+  if (entry.effect.effect === 'staged_file_write') return resourceKinds.has('file') || resourceKinds.has('directory');
   if (toolName === 'read_file') return resourceKinds.has('file');
   if (toolName === 'grep') return resourceKinds.has('file') || resourceKinds.has('directory');
   return resourceKinds.has('directory');
@@ -234,13 +243,13 @@ function compileFailure(error: AgentTaskError): AgentPlanCompileResult {
 }
 
 /**
- * 编译一个 contract-bound、模型继承且仅包含 pure-read 能力的计划。
+ * 编译一个 contract-bound、模型继承且符合 Task mode 的计划。
  * @param input - 持久化事实与可信授权输入
  * @param dependencies - registry、scope 和 policy 依赖
  * @returns 深冻结计划或结构化错误
  */
 export function compileAgentPlan(input: AgentPlanCompileInput, dependencies: AgentPlanCompilerDependencies): AgentPlanCompileResult {
-  if (!hasMatchingAggregate(input.task, input.checkpoint) || input.task.status !== 'created' || input.task.contractSnapshot.mode !== 'read') {
+  if (!hasMatchingAggregate(input.task, input.checkpoint) || input.task.status !== 'created') {
     return compileFailure(
       createPlanError('protocol_error', 'plan_validation', 'protocol', 'plan_aggregate_identity_invalid', 'Task 与 Checkpoint 不是可授权的同一聚合')
     );
@@ -258,26 +267,36 @@ export function compileAgentPlan(input: AgentPlanCompileInput, dependencies: Age
 
   const parentTools = new Set(normalizeStringSet(input.parentToolNames));
   const availableTools = new Set(normalizeStringSet(input.availableToolNames));
+  const taskMode = input.task.contractSnapshot.mode;
   const capabilitySet = normalizeStringSet(input.task.contractSnapshot.requestedTools).filter((toolName): boolean => {
     return (
       parentTools.has(toolName) &&
       availableTools.has(toolName) &&
-      isSafeReadTool(toolName, dependencies.getToolEntry(toolName), input.task.contractSnapshot.resources, dependencies)
+      isSafeTool(toolName, dependencies.getToolEntry(toolName), input.task.contractSnapshot.resources, taskMode, dependencies)
     );
   });
   if (capabilitySet.length === 0) {
     return compileFailure(createPlanError('capability_denied', 'plan_validation', 'policy', 'plan_capability_empty', '请求能力经安全交集后为空'));
   }
+  const hasStagedCapability = capabilitySet.some((toolName): boolean => dependencies.getToolEntry(toolName)?.effect.effect === 'staged_file_write');
+  if (taskMode === 'write' && !hasStagedCapability) {
+    return compileFailure(
+      createPlanError('capability_denied', 'plan_validation', 'policy', 'write_plan_staged_capability_missing', 'write Task 必须保留至少一个暂存能力')
+    );
+  }
 
   const body: AgentExecutionPlanBody = {
     planSchemaVersion: AGENT_PLAN_SCHEMA_VERSION,
-    policyVersion: AGENT_READ_PLAN_POLICY_VERSION,
+    policyVersion: taskMode === 'write' ? AGENT_WRITE_PLAN_POLICY_VERSION : AGENT_READ_PLAN_POLICY_VERSION,
     capabilitySet,
     modelSnapshot: { ...modelSnapshot },
     permissionSnapshot: { scopeIds: permissionScopeIds },
     resourceScopes: [...scopeResolution.resourceScopes],
-    toolEffectSet: capabilitySet.map((toolName) => ({ toolName, effect: 'pure_read' as const })),
-    commitPolicy: { mode: 'none' },
+    toolEffectSet: capabilitySet.map((toolName) => ({
+      toolName,
+      effect: dependencies.getToolEntry(toolName)?.effect.effect === 'staged_file_write' ? ('staged_file_write' as const) : ('pure_read' as const)
+    })),
+    commitPolicy: taskMode === 'write' ? { mode: 'staged', adapter: AGENT_FILE_COMMIT_ADAPTER } : { mode: 'none' },
     budget: { ...input.budget }
   };
   const candidate: AgentExecutionPlanSnapshot = {
@@ -388,7 +407,8 @@ export function restoreAgentPlan(input: AgentPlanRestoreInput, dependencies: Age
     if (!entry) return false;
     return (
       effectByTool.get(toolName) !== entry.effect.effect ||
-      CHILD_READ_RESOLVERS.get(toolName) !== entry.effect.resourceScopeResolver ||
+      CHILD_TOOL_RESOLVERS.get(toolName) !== entry.effect.resourceScopeResolver ||
+      (entry.effect.effect === 'staged_file_write' && entry.effect.commitAdapter !== AGENT_FILE_COMMIT_ADAPTER) ||
       entry.runtime !== 'main' ||
       entry.executionClass !== 'direct'
     );
@@ -404,12 +424,15 @@ export function restoreAgentPlan(input: AgentPlanRestoreInput, dependencies: Age
     return (
       previousCapabilities.has(toolName) &&
       availableTools.has(toolName) &&
-      effectByTool.get(toolName) === 'pure_read' &&
-      isSafeReadTool(toolName, entry, input.task.contractSnapshot.resources, dependencies)
+      effectByTool.get(toolName) === entry?.effect.effect &&
+      isSafeTool(toolName, entry, input.task.contractSnapshot.resources, input.task.contractSnapshot.mode, dependencies)
     );
   });
   if (effectiveCapabilitySet.length === 0) {
     return restoreFailure('restore_capability_empty', '恢复后的有效能力集合为空');
+  }
+  if (input.task.contractSnapshot.mode === 'write' && !effectiveCapabilitySet.some((toolName): boolean => effectByTool.get(toolName) === 'staged_file_write')) {
+    return restoreFailure('restore_staged_capability_missing', 'write Task 恢复后没有可用暂存能力');
   }
 
   const currentPermissions = new Set(normalizeStringSet(input.permissionScopeIds));
