@@ -3,7 +3,7 @@
  * @description ChatRuntime 主进程模型流式执行器主循环与公共入口。
  */
 import type { ChatRuntimeDeferredToolCall, ChatRuntimeStreamExecutor, ChatRuntimeStreamExecutorResult } from '../types.mjs';
-import type { RuntimeStreamExecutorDependencies, RuntimeStreamText, RuntimeToolCallChunk, RuntimeToolResultChunk } from './types.mjs';
+import type { RuntimeStreamExecutorDependencies, RuntimeStreamText, RuntimeToolCallChunk, RuntimeToolGuardSource, RuntimeToolResultChunk } from './types.mjs';
 import type { AIUsage, AIToolExecutionResult } from 'types/ai';
 import type { ChatMessageRecord, ChatMessageToolPart } from 'types/chat';
 import { AI_ERROR_CODE, createAIServiceError } from '../../../ai/errors/codes.mjs';
@@ -33,6 +33,7 @@ import {
 } from './message-parts.mjs';
 import { createRuntimeStreamRequest } from './request.mjs';
 import {
+  createToolFailureResultFromError,
   createUnknownToolFailureResult,
   executeMainToolSafely,
   executeRendererToolSafely,
@@ -332,11 +333,28 @@ export function createRuntimeStreamExecutor(dependencies: RuntimeStreamExecutorD
           input: call.input
         };
         const providerResult = observedTools.get(call.toolCallId)?.results[0];
-        let toolResult: AIToolExecutionResult | undefined = providerResult?.result;
-        if (!providerResult && dependencies.executeMainTool && isMainProcessTool(call.toolName)) {
+        let source: RuntimeToolGuardSource = 'unknown';
+        if (providerResult) {
+          source = 'provider';
+        } else if (dependencies.executeMainTool && isMainProcessTool(call.toolName)) {
+          source = 'main';
+        } else if (dependencies.executeRendererTool && isRendererManagedTool(runtime, call.toolName)) {
+          source = 'renderer';
+        }
+        let toolResult: AIToolExecutionResult | undefined;
+        if (dependencies.guardToolCall) {
+          // Guard rejection and异常都必须在读取 Provider 结果或调用任何 executor 前收敛。
+          // eslint-disable-next-line no-await-in-loop
+          const [guardResult] = await Promise.allSettled([dependencies.guardToolCall({ ...toolExecutionInput, source })]);
+          toolResult =
+            guardResult.status === 'fulfilled' ? guardResult.value ?? undefined : createToolFailureResultFromError(call.toolName, guardResult.reason);
+        }
+        if (!toolResult && providerResult) {
+          toolResult = providerResult.result;
+        } else if (!toolResult && dependencies.executeMainTool && isMainProcessTool(call.toolName)) {
           // eslint-disable-next-line no-await-in-loop
           toolResult = await executeMainToolSafely(dependencies.executeMainTool, toolExecutionInput, runtimeToolTimeoutMs);
-        } else if (!providerResult && dependencies.executeRendererTool && isRendererManagedTool(runtime, call.toolName)) {
+        } else if (!toolResult && dependencies.executeRendererTool && isRendererManagedTool(runtime, call.toolName)) {
           // eslint-disable-next-line no-await-in-loop
           toolResult = await executeRendererToolSafely(dependencies.executeRendererTool, toolExecutionInput, runtimeToolTimeoutMs);
         }

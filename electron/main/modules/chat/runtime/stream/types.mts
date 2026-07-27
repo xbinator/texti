@@ -3,7 +3,7 @@
  * @description ChatRuntime 流式执行器内部类型。
  */
 import type { ChatModelResolver } from '../model/resolver.mjs';
-import type { ChatRuntimeMainToolExecutor, ChatRuntimeRendererToolExecutor } from '../types.mjs';
+import type { ActiveChatRuntime, ChatRuntimeMainToolExecutor, ChatRuntimeRendererToolExecutor } from '../types.mjs';
 import type { AIRequestOptions, AIServiceError, AIStreamFinishReason, AIStreamResult, AIUsage, AIToolExecutionResult } from 'types/ai';
 
 /** ChatRuntime 传给 AI 服务的内部调用策略。 */
@@ -23,6 +23,29 @@ export type RuntimeStreamText = (
   callOptions: RuntimeStreamCallOptions
 ) => Promise<[AIServiceError] | [undefined, AIStreamResult]>;
 
+/** 工具结果或执行器的实际来源。 */
+export type RuntimeToolGuardSource = 'provider' | 'main' | 'renderer' | 'unknown';
+
+/** 强制工具授权钩子的最小输入。 */
+export interface RuntimeToolGuardInput {
+  /** 当前完整 Runtime 地址和易失状态。 */
+  runtime: ActiveChatRuntime;
+  /** Provider 工具调用 ID。 */
+  toolCallId: string;
+  /** Provider 工具名称。 */
+  toolName: string;
+  /** Provider 工具输入。 */
+  input: unknown;
+  /** 待接受结果或待调用 executor 的来源。 */
+  source: RuntimeToolGuardSource;
+}
+
+/**
+ * 强制工具授权函数。
+ * null 表示允许继续；返回工具结果表示在任何副作用前拒绝。
+ */
+export type RuntimeToolGuard = (input: RuntimeToolGuardInput) => Promise<AIToolExecutionResult | null>;
+
 /** Runtime 流式执行器依赖。 */
 export interface RuntimeStreamExecutorDependencies {
   /** 聊天模型解析器。 */
@@ -33,6 +56,8 @@ export interface RuntimeStreamExecutorDependencies {
   executeRendererTool?: ChatRuntimeRendererToolExecutor;
   /** 主进程工具执行函数。 */
   executeMainTool?: ChatRuntimeMainToolExecutor;
+  /** Provider 结果或本地 executor 之前的强制授权钩子。 */
+  guardToolCall?: RuntimeToolGuard;
   /** Renderer 本地工具超时时间。 */
   rendererToolTimeoutMs?: number;
 }

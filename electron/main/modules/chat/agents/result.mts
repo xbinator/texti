@@ -186,7 +186,8 @@ function validateChangeset(result: Readonly<ChatAgentResult>, context: AgentResu
 function validateUsage(result: Readonly<ChatAgentResult>, plan: AgentExecutionPlanSnapshot): AgentResultValidationFailure | null {
   const { usage } = result;
   const { budget } = plan;
-  if (usage.totalTokens > budget.tokenLimit) {
+  const reportsBudgetOverrun = result.executionStatus === 'failed' && result.error?.code === 'budget_exceeded';
+  if (usage.totalTokens > budget.tokenLimit && !reportsBudgetOverrun) {
     return resultFailure('result_budget_exceeded', 'Agent result token usage exceeds the frozen Task budget');
   }
   const cost = usage.monetaryCost;
@@ -205,7 +206,10 @@ function validateUsage(result: Readonly<ChatAgentResult>, plan: AgentExecutionPl
   if (cost.estimated === 'unknown' && cost.actual === 'unknown') {
     return resultFailure('result_cost_missing', 'Known Task pricing requires at least one trusted numeric cost amount');
   }
-  if ((typeof cost.estimated === 'number' && cost.estimated > budget.costLimitUsd) || (typeof cost.actual === 'number' && cost.actual > budget.costLimitUsd)) {
+  if (
+    !reportsBudgetOverrun &&
+    ((typeof cost.estimated === 'number' && cost.estimated > budget.costLimitUsd) || (typeof cost.actual === 'number' && cost.actual > budget.costLimitUsd))
+  ) {
     return resultFailure('result_budget_exceeded', 'Agent result monetary usage exceeds the frozen Task budget');
   }
   return null;

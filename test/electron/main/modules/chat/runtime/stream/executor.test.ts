@@ -1239,6 +1239,91 @@ describe('runtime stream executor', (): void => {
     ]);
   });
 
+  it('runs the mandatory guard before invoking a main-process tool executor', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const executeMainTool = vi.fn();
+    const guardToolCall = vi.fn(
+      async (): Promise<AIToolExecutionResult | null> => ({
+        toolName: 'read_file',
+        status: 'failure',
+        error: {
+          code: 'PERMISSION_DENIED',
+          message: 'Tool is outside the frozen Child plan'
+        }
+      })
+    );
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createMainReadFileToolCallStream() }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool, guardToolCall });
+
+    await executor({ runtime: { ...runtime }, userMessage, assistantMessage }, async () => undefined);
+
+    expect(guardToolCall).toHaveBeenCalledWith({
+      runtime: expect.objectContaining({ runtimeId: runtime.runtimeId }),
+      toolCallId: 'tool-call-1',
+      toolName: 'read_file',
+      input: { path: 'secret.md' },
+      source: 'main'
+    });
+    expect(executeMainTool).not.toHaveBeenCalled();
+    expect(assistantMessage.parts).toContainEqual(
+      expect.objectContaining({
+        type: 'tool',
+        status: 'done',
+        result: expect.objectContaining({
+          status: 'failure',
+          error: expect.objectContaining({ code: 'PERMISSION_DENIED' })
+        })
+      })
+    );
+  });
+
+  it('lets the mandatory guard reject a Provider-supplied tool result before it is accepted', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const executeMainTool = vi.fn();
+    const guardToolCall = vi.fn(
+      async (): Promise<AIToolExecutionResult | null> => ({
+        toolName: 'read_file',
+        status: 'failure',
+        error: {
+          code: 'protocol_error',
+          message: 'Provider tool results are forbidden for Child runtimes'
+        }
+      })
+    );
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createToolStream() }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool, guardToolCall });
+
+    await executor({ runtime: { ...runtime }, userMessage, assistantMessage }, async () => undefined);
+
+    expect(guardToolCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolCallId: 'tool-call-1',
+        toolName: 'read_file',
+        source: 'provider'
+      })
+    );
+    expect(executeMainTool).not.toHaveBeenCalled();
+    expect(assistantMessage.parts).toContainEqual(
+      expect.objectContaining({
+        toolCallId: 'tool-call-1',
+        status: 'done',
+        result: expect.objectContaining({
+          status: 'failure',
+          error: expect.objectContaining({ code: 'protocol_error' })
+        })
+      })
+    );
+    expect(JSON.stringify(assistantMessage.parts)).not.toContain('export const ok = true');
+  });
+
   it.each([
     ['deferred start-only with complete direct', true],
     ['direct start-only with complete deferred', false]

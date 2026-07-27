@@ -287,6 +287,33 @@ describe('agent result validation', (): void => {
     });
   });
 
+  it('accepts actual overrun usage only for a failed budget_exceeded result', (): void => {
+    const result = createResult();
+    result.executionStatus = 'failed';
+    result.usage = {
+      ...result.usage,
+      inputTokens: 80,
+      outputTokens: 40,
+      totalTokens: 120
+    };
+    result.error = {
+      code: 'budget_exceeded',
+      phase: 'runtime',
+      category: 'policy',
+      retryable: false,
+      details: { reason: 'token_budget_exceeded' }
+    };
+
+    expect(validateAgentResult(result, validationContext)).toMatchObject({
+      ok: true,
+      result: {
+        executionStatus: 'failed',
+        usage: { inputTokens: 80, outputTokens: 40, totalTokens: 120 },
+        error: { code: 'budget_exceeded', phase: 'runtime' }
+      }
+    });
+  });
+
   /** 已知定价边界用例，显式保留 monetaryCost 联合类型。 */
   const knownPricingCases: ReadonlyArray<readonly [string, ChatAgentResult['usage']['monetaryCost']]> = [
     [
