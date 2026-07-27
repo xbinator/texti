@@ -51,6 +51,7 @@ import { createAgentCoordinator, type AgentCoordinator } from './coordinator.mjs
 import { compileAgentPlan, type AgentPlanCompileInput, type AgentPlanCompileResult } from './plan-compiler.mjs';
 import { resolveAgentScopes } from './resource-scopes.mjs';
 import { validateAgentResult } from './result.mjs';
+import { createAgentReadScheduler } from './scheduler.mjs';
 import { createAgentDelegationStore } from './store.mjs';
 
 /** Runtime B 续接允许保留的非敏感内存上下文。 */
@@ -1187,18 +1188,18 @@ const defaultAgentStore = createAgentDelegationStore(agentStoreDatabase);
 /** 主进程默认稳定 Child Actor 注册表。 */
 const defaultChildRegistry = createChildActorRegistry();
 
-/** Task 4 调度器接管前保存已授权的最小 start queue 身份。 */
-const pendingReadTaskIds = new Set<string>();
+/** 主进程默认共享只读资源调度器。 */
+const defaultReadScheduler = createAgentReadScheduler();
 
 /** 模块初始化完成后由默认内部 Outbox consumer 使用的 Coordinator。 */
 let defaultCoordinator: AgentCoordinator | null = null;
 
 /**
- * 暂存一个已授权 read Task，后续 resource-scope scheduler 将消费该集合。
- * @param taskId - queued(start) Task
+ * 在 Child executor 接线前保持生产启动路径关闭。
+ * @returns 始终拒绝的 fail-closed Promise
  */
-function enqueueReadTask(taskId: string): void {
-  pendingReadTaskIds.add(taskId);
+function rejectChildStart(): Promise<void> {
+  return Promise.reject(new Error('child_executor_not_available'));
 }
 
 /** 主进程默认 Child Agent 委派服务。 */
@@ -1237,15 +1238,10 @@ export const chatAgentCoordinator = createAgentCoordinator({
   listActive: () => defaultAgentStore.listActive(),
   authorizeReadTask: (taskId: string): AgentTaskRecord => chatAgentDelegationService.authorizeReadTask(taskId),
   recordPreFailure: (task: AgentTaskRecord, error: AgentTaskError): AgentCheckpointRecord => chatAgentDelegationService.recordPreFailure(task, error),
-  enqueueTask: enqueueReadTask,
+  scheduler: defaultReadScheduler,
+  runTask: rejectChildStart,
   cancelCheckpoint(checkpointId: string, reason: string): void {
     if (!reason.trim()) throw new Error('agent_coordinator_cancel_reason_invalid');
-    defaultAgentStore
-      .listActive()
-      .find((recovery): boolean => recovery.checkpoint.checkpointId === checkpointId)
-      ?.tasks.forEach((task): void => {
-        pendingReadTaskIds.delete(task.taskId);
-      });
     chatAgentDelegationService.cancelCheckpoint({ checkpointId });
   },
   now: (): string => new Date().toISOString(),

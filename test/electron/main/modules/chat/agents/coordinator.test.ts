@@ -2,6 +2,7 @@
  * @file coordinator.test.ts
  * @description 验证 Main-owned Coordinator 的幂等授权、失败汇合与 Actor 注册顺序。
  */
+import type { AgentReadLease, AgentReadScheduler, AgentScheduleRequest } from '../../../../../../electron/main/modules/chat/agents/scheduler.mjs';
 import type { AgentCheckpointRecord, AgentDelegationRecoverySnapshot, AgentTaskRecord } from '../../../../../../electron/main/modules/chat/agents/types.mjs';
 import type { AgentDelegationCreatedPayload, AgentTaskError } from 'types/chat-agent';
 import { describe, expect, it, vi } from 'vitest';
@@ -46,6 +47,33 @@ function createTask(index: number, required = true): AgentTaskRecord {
     unfinishedJournalCount: 0,
     createdAt: '2026-07-27T00:00:00.000Z',
     updatedAt: '2026-07-27T00:00:00.000Z'
+  };
+}
+
+/**
+ * 给已授权 Task 附加冻结只读计划。
+ * @param task - created Task
+ * @returns queued(start) Task
+ */
+function authorizeTask(task: AgentTaskRecord): AgentTaskRecord {
+  const planHash = '9'.repeat(64);
+  return {
+    ...task,
+    executionPlanSnapshot: {
+      planHash,
+      planSchemaVersion: 1,
+      policyVersion: 'read-runtime-v1',
+      capabilitySet: ['read_file'],
+      modelSnapshot: { providerId: 'openai', modelId: 'gpt-5' },
+      permissionSnapshot: { scopeIds: ['workspace-read'] },
+      resourceScopes: [`file:/workspace/resource-${task.taskId}.md`],
+      toolEffectSet: [{ toolName: 'read_file', effect: 'pure_read' }],
+      commitPolicy: { mode: 'none' },
+      budget: { tokenLimit: 100, costLimitUsd: 0.01, pricingVersion: 'test-v1' }
+    },
+    executionPlanSnapshotHash: planHash,
+    status: 'queued',
+    queuePhase: 'start'
   };
 }
 
@@ -103,6 +131,9 @@ function createDependencies(tasks: AgentTaskRecord[]): {
   recordPreFailure: ReturnType<typeof vi.fn>;
   ensureActor: ReturnType<typeof vi.fn>;
   enqueueTask: ReturnType<typeof vi.fn>;
+  cancelTask: ReturnType<typeof vi.fn>;
+  runTask: ReturnType<typeof vi.fn>;
+  releaseTask: ReturnType<typeof vi.fn>;
   listActive: ReturnType<typeof vi.fn>;
   cancelCheckpoint: ReturnType<typeof vi.fn>;
   abortTask: ReturnType<typeof vi.fn>;
@@ -114,12 +145,7 @@ function createDependencies(tasks: AgentTaskRecord[]): {
   const authorizeReadTask = vi.fn((taskId: string): AgentTaskRecord => {
     const task = tasks.find((entry): boolean => entry.taskId === taskId);
     if (!task) throw new Error('task_missing');
-    return {
-      ...task,
-      executionPlanSnapshotHash: '9'.repeat(64),
-      status: 'queued',
-      queuePhase: 'start'
-    };
+    return authorizeTask(task);
   });
   const recordPreFailure = vi.fn((): AgentCheckpointRecord => {
     return {
@@ -136,7 +162,22 @@ function createDependencies(tasks: AgentTaskRecord[]): {
     rootRuntimeId: task.rootRuntimeId,
     planHash: task.executionPlanSnapshotHash as string
   }));
-  const enqueueTask = vi.fn();
+  const releaseTask = vi.fn();
+  const enqueueTask = vi.fn(async (request: AgentScheduleRequest): Promise<AgentReadLease> => {
+    return {
+      taskId: request.taskId,
+      signal: new AbortController().signal,
+      release: releaseTask
+    };
+  });
+  const cancelTask = vi.fn((): boolean => true);
+  const scheduler: AgentReadScheduler = {
+    enqueue: enqueueTask,
+    cancel: cancelTask,
+    activeCount: (): number => 0,
+    queuedCount: (): number => 0
+  };
+  const runTask = vi.fn(async (): Promise<void> => undefined);
   const cancelCheckpoint = vi.fn();
   const abortTask = vi.fn();
   const getActor = vi.fn();
@@ -146,7 +187,8 @@ function createDependencies(tasks: AgentTaskRecord[]): {
       listActive,
       authorizeReadTask,
       recordPreFailure,
-      enqueueTask,
+      scheduler,
+      runTask,
       cancelCheckpoint,
       now: (): string => '2026-07-27T00:00:00.000Z',
       registry: {
@@ -162,6 +204,9 @@ function createDependencies(tasks: AgentTaskRecord[]): {
     recordPreFailure,
     ensureActor,
     enqueueTask,
+    cancelTask,
+    runTask,
+    releaseTask,
     listActive,
     cancelCheckpoint,
     abortTask,
@@ -263,8 +308,52 @@ describe('agent coordinator', (): void => {
 
     expect(fixture.recordPreFailure).toHaveBeenCalledTimes(1);
     expect(fixture.ensureActor).toHaveBeenCalledTimes(1);
-    expect(fixture.enqueueTask).toHaveBeenCalledWith(tasks[1].taskId);
+    expect(fixture.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: tasks[1]?.taskId,
+        priority: tasks[1]?.priority,
+        mode: 'read'
+      })
+    );
     expect(coordinator.getCheckpointState(payload.checkpointId)).toBe('running');
+  });
+
+  it('waits for a lease before passing its AbortSignal to the execution seam', async (): Promise<void> => {
+    const task = createTask(1);
+    const fixture = createDependencies([task]);
+    const controller = new AbortController();
+    const release = vi.fn();
+    let grantLease: (lease: AgentReadLease) => void = (): void => undefined;
+    fixture.enqueueTask.mockImplementationOnce(
+      (): Promise<AgentReadLease> =>
+        new Promise<AgentReadLease>((resolve): void => {
+          grantLease = resolve;
+        })
+    );
+    const coordinator = createAgentCoordinator(fixture.dependencies);
+
+    await coordinator.accept(payload);
+
+    expect(fixture.runTask).not.toHaveBeenCalled();
+    grantLease({ taskId: task.taskId, signal: controller.signal, release });
+    await vi.waitFor((): void => {
+      expect(fixture.runTask).toHaveBeenCalledWith(expect.objectContaining({ taskId: task.taskId }), controller.signal);
+      expect(release).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('releases a lease once and returns to idle when the execution seam rejects before Task 6 handles the outcome', async (): Promise<void> => {
+    const task = createTask(1);
+    const fixture = createDependencies([task]);
+    fixture.runTask.mockRejectedValueOnce(new Error('child_executor_not_ready'));
+    const coordinator = createAgentCoordinator(fixture.dependencies);
+
+    await coordinator.accept(payload);
+
+    await vi.waitFor((): void => {
+      expect(fixture.releaseTask).toHaveBeenCalledTimes(1);
+      expect(coordinator.getCheckpointState(payload.checkpointId)).toBe('idle');
+    });
   });
 
   it('persists cancellation before cooperatively aborting registered Child Actors', async (): Promise<void> => {
@@ -276,6 +365,7 @@ describe('agent coordinator', (): void => {
     await coordinator.cancel(payload.checkpointId, 'user_cancelled');
 
     expect(fixture.cancelCheckpoint).toHaveBeenCalledWith(payload.checkpointId, 'user_cancelled');
+    expect(fixture.cancelTask).toHaveBeenCalledWith(task.taskId, 'user_cancelled');
     expect(fixture.abortTask).toHaveBeenCalledWith(
       task.taskId,
       expect.objectContaining({
@@ -285,6 +375,7 @@ describe('agent coordinator', (): void => {
       })
     );
     expect(fixture.cancelCheckpoint.mock.invocationCallOrder[0]).toBeLessThan(fixture.abortTask.mock.invocationCallOrder[0] as number);
+    expect(fixture.cancelCheckpoint.mock.invocationCallOrder[0]).toBeLessThan(fixture.cancelTask.mock.invocationCallOrder[0] as number);
     expect(coordinator.getCheckpointState(payload.checkpointId)).toBe('terminal');
   });
 });

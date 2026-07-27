@@ -3,6 +3,7 @@
  * @description 消费持久化 delegation.created 事实，幂等授权并排队只读 Child Task。
  */
 import type { ChildActorRegistry } from './child-registry.mjs';
+import type { AgentReadLease, AgentReadScheduler, AgentScheduleRequest } from './scheduler.mjs';
 import type { AgentCheckpointRecord, AgentDelegationRecoverySnapshot, AgentTaskRecord } from './types.mjs';
 import type { AgentDelegationCreatedPayload, AgentTaskError } from 'types/chat-agent';
 import { validateAgentTaskError } from './contracts.mjs';
@@ -31,11 +32,14 @@ export interface AgentCoordinatorDependencies {
    * @returns 推进后的 Checkpoint
    */
   recordPreFailure(task: AgentTaskRecord, error: AgentTaskError): AgentCheckpointRecord;
+  /** 资源范围级共享只读调度器。 */
+  scheduler: AgentReadScheduler;
   /**
-   * 把已授权 Task 交给后续 resource-scope scheduler。
-   * @param taskId - queued(start) Task
+   * lease 获取后的受控执行缝；Task 6 将在此接入 Attempt 与 Child executor。
+   * @param task - queued(start) Task
+   * @param signal - lease 的 cooperative cancellation 信号
    */
-  enqueueTask(taskId: string): void;
+  runTask(task: AgentTaskRecord, signal: AbortSignal): Promise<void>;
   /**
    * 持久化 Checkpoint cooperative cancellation。
    * @param checkpointId - 目标 Checkpoint
@@ -157,6 +161,38 @@ function matchesPayload(payload: AgentDelegationCreatedPayload, recovery: AgentD
 }
 
 /**
+ * 取 Task 与 Turn 截止时间中的较早者。
+ * @param task - 已授权 Task
+ * @param checkpoint - Task 所属 Checkpoint
+ * @returns 覆盖排队与执行的绝对截止时间
+ */
+function resolveDeadline(task: AgentTaskRecord, checkpoint: AgentCheckpointRecord): string {
+  const turnDeadline = checkpoint.continuationSnapshot.absoluteTurnDeadline;
+  if (!task.deadlineAt) return turnDeadline;
+  return Date.parse(task.deadlineAt) <= Date.parse(turnDeadline) ? task.deadlineAt : turnDeadline;
+}
+
+/**
+ * 从冻结计划构造调度器最小请求。
+ * @param task - queued(start) Task
+ * @param checkpoint - Task 所属 Checkpoint
+ * @returns 不含可变 Runtime 状态的请求
+ */
+function createScheduleRequest(task: AgentTaskRecord, checkpoint: AgentCheckpointRecord): AgentScheduleRequest {
+  if (!task.executionPlanSnapshot || task.contractSnapshot.mode !== 'read') {
+    throw new Error('coordinator_execution_plan_missing');
+  }
+  return {
+    taskId: task.taskId,
+    priority: task.priority,
+    deadlineAt: resolveDeadline(task, checkpoint),
+    createdAt: task.createdAt,
+    resourceScopes: task.executionPlanSnapshot.resourceScopes,
+    mode: 'read'
+  };
+}
+
+/**
  * 创建 Main-owned Child Coordinator。
  * @param dependencies - Store、授权器、Registry 和调度入口
  * @returns 幂等 Coordinator
@@ -164,6 +200,7 @@ function matchesPayload(payload: AgentDelegationCreatedPayload, recovery: AgentD
 export function createAgentCoordinator(dependencies: AgentCoordinatorDependencies): AgentCoordinator {
   const executions = new Map<string, CoordinatorExecution>();
   const inFlight = new Map<string, Promise<void>>();
+  const taskRuns = new Map<string, Promise<void>>();
 
   /**
    * 更新一个 Checkpoint 的进程内状态。
@@ -172,6 +209,40 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
    */
   function setState(checkpointId: string, status: AgentCoordinatorState): void {
     executions.set(checkpointId, { status, updatedAt: dependencies.now() });
+  }
+
+  /**
+   * 在取得 lease 后调用受控执行缝，并保证所有退出路径只释放一次。
+   * @param task - 已授权 Task
+   * @param checkpoint - Task 所属 Checkpoint
+   */
+  async function runScheduledTask(task: AgentTaskRecord, checkpoint: AgentCheckpointRecord): Promise<void> {
+    let lease: AgentReadLease | undefined;
+    try {
+      lease = await dependencies.scheduler.enqueue(createScheduleRequest(task, checkpoint));
+      await dependencies.runTask(task, lease.signal);
+    } catch {
+      // Task 6 接入结构化执行结果前，启动失败保持可恢复 idle，不能伪造 Attempt 或终态。
+      if (executions.get(checkpoint.checkpointId)?.status !== 'terminal') {
+        setState(checkpoint.checkpointId, 'idle');
+      }
+    } finally {
+      lease?.release();
+    }
+  }
+
+  /**
+   * 幂等启动一个 Task 的异步 lease 获取与执行。
+   * @param task - queued(start) Task
+   * @param checkpoint - Task 所属 Checkpoint
+   */
+  function startScheduledTask(task: AgentTaskRecord, checkpoint: AgentCheckpointRecord): void {
+    if (taskRuns.has(task.taskId)) return;
+    const execution = runScheduledTask(task, checkpoint);
+    taskRuns.set(task.taskId, execution);
+    execution.then((): void => {
+      if (taskRuns.get(task.taskId) === execution) taskRuns.delete(task.taskId);
+    });
   }
 
   /**
@@ -256,7 +327,7 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
 
     authorizedTasks.forEach((task): void => {
       dependencies.registry.ensureActor(task);
-      dependencies.enqueueTask(task.taskId);
+      startScheduledTask(task, recovery.checkpoint);
     });
     const hasOutstandingWork = authorizedTasks.length > 0 || tasks.some((task): boolean => !settledTaskIds.has(task.taskId) && !isTaskTerminal(task.status));
     setState(payload.checkpointId, latestCheckpoint.status === 'ready_to_resume' || !hasOutstandingWork ? 'terminal' : 'running');
@@ -302,6 +373,7 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
         details: { reason: normalizedReason }
       };
       recovery?.tasks.forEach((task): void => {
+        dependencies.scheduler.cancel(task.taskId, normalizedReason);
         if (dependencies.registry.getActor(task.taskId)) dependencies.registry.abortTask(task.taskId, error);
       });
       setState(checkpointId, 'terminal');
