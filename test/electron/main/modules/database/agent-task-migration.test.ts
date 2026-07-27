@@ -23,7 +23,7 @@ vi.mock('electron', () => ({
 const describeWithSqlite = 'electron' in process.versions ? describe : describe.skip;
 
 /**
- * 创建覆盖 Task、Attempt、Checkpoint、Event 与 Outbox 的最小事实集合。
+ * 创建覆盖 Task、Attempt、Checkpoint、Event、Outbox 与预算预留的最小事实集合。
  */
 async function seedAgentFacts(): Promise<void> {
   await initDatabase();
@@ -108,6 +108,26 @@ async function seedAgentFacts(): Promise<void> {
       '2026-07-23T08:00:00.000Z'
     ]
   );
+  dbExecute(
+    `INSERT INTO chat_agent_budget_reservations (
+      reservation_id, session_id, turn_id, checkpoint_id, task_id, kind,
+      reserved_tokens, reserved_cost_usd, pricing_version, status, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      'budget-task-protected',
+      'session-protected',
+      'turn-protected',
+      'checkpoint-protected',
+      'task-protected',
+      'task',
+      512,
+      0.01,
+      'pricing-v1',
+      'active',
+      '2026-07-23T08:00:00.000Z',
+      '2026-07-23T08:00:00.000Z'
+    ]
+  );
 }
 
 describeWithSqlite('agent task additive migration', (): void => {
@@ -150,10 +170,23 @@ describeWithSqlite('agent task additive migration', (): void => {
     const indexNames = dbSelect<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'index'").map((row): string => row.name);
 
     expect(tableNames).toEqual(
-      expect.arrayContaining(['chat_agent_tasks', 'chat_agent_attempts', 'chat_agent_delegation_checkpoints', 'chat_agent_events', 'chat_agent_outbox'])
+      expect.arrayContaining([
+        'chat_agent_tasks',
+        'chat_agent_attempts',
+        'chat_agent_delegation_checkpoints',
+        'chat_agent_events',
+        'chat_agent_outbox',
+        'chat_agent_budget_reservations'
+      ])
     );
     expect(indexNames).toEqual(
-      expect.arrayContaining(['idx_chat_agent_tasks_checkpoint_tool_call', 'idx_chat_agent_events_aggregate_sequence', 'idx_chat_agent_outbox_delivery'])
+      expect.arrayContaining([
+        'idx_chat_agent_tasks_checkpoint_tool_call',
+        'idx_chat_agent_events_aggregate_sequence',
+        'idx_chat_agent_outbox_delivery',
+        'idx_chat_agent_budget_turn_status',
+        'idx_chat_agent_budget_task'
+      ])
     );
     expect(dbSelect<{ title: string }>('SELECT title FROM chat_sessions WHERE id = ?', ['legacy-session'])).toEqual([{ title: 'Legacy' }]);
   });
@@ -363,14 +396,48 @@ describeWithSqlite('agent task additive migration', (): void => {
     ).toBe(1);
   });
 
-  it.each(['chat_agent_tasks', 'chat_agent_attempts', 'chat_agent_delegation_checkpoints', 'chat_agent_events', 'chat_agent_outbox'])(
-    'rejects physical deletion from %s',
-    async (tableName: string): Promise<void> => {
-      await seedAgentFacts();
+  it('protects budget reservation facts while allowing settlement projection updates', async (): Promise<void> => {
+    await seedAgentFacts();
+    const immutableUpdates = [
+      ['reservation_id', 'budget-rewritten'],
+      ['session_id', 'session-rewritten'],
+      ['turn_id', 'turn-rewritten'],
+      ['checkpoint_id', 'checkpoint-rewritten'],
+      ['task_id', 'task-rewritten'],
+      ['kind', 'resume'],
+      ['reserved_tokens', 1_024],
+      ['reserved_cost_usd', 0.02],
+      ['pricing_version', 'pricing-v2'],
+      ['created_at', '2026-07-23T08:01:00.000Z']
+    ] as const;
 
+    immutableUpdates.forEach(([column, value]): void => {
       expect((): void => {
-        dbExecute(`DELETE FROM ${tableName}`);
-      }).toThrowError(/agent_fact_delete_forbidden/i);
-    }
-  );
+        dbExecute(`UPDATE chat_agent_budget_reservations SET ${column} = ? WHERE reservation_id = ?`, [value, 'budget-task-protected']);
+      }).toThrowError(/agent_budget_immutable/i);
+    });
+    expect(
+      dbExecute(
+        `UPDATE chat_agent_budget_reservations
+         SET used_tokens = ?, used_cost_usd = ?, status = ?, updated_at = ?
+         WHERE reservation_id = ?`,
+        [128, 0.005, 'settled', '2026-07-23T08:01:00.000Z', 'budget-task-protected']
+      ).changes
+    ).toBe(1);
+  });
+
+  it.each([
+    'chat_agent_tasks',
+    'chat_agent_attempts',
+    'chat_agent_delegation_checkpoints',
+    'chat_agent_events',
+    'chat_agent_outbox',
+    'chat_agent_budget_reservations'
+  ])('rejects physical deletion from %s', async (tableName: string): Promise<void> => {
+    await seedAgentFacts();
+
+    expect((): void => {
+      dbExecute(`DELETE FROM ${tableName}`);
+    }).toThrowError(/agent_fact_delete_forbidden/i);
+  });
 });

@@ -15,7 +15,8 @@ type DatabaseTableName =
   | 'chat_agent_attempts'
   | 'chat_agent_delegation_checkpoints'
   | 'chat_agent_events'
-  | 'chat_agent_outbox';
+  | 'chat_agent_outbox'
+  | 'chat_agent_budget_reservations';
 
 interface DatabaseTableInfoRow {
   name: string;
@@ -190,6 +191,33 @@ export function createAgentTables(database: Pick<DatabaseInstance, 'exec'>): voi
       CHECK (attempt_count >= 0)
     );
 
+    CREATE TABLE IF NOT EXISTS chat_agent_budget_reservations (
+      reservation_id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      turn_id TEXT NOT NULL,
+      checkpoint_id TEXT NOT NULL,
+      task_id TEXT,
+      kind TEXT NOT NULL,
+      reserved_tokens INTEGER NOT NULL,
+      reserved_cost_usd REAL NOT NULL,
+      used_tokens INTEGER NOT NULL DEFAULT 0,
+      used_cost_usd REAL,
+      pricing_version TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      CHECK (kind IN ('resume', 'task')),
+      CHECK (reserved_tokens > 0),
+      CHECK (reserved_cost_usd >= 0),
+      CHECK (used_tokens >= 0),
+      CHECK (used_cost_usd IS NULL OR used_cost_usd >= 0),
+      CHECK (status IN ('active', 'settled', 'released')),
+      CHECK (
+        (kind = 'resume' AND task_id IS NULL)
+        OR (kind = 'task' AND task_id IS NOT NULL)
+      )
+    );
+
     CREATE TRIGGER IF NOT EXISTS trg_chat_agent_tasks_immutable
     BEFORE UPDATE OF
       task_id, session_id, turn_id, agent_id, parent_agent_id, root_runtime_id,
@@ -309,6 +337,26 @@ export function createAgentTables(database: Pick<DatabaseInstance, 'exec'>): voi
       SELECT RAISE(ABORT, 'agent_outbox_immutable');
     END;
 
+    CREATE TRIGGER IF NOT EXISTS trg_chat_agent_budget_immutable
+    BEFORE UPDATE OF
+      reservation_id, session_id, turn_id, checkpoint_id, task_id, kind,
+      reserved_tokens, reserved_cost_usd, pricing_version, created_at
+    ON chat_agent_budget_reservations
+    WHEN
+      NEW.reservation_id IS NOT OLD.reservation_id
+      OR NEW.session_id IS NOT OLD.session_id
+      OR NEW.turn_id IS NOT OLD.turn_id
+      OR NEW.checkpoint_id IS NOT OLD.checkpoint_id
+      OR NEW.task_id IS NOT OLD.task_id
+      OR NEW.kind IS NOT OLD.kind
+      OR NEW.reserved_tokens IS NOT OLD.reserved_tokens
+      OR NEW.reserved_cost_usd IS NOT OLD.reserved_cost_usd
+      OR NEW.pricing_version IS NOT OLD.pricing_version
+      OR NEW.created_at IS NOT OLD.created_at
+    BEGIN
+      SELECT RAISE(ABORT, 'agent_budget_immutable');
+    END;
+
     CREATE TRIGGER IF NOT EXISTS trg_chat_agent_tasks_no_delete
     BEFORE DELETE ON chat_agent_tasks
     BEGIN
@@ -339,6 +387,12 @@ export function createAgentTables(database: Pick<DatabaseInstance, 'exec'>): voi
       SELECT RAISE(ABORT, 'agent_fact_delete_forbidden');
     END;
 
+    CREATE TRIGGER IF NOT EXISTS trg_chat_agent_budget_no_delete
+    BEFORE DELETE ON chat_agent_budget_reservations
+    BEGIN
+      SELECT RAISE(ABORT, 'agent_fact_delete_forbidden');
+    END;
+
     CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_agent_tasks_checkpoint_tool_call
     ON chat_agent_tasks(checkpoint_id, tool_call_id);
 
@@ -359,6 +413,13 @@ export function createAgentTables(database: Pick<DatabaseInstance, 'exec'>): voi
 
     CREATE INDEX IF NOT EXISTS idx_chat_agent_outbox_delivery
     ON chat_agent_outbox(delivery_status, created_at ASC);
+
+    CREATE INDEX IF NOT EXISTS idx_chat_agent_budget_turn_status
+    ON chat_agent_budget_reservations(session_id, turn_id, status);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_agent_budget_task
+    ON chat_agent_budget_reservations(task_id)
+    WHERE task_id IS NOT NULL;
   `);
 }
 

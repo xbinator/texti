@@ -313,6 +313,44 @@ function createStartFailedResult(taskId: string): ChatAgentResult {
 }
 
 /**
+ * 创建 cooperative cancellation 返回的结构化终态结果。
+ * @param taskId - 结果所属 Task
+ * @returns 可从 cancelling 汇合的取消结果
+ */
+function createCancelledResult(taskId: string): ChatAgentResult {
+  return {
+    ...createTaskResult(taskId),
+    executionStatus: 'cancelled',
+    completion: {
+      level: 'none',
+      criteria: [
+        {
+          criterionIndex: 0,
+          claim: {
+            status: 'unknown',
+            summary: 'Task stopped after cooperative cancellation.',
+            evidence: []
+          },
+          verification: {
+            status: 'unverified',
+            verifier: 'policy',
+            evidence: []
+          }
+        }
+      ]
+    },
+    summary: 'Child runtime acknowledged cooperative cancellation.',
+    error: {
+      code: 'cancelled',
+      phase: 'runtime',
+      category: 'user',
+      retryable: false,
+      details: { reason: 'user_requested' }
+    }
+  };
+}
+
+/**
  * 把基础只读 Task 推进到 running。
  * @param store - 待操作 Store
  * @param input - Task 初始委派事实
@@ -2322,6 +2360,85 @@ describeWithSqlite('agent delegation store', (): void => {
     });
     expect(store.listEvents('task', 'task-cancel').at(-1)?.type).toBe('task.cancelled');
     expect(store.listEvents('checkpoint', 'checkpoint-cancel').at(-1)?.type).toBe('delegation.completed');
+  });
+
+  it('joins a cooperative Child result into cancelling without scheduling Primary resume', (): void => {
+    const input = createPreparedInput('cancel-result');
+    const task = input.tasks[0];
+    store.prepareDelegation(input, (): undefined => undefined);
+    startTask(store, input);
+    const cancelling = store.cancelCheckpoint({
+      checkpointId: input.checkpoint.checkpointId,
+      reason: 'user_requested',
+      occurredAt
+    });
+    const result = createCancelledResult(task.taskId);
+
+    const cancelled = store.recordTaskResult({
+      taskId: task.taskId,
+      checkpointId: task.checkpointId,
+      toolCallId: task.toolCallId,
+      result,
+      resultHash: hashAgentPayload(result),
+      occurredAt
+    });
+
+    expect(cancelling.status).toBe('cancelling');
+    expect(cancelled).toMatchObject({
+      status: 'cancelled',
+      terminalResults: {
+        [task.toolCallId]: {
+          result,
+          resultHash: hashAgentPayload(result)
+        }
+      }
+    });
+    expect(store.getTask(task.taskId)).toMatchObject({ status: 'cancelled', result });
+    expect(store.getAttempt(`attempt-${task.taskId}`)).toMatchObject({ status: 'cancelled', finishedAt: occurredAt });
+    expect(
+      store
+        .listEvents('checkpoint', input.checkpoint.checkpointId)
+        .slice(-2)
+        .map((event): string => event.type)
+    ).toEqual(['child.result_recorded', 'delegation.completed']);
+    expect(store.listPendingOutbox().filter((record): boolean => record.eventType === 'delegation.ready')).toEqual([]);
+  });
+
+  it('finalizes queued cancelling siblings after the last live Attempt returns', (): void => {
+    const input = createTwoTaskInput('cancel-siblings');
+    const runningTask = input.tasks[0];
+    const queuedTask = input.tasks[1];
+    store.prepareDelegation(input, (): undefined => undefined);
+    startTask(store, input);
+    store.cancelCheckpoint({
+      checkpointId: input.checkpoint.checkpointId,
+      reason: 'user_requested',
+      occurredAt
+    });
+    const result = createCancelledResult(runningTask.taskId);
+
+    const joining = store.recordTaskResult({
+      taskId: runningTask.taskId,
+      checkpointId: input.checkpoint.checkpointId,
+      toolCallId: runningTask.toolCallId,
+      result,
+      resultHash: hashAgentPayload(result),
+      occurredAt
+    });
+    const cancelled = store.cancelCheckpoint({
+      checkpointId: input.checkpoint.checkpointId,
+      reason: 'user_requested',
+      occurredAt
+    });
+
+    expect(joining.status).toBe('cancelling');
+    expect(joining.terminalResults).toHaveProperty(runningTask.toolCallId);
+    expect(cancelled.status).toBe('cancelled');
+    expect(store.getTask(runningTask.taskId)?.status).toBe('cancelled');
+    expect(store.getTask(queuedTask.taskId)?.status).toBe('cancelled');
+    expect(store.getTask(queuedTask.taskId)?.currentAttemptId).toBeUndefined();
+    expect(store.getTask(queuedTask.taskId)?.result).toBeUndefined();
+    expect(store.listPendingOutbox().filter((record): boolean => record.eventType === 'delegation.ready')).toEqual([]);
   });
 
   it('interrupts every nonterminal checkpoint while preserving persisted results', (): void => {

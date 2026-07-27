@@ -191,6 +191,9 @@ function createDependencies(): {
   publish: ReturnType<typeof vi.fn>;
   resolveReadLimits: ReturnType<typeof vi.fn>;
   compileReadPlan: ReturnType<typeof vi.fn>;
+  reserveTask: ReturnType<typeof vi.fn>;
+  releaseBudget: ReturnType<typeof vi.fn>;
+  releaseCheckpoint: ReturnType<typeof vi.fn>;
 } {
   const prepareDelegation = vi.fn((_input, persistAssistant: () => undefined): void => {
     persistAssistant();
@@ -222,6 +225,9 @@ function createDependencies(): {
     budget: { tokenLimit: 800, costLimitUsd: 0.08, pricingVersion: 'test-v1' }
   }));
   const compileReadPlan = vi.fn();
+  const reserveTask = vi.fn();
+  const releaseBudget = vi.fn();
+  const releaseCheckpoint = vi.fn();
   getCheckpoint.mockImplementation((checkpointId: string): AgentCheckpointRecord | null => {
     const preparedInput = prepareDelegation.mock.calls.at(-1)?.[0];
     if (!preparedInput || preparedInput.checkpoint.checkpointId !== checkpointId) return null;
@@ -276,6 +282,14 @@ function createDependencies(): {
       now: (): string => '2026-07-23T00:00:01.000Z',
       resolveReadLimits,
       compileReadPlan,
+      budgetLedger: {
+        reserveResume: vi.fn(),
+        reserveTask,
+        settleAttempt: vi.fn(),
+        releaseTask: releaseBudget,
+        releaseCheckpoint,
+        remainingTurnTokens: vi.fn((): number => 10_000)
+      },
       startPrimaryContinuation
     },
     prepareDelegation,
@@ -301,7 +315,10 @@ function createDependencies(): {
     publishCheckpoint,
     publish,
     resolveReadLimits,
-    compileReadPlan
+    compileReadPlan,
+    reserveTask,
+    releaseBudget,
+    releaseCheckpoint
   };
 }
 
@@ -504,7 +521,43 @@ describe('chat agent delegation service', (): void => {
       occurredAt: '2026-07-23T00:00:01.000Z',
       source: 'coordinator'
     });
+    expect(fixture.reserveTask).toHaveBeenCalledWith(task.taskId, plan.budget);
+    expect(fixture.reserveTask.mock.invocationCallOrder[0]).toBeLessThan(fixture.authorizeTask.mock.invocationCallOrder[0] as number);
+    expect(fixture.releaseBudget).not.toHaveBeenCalled();
     expect(result).toBe(queuedTask);
+  });
+
+  it('releases a Task reservation when the Store cannot freeze the authorized projection', (): void => {
+    const fixture = createDependencies();
+    const service = createChatAgentDelegationService(fixture.dependencies);
+    const input = createInput();
+    input.runtime.tools = [...(input.runtime.tools ?? []), { name: 'read_file', description: 'read a file', parameters: { type: 'object' } }];
+    service.prepareDelegation(input);
+    const prepared = fixture.prepareDelegation.mock.calls[0]?.[0] as PrepareDelegationInput | undefined;
+    if (!prepared) throw new Error('Prepare facts must be captured');
+    const task = createPreparedTask(prepared);
+    const checkpoint: AgentCheckpointRecord = {
+      ...prepared.checkpoint,
+      status: 'waiting_children',
+      version: 1,
+      terminalResults: {},
+      recordState: 'active',
+      createdAt: prepared.occurredAt,
+      updatedAt: prepared.occurredAt
+    };
+    const plan = createReadPlan(task, checkpoint);
+    fixture.getTask.mockReturnValue(task);
+    fixture.compileReadPlan.mockReturnValue({ ok: true, plan });
+    fixture.authorizeTask.mockImplementationOnce((): never => {
+      throw new Error('authorization_write_failed');
+    });
+
+    expect((): void => {
+      service.authorizeReadTask(task.taskId);
+    }).toThrowError('authorization_write_failed');
+
+    expect(fixture.reserveTask).toHaveBeenCalledWith(task.taskId, plan.budget);
+    expect(fixture.releaseBudget).toHaveBeenCalledWith(task.taskId);
   });
 
   it('leaves a Task created when plan compilation fails before the Store boundary', (): void => {
@@ -535,7 +588,7 @@ describe('chat agent delegation service', (): void => {
     expect(task.status).toBe('created');
   });
 
-  it('keeps production authorization fail-closed until a trusted budget and permission provider is injected', (): void => {
+  it('keeps an unconfigured service fail-closed until trusted budget and permission limits are injected', (): void => {
     const fixture = createDependencies();
     delete fixture.dependencies.resolveReadLimits;
     const service = createChatAgentDelegationService(fixture.dependencies);
@@ -681,6 +734,84 @@ describe('chat agent delegation service', (): void => {
     expect(fixture.markOutboxDelivered).not.toHaveBeenCalled();
   });
 
+  it('finalizes a cancelling checkpoint from the Child result without publishing ready', async (): Promise<void> => {
+    const fixture = createDependencies();
+    const service = createChatAgentDelegationService(fixture.dependencies);
+    service.prepareDelegation(createInput());
+    const prepared = fixture.prepareDelegation.mock.calls[0]?.[0] as PrepareDelegationInput | undefined;
+    if (!prepared) throw new Error('Prepare facts must be captured');
+    await vi.waitFor((): void => {
+      expect(fixture.markOutboxDelivered).toHaveBeenCalledOnce();
+    });
+    const baseTask = createPreparedTask(prepared);
+    const plan = createReadPlan(baseTask, {
+      ...prepared.checkpoint,
+      status: 'waiting_children',
+      version: 1,
+      terminalResults: {},
+      recordState: 'active',
+      createdAt: prepared.occurredAt,
+      updatedAt: prepared.occurredAt
+    });
+    const task: AgentTaskRecord = {
+      ...baseTask,
+      executionPlanSnapshot: plan,
+      executionPlanSnapshotHash: plan.planHash,
+      status: 'cancelling',
+      currentAttemptId: 'attempt-1'
+    };
+    const cancelled: AgentCheckpointRecord = {
+      ...prepared.checkpoint,
+      status: 'cancelled',
+      version: 3,
+      terminalResults: {},
+      recordState: 'active',
+      createdAt: prepared.occurredAt,
+      updatedAt: '2026-07-23T00:00:02.000Z'
+    };
+    const result: ChatAgentResult = {
+      ...createTaskResult(),
+      executionStatus: 'cancelled',
+      summary: 'Child acknowledged cancellation.',
+      usage: {
+        ...createTaskResult().usage,
+        monetaryCost: {
+          currency: 'USD',
+          pricingVersion: 'test-v1',
+          estimated: 0.001,
+          actual: 'unknown'
+        }
+      },
+      error: {
+        code: 'cancelled',
+        phase: 'runtime',
+        category: 'user',
+        retryable: false,
+        details: { reason: 'user_cancelled' }
+      }
+    };
+    fixture.getTask.mockReturnValue(task);
+    fixture.recordTaskResult.mockReturnValue(cancelled);
+    fixture.readMessages.mockReturnValue([createAssistant()]);
+    fixture.publish.mockClear();
+    fixture.markOutboxDelivered.mockClear();
+
+    expect(
+      service.recordTaskResult({
+        taskId: task.taskId,
+        checkpointId: task.checkpointId,
+        toolCallId: task.toolCallId,
+        result
+      })
+    ).toBe(cancelled);
+
+    expect(fixture.releaseCheckpoint).toHaveBeenCalledWith(task.checkpointId);
+    expect(fixture.persistAssistant).toHaveBeenCalledWith(expect.objectContaining({ finished: true, loading: false }), task.checkpointId);
+    expect(fixture.publish).not.toHaveBeenCalledWith('delegation.ready', expect.anything());
+    expect(fixture.getOutbox).not.toHaveBeenCalledWith(`delegation.ready:${task.checkpointId}`);
+    expect(service.getContinuationContext(task.checkpointId)).toBeUndefined();
+  });
+
   it('claims and runs one internal Primary continuation with the claimed version as finalize boundary', async (): Promise<void> => {
     const fixture = createDependencies();
     const service = createChatAgentDelegationService(fixture.dependencies);
@@ -758,7 +889,11 @@ describe('chat agent delegation service', (): void => {
         occurredAt: '2026-07-23T00:00:01.000Z'
       });
     });
-    expect(service.getContinuationContext('checkpoint-1')).toBeUndefined();
+    expect(fixture.releaseCheckpoint).toHaveBeenCalledWith('checkpoint-1');
+    expect(fixture.finalizeResume.mock.invocationCallOrder[0]).toBeLessThan(fixture.releaseCheckpoint.mock.invocationCallOrder[0] as number);
+    await vi.waitFor((): void => {
+      expect(service.getContinuationContext('checkpoint-1')).toBeUndefined();
+    });
     expect(fixture.dependencies.locks.getContinuationFence('session:session-1/history')).toBeUndefined();
   });
 
@@ -1048,8 +1183,35 @@ describe('chat agent delegation service', (): void => {
     );
     expect(fixture.publishAssistant.mock.invocationCallOrder[0]).toBeGreaterThan(fixture.persistAssistant.mock.invocationCallOrder.at(-1) ?? 0);
     expect(fixture.publishCheckpoint.mock.invocationCallOrder.at(-1)).toBeGreaterThan(fixture.publishAssistant.mock.invocationCallOrder[0] ?? 0);
+    expect(fixture.releaseCheckpoint).toHaveBeenCalledWith('checkpoint-1');
     expect(service.getContinuationContext('checkpoint-1')).toBeUndefined();
     expect(fixture.dependencies.locks.getContinuationFence('session:session-1/history')).toBeUndefined();
+  });
+
+  it('persists a Coordinator cancellation with its stable machine reason', (): void => {
+    const fixture = createDependencies();
+    const service = createChatAgentDelegationService(fixture.dependencies);
+    service.prepareDelegation(createInput());
+    const preparedInput = fixture.prepareDelegation.mock.calls[0]?.[0];
+    if (!preparedInput) throw new Error('Prepare input must be captured');
+    fixture.cancelCheckpoint.mockReturnValue({
+      ...preparedInput.checkpoint,
+      status: 'cancelled',
+      version: 3,
+      terminalResults: {},
+      recordState: 'active',
+      createdAt: preparedInput.occurredAt,
+      updatedAt: '2026-07-23T00:00:02.000Z'
+    });
+    fixture.readMessages.mockReturnValue([createAssistant()]);
+
+    service.cancelInternal('checkpoint-1', 'schedule_deadline_exceeded');
+
+    expect(fixture.cancelCheckpoint).toHaveBeenCalledWith({
+      checkpointId: 'checkpoint-1',
+      reason: 'schedule_deadline_exceeded',
+      occurredAt: '2026-07-23T00:00:01.000Z'
+    });
   });
 
   it('keeps the cancellation fence when source assistant persistence fails and finishes on retry', (): void => {

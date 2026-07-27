@@ -3,11 +3,14 @@
  * @description Child Agent 委派契约校验、原子 prepare、continuation fence 与启动恢复服务。
  */
 import type {
+  AgentAttemptProjection,
   AgentCheckpointRecord,
   AgentDelegationStore,
   AgentOutboxRecord,
   AgentStoreDatabase,
   AgentTaskRecord,
+  BeginAgentAttemptInput,
+  MarkAgentAttemptInput,
   PrepareAgentTaskInput,
   PrepareDelegationInput
 } from './types.mjs';
@@ -24,6 +27,8 @@ import type {
   AgentModelSnapshot,
   AgentOrderedToolCallSnapshot,
   AgentTaskError,
+  AgentUsageAccounting,
+  ChatAgentResult,
   ChatAgentResumePrimaryInput,
   ChatAgentResumeResult,
   DelegateTaskInput
@@ -32,11 +37,14 @@ import type { ChatRuntimeAddress } from 'types/chat-runtime';
 import { BrowserWindow } from 'electron';
 import { nanoid } from 'nanoid';
 import { getToolRegistryEntry } from '../../../../../shared/ai/tools/index.js';
+import { aiService } from '../../ai/service.mjs';
 import { dbExecute, dbSelect, transaction } from '../../database/service.mjs';
 import { chatRuntimeLocks, getSessionHistoryScope, type RuntimeContinuationFenceHandle, type RuntimeLockRegistry } from '../runtime/infrastructure/locks.mjs';
 import { finishAssistantMessageInterrupted } from '../runtime/messages/finalizer.mjs';
+import { createDefaultChatModelResolver } from '../runtime/model/resolver.mjs';
 import { getRuntimeTaskDeadlineAt } from '../runtime/task-clock.mjs';
 import { chatSessionManager } from '../service.mjs';
+import { createAgentBudgetLedger, type AgentBudgetLedger } from './budget.mjs';
 import { createChildActorRegistry } from './child-registry.mjs';
 import {
   AGENT_CHECKPOINT_SCHEMA_VERSION,
@@ -48,6 +56,7 @@ import {
   validateFoundationContract
 } from './contracts.mjs';
 import { createAgentCoordinator, type AgentCoordinator } from './coordinator.mjs';
+import { createChildRuntimeExecutor } from './executor.mjs';
 import { compileAgentPlan, type AgentPlanCompileInput, type AgentPlanCompileResult } from './plan-compiler.mjs';
 import { resolveAgentScopes } from './resource-scopes.mjs';
 import { validateAgentResult } from './result.mjs';
@@ -177,6 +186,8 @@ export interface ChatAgentDelegationServiceDependencies {
    * @returns 不接受 Renderer 覆盖的当前上限
    */
   resolveReadLimits?: (task: AgentTaskRecord, checkpoint: AgentCheckpointRecord, context: ContinuationRuntimeContext) => ChatAgentReadPlanLimits;
+  /** Main-owned 持久化 Turn/Task 预算账本；生产授权必须注入。 */
+  budgetLedger?: AgentBudgetLedger;
   /**
    * 使用主进程 registry 与 policy 编译计划。
    * @param input - 持久化事实和可信授权上限
@@ -250,6 +261,13 @@ export interface ChatAgentDelegationService {
    * @returns 当前公开 Checkpoint 投影
    */
   cancelCheckpoint(input: ChatAgentCancelCheckpointInput): ChatAgentCheckpointSnapshot;
+  /**
+   * 由可信 Main 协调器使用稳定机器原因持久化 cooperative cancellation。
+   * @param checkpointId - 目标 Checkpoint
+   * @param reason - 不依赖展示文本的机器原因
+   * @returns 当前公开 Checkpoint 投影
+   */
+  cancelInternal(checkpointId: string, reason: string): ChatAgentCheckpointSnapshot;
   /**
    * 读取进程内 allowlist continuation context。
    * @param checkpointId - Checkpoint ID
@@ -494,6 +512,20 @@ function isSettledStatus(
 /** 首版 Child Runtime 显式允许的本地纯读工具。 */
 const CHILD_READ_TOOL_NAMES = new Set(['glob', 'grep', 'read_directory', 'read_file']);
 
+/** Main-owned 单 Turn Child/Primary 共享 token ceiling。 */
+const DEFAULT_TURN_BUDGET: AgentBudgetSnapshot = Object.freeze({
+  tokenLimit: 32_768,
+  costLimitUsd: 0,
+  pricingVersion: 'unknown'
+});
+
+/** 首版单个 Child Task 的最大 token 预留。 */
+const DEFAULT_CHILD_BUDGET: AgentBudgetSnapshot = Object.freeze({
+  tokenLimit: 4_096,
+  costLimitUsd: 0,
+  pricingVersion: 'unknown'
+});
+
 /**
  * 在层级预算账本接入前拒绝生产默认授权。
  * @param task - 当前 Task
@@ -713,9 +745,15 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
       occurredAt: dependencies.now(),
       ...(runtimeResult.outcome === 'failed' ? { error: runtimeResult.error } : {})
     });
-    // finalize 成功证明 assistant 已安全终态化；此前绝不释放 history fence。
+    const [budgetRelease] = await Promise.allSettled([
+      Promise.resolve().then((): void => {
+        dependencies.budgetLedger?.releaseCheckpoint(claimed.checkpointId);
+      })
+    ]);
+    // finalize 成功证明 assistant 已安全终态化；预算释放失败留给恢复，但不能继续占用 history fence。
     releaseContinuation(claimed.checkpointId);
     publishCheckpointSnapshot(finalized);
+    if (budgetRelease.status === 'rejected') throw budgetRelease.reason;
   }
 
   /**
@@ -854,13 +892,19 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
       budget: limits.budget
     });
     if (!compiled.ok) throw new ChatAgentDelegationError(compiled.error);
-    return dependencies.store.authorizeTask({
-      taskId: task.taskId,
-      executionPlanSnapshot: compiled.plan,
-      executionPlanSnapshotHash: compiled.plan.planHash,
-      occurredAt: dependencies.now(),
-      source: 'coordinator'
-    });
+    dependencies.budgetLedger?.reserveTask(task.taskId, compiled.plan.budget);
+    try {
+      return dependencies.store.authorizeTask({
+        taskId: task.taskId,
+        executionPlanSnapshot: compiled.plan,
+        executionPlanSnapshotHash: compiled.plan.planHash,
+        occurredAt: dependencies.now(),
+        source: 'coordinator'
+      });
+    } catch (error) {
+      dependencies.budgetLedger?.releaseTask(task.taskId);
+      throw error;
+    }
   }
 
   /**
@@ -872,20 +916,10 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
   }
 
   /**
-   * 持久化 cooperative cancellation，并在 Store 安全终态后关闭 source assistant。
-   * @param input - 最小取消输入
-   * @returns 当前公开 Checkpoint
+   * 终态化 cancelled Checkpoint 的 source assistant、预算和 continuation fence。
+   * @param checkpoint - Store 已持久化的 cancelled Checkpoint
    */
-  function cancelCheckpoint(input: ChatAgentCancelCheckpointInput): ChatAgentCheckpointSnapshot {
-    const checkpoint = dependencies.store.cancelCheckpoint({
-      checkpointId: input.checkpointId,
-      reason: 'user_cancelled',
-      occurredAt: dependencies.now()
-    });
-    if (checkpoint.status !== 'cancelled') {
-      return publishCheckpointSnapshot(checkpoint);
-    }
-
+  function finishCancellation(checkpoint: AgentCheckpointRecord): void {
     const sourceAssistant = dependencies
       .readMessages(checkpoint.sessionId)
       .find((message): boolean => message.id === checkpoint.assistantMessageId && message.role === 'assistant');
@@ -896,9 +930,40 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
     finishAssistantMessageInterrupted(interruptedAssistant);
     dependencies.persistAssistant(interruptedAssistant, checkpoint.checkpointId);
     dependencies.publishAssistant(interruptedAssistant, checkpoint);
-    // Store cancellation 与 assistant 终态都已持久化并广播后，才允许释放历史 fence。
+    dependencies.budgetLedger?.releaseCheckpoint(checkpoint.checkpointId);
+    // Store cancellation、assistant 终态和预算释放都已持久化并广播后，才允许释放历史 fence。
     releaseContinuation(checkpoint.checkpointId);
+  }
+
+  /**
+   * 使用可信机器原因持久化 cooperative cancellation，并在 Store 安全终态后关闭 source assistant。
+   * @param checkpointId - 目标 Checkpoint
+   * @param reason - 稳定机器原因
+   * @returns 当前公开 Checkpoint
+   */
+  function cancelWithReason(checkpointId: string, reason: string): ChatAgentCheckpointSnapshot {
+    const normalizedReason = reason.trim();
+    if (!normalizedReason) throw createFenceError(checkpointId, 'cancel_reason_invalid');
+    const checkpoint = dependencies.store.cancelCheckpoint({
+      checkpointId,
+      reason: normalizedReason,
+      occurredAt: dependencies.now()
+    });
+    if (checkpoint.status !== 'cancelled') {
+      return publishCheckpointSnapshot(checkpoint);
+    }
+
+    finishCancellation(checkpoint);
     return publishCheckpointSnapshot(checkpoint);
+  }
+
+  /**
+   * 持久化 Renderer 发起的 cooperative cancellation。
+   * @param input - 最小取消输入
+   * @returns 当前公开 Checkpoint
+   */
+  function cancelCheckpoint(input: ChatAgentCancelCheckpointInput): ChatAgentCheckpointSnapshot {
+    return cancelWithReason(input.checkpointId, 'user_cancelled');
   }
 
   return {
@@ -1057,6 +1122,11 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
         resultHash: validation.resultHash,
         occurredAt
       });
+      if (checkpoint.status === 'cancelled') {
+        finishCancellation(checkpoint);
+        publishCheckpointSnapshot(checkpoint);
+        return checkpoint;
+      }
       publishCheckpointSnapshot(checkpoint);
       if (checkpoint.status !== 'ready_to_resume') return checkpoint;
 
@@ -1072,6 +1142,10 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
     listActive,
 
     cancelCheckpoint,
+
+    cancelInternal(checkpointId: string, reason: string): ChatAgentCheckpointSnapshot {
+      return cancelWithReason(checkpointId, reason);
+    },
 
     getContinuationContext(checkpointId: string): ContinuationRuntimeContext | undefined {
       const context = continuationContexts.get(checkpointId);
@@ -1185,21 +1259,36 @@ function publishAssistant(message: ChatMessageRecord, checkpoint: AgentCheckpoin
 /** 主进程默认 Agent Store，供 Service 与 Coordinator 共享同一事实源。 */
 const defaultAgentStore = createAgentDelegationStore(agentStoreDatabase);
 
+/** 主进程默认持久化 Turn/Checkpoint/Task 预算账本。 */
+const defaultBudgetLedger = createAgentBudgetLedger({
+  database: agentStoreDatabase,
+  resolveTurnBudget: (): AgentBudgetSnapshot => DEFAULT_TURN_BUDGET,
+  now: (): string => new Date().toISOString()
+});
+
 /** 主进程默认稳定 Child Actor 注册表。 */
 const defaultChildRegistry = createChildActorRegistry();
 
 /** 主进程默认共享只读资源调度器。 */
 const defaultReadScheduler = createAgentReadScheduler();
 
+/** 主进程默认冻结模型解析器。 */
+const defaultChildModelResolver = createDefaultChatModelResolver();
+
 /** 模块初始化完成后由默认内部 Outbox consumer 使用的 Coordinator。 */
 let defaultCoordinator: AgentCoordinator | null = null;
 
 /**
- * 在 Child executor 接线前保持生产启动路径关闭。
- * @returns 始终拒绝的 fail-closed Promise
+ * 返回当前 Main registry 中实际可执行的本地 pure-read 工具。
+ * @returns 已排序的安全工具集合
  */
-function rejectChildStart(): Promise<void> {
-  return Promise.reject(new Error('child_executor_not_available'));
+function listChildReadTools(): string[] {
+  return [...CHILD_READ_TOOL_NAMES]
+    .filter((toolName): boolean => {
+      const entry = getToolRegistryEntry(toolName);
+      return entry?.runtime === 'main' && entry.executionClass === 'direct' && entry.effect.effect === 'pure_read';
+    })
+    .sort();
 }
 
 /** 主进程默认 Child Agent 委派服务。 */
@@ -1227,10 +1316,35 @@ export const chatAgentDelegationService = createChatAgentDelegationService({
     return `${kind}-${nanoid()}`;
   },
   now: (): string => new Date().toISOString(),
+  resolveReadLimits(task: AgentTaskRecord, checkpoint: AgentCheckpointRecord, context: ContinuationRuntimeContext): ChatAgentReadPlanLimits {
+    if (task.checkpointId !== checkpoint.checkpointId || checkpoint.status !== 'waiting_children' || !context.workspaceRoot) {
+      return resolveDefaultLimits(task, checkpoint, context);
+    }
+    return {
+      availableToolNames: listChildReadTools(),
+      permissionScopeIds: ['workspace:read'],
+      budget: DEFAULT_CHILD_BUDGET
+    };
+  },
+  budgetLedger: defaultBudgetLedger,
   async startPrimaryContinuation(input: ChatAgentPrimaryContinuationInput): Promise<ChatAgentPrimaryContinuationResult> {
     const { chatRuntimeService } = await import('../runtime/service.mjs');
     return chatRuntimeService.resumePrimary(input);
   }
+});
+
+/** 主进程默认无消息持久化 Child executor。 */
+const defaultChildExecutor = createChildRuntimeExecutor({
+  resolver: defaultChildModelResolver,
+  streamText: aiService.streamText.bind(aiService),
+  resolveWorkspaceRoot: (checkpointId: string): string | undefined => chatAgentDelegationService.getContinuationContext(checkpointId)?.workspaceRoot,
+  calculateCost: (): AgentUsageAccounting['monetaryCost'] => ({
+    currency: 'unknown',
+    pricingVersion: 'unknown',
+    estimated: 'unknown',
+    actual: 'unknown'
+  }),
+  now: (): number => Date.now()
 });
 
 /** 主进程默认 Coordinator；Actor 创建和授权只消费持久化事实。 */
@@ -1238,11 +1352,24 @@ export const chatAgentCoordinator = createAgentCoordinator({
   listActive: () => defaultAgentStore.listActive(),
   authorizeReadTask: (taskId: string): AgentTaskRecord => chatAgentDelegationService.authorizeReadTask(taskId),
   recordPreFailure: (task: AgentTaskRecord, error: AgentTaskError): AgentCheckpointRecord => chatAgentDelegationService.recordPreFailure(task, error),
+  reserveResume: (checkpointId: string, budget: AgentBudgetSnapshot): void => defaultBudgetLedger.reserveResume(checkpointId, budget),
   scheduler: defaultReadScheduler,
-  runTask: rejectChildStart,
-  cancelCheckpoint(checkpointId: string, reason: string): void {
+  beginAttempt: (input: BeginAgentAttemptInput): AgentAttemptProjection => defaultAgentStore.beginAttempt(input),
+  markAttemptRunning: (input: MarkAgentAttemptInput): AgentAttemptProjection => defaultAgentStore.markAttemptRunning(input),
+  recordTaskResult: (task: AgentTaskRecord, result: ChatAgentResult): AgentCheckpointRecord =>
+    chatAgentDelegationService.recordTaskResult({
+      taskId: task.taskId,
+      checkpointId: task.checkpointId,
+      toolCallId: task.toolCallId,
+      result
+    }),
+  settleTask: (taskId: string, usage: AgentUsageAccounting): void => defaultBudgetLedger.settleAttempt(taskId, usage),
+  releaseBudget: (taskId: string): void => defaultBudgetLedger.releaseTask(taskId),
+  executor: defaultChildExecutor,
+  createRuntimeId: (task: AgentTaskRecord): string => `runtime-${task.taskId}-${nanoid()}`,
+  cancelCheckpoint(checkpointId: string, reason: string): ChatAgentCheckpointSnapshot {
     if (!reason.trim()) throw new Error('agent_coordinator_cancel_reason_invalid');
-    chatAgentDelegationService.cancelCheckpoint({ checkpointId });
+    return chatAgentDelegationService.cancelInternal(checkpointId, reason);
   },
   now: (): string => new Date().toISOString(),
   registry: defaultChildRegistry

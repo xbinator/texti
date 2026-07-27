@@ -1828,10 +1828,11 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
   }
 
   /**
-   * 把一个已写入 Task 的终态结果汇合到 Checkpoint，并在完整时创建 ready Outbox。
+   * 把一个已写入 Task 的终态结果汇合到 Checkpoint。
+   * 正常等待在结果齐备时创建 ready Outbox；取消中的 Checkpoint 只汇合结果并终止，不触发 Primary 续接。
    * 调用方必须处于同一 Store 事务中。
    * @param task - 结果所属 Task
-   * @param checkpoint - 仍在等待 Child 的 Checkpoint
+   * @param checkpoint - 仍在等待 Child 或取消回执的 Checkpoint
    * @param result - 已规范化 Task 结果
    * @param resultHash - canonical 结果 hash
    * @param occurredAt - 汇合时间
@@ -1846,7 +1847,8 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
     occurredAt: string,
     source: Extract<ChatAgentEventSource, 'child' | 'coordinator'>
   ): AgentCheckpointRecord {
-    if (checkpoint.status !== 'waiting_children' || checkpoint.terminalResults[task.toolCallId]) {
+    const acceptsResults = checkpoint.status === 'waiting_children' || checkpoint.status === 'cancelling';
+    if (!acceptsResults || checkpoint.terminalResults[task.toolCallId]) {
       throw new AgentStoreProtocolError('checkpoint_not_waiting', 'Checkpoint is not accepting a new Task result');
     }
     const terminalResults = {
@@ -1854,18 +1856,23 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       [task.toolCallId]: { result, resultHash }
     };
     const allTerminal = checkpoint.continuationSnapshot.orderedToolCalls.every((toolCall): boolean => terminalResults[toolCall.toolCallId] !== undefined);
-    const nextStatus: AgentCheckpointStatus = allTerminal ? 'ready_to_resume' : 'waiting_children';
+    let nextStatus: AgentCheckpointStatus = checkpoint.status;
+    if (checkpoint.status === 'cancelling' && allTerminal) nextStatus = 'cancelled';
+    if (checkpoint.status === 'waiting_children' && allTerminal) nextStatus = 'ready_to_resume';
+    if (nextStatus !== checkpoint.status && !canTransitionCheckpoint(checkpoint.status, nextStatus)) {
+      throw new AgentStoreProtocolError('checkpoint_result_transition_invalid', 'Checkpoint cannot finish after joining this Task result');
+    }
     const checkpointUpdate = this.database.execute(
       `UPDATE chat_agent_delegation_checkpoints
        SET terminal_results_json = ?, status = ?, version = version + 1, updated_at = ?
        WHERE checkpoint_id = ? AND status = ? AND version = ? AND record_state = ?`,
-      [JSON.stringify(terminalResults), nextStatus, occurredAt, checkpoint.checkpointId, 'waiting_children', checkpoint.version, 'active']
+      [JSON.stringify(terminalResults), nextStatus, occurredAt, checkpoint.checkpointId, checkpoint.status, checkpoint.version, 'active']
     );
     if (checkpointUpdate.changes !== 1) {
       throw new AgentStoreProtocolError('checkpoint_result_conflict', 'Checkpoint result projection changed concurrently');
     }
     this.appendEvent('checkpoint', checkpoint.checkpointId, 'child.result_recorded', { toolCallId: task.toolCallId, resultHash }, occurredAt, source);
-    if (allTerminal) {
+    if (allTerminal && checkpoint.status === 'waiting_children') {
       this.appendEvent(
         'checkpoint',
         checkpoint.checkpointId,
@@ -1901,6 +1908,8 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       if (outboxInsert.changes !== 1) {
         throw new AgentStoreProtocolError('ready_outbox_write_failed', 'Ready Outbox was not created with the terminal result');
       }
+    } else if (allTerminal) {
+      this.appendEvent('checkpoint', checkpoint.checkpointId, 'delegation.completed', { outcome: 'cancelled' }, occurredAt, 'coordinator');
     }
     const updated = this.getCheckpoint(checkpoint.checkpointId);
     if (!updated) throw new AgentStoreProtocolError('checkpoint_projection_missing', 'Updated Checkpoint is missing');
@@ -1995,7 +2004,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       ) {
         throw new AgentStoreProtocolError('result_attempt_invalid', 'Current Attempt identity, plan, or status is invalid');
       }
-      if (checkpoint.status !== 'waiting_children') {
+      if (checkpoint.status !== 'waiting_children' && checkpoint.status !== 'cancelling') {
         throw new AgentStoreProtocolError('checkpoint_not_waiting', 'Checkpoint is not accepting Task results');
       }
 
