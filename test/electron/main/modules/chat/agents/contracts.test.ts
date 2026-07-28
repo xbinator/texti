@@ -758,6 +758,37 @@ describe('foundation delegation contract', (): void => {
     ).toMatchObject({ ok: false });
   });
 
+  it('validates only the public journal cancellation identity payload', (): void => {
+    const event = {
+      eventId: 'event-journal-cancelled',
+      aggregate: { kind: 'task', id: 'task-1' },
+      taskId: 'task-1',
+      attemptId: 'attempt-1',
+      runtimeId: 'runtime-1',
+      sequence: 3,
+      type: 'commit.journal_cancelled',
+      occurredAt: '2026-07-23T08:00:00.000Z',
+      source: 'coordinator',
+      schemaVersion: 1,
+      payload: {
+        journalId: 'journal-1',
+        changesetId: 'changeset-1'
+      }
+    };
+
+    expect(validateChatAgentEvent(event)).toMatchObject({ ok: true });
+    expect(
+      validateChatAgentEvent({
+        ...event,
+        payload: {
+          ...event.payload,
+          candidateReference: 'agent-runtime/journals/private-candidate'
+        }
+      })
+    ).toMatchObject({ ok: false });
+    expect(validateChatAgentEvent({ ...event, payload: { journalId: 'journal-1' } })).toMatchObject({ ok: false });
+  });
+
   it('validates canonical pre-Attempt cancellation without accepting invented execution facts', (): void => {
     const validateCancellation = (agentContracts as CancellationContracts).validatePreAttemptCancellation;
 

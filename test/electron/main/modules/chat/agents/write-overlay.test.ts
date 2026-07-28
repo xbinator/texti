@@ -20,7 +20,7 @@ import {
   validateExecutionPlanSnapshot,
   validateFoundationContract
 } from '../../../../../../electron/main/modules/chat/agents/contracts.mjs';
-import { createAgentWriteOverlay, type AgentWriteOverlay } from '../../../../../../electron/main/modules/chat/agents/write-overlay.mjs';
+import { createAgentWriteOverlay, discardTaskOverlay, type AgentWriteOverlay } from '../../../../../../electron/main/modules/chat/agents/write-overlay.mjs';
 
 /** 测试创建并负责清理的临时根目录。 */
 const temporaryRoots: string[] = [];
@@ -184,6 +184,90 @@ afterEach(async (): Promise<void> => {
 });
 
 describe('agent write overlay', (): void => {
+  it('discards only one exact Attempt overlay and preserves siblings byte-for-byte', async (): Promise<void> => {
+    const roots = await createRoots();
+    const targetAttempt = path.join(roots.overlayRoot, 'task-target', 'attempt-target');
+    const siblingAttempt = path.join(roots.overlayRoot, 'task-target', 'attempt-sibling');
+    const neighborAttempt = path.join(roots.overlayRoot, 'task-neighbor', 'attempt-neighbor');
+    await Promise.all([
+      fs.mkdir(targetAttempt, { recursive: true }),
+      fs.mkdir(siblingAttempt, { recursive: true }),
+      fs.mkdir(neighborAttempt, { recursive: true })
+    ]);
+    await Promise.all([
+      fs.writeFile(path.join(targetAttempt, 'candidate'), 'delete-me', 'utf8'),
+      fs.writeFile(path.join(siblingAttempt, 'candidate'), 'keep-sibling', 'utf8'),
+      fs.writeFile(path.join(neighborAttempt, 'candidate'), 'keep-neighbor', 'utf8')
+    ]);
+
+    await discardTaskOverlay({
+      overlayRoot: roots.overlayRoot,
+      taskId: 'task-target',
+      attemptId: 'attempt-target'
+    });
+
+    await expect(fs.access(targetAttempt)).rejects.toThrow();
+    await expect(fs.readFile(path.join(siblingAttempt, 'candidate'), 'utf8')).resolves.toBe('keep-sibling');
+    await expect(fs.readFile(path.join(neighborAttempt, 'candidate'), 'utf8')).resolves.toBe('keep-neighbor');
+  });
+
+  it.each([
+    { taskId: '../task', attemptId: 'attempt' },
+    { taskId: 'task/nested', attemptId: 'attempt' },
+    { taskId: '/absolute-task', attemptId: 'attempt' },
+    { taskId: 'task', attemptId: '../attempt' },
+    { taskId: 'task', attemptId: 'attempt/nested' },
+    { taskId: 'task', attemptId: '/absolute-attempt' }
+  ])('rejects unsafe cleanup identity segments %#', async ({ taskId, attemptId }): Promise<void> => {
+    const roots = await createRoots();
+
+    await expect(
+      discardTaskOverlay({
+        overlayRoot: roots.overlayRoot,
+        taskId,
+        attemptId
+      })
+    ).rejects.toMatchObject({
+      details: { reason: 'overlay_cleanup_identity_invalid' }
+    });
+  });
+
+  it('rejects task and Attempt symlinks without deleting their external targets', async (): Promise<void> => {
+    const roots = await createRoots();
+    const externalTask = path.join(roots.root, 'external-task');
+    const externalAttempt = path.join(roots.root, 'external-attempt');
+    await Promise.all([fs.mkdir(externalTask), fs.mkdir(externalAttempt)]);
+    await Promise.all([
+      fs.writeFile(path.join(externalTask, 'keep'), 'task-target', 'utf8'),
+      fs.writeFile(path.join(externalAttempt, 'keep'), 'attempt-target', 'utf8')
+    ]);
+    await fs.symlink(externalTask, path.join(roots.overlayRoot, 'task-link'));
+    await expect(
+      discardTaskOverlay({
+        overlayRoot: roots.overlayRoot,
+        taskId: 'task-link',
+        attemptId: 'attempt'
+      })
+    ).rejects.toMatchObject({
+      details: { reason: 'overlay_cleanup_symlink_denied' }
+    });
+
+    const realTask = path.join(roots.overlayRoot, 'task-real');
+    await fs.mkdir(realTask);
+    await fs.symlink(externalAttempt, path.join(realTask, 'attempt-link'));
+    await expect(
+      discardTaskOverlay({
+        overlayRoot: roots.overlayRoot,
+        taskId: 'task-real',
+        attemptId: 'attempt-link'
+      })
+    ).rejects.toMatchObject({
+      details: { reason: 'overlay_cleanup_symlink_denied' }
+    });
+    await expect(fs.readFile(path.join(externalTask, 'keep'), 'utf8')).resolves.toBe('task-target');
+    await expect(fs.readFile(path.join(externalAttempt, 'keep'), 'utf8')).resolves.toBe('attempt-target');
+  });
+
   it('keeps the real workspace unchanged and prepares canonical replace integrity facts', async (): Promise<void> => {
     const roots = await createRoots();
     const targetPath = path.join(roots.workspaceRoot, 'notes.md');

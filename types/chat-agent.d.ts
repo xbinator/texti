@@ -541,7 +541,7 @@ export type AgentConfirmationDecision = {
 };
 
 /** commit journal 可变协议状态。 */
-export type AgentCommitJournalStatus = 'created' | 'applying' | 'applied' | 'finalized' | 'cancelled' | 'manual_recovery';
+export type AgentCommitJournalStatus = 'created' | 'applying' | 'applied' | 'finalized' | 'cancelled' | 'failed' | 'manual_recovery';
 
 /** changeset 的不可变快照与可变状态投影。 */
 export interface AgentChangesetRecord {
@@ -756,6 +756,7 @@ export type ChatAgentEventType =
   | 'tool.completed'
   | 'changeset.prepared'
   | 'commit.journal_created'
+  | 'commit.journal_cancelled'
   | 'commit.mutation_applied'
   | 'commit.finalized'
   | 'protocol.error'
@@ -787,6 +788,7 @@ export type ChatAgentTaskEventType =
   | 'tool.completed'
   | 'changeset.prepared'
   | 'commit.journal_created'
+  | 'commit.journal_cancelled'
   | 'commit.mutation_applied'
   | 'commit.finalized'
   | 'protocol.error'
@@ -834,6 +836,8 @@ export interface ChatAgentEventPayloadMap {
   'changeset.prepared': { changesetId: string; snapshotHash: string; diffHash: string };
   /** commit journal 已创建。 */
   'commit.journal_created': { journalId: string; changesetId: string; intentHash: string; confirmationVersion: number };
+  /** 未开始外部 mutation 的 commit journal 已安全取消。 */
+  'commit.journal_cancelled': { journalId: string; changesetId: string };
   /** 单个外部变更已应用。 */
   'commit.mutation_applied': { journalId: string; operationId: string; targetHash: string };
   /** commit journal 已验证并结束。 */

@@ -1222,6 +1222,50 @@ describe('Agent Task Detail projector', (): void => {
     expect(JSON.stringify(detail.timeline)).not.toMatch(/private-event|private-path|private-hash|timeline-private|targetPath|resultHash/);
   });
 
+  it('maps journal cancellation to one redacted public commit code', (): void => {
+    const projection = createProjection({ suffix: 'detail-journal-cancelled' });
+    const event = {
+      eventId: 'private-journal-cancel-event',
+      aggregate: { kind: 'task' as const, id: projection.task.taskId },
+      taskId: projection.task.taskId,
+      checkpointId: projection.task.checkpointId,
+      sequence: 8,
+      attemptId: projection.currentAttempt?.attemptId,
+      runtimeId: projection.currentAttempt?.currentRuntimeId,
+      type: 'commit.journal_cancelled',
+      occurredAt: '2026-07-28T08:00:04.000Z',
+      source: 'coordinator' as const,
+      schemaVersion: 1,
+      payload: {
+        journalId: 'private-journal-id',
+        changesetId: 'private-changeset-id'
+      }
+    };
+    const projector = createDetailProjector({
+      ...projection,
+      events: [...projection.events, event as unknown as ChatAgentEvent],
+      taskSequence: 8
+    });
+
+    const detail = projector.projectDetail('session-projector', projection.task.taskId);
+
+    expect(detail).toMatchObject({
+      recordState: 'active',
+      timeline: {
+        entries: [
+          expect.objectContaining({ sequence: 7 }),
+          {
+            sequence: 8,
+            type: 'commit',
+            code: 'journal_cancelled',
+            occurredAt: '2026-07-28T08:00:04.000Z'
+          }
+        ]
+      }
+    });
+    expect(JSON.stringify(detail)).not.toMatch(/private-journal-id|private-changeset-id|private-journal-cancel-event/);
+  });
+
   it('fails closed for a gapped timeline or a last sequence mismatch', (): void => {
     const projection = createProjection({ suffix: 'detail-gap' });
     const projectorWithGap = createDetailProjector({
@@ -1370,6 +1414,7 @@ describe('Agent Task Detail projector', (): void => {
 
   it.each([
     ['manual_recovery', 'recovery_required'],
+    ['failed', 'recovery_required'],
     ['finalized', 'finalized'],
     ['applied', 'mutation_applied'],
     ['created', 'journal_created'],

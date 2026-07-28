@@ -4,6 +4,7 @@
  */
 import { readFileSync } from 'node:fs';
 import type { AgentConfirmationQueue } from '../../../../../../electron/main/modules/chat/agents/confirmation-store.mjs';
+import type { AgentJournalRecoveryResult } from '../../../../../../electron/main/modules/chat/agents/file-commit.mjs';
 import type {
   AgentCheckpointRecord,
   AgentDelegationRecoverySnapshot,
@@ -188,7 +189,8 @@ function createDependencies(
   publish: ReturnType<typeof vi.fn>;
   markOutboxDelivered: ReturnType<typeof vi.fn>;
   revokeTask: ReturnType<typeof vi.fn>;
-  discardWriteOverlays: ReturnType<typeof vi.fn>;
+  discardTaskOverlay: ReturnType<typeof vi.fn>;
+  finalizeCommitCancellation: ReturnType<typeof vi.fn>;
   recoveryOrder: string[];
 } {
   let active = initialActive;
@@ -217,6 +219,10 @@ function createDependencies(
     outboxes = outboxes.map((outbox): AgentOutboxRecord => (outbox.outboxId === input.outboxId ? delivered : outbox));
     return delivered;
   });
+  const finalizeCommitCancellation = vi.fn((input: { journalId: string }): AgentCheckpointRecord => {
+    recoveryOrder.push(`finalize:${input.journalId}`);
+    return { ...createCheckpoint(), status: 'cancelling' };
+  });
   const store: ChatAgentDelegationStore = {
     prepareDelegation: vi.fn(),
     authorizeTask: vi.fn(),
@@ -231,6 +237,7 @@ function createDependencies(
     finalizeResume: vi.fn(),
     cancelCheckpoint: vi.fn(),
     finalizeCancellation: vi.fn(),
+    finalizeCommitCancellation,
     interruptCheckpoint: vi.fn(),
     interruptActive,
     listEvents: vi.fn(() => []),
@@ -258,8 +265,8 @@ function createDependencies(
     listPending: vi.fn(() => []),
     recover: vi.fn()
   };
-  const discardWriteOverlays = vi.fn(async (): Promise<void> => {
-    recoveryOrder.push('discard-unjournaled-overlays');
+  const discardTaskOverlay = vi.fn(async (input: { taskId: string; attemptId: string }): Promise<void> => {
+    recoveryOrder.push(`discard:${input.taskId}:${input.attemptId}`);
   });
   return {
     dependencies: {
@@ -277,7 +284,7 @@ function createDependencies(
       dispatchInternal,
       publishCheckpoint: (): void => undefined,
       confirmationQueue,
-      discardWriteOverlays,
+      discardTaskOverlay,
       createId: (kind: string, index = 1): string => `${kind}-${index}`,
       now: (): string => RECOVERY_TIME,
       budgetLedger: {
@@ -296,7 +303,8 @@ function createDependencies(
     publish,
     markOutboxDelivered,
     revokeTask,
-    discardWriteOverlays,
+    discardTaskOverlay,
+    finalizeCommitCancellation,
     recoveryOrder
   };
 }
@@ -334,11 +342,120 @@ describe('agent startup recovery', (): void => {
     ]);
     const service = createChatAgentDelegationService(fixture.dependencies);
 
-    await expect(service.recoverInterruptedWrites()).resolves.toBe(1);
+    await expect(service.recoverInterruptedWrites([])).resolves.toBe(1);
 
     expect(fixture.revokeTask).toHaveBeenCalledWith(writeTask.taskId, 'process_restart');
-    expect(fixture.discardWriteOverlays).toHaveBeenCalledOnce();
-    expect(fixture.recoveryOrder).toEqual(['revoke-orphan-confirmations', 'discard-unjournaled-overlays', 'interrupt-unrecoverable-write-attempts']);
+    expect(fixture.discardTaskOverlay).toHaveBeenCalledWith({
+      taskId: writeTask.taskId,
+      attemptId: writeTask.currentAttemptId
+    });
+    expect(fixture.recoveryOrder).toEqual([
+      'revoke-orphan-confirmations',
+      `discard:${writeTask.taskId}:${writeTask.currentAttemptId}`,
+      'interrupt-unrecoverable-write-attempts'
+    ]);
+  });
+
+  it('cleans safe journals and orphan overlays while preserving manual recovery neighbors', async (): Promise<void> => {
+    const safeTask: AgentTaskRecord = {
+      ...createWriteTask(),
+      taskId: 'task-safe-journal',
+      toolCallId: 'tool-safe-journal',
+      status: 'committing',
+      currentAttemptId: 'attempt-safe-journal',
+      unfinishedJournalCount: 0
+    };
+    const manualTask: AgentTaskRecord = {
+      ...createWriteTask(),
+      taskId: 'task-manual-journal',
+      toolCallId: 'tool-manual-journal',
+      status: 'committing',
+      currentAttemptId: 'attempt-manual-journal',
+      unfinishedJournalCount: 1
+    };
+    const orphanTask: AgentTaskRecord = {
+      ...createWriteTask(),
+      taskId: 'task-orphan-overlay',
+      toolCallId: 'tool-orphan-overlay',
+      currentAttemptId: 'attempt-orphan-overlay'
+    };
+    const fixture = createDependencies([
+      {
+        checkpoint: createCheckpoint(),
+        tasks: [safeTask, manualTask, orphanTask],
+        eventSequence: 8
+      }
+    ]);
+    const service = createChatAgentDelegationService(fixture.dependencies);
+    const recoveryResults: AgentJournalRecoveryResult[] = [
+      {
+        journalId: 'journal-safe',
+        status: 'cancelled',
+        taskId: safeTask.taskId,
+        attemptId: safeTask.currentAttemptId as string
+      },
+      {
+        journalId: 'journal-manual',
+        status: 'manual_recovery',
+        taskId: manualTask.taskId,
+        attemptId: manualTask.currentAttemptId as string
+      }
+    ];
+
+    await expect(service.recoverInterruptedWrites(recoveryResults)).resolves.toBe(1);
+
+    expect(fixture.revokeTask).toHaveBeenCalledTimes(1);
+    expect(fixture.revokeTask).toHaveBeenCalledWith(orphanTask.taskId, 'process_restart');
+    expect(fixture.discardTaskOverlay.mock.calls).toEqual([
+      [{ taskId: safeTask.taskId, attemptId: safeTask.currentAttemptId }],
+      [{ taskId: orphanTask.taskId, attemptId: orphanTask.currentAttemptId }]
+    ]);
+    expect(fixture.finalizeCommitCancellation).toHaveBeenCalledWith({
+      journalId: 'journal-safe',
+      occurredAt: RECOVERY_TIME,
+      startupRecovery: true
+    });
+    expect(fixture.recoveryOrder).toEqual([
+      'revoke-orphan-confirmations',
+      `discard:${safeTask.taskId}:${safeTask.currentAttemptId}`,
+      `discard:${orphanTask.taskId}:${orphanTask.currentAttemptId}`,
+      'finalize:journal-safe',
+      'interrupt-unrecoverable-write-attempts'
+    ]);
+  });
+
+  it('does not finalize or interrupt when safe journal overlay cleanup fails', async (): Promise<void> => {
+    const safeTask: AgentTaskRecord = {
+      ...createWriteTask(),
+      taskId: 'task-safe-failure',
+      toolCallId: 'tool-safe-failure',
+      status: 'committing',
+      currentAttemptId: 'attempt-safe-failure',
+      unfinishedJournalCount: 0
+    };
+    const fixture = createDependencies([
+      {
+        checkpoint: createCheckpoint(),
+        tasks: [safeTask],
+        eventSequence: 5
+      }
+    ]);
+    fixture.discardTaskOverlay.mockRejectedValue(new Error('precise_cleanup_failed'));
+    const service = createChatAgentDelegationService(fixture.dependencies);
+
+    await expect(
+      service.recoverInterruptedWrites([
+        {
+          journalId: 'journal-safe-failure',
+          status: 'cancelled',
+          taskId: safeTask.taskId,
+          attemptId: safeTask.currentAttemptId as string
+        }
+      ])
+    ).rejects.toThrow('precise_cleanup_failed');
+
+    expect(fixture.finalizeCommitCancellation).not.toHaveBeenCalled();
+    expect(fixture.interruptActive).not.toHaveBeenCalled();
   });
 
   it('replays an eligible same-process pending Outbox exactly once', async (): Promise<void> => {
@@ -391,10 +508,11 @@ describe('agent startup recovery', (): void => {
     const drainIndex = mainSource.indexOf('await chatAgentDelegationService.drainOutbox()');
     const ipcIndex = mainSource.indexOf('registerAllIpcHandlers()');
     const windowIndex = mainSource.indexOf('createWindow()', ipcIndex);
-    const journalIndex = serviceSource.indexOf('await chatAgentFileCommitter.recover()');
+    const journalIndex = serviceSource.indexOf('const journalResults = await chatAgentFileCommitter.recover()');
     const confirmationIndex = serviceSource.indexOf('chatAgentConfirmationQueue.recover()', journalIndex);
-    const interruptIndex = serviceSource.indexOf('await chatAgentDelegationService.recoverInterruptedWrites()', confirmationIndex);
-    const coordinatorIndex = serviceSource.indexOf('await chatAgentCoordinator.recover()', interruptIndex);
+    const interruptIndex = serviceSource.indexOf('await chatAgentDelegationService.recoverInterruptedWrites(journalResults)', confirmationIndex);
+    const cancellationIndex = serviceSource.indexOf('chatAgentDelegationService.recoverCancellations()', interruptIndex);
+    const coordinatorIndex = serviceSource.indexOf('await chatAgentCoordinator.recover()', cancellationIndex);
 
     expect(databaseIndex).toBeGreaterThan(-1);
     expect(recoveryIndex).toBeGreaterThan(databaseIndex);
@@ -404,6 +522,7 @@ describe('agent startup recovery', (): void => {
     expect(journalIndex).toBeGreaterThan(-1);
     expect(confirmationIndex).toBeGreaterThan(journalIndex);
     expect(interruptIndex).toBeGreaterThan(confirmationIndex);
-    expect(coordinatorIndex).toBeGreaterThan(interruptIndex);
+    expect(cancellationIndex).toBeGreaterThan(interruptIndex);
+    expect(coordinatorIndex).toBeGreaterThan(cancellationIndex);
   });
 });

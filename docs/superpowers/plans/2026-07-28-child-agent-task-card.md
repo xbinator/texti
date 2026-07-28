@@ -1160,6 +1160,7 @@ git commit -m "feat(chat): 支持单 Child Task 协作取消"
 - Modify: `electron/main/modules/chat/agents/coordinator.mts`
 - Modify: `electron/main/modules/chat/agents/service.mts`
 - Modify: `electron/main/modules/chat/agents/write-overlay.mts`
+- Modify: `electron/main/modules/database/service.mts`
 - Modify: `test/electron/main/modules/chat/agents/contracts.test.ts`
 - Modify: `test/electron/main/modules/chat/agents/store.test.ts`
 - Modify: `test/electron/main/modules/chat/agents/file-commit.test.ts`
@@ -1169,6 +1170,7 @@ git commit -m "feat(chat): 支持单 Child Task 协作取消"
 - Modify: `test/electron/main/modules/chat/agents/service.test.ts`
 - Modify: `test/electron/main/modules/chat/agents/ipc.test.ts`
 - Modify: `test/electron/main/modules/chat/agents/write-overlay.test.ts`
+- Modify: `test/electron/main/modules/database/agent-task-migration.test.ts`
 - Modify: `test/components/BChat/bubble-part-agent-task.component.test.ts`
 - Modify: `changelog/2026-07-28.md`
 
@@ -1179,7 +1181,7 @@ git commit -m "feat(chat): 支持单 Child Task 协作取消"
 - Makes late cancellation converge to completed, commit_failed or manual recovery truth.
 - Finishes end-to-end security, recovery and concurrency regression coverage.
 
-- [ ] **Step 1: Write failing journal-boundary tests**
+- [x] **Step 1: Write failing journal-boundary tests**
 
 Assert:
 
@@ -1197,7 +1199,7 @@ Assert:
 - mixed startup recovery deletes only safe-cancel/orphan overlays and preserves manual-recovery or roll-forward neighbors;
 - cleanup failure never publishes a false cancelled Summary.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run:
 
@@ -1213,7 +1215,7 @@ pnpm exec cross-env ELECTRON_RUN_AS_NODE=1 HOST=127.0.0.1 electron node_modules/
 
 Expected: FAIL because current `cancelCommitJournal()` terminalizes the Task before external cleanup and FileCommitter has no explicit cancel disposition.
 
-- [ ] **Step 3: Split journal cancellation from Task terminalization**
+- [x] **Step 3: Split journal cancellation from Task terminalization**
 
 Refactor Store so the safe journal CAS performs only:
 
@@ -1245,7 +1247,7 @@ cancelCommitJournal(
 ): AgentCommitJournalRecord;
 ```
 
-- [ ] **Step 4: Add FileCommitter cancellation arbitration**
+- [x] **Step 4: Add FileCommitter cancellation arbitration**
 
 Add:
 
@@ -1267,13 +1269,13 @@ Under the same commit mutex/CAS:
 - FileCommitter never consumes the Runtime hard-abort timer;
 - after `markJournalApplying`, commit/recovery owns convergence.
 
-- [ ] **Step 5: Finalize a safely cancelled commit only after cleanup**
+- [x] **Step 5: Finalize a safely cancelled commit only after cleanup**
 
 Add a Store finalizer:
 
 ```ts
 finalizeCommitCancellation(
-  input: MarkAgentJournalInput
+  input: FinalizeAgentCommitCancellationInput
 ): AgentCheckpointRecord;
 ```
 
@@ -1308,7 +1310,7 @@ Validate both identity segments, resolve beneath the canonical overlay root and 
 
 Never include a Task whose journal is `applying`、`applied`、`manual_recovery` or otherwise requires roll-forward. A mixed recovery test must keep that neighbor’s overlay and private recovery references byte-for-byte intact.
 
-- [ ] **Step 6: Converge late cancellation truthfully**
+- [x] **Step 6: Converge late cancellation truthfully**
 
 Coordinator keeps `committing` while FileCommitter reports `commit_in_progress`. When commit resolves:
 
@@ -1316,9 +1318,11 @@ Coordinator keeps `committing` while FileCommitter reports `commit_in_progress`.
 - deterministic failure records `commit_failed`;
 - unknown external state records `manual_recovery_required` and keeps recovery references.
 
+Deterministic failure uses the terminal journal state `failed` only when the journal is still `applying`, has zero persisted operation progress and every target remains at its immutable base hash. Existing progress, `applied` state, mixed targets or unknown target state remain `manual_recovery`. The additive SQLite migration must preserve all journal facts, immutable/no-delete triggers and the status index while extending the journal status constraint.
+
 Renderer continues to show the returned Summary and later Event; it never converts `commit_in_progress` into cancelled locally.
 
-- [ ] **Step 7: Add end-to-end recovery, security and concurrency regression**
+- [x] **Step 7: Add end-to-end recovery, security and concurrency regression**
 
 Complete the design section 14 matrix:
 
@@ -1331,7 +1335,7 @@ Complete the design section 14 matrix:
 - recursive IPC scan rejects every forbidden key/value and absolute path;
 - production controlled-write flag remains false.
 
-- [ ] **Step 8: Run focused and full verification**
+- [x] **Step 8: Run focused and full verification**
 
 Run the two commands from Step 2, then:
 
@@ -1345,7 +1349,7 @@ pnpm test
 
 Expected: all commands exit 0. If `pnpm lint` or `pnpm lint:style` changes files, inspect the diff and rerun the corresponding command plus affected focused tests.
 
-- [ ] **Step 9: Update changelog and commit**
+- [x] **Step 9: Update changelog and commit**
 
 Add under `## Changed`:
 
@@ -1356,21 +1360,21 @@ Add under `## Changed`:
 Commit:
 
 ```bash
-git add types/chat-agent.d.ts electron/main/modules/chat/agents/contracts.mts electron/main/modules/chat/agents/types.mts electron/main/modules/chat/agents/store.mts electron/main/modules/chat/agents/file-commit.mts electron/main/modules/chat/agents/coordinator.mts electron/main/modules/chat/agents/service.mts electron/main/modules/chat/agents/write-overlay.mts test/electron/main/modules/chat/agents/contracts.test.ts test/electron/main/modules/chat/agents/store.test.ts test/electron/main/modules/chat/agents/file-commit.test.ts test/electron/main/modules/chat/agents/coordinator.test.ts test/electron/main/modules/chat/agents/startup-recovery.test.ts test/electron/main/modules/chat/agents/task-projection.test.ts test/electron/main/modules/chat/agents/service.test.ts test/electron/main/modules/chat/agents/ipc.test.ts test/electron/main/modules/chat/agents/write-overlay.test.ts test/components/BChat/bubble-part-agent-task.component.test.ts changelog/2026-07-28.md
+git add types/chat-agent.d.ts electron/main/modules/chat/agents/contracts.mts electron/main/modules/chat/agents/types.mts electron/main/modules/chat/agents/store.mts electron/main/modules/chat/agents/file-commit.mts electron/main/modules/chat/agents/coordinator.mts electron/main/modules/chat/agents/service.mts electron/main/modules/chat/agents/write-overlay.mts electron/main/modules/database/service.mts test/electron/main/modules/chat/agents/contracts.test.ts test/electron/main/modules/chat/agents/store.test.ts test/electron/main/modules/chat/agents/file-commit.test.ts test/electron/main/modules/chat/agents/coordinator.test.ts test/electron/main/modules/chat/agents/startup-recovery.test.ts test/electron/main/modules/chat/agents/task-projection.test.ts test/electron/main/modules/chat/agents/service.test.ts test/electron/main/modules/chat/agents/ipc.test.ts test/electron/main/modules/chat/agents/write-overlay.test.ts test/electron/main/modules/database/agent-task-migration.test.ts test/components/BChat/bubble-part-agent-task.component.test.ts docs/superpowers/plans/2026-07-28-child-agent-task-card.md changelog/2026-07-28.md
 git commit -m "fix(chat): 守住 Child 提交取消边界"
 ```
 
 ## Final Acceptance
 
-- [ ] `chat_agent_delegation_checkpoints.assistant_message_id` is audited before a unique index is created.
-- [ ] list/event/collapsed card carry Summary only; Detail is directed and lazy.
-- [ ] every Task mutation publishes only after commit and broadcast failure cannot change persisted business results.
-- [ ] Renderer accepts newer sequence, tolerates jumps, rejects identity conflicts and never revives tombstones.
-- [ ] `delegate_task` stays in the original Tool Part order and safely falls back when projection is unavailable.
-- [ ] confirmation, changeset integrity and artifact opening use existing trusted stores/registries.
-- [ ] single Task cancellation never cancels a sibling or releases the Primary continuation fence.
-- [ ] every cancelled Task has a terminal Result, including pre-Attempt and Checkpoint cascade paths.
-- [ ] journal `applying/applied` is never hard-aborted or misreported as cancelled.
-- [ ] Main/Renderer protocol output contains no forbidden internal or path data.
-- [ ] production `controlledWriteChildEnabled` remains false.
+- [x] `chat_agent_delegation_checkpoints.assistant_message_id` is audited before a unique index is created.
+- [x] list/event/collapsed card carry Summary only; Detail is directed and lazy.
+- [x] every Task mutation publishes only after commit and broadcast failure cannot change persisted business results.
+- [x] Renderer accepts newer sequence, tolerates jumps, rejects identity conflicts and never revives tombstones.
+- [x] `delegate_task` stays in the original Tool Part order and safely falls back when projection is unavailable.
+- [x] confirmation, changeset integrity and artifact opening use existing trusted stores/registries.
+- [x] single Task cancellation never cancels a sibling or releases the Primary continuation fence.
+- [x] every cancelled Task has a terminal Result, including pre-Attempt and Checkpoint cascade paths.
+- [x] journal `applying/applied` is never hard-aborted or misreported as cancelled.
+- [x] Main/Renderer protocol output contains no forbidden internal or path data.
+- [x] production `controlledWriteChildEnabled` remains false.
 - [ ] all focused tests, TypeScript, Main build, ESLint, Stylelint and full test suite pass.

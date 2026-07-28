@@ -64,7 +64,9 @@ export type AgentFileCommitStore = Pick<
   | 'markJournalOperation'
   | 'markJournalApplied'
   | 'cancelCommitJournal'
+  | 'finalizeCommitCancellation'
   | 'finalizeCommit'
+  | 'finalizeCommitFailure'
   | 'markManualRecovery'
   | 'listUnfinishedJournals'
   | 'getCommitJournal'
@@ -100,6 +102,14 @@ export interface AgentFileCommitResult {
   readonly targetHashes: readonly string[];
 }
 
+/** FileCommitter 对 journal 安全取消请求的权威裁决。 */
+export interface AgentFileCommitCancelResult {
+  /** journal 已取消，或外部提交已越过不可逆边界。 */
+  readonly disposition: 'journal_cancelled' | 'commit_in_progress';
+  /** 裁决时的权威 journal。 */
+  readonly journal: AgentCommitJournalRecord;
+}
+
 /** 单个 journal 的启动恢复结果。 */
 export interface AgentJournalRecoveryResult {
   /** journal 身份。 */
@@ -108,6 +118,8 @@ export interface AgentJournalRecoveryResult {
   readonly status: 'finalized' | 'cancelled' | 'manual_recovery';
   /** 所属 Task。 */
   readonly taskId: string;
+  /** journal 绑定的不可变 Attempt。 */
+  readonly attemptId: string;
 }
 
 /** 文件提交器可替换依赖。 */
@@ -148,6 +160,12 @@ export interface AgentFileCommitter {
    * @returns finalized journal、Checkpoint 与结果
    */
   commit(input: AgentFileCommitInput): Promise<AgentFileCommitResult>;
+  /**
+   * 在 journal 不可逆边界上仲裁 Task 取消。
+   * @param taskId - committing Task 身份
+   * @returns journal 取消或 commit 继续的权威 disposition
+   */
+  cancelTask(taskId: string): Promise<AgentFileCommitCancelResult>;
   /** @returns 全部未完成 journal 的确定性恢复结果。 */
   recover(): Promise<AgentJournalRecoveryResult[]>;
 }
@@ -168,6 +186,9 @@ export class AgentFileCommitError extends Error {
 
   /** 不泄露本地路径的稳定细节。 */
   readonly details: NonNullable<AgentTaskError['details']>;
+
+  /** 已原子收敛失败结果的 Checkpoint；前置校验失败时不存在。 */
+  checkpoint?: AgentCheckpointRecord;
 
   /**
    * 创建结构化提交错误。
@@ -829,6 +850,64 @@ function createRecoveryError(reason: string, operationId?: string): AgentTaskErr
 }
 
 /**
+ * 把不可逆边界后的异常收窄为确定性失败或未知外部状态。
+ * @param reason - applyJournal 拒绝原因
+ * @returns 可持久化的 commit 错误
+ */
+function normalizeCommitError(reason: unknown): AgentFileCommitError {
+  if (reason instanceof AgentFileCommitError && (reason.code === 'commit_failed' || reason.code === 'manual_recovery_required')) return reason;
+  return new AgentFileCommitError(
+    'external_state_unknown',
+    'Commit writer outcome is unknown after journal application began',
+    'manual_recovery_required',
+    'commit',
+    'integrity'
+  );
+}
+
+/**
+ * 把可能已经产生外部 mutation 的提交失败收敛为人工恢复错误。
+ * @param reason - 原始稳定原因
+ * @returns 不自动丢弃任何 journal 证据的错误
+ */
+function createManualError(reason: string): AgentFileCommitError {
+  return new AgentFileCommitError(
+    reason,
+    'Commit state requires manual recovery after journal application began',
+    'manual_recovery_required',
+    'commit',
+    'integrity'
+  );
+}
+
+/**
+ * 执行可选故障注入，并把测试异常隔离为不可收敛的进程崩溃哨兵。
+ * @param dependencies - commit 依赖
+ * @param point - 精确故障点
+ */
+function injectCommitCrash(dependencies: AgentFileCommitDependencies, point: AgentCommitCrashPoint): void {
+  if (!dependencies.injectCrash) return;
+  try {
+    dependencies.injectCrash(point);
+  } catch {
+    const crash = new Error(`crash:${point}`);
+    crash.name = 'AgentCommitCrashError';
+    throw crash;
+  }
+}
+
+/**
+ * 给已持久化失败错误绑定同一事务返回的 Checkpoint。
+ * @param error - 已归一化提交错误
+ * @param checkpoint - Store 汇合后的 Checkpoint
+ * @returns 保留稳定错误字段的新错误
+ */
+function bindFailureCheckpoint(error: AgentFileCommitError, checkpoint: AgentCheckpointRecord): AgentFileCommitError {
+  error.checkpoint = checkpoint;
+  return error;
+}
+
+/**
  * 读取 journal candidate 并复核 target hash。
  * @param operation - journal 私有引用操作
  * @returns 候选全文
@@ -938,9 +1017,9 @@ async function applyJournal(
       });
     }
     dependencies.onPhase?.('operation-applied');
-    if (!recovery && index === 0) dependencies.injectCrash?.('after_first_operation');
+    if (!recovery && index === 0) injectCommitCrash(dependencies, 'after_first_operation');
   }
-  if (!recovery) dependencies.injectCrash?.('after_all_operations');
+  if (!recovery) injectCommitCrash(dependencies, 'after_all_operations');
   if (journal.status !== 'applied') {
     journal = dependencies.store.markJournalApplied({ journalId: journal.journalId, occurredAt: dependencies.now() });
     dependencies.onPhase?.('journal-applied');
@@ -956,7 +1035,7 @@ async function applyJournal(
     );
   }
   dependencies.onPhase?.('targets-verified');
-  if (!recovery) dependencies.injectCrash?.('after_target_validation');
+  if (!recovery) injectCommitCrash(dependencies, 'after_target_validation');
   return journal;
 }
 
@@ -966,6 +1045,54 @@ async function applyJournal(
  * @returns commit 与 recover 边界
  */
 export function createAgentFileCommitter(dependencies: AgentFileCommitDependencies): AgentFileCommitter {
+  /** 每个 Task 的串行操作尾部。 */
+  const taskTails = new Map<string, Promise<void>>();
+
+  /** 当前实例已观察到的 Task journal。 */
+  const taskJournals = new Map<string, AgentCommitJournalRecord>();
+
+  /**
+   * 把同一 Task 的 commit、cancel 与 recover 串行化。
+   * @param taskId - Task 身份
+   * @param operation - 串行执行的异步操作
+   * @returns 操作结果
+   */
+  async function runTaskSerial<TResult>(taskId: string, operation: () => Promise<TResult>): Promise<TResult> {
+    const previous = taskTails.get(taskId) ?? Promise.resolve();
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve): void => {
+      release = resolve;
+    });
+    const current = previous.then((): Promise<void> => gate);
+    taskTails.set(taskId, current);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release?.();
+      if (taskTails.get(taskId) === current) taskTails.delete(taskId);
+    }
+  }
+
+  /**
+   * 读取本实例或 Store 中当前 Task 的 commit journal。
+   * @param taskId - Task 身份
+   * @returns journal；不存在时返回 null
+   */
+  function findTaskJournal(taskId: string): AgentCommitJournalRecord | null {
+    const remembered = taskJournals.get(taskId);
+    if (remembered) {
+      const current = dependencies.store.getCommitJournal(remembered.journalId);
+      if (current) {
+        taskJournals.set(taskId, current);
+        return current;
+      }
+    }
+    const journal = dependencies.store.listUnfinishedJournals().find((candidate): boolean => candidate.taskId === taskId) ?? null;
+    if (journal) taskJournals.set(taskId, journal);
+    return journal;
+  }
+
   /**
    * 把恢复异常收敛到 manual_recovery。
    * @param journal - 问题 journal
@@ -980,7 +1107,8 @@ export function createAgentFileCommitter(dependencies: AgentFileCommitDependenci
     return {
       journalId: journal.journalId,
       status: 'manual_recovery',
-      taskId: journal.taskId
+      taskId: journal.taskId,
+      attemptId: journal.attemptId
     };
   }
 
@@ -990,8 +1118,11 @@ export function createAgentFileCommitter(dependencies: AgentFileCommitDependenci
    * @returns 稳定恢复结果
    */
   async function recoverJournal(journal: AgentCommitJournalRecord): Promise<AgentJournalRecoveryResult> {
+    if (journal.status === 'cancelled') {
+      return { journalId: journal.journalId, status: 'cancelled', taskId: journal.taskId, attemptId: journal.attemptId };
+    }
     if (journal.status === 'manual_recovery') {
-      return { journalId: journal.journalId, status: 'manual_recovery', taskId: journal.taskId };
+      return { journalId: journal.journalId, status: 'manual_recovery', taskId: journal.taskId, attemptId: journal.attemptId };
     }
     const validation = validateCommitIntentSnapshot(journal.intent, journal.intentHash);
     if (!validation.ok) throw new AgentFileCommitError('journal_intent_invalid', 'Persisted commit intent failed validation');
@@ -1001,8 +1132,14 @@ export function createAgentFileCommitter(dependencies: AgentFileCommitDependenci
       return markRecoveryFailed(journal);
     }
     if (journal.status === 'created' && inspections.every((inspection): boolean => inspection.state === 'base')) {
-      dependencies.store.cancelCommitJournal({ journalId: journal.journalId, occurredAt: dependencies.now() });
-      return { journalId: journal.journalId, status: 'cancelled', taskId: journal.taskId };
+      const cancelled = dependencies.store.cancelCommitJournal({ journalId: journal.journalId, occurredAt: dependencies.now() });
+      taskJournals.set(cancelled.taskId, cancelled);
+      return {
+        journalId: cancelled.journalId,
+        status: 'cancelled',
+        taskId: cancelled.taskId,
+        attemptId: cancelled.attemptId
+      };
     }
     const applied = await applyJournal(dependencies, journal, true);
     const changeset = dependencies.store.getChangeset(journal.changesetId);
@@ -1013,50 +1150,118 @@ export function createAgentFileCommitter(dependencies: AgentFileCommitDependenci
     if (!task) throw new AgentFileCommitError('journal_task_missing', 'Commit journal Task projection is missing');
     const result = createCommitResult(applied, changeset, task);
     finalizeJournal(dependencies, applied, result);
-    return { journalId: journal.journalId, status: 'finalized', taskId: journal.taskId };
+    return { journalId: journal.journalId, status: 'finalized', taskId: journal.taskId, attemptId: journal.attemptId };
   }
 
   return {
     async commit(input: AgentFileCommitInput): Promise<AgentFileCommitResult> {
-      dependencies.onPhase?.('validate');
-      validateCommitFacts(input, dependencies);
-      await validateDiff(input.changeset);
-      await Promise.all(input.changeset.snapshot.operations.map((operation): Promise<TargetInspection> => inspectTarget(operation, true)));
-      const protectedContents = await validateProtectedReferences(input.changeset.snapshot.operations);
-      const journalId = dependencies.createId('journal');
-      if (!journalId || journalId.trim() !== journalId || journalId.length > 256 || journalId.includes('\0')) {
-        throw new AgentFileCommitError('journal_identity_invalid', 'Commit journal identity is invalid');
-      }
-      const journalOperations = await copyJournalContent(dependencies, input.task.taskId, journalId, protectedContents);
-      const occurredAt = dependencies.now();
-      if (!Number.isFinite(Date.parse(occurredAt))) {
-        throw new AgentFileCommitError('journal_timestamp_invalid', 'Commit journal timestamp is invalid');
-      }
-      const intent = createCommitIntent(input, journalOperations, occurredAt);
-      const journal = dependencies.store.createCommitJournal({
-        journalId,
-        changesetId: input.changeset.snapshot.changesetId,
-        confirmationId: input.confirmation.confirmationId,
-        confirmationVersion: input.confirmation.version,
-        intent,
-        intentHash: hashCommitIntentSnapshot(intent),
-        occurredAt
+      const journal = await runTaskSerial(input.task.taskId, async (): Promise<AgentCommitJournalRecord> => {
+        dependencies.onPhase?.('validate');
+        validateCommitFacts(input, dependencies);
+        await validateDiff(input.changeset);
+        await Promise.all(input.changeset.snapshot.operations.map((operation): Promise<TargetInspection> => inspectTarget(operation, true)));
+        const protectedContents = await validateProtectedReferences(input.changeset.snapshot.operations);
+        const journalId = dependencies.createId('journal');
+        if (!journalId || journalId.trim() !== journalId || journalId.length > 256 || journalId.includes('\0')) {
+          throw new AgentFileCommitError('journal_identity_invalid', 'Commit journal identity is invalid');
+        }
+        const journalOperations = await copyJournalContent(dependencies, input.task.taskId, journalId, protectedContents);
+        const occurredAt = dependencies.now();
+        if (!Number.isFinite(Date.parse(occurredAt))) {
+          throw new AgentFileCommitError('journal_timestamp_invalid', 'Commit journal timestamp is invalid');
+        }
+        const intent = createCommitIntent(input, journalOperations, occurredAt);
+        const created = dependencies.store.createCommitJournal({
+          journalId,
+          changesetId: input.changeset.snapshot.changesetId,
+          confirmationId: input.confirmation.confirmationId,
+          confirmationVersion: input.confirmation.version,
+          intent,
+          intentHash: hashCommitIntentSnapshot(intent),
+          occurredAt
+        });
+        taskJournals.set(created.taskId, created);
+        dependencies.onPhase?.('journal-created');
+        injectCommitCrash(dependencies, 'after_journal_created');
+        return created;
       });
-      dependencies.onPhase?.('journal-created');
-      dependencies.injectCrash?.('after_journal_created');
-      const applied = await applyJournal(dependencies, journal, false);
-      const task = dependencies.store.getTask(input.task.taskId);
-      if (!task) throw new AgentFileCommitError('commit_task_missing', 'Committed Task projection is missing');
-      const result = createCommitResult(applied, input.changeset, task);
-      return finalizeJournal(dependencies, applied, result);
+      return runTaskSerial(input.task.taskId, async (): Promise<AgentFileCommitResult> => {
+        const current = dependencies.store.getCommitJournal(journal.journalId);
+        if (!current) throw new AgentFileCommitError('commit_journal_missing', 'Created commit journal projection is missing');
+        if (current.status === 'cancelled') {
+          throw new AgentFileCommitError('journal_cancelled', 'Commit journal was cancelled before external application', 'cancelled', 'commit', 'runtime');
+        }
+        const [applyOutcome] = await Promise.allSettled([applyJournal(dependencies, current, false)]);
+        if (applyOutcome.status === 'rejected') {
+          if (applyOutcome.reason instanceof Error && applyOutcome.reason.name === 'AgentCommitCrashError') throw applyOutcome.reason;
+          const normalizedError = normalizeCommitError(applyOutcome.reason);
+          const refreshed = dependencies.store.getCommitJournal(current.journalId);
+          if (!refreshed) throw new AgentFileCommitError('commit_journal_missing', 'Commit failure journal projection is missing');
+          const inspections = await Promise.allSettled(
+            refreshed.intent.operations.map((operation): Promise<TargetInspection> => inspectTarget(operation, false))
+          );
+          const allTargetsBase = inspections.every((inspection): boolean => inspection.status === 'fulfilled' && inspection.value.state === 'base');
+          const deterministicFailure =
+            normalizedError.code === 'commit_failed' && refreshed.status === 'applying' && refreshed.appliedOperationIds.length === 0 && allTargetsBase;
+          const error = deterministicFailure ? normalizedError : createManualError('external_state_requires_recovery');
+          const checkpoint = deterministicFailure
+            ? dependencies.store.finalizeCommitFailure({
+                journalId: refreshed.journalId,
+                error,
+                occurredAt: dependencies.now()
+              })
+            : dependencies.store.markManualRecovery({
+                journalId: refreshed.journalId,
+                error,
+                occurredAt: dependencies.now()
+              });
+          throw bindFailureCheckpoint(error, checkpoint);
+        }
+        const applied = applyOutcome.value;
+        const task = dependencies.store.getTask(input.task.taskId);
+        if (!task) throw new AgentFileCommitError('commit_task_missing', 'Committed Task projection is missing');
+        const result = createCommitResult(applied, input.changeset, task);
+        const finalized = finalizeJournal(dependencies, applied, result);
+        taskJournals.set(finalized.journal.taskId, finalized.journal);
+        return finalized;
+      });
+    },
+
+    async cancelTask(taskId: string): Promise<AgentFileCommitCancelResult> {
+      const observed = findTaskJournal(taskId);
+      if (!observed) {
+        throw new AgentFileCommitError('commit_journal_not_found', 'Task does not own a commit journal', 'protocol_error', 'commit', 'runtime');
+      }
+      if (observed.status === 'cancelled') {
+        return Object.freeze({ disposition: 'journal_cancelled', journal: observed });
+      }
+      if (observed.status !== 'created' || observed.appliedOperationIds.length > 0) {
+        return Object.freeze({ disposition: 'commit_in_progress', journal: observed });
+      }
+      return runTaskSerial(taskId, async (): Promise<AgentFileCommitCancelResult> => {
+        const journal = findTaskJournal(taskId);
+        if (!journal) {
+          throw new AgentFileCommitError('commit_journal_not_found', 'Task does not own a commit journal', 'protocol_error', 'commit', 'runtime');
+        }
+        if (journal.status === 'created' && journal.appliedOperationIds.length === 0) {
+          const cancelled = dependencies.store.cancelCommitJournal({ journalId: journal.journalId, occurredAt: dependencies.now() });
+          taskJournals.set(taskId, cancelled);
+          return Object.freeze({ disposition: 'journal_cancelled', journal: cancelled });
+        }
+        if (journal.status === 'cancelled') {
+          return Object.freeze({ disposition: 'journal_cancelled', journal });
+        }
+        return Object.freeze({ disposition: 'commit_in_progress', journal });
+      });
     },
 
     async recover(): Promise<AgentJournalRecoveryResult[]> {
       const results: AgentJournalRecoveryResult[] = [];
       for (const journal of dependencies.store.listUnfinishedJournals()) {
+        taskJournals.set(journal.taskId, journal);
         // Recovery is deliberately serial so two journals never interleave Store transitions.
         // eslint-disable-next-line no-await-in-loop
-        const [recoveryResult] = await Promise.allSettled([recoverJournal(journal)]);
+        const [recoveryResult] = await Promise.allSettled([runTaskSerial(journal.taskId, (): Promise<AgentJournalRecoveryResult> => recoverJournal(journal))]);
         results.push(recoveryResult.status === 'fulfilled' ? recoveryResult.value : markRecoveryFailed(journal));
       }
       return results;

@@ -69,6 +69,8 @@ import {
   type CreateAgentCommitJournalInput,
   type CreateAgentConfirmationInput,
   type DeliverAgentOutboxInput,
+  type FinalizeAgentCommitCancellationInput,
+  type FinalizeAgentCommitFailureInput,
   type FinalizeAgentCommitInput,
   type FinalizeCancellationInput,
   type FinalizeCheckpointInput,
@@ -466,7 +468,7 @@ const CHANGESET_STATUSES = new Set<AgentChangesetRecord['status']>([
 const CONFIRMATION_STATUSES = new Set<AgentConfirmationStatus>(['pending', 'approved', 'rejected', 'revoked']);
 
 /** Commit journal 可变状态 allowlist。 */
-const JOURNAL_STATUSES = new Set<AgentCommitJournalStatus>(['created', 'applying', 'applied', 'finalized', 'cancelled', 'manual_recovery']);
+const JOURNAL_STATUSES = new Set<AgentCommitJournalStatus>(['created', 'applying', 'applied', 'finalized', 'cancelled', 'failed', 'manual_recovery']);
 
 /** 由 task.failed Event 表达的 Task 失败终态。 */
 const TASK_FAILURE_STATUSES = new Set<AgentTaskStatus>(['failed', 'deadline_exceeded', 'commit_failed']);
@@ -987,8 +989,8 @@ function parseCommitJournal(row: CommitJournalRow): AgentCommitJournalRecord {
     intent.confirmationId !== row.confirmation_id ||
     intent.confirmationVersion !== confirmationVersion ||
     intent.planHash !== row.plan_hash ||
-    (status === 'finalized') !== (finalizedAt !== undefined) ||
-    (status === 'manual_recovery') !== (error !== undefined)
+    (status === 'finalized' || status === 'cancelled' || status === 'failed') !== (finalizedAt !== undefined) ||
+    (status === 'manual_recovery' || status === 'failed') !== (error !== undefined)
   ) {
     throw new AgentStoreProtocolError('commit_journal_row_mismatch', 'Commit journal columns do not match its immutable intent or state');
   }
@@ -3155,8 +3157,8 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
   }
 
   /** @inheritdoc */
-  cancelCommitJournal(input: CancelAgentCommitJournalInput): AgentCheckpointRecord {
-    return this.runTaskTransaction((): AgentCheckpointRecord => {
+  cancelCommitJournal(input: CancelAgentCommitJournalInput): AgentCommitJournalRecord {
+    return this.runTaskTransaction((): AgentCommitJournalRecord => {
       if (!Number.isFinite(Date.parse(input.occurredAt))) {
         throw new AgentStoreProtocolError('commit_journal_input_invalid', 'Commit journal timestamp is invalid', 'recovery');
       }
@@ -3169,7 +3171,10 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       if (!task || !attempt || !changeset || !checkpoint) {
         throw new AgentStoreProtocolError('commit_cancel_target_missing', 'Commit cancellation aggregate is incomplete', 'recovery');
       }
-      if (journal.status === 'cancelled' && task.status === 'cancelled' && task.resultHash) return checkpoint;
+      if (journal.status === 'cancelled') {
+        if (changeset.status === 'discarded' && task.unfinishedJournalCount === 0) return journal;
+        throw new AgentStoreProtocolError('commit_cancel_replay_conflict', 'Cancelled journal conflicts with its aggregate projections', 'recovery');
+      }
       if (
         journal.status !== 'created' ||
         journal.appliedOperationIds.length !== 0 ||
@@ -3177,11 +3182,123 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         task.unfinishedJournalCount !== 1 ||
         task.currentAttemptId !== attempt.attemptId ||
         attempt.status !== 'running' ||
-        changeset.status !== 'committing' ||
-        !canFinalizeUsage(attempt, journal.intent.resultDraft.usage) ||
-        !canTransitionTask('committing', 'cancelled', { mode: 'write' })
+        changeset.status !== 'committing'
       ) {
         throw new AgentStoreProtocolError('commit_cancel_state_invalid', 'Only an unapplied created journal can be cancelled', 'recovery');
+      }
+      const taskUpdate = this.database.execute(
+        `UPDATE chat_agent_tasks
+         SET unfinished_journal_count = unfinished_journal_count - 1, updated_at = ?
+         WHERE task_id = ? AND status = ? AND current_attempt_id = ?
+           AND result_hash IS NULL AND unfinished_journal_count = 1 AND record_state = ?`,
+        [input.occurredAt, task.taskId, 'committing', attempt.attemptId, 'active']
+      );
+      const changesetUpdate = this.database.execute(
+        `UPDATE chat_agent_changesets
+         SET status = ?, updated_at = ?
+         WHERE changeset_id = ? AND status = ?`,
+        ['discarded', input.occurredAt, changeset.snapshot.changesetId, 'committing']
+      );
+      const journalUpdate = this.database.execute(
+        `UPDATE chat_agent_commit_journals
+         SET status = ?, finalized_at = ?, updated_at = ?
+         WHERE journal_id = ? AND status = ? AND operation_progress_json = ?`,
+        ['cancelled', input.occurredAt, input.occurredAt, journal.journalId, 'created', '[]']
+      );
+      if (taskUpdate.changes !== 1 || changesetUpdate.changes !== 1 || journalUpdate.changes !== 1) {
+        throw new AgentStoreProtocolError('commit_cancel_conflict', 'Commit cancellation projections changed concurrently', 'recovery');
+      }
+      const links = { attemptId: attempt.attemptId, runtimeId: attempt.currentRuntimeId };
+      this.appendEvent(
+        'task',
+        task.taskId,
+        'commit.journal_cancelled',
+        { journalId: journal.journalId, changesetId: changeset.snapshot.changesetId },
+        input.occurredAt,
+        'coordinator',
+        links
+      );
+      const cancelled = this.getCommitJournal(journal.journalId);
+      if (!cancelled) throw new AgentStoreProtocolError('commit_journal_projection_missing', 'Cancelled commit journal projection is missing');
+      return cancelled;
+    });
+  }
+
+  /** @inheritdoc */
+  finalizeCommitCancellation(input: FinalizeAgentCommitCancellationInput): AgentCheckpointRecord {
+    return this.runTaskTransaction((): AgentCheckpointRecord => {
+      if (!Number.isFinite(Date.parse(input.occurredAt))) {
+        throw new AgentStoreProtocolError('commit_cancel_finalize_input_invalid', 'Commit cancellation finalizer timestamp is invalid', 'recovery');
+      }
+      const journal = this.getCommitJournal(input.journalId);
+      if (!journal) throw new AgentStoreProtocolError('commit_journal_not_found', 'Commit journal does not exist', 'recovery');
+      let task = this.getTask(journal.taskId);
+      const attempt = this.getAttempt(journal.attemptId);
+      const changeset = this.getChangeset(journal.changesetId);
+      let checkpoint = task ? this.getCheckpoint(task.checkpointId) : null;
+      if (!task || !attempt || !changeset || !checkpoint) {
+        throw new AgentStoreProtocolError('commit_cancel_target_missing', 'Commit cancellation aggregate is incomplete', 'recovery');
+      }
+      if (task.status === 'cancelled' && task.resultHash) return checkpoint;
+      if (
+        journal.status !== 'cancelled' ||
+        journal.appliedOperationIds.length !== 0 ||
+        task.status !== 'committing' ||
+        task.unfinishedJournalCount !== 0 ||
+        task.currentAttemptId !== attempt.attemptId ||
+        attempt.status !== 'running' ||
+        changeset.status !== 'discarded'
+      ) {
+        throw new AgentStoreProtocolError('commit_cancel_finalize_state_invalid', 'Commit aggregate is not safely cancelled', 'recovery');
+      }
+      const links = { attemptId: attempt.attemptId, runtimeId: attempt.currentRuntimeId };
+      if (task.cancelRequestedAt === undefined) {
+        if (input.startupRecovery !== true) {
+          throw new AgentStoreProtocolError('commit_cancel_request_missing', 'Live commit cancellation requires a persisted request', 'recovery');
+        }
+        if (checkpoint.status === 'waiting_children') {
+          if (!canTransitionCheckpoint(checkpoint.status, 'cancelling')) {
+            throw new AgentStoreProtocolError('checkpoint_cancel_transition_invalid', 'Recovery cancellation cannot start');
+          }
+          const checkpointUpdate = this.database.execute(
+            `UPDATE chat_agent_delegation_checkpoints
+             SET status = ?, version = version + 1, updated_at = ?
+             WHERE checkpoint_id = ? AND status = ? AND version = ? AND record_state = ?`,
+            ['cancelling', input.occurredAt, checkpoint.checkpointId, checkpoint.status, checkpoint.version, 'active']
+          );
+          if (checkpointUpdate.changes !== 1) {
+            throw new AgentStoreProtocolError('checkpoint_cancel_conflict', 'Recovery cancellation Checkpoint changed concurrently', 'recovery');
+          }
+          this.appendEvent(
+            'checkpoint',
+            checkpoint.checkpointId,
+            'delegation.cancel_requested',
+            { reason: 'process_restart_commit_cancelled' },
+            input.occurredAt,
+            'system'
+          );
+          const cancellingCheckpoint = this.getCheckpoint(checkpoint.checkpointId);
+          if (!cancellingCheckpoint) {
+            throw new AgentStoreProtocolError('checkpoint_projection_missing', 'Recovery cancelling Checkpoint projection is missing', 'recovery');
+          }
+          checkpoint = cancellingCheckpoint;
+        } else if (checkpoint.status !== 'cancelling') {
+          throw new AgentStoreProtocolError('checkpoint_cancel_state_invalid', 'Recovery cancellation Checkpoint cannot accept cancellation', 'recovery');
+        }
+        const requestUpdate = this.database.execute(
+          `UPDATE chat_agent_tasks
+           SET cancel_requested_at = ?, updated_at = ?
+           WHERE task_id = ? AND status = ? AND cancel_requested_at IS NULL
+             AND unfinished_journal_count = 0 AND record_state = ?`,
+          [input.occurredAt, input.occurredAt, task.taskId, 'committing', 'active']
+        );
+        if (requestUpdate.changes !== 1) {
+          throw new AgentStoreProtocolError('commit_cancel_request_conflict', 'Recovery cancellation request changed concurrently', 'recovery');
+        }
+        this.appendEvent('task', task.taskId, 'task.cancel_requested', { requestKind: 'checkpoint_cascade' }, input.occurredAt, 'system', links);
+        const requestedTask = this.getTask(task.taskId);
+        if (!requestedTask) throw new AgentStoreProtocolError('task_projection_missing', 'Recovery cancellation Task projection is missing', 'recovery');
+        task = requestedTask;
       }
       const criteria = [...journal.intent.resultDraft.criteria];
       const verifiedCount = criteria.filter(
@@ -3195,7 +3312,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         phase: 'recovery',
         category: 'runtime',
         retryable: false,
-        details: { reason: 'journal_unapplied_after_restart' }
+        details: { reason: 'journal_cancelled_before_apply' }
       };
       const resultCandidate: ChatAgentResult = {
         taskId: task.taskId,
@@ -3227,6 +3344,9 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       }
       const { result } = resultValidation;
       const resultHash = hashAgentPayload(result);
+      if (!canFinalizeUsage(attempt, result.usage) || !canTransitionTask('committing', 'cancelled', { mode: 'write' })) {
+        throw new AgentStoreProtocolError('commit_cancel_finalize_state_invalid', 'Commit cancellation result cannot be finalized', 'recovery');
+      }
       const attemptUpdate = this.database.execute(
         `UPDATE chat_agent_attempts
          SET status = ?, usage_snapshot_json = ?, usage_complete = 1,
@@ -3236,28 +3356,15 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       );
       const taskUpdate = this.database.execute(
         `UPDATE chat_agent_tasks
-         SET status = ?, result_json = ?, result_hash = ?, error_json = ?,
-             unfinished_journal_count = unfinished_journal_count - 1, updated_at = ?
+         SET status = ?, result_json = ?, result_hash = ?, error_json = ?, updated_at = ?
          WHERE task_id = ? AND status = ? AND current_attempt_id = ?
-           AND result_hash IS NULL AND unfinished_journal_count = 1 AND record_state = ?`,
+           AND result_hash IS NULL AND unfinished_journal_count = 0
+           AND cancel_requested_at IS NOT NULL AND record_state = ?`,
         ['cancelled', JSON.stringify(result), resultHash, JSON.stringify(error), input.occurredAt, task.taskId, 'committing', attempt.attemptId, 'active']
       );
-      const changesetUpdate = this.database.execute(
-        `UPDATE chat_agent_changesets
-         SET status = ?, updated_at = ?
-         WHERE changeset_id = ? AND status = ?`,
-        ['discarded', input.occurredAt, changeset.snapshot.changesetId, 'committing']
-      );
-      const journalUpdate = this.database.execute(
-        `UPDATE chat_agent_commit_journals
-         SET status = ?, finalized_at = ?, updated_at = ?
-         WHERE journal_id = ? AND status = ? AND operation_progress_json = ?`,
-        ['cancelled', input.occurredAt, input.occurredAt, journal.journalId, 'created', '[]']
-      );
-      if (attemptUpdate.changes !== 1 || taskUpdate.changes !== 1 || changesetUpdate.changes !== 1 || journalUpdate.changes !== 1) {
-        throw new AgentStoreProtocolError('commit_cancel_conflict', 'Commit cancellation projections changed concurrently', 'recovery');
+      if (attemptUpdate.changes !== 1 || taskUpdate.changes !== 1) {
+        throw new AgentStoreProtocolError('commit_cancel_finalize_conflict', 'Commit cancellation finalizer changed concurrently', 'recovery');
       }
-      const links = { attemptId: attempt.attemptId, runtimeId: attempt.currentRuntimeId };
       this.appendEvent('task', task.taskId, 'task.cancelled', { resultHash }, input.occurredAt, 'coordinator', links);
       return this.joinTerminalResult(task, checkpoint, result, resultHash, input.occurredAt, 'coordinator');
     });
@@ -3401,14 +3508,15 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
   markManualRecovery(input: MarkAgentJournalFailureInput): AgentCheckpointRecord {
     return this.runTaskTransaction((): AgentCheckpointRecord => {
       const error = validateAgentTaskError(input.error);
+      const journalStatus: Extract<AgentCommitJournalStatus, 'failed' | 'manual_recovery'> = error?.code === 'commit_failed' ? 'failed' : 'manual_recovery';
       if (
         !error ||
-        error.code !== 'manual_recovery_required' ||
+        (error.code !== 'manual_recovery_required' && error.code !== 'commit_failed') ||
         (error.phase !== 'commit_validation' && error.phase !== 'commit' && error.phase !== 'recovery') ||
         (error.category !== 'runtime' && error.category !== 'integrity') ||
         !Number.isFinite(Date.parse(input.occurredAt))
       ) {
-        throw new AgentStoreProtocolError('manual_recovery_error_invalid', 'Manual recovery requires a manual_recovery_required error', 'recovery');
+        throw new AgentStoreProtocolError('commit_failure_error_invalid', 'Commit failure finalization requires a supported commit error', 'recovery');
       }
       const journal = this.getCommitJournal(input.journalId);
       if (!journal) throw new AgentStoreProtocolError('commit_journal_not_found', 'Commit journal does not exist', 'recovery');
@@ -3419,16 +3527,19 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       if (!task || !attempt || !changeset || !checkpoint) {
         throw new AgentStoreProtocolError('manual_recovery_target_missing', 'Commit recovery aggregate is incomplete', 'recovery');
       }
-      if (journal.status === 'manual_recovery' && task.status === 'commit_failed' && task.resultHash) return checkpoint;
+      if (journal.status === journalStatus && task.status === 'commit_failed' && task.resultHash) return checkpoint;
       if (
         journal.status === 'finalized' ||
         journal.status === 'cancelled' ||
+        journal.status === 'failed' ||
+        journal.status === 'manual_recovery' ||
         task.status !== 'committing' ||
         attempt.status !== 'running' ||
         changeset.status !== 'committing' ||
+        (journalStatus === 'failed' && (journal.status !== 'applying' || journal.appliedOperationIds.length !== 0)) ||
         !canFinalizeUsage(attempt, journal.intent.resultDraft.usage)
       ) {
-        throw new AgentStoreProtocolError('manual_recovery_state_invalid', 'Commit aggregate cannot enter manual recovery', 'recovery');
+        throw new AgentStoreProtocolError('commit_failure_state_invalid', 'Commit aggregate cannot enter its failure terminal state', 'recovery');
       }
       const criteria = [...journal.intent.resultDraft.criteria];
       const satisfiedCount = criteria.filter((criterion): boolean => criterion.claim.status === 'satisfied').length;
@@ -3473,26 +3584,58 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
          WHERE attempt_id = ? AND task_id = ? AND status = ?`,
         ['failed', JSON.stringify(result.usage), input.occurredAt, input.occurredAt, JSON.stringify(error), attempt.attemptId, task.taskId, 'running']
       );
-      const taskUpdate = this.database.execute(
-        `UPDATE chat_agent_tasks
-         SET status = ?, result_json = ?, result_hash = ?, error_json = ?, updated_at = ?
-         WHERE task_id = ? AND status = ? AND result_hash IS NULL
-           AND unfinished_journal_count = 1 AND record_state = ?`,
-        ['commit_failed', JSON.stringify(result), resultHash, JSON.stringify(error), input.occurredAt, task.taskId, 'committing', 'active']
-      );
-      const journalUpdate = this.database.execute(
-        `UPDATE chat_agent_commit_journals
-         SET status = ?, error_json = ?, updated_at = ?
-         WHERE journal_id = ? AND status NOT IN (?, ?)`,
-        ['manual_recovery', JSON.stringify(error), input.occurredAt, journal.journalId, 'finalized', 'cancelled']
-      );
-      if (attemptUpdate.changes !== 1 || taskUpdate.changes !== 1 || journalUpdate.changes !== 1) {
-        throw new AgentStoreProtocolError('manual_recovery_conflict', 'Manual recovery projections changed concurrently', 'recovery');
+      const taskUpdate =
+        journalStatus === 'failed'
+          ? this.database.execute(
+              `UPDATE chat_agent_tasks
+               SET status = ?, result_json = ?, result_hash = ?, error_json = ?,
+                   unfinished_journal_count = unfinished_journal_count - 1, updated_at = ?
+               WHERE task_id = ? AND status = ? AND result_hash IS NULL
+                 AND unfinished_journal_count = 1 AND record_state = ?`,
+              ['commit_failed', JSON.stringify(result), resultHash, JSON.stringify(error), input.occurredAt, task.taskId, 'committing', 'active']
+            )
+          : this.database.execute(
+              `UPDATE chat_agent_tasks
+               SET status = ?, result_json = ?, result_hash = ?, error_json = ?, updated_at = ?
+               WHERE task_id = ? AND status = ? AND result_hash IS NULL
+                 AND unfinished_journal_count = 1 AND record_state = ?`,
+              ['commit_failed', JSON.stringify(result), resultHash, JSON.stringify(error), input.occurredAt, task.taskId, 'committing', 'active']
+            );
+      const journalUpdate =
+        journalStatus === 'failed'
+          ? this.database.execute(
+              `UPDATE chat_agent_commit_journals
+               SET status = ?, error_json = ?, finalized_at = ?, updated_at = ?
+               WHERE journal_id = ? AND status IN (?, ?)`,
+              ['failed', JSON.stringify(error), input.occurredAt, input.occurredAt, journal.journalId, 'applying', 'applied']
+            )
+          : this.database.execute(
+              `UPDATE chat_agent_commit_journals
+               SET status = ?, error_json = ?, updated_at = ?
+               WHERE journal_id = ? AND status NOT IN (?, ?, ?, ?)`,
+              ['manual_recovery', JSON.stringify(error), input.occurredAt, journal.journalId, 'finalized', 'cancelled', 'failed', 'manual_recovery']
+            );
+      const changesetUpdate =
+        journalStatus === 'failed'
+          ? this.database.execute(
+              `UPDATE chat_agent_changesets
+               SET status = ?, updated_at = ?
+               WHERE changeset_id = ? AND status = ?`,
+              ['discarded', input.occurredAt, changeset.snapshot.changesetId, 'committing']
+            )
+          : { changes: 1 };
+      if (attemptUpdate.changes !== 1 || taskUpdate.changes !== 1 || journalUpdate.changes !== 1 || changesetUpdate.changes !== 1) {
+        throw new AgentStoreProtocolError('commit_failure_conflict', 'Commit failure projections changed concurrently', 'recovery');
       }
       const links = { attemptId: attempt.attemptId, runtimeId: attempt.currentRuntimeId };
       this.appendEvent('task', task.taskId, 'task.failed', { error, resultHash }, input.occurredAt, 'coordinator', links);
       return this.joinTerminalResult(task, checkpoint, result, resultHash, input.occurredAt, 'coordinator');
     });
+  }
+
+  /** @inheritdoc */
+  finalizeCommitFailure(input: FinalizeAgentCommitFailureInput): AgentCheckpointRecord {
+    return this.markManualRecovery(input);
   }
 
   /** @inheritdoc */
@@ -3511,10 +3654,19 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
   listUnfinishedJournals(): AgentCommitJournalRecord[] {
     return this.database
       .select<CommitJournalRow>(
-        `SELECT * FROM chat_agent_commit_journals
-         WHERE status NOT IN (?, ?)
-         ORDER BY created_at ASC, journal_id ASC`,
-        ['finalized', 'cancelled']
+        `SELECT journal.*
+         FROM chat_agent_commit_journals AS journal
+         JOIN chat_agent_tasks AS task ON task.task_id = journal.task_id
+         WHERE journal.status NOT IN (?, ?, ?)
+           OR (
+             journal.status = ?
+             AND task.status = ?
+             AND task.result_hash IS NULL
+             AND task.unfinished_journal_count = 0
+             AND task.record_state = ?
+           )
+         ORDER BY journal.created_at ASC, journal.journal_id ASC`,
+        ['finalized', 'cancelled', 'failed', 'cancelled', 'committing', 'active']
       )
       .map(parseCommitJournal);
   }

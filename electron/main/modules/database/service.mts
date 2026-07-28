@@ -26,6 +26,12 @@ interface DatabaseTableInfoRow {
   name: string;
 }
 
+/** SQLite schema 文本查询结果。 */
+interface DatabaseSchemaRow {
+  /** sqlite_master 保存的建表 SQL。 */
+  sql: string | null;
+}
+
 /**
  * Assistant Message 唯一性审计返回的重复记录。
  */
@@ -161,6 +167,90 @@ function backfillAttemptUsage(database: Pick<DatabaseInstance, 'prepare'>): void
     if (!usage) return;
     update.run(JSON.stringify(usage), resultUsage !== null || journalUsage !== null ? 1 : 0, row.attempt_id, AGENT_ZERO_USAGE_JSON);
   });
+}
+
+/**
+ * 为既有 commit journal 表补齐确定性 failed 终态。
+ * @param database - Agent 表共享 SQLite 连接
+ */
+function ensureJournalFailed(database: Pick<DatabaseInstance, 'exec' | 'prepare'>): void {
+  const schema = database
+    .prepare<[string, string], DatabaseSchemaRow>('SELECT sql FROM sqlite_master WHERE type = ? AND name = ?')
+    .get('table', 'chat_agent_commit_journals');
+  if (schema?.sql?.includes("'failed'")) return;
+  database.exec(`
+    BEGIN IMMEDIATE;
+
+    DROP TRIGGER IF EXISTS trg_chat_agent_commit_journals_immutable;
+    DROP TRIGGER IF EXISTS trg_chat_agent_commit_journals_no_delete;
+    DROP INDEX IF EXISTS idx_chat_agent_commit_journals_status;
+
+    ALTER TABLE chat_agent_commit_journals RENAME TO chat_agent_commit_journals_legacy;
+
+    CREATE TABLE chat_agent_commit_journals (
+      journal_id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      attempt_id TEXT NOT NULL,
+      changeset_id TEXT NOT NULL UNIQUE,
+      confirmation_id TEXT NOT NULL,
+      confirmation_version INTEGER NOT NULL,
+      plan_hash TEXT NOT NULL,
+      intent_json TEXT NOT NULL,
+      intent_hash TEXT NOT NULL,
+      status TEXT NOT NULL,
+      operation_progress_json TEXT NOT NULL DEFAULT '[]',
+      error_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      finalized_at TEXT,
+      CHECK (confirmation_version > 0),
+      CHECK (status IN ('created', 'applying', 'applied', 'finalized', 'cancelled', 'failed', 'manual_recovery'))
+    );
+
+    INSERT INTO chat_agent_commit_journals (
+      journal_id, task_id, attempt_id, changeset_id, confirmation_id,
+      confirmation_version, plan_hash, intent_json, intent_hash, status,
+      operation_progress_json, error_json, created_at, updated_at, finalized_at
+    )
+    SELECT
+      journal_id, task_id, attempt_id, changeset_id, confirmation_id,
+      confirmation_version, plan_hash, intent_json, intent_hash, status,
+      operation_progress_json, error_json, created_at, updated_at, finalized_at
+    FROM chat_agent_commit_journals_legacy;
+
+    DROP TABLE chat_agent_commit_journals_legacy;
+
+    CREATE TRIGGER trg_chat_agent_commit_journals_immutable
+    BEFORE UPDATE OF
+      journal_id, task_id, attempt_id, changeset_id, confirmation_id,
+      confirmation_version, plan_hash, intent_json, intent_hash, created_at
+    ON chat_agent_commit_journals
+    WHEN
+      NEW.journal_id IS NOT OLD.journal_id
+      OR NEW.task_id IS NOT OLD.task_id
+      OR NEW.attempt_id IS NOT OLD.attempt_id
+      OR NEW.changeset_id IS NOT OLD.changeset_id
+      OR NEW.confirmation_id IS NOT OLD.confirmation_id
+      OR NEW.confirmation_version IS NOT OLD.confirmation_version
+      OR NEW.plan_hash IS NOT OLD.plan_hash
+      OR NEW.intent_json IS NOT OLD.intent_json
+      OR NEW.intent_hash IS NOT OLD.intent_hash
+      OR NEW.created_at IS NOT OLD.created_at
+    BEGIN
+      SELECT RAISE(ABORT, 'agent_commit_journal_immutable');
+    END;
+
+    CREATE TRIGGER trg_chat_agent_commit_journals_no_delete
+    BEFORE DELETE ON chat_agent_commit_journals
+    BEGIN
+      SELECT RAISE(ABORT, 'agent_fact_delete_forbidden');
+    END;
+
+    CREATE INDEX idx_chat_agent_commit_journals_status
+    ON chat_agent_commit_journals(status, updated_at ASC);
+
+    COMMIT;
+  `);
 }
 
 let db: DatabaseInstance | null = null;
@@ -418,7 +508,7 @@ export function createAgentTables(database: Pick<DatabaseInstance, 'exec' | 'pre
       updated_at TEXT NOT NULL,
       finalized_at TEXT,
       CHECK (confirmation_version > 0),
-      CHECK (status IN ('created', 'applying', 'applied', 'finalized', 'cancelled', 'manual_recovery'))
+      CHECK (status IN ('created', 'applying', 'applied', 'finalized', 'cancelled', 'failed', 'manual_recovery'))
     );
 
     CREATE TRIGGER IF NOT EXISTS trg_chat_agent_tasks_immutable
@@ -710,6 +800,8 @@ export function createAgentTables(database: Pick<DatabaseInstance, 'exec' | 'pre
     CREATE INDEX IF NOT EXISTS idx_chat_agent_commit_journals_status
     ON chat_agent_commit_journals(status, updated_at ASC);
   `);
+
+  ensureJournalFailed(database);
 
   const checkpointColumns = database.prepare<[], DatabaseTableInfoRow>('PRAGMA table_info(chat_agent_delegation_checkpoints)').all();
   if (!checkpointColumns.some((column): boolean => column.name === 'cancellation_finalized_at')) {

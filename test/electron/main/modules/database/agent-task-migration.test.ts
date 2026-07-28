@@ -265,6 +265,60 @@ describeWithSqlite('agent task additive migration', (): void => {
     expect(dbSelect<{ title: string }>('SELECT title FROM chat_sessions WHERE id = ?', ['legacy-session'])).toEqual([{ title: 'Legacy' }]);
   });
 
+  it('migrates the legacy commit journal constraint to the deterministic failed terminal state', (): void => {
+    const database = new Database(':memory:');
+    database.exec(`
+      CREATE TABLE chat_agent_commit_journals (
+        journal_id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        attempt_id TEXT NOT NULL,
+        changeset_id TEXT NOT NULL UNIQUE,
+        confirmation_id TEXT NOT NULL,
+        confirmation_version INTEGER NOT NULL,
+        plan_hash TEXT NOT NULL,
+        intent_json TEXT NOT NULL,
+        intent_hash TEXT NOT NULL,
+        status TEXT NOT NULL,
+        operation_progress_json TEXT NOT NULL DEFAULT '[]',
+        error_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        finalized_at TEXT,
+        CHECK (confirmation_version > 0),
+        CHECK (status IN ('created', 'applying', 'applied', 'finalized', 'cancelled', 'manual_recovery'))
+      );
+      INSERT INTO chat_agent_commit_journals (
+        journal_id, task_id, attempt_id, changeset_id, confirmation_id,
+        confirmation_version, plan_hash, intent_json, intent_hash, status,
+        operation_progress_json, created_at, updated_at
+      ) VALUES (
+        'journal-legacy-status', 'task-legacy-status', 'attempt-legacy-status',
+        'changeset-legacy-status', 'confirmation-legacy-status', 1,
+        '${'a'.repeat(64)}', '{}', '${'b'.repeat(64)}', 'applying', '[]',
+        '2026-07-28T08:00:00.000Z', '2026-07-28T08:00:00.000Z'
+      );
+    `);
+
+    createAgentTables(database);
+    createAgentTables(database);
+    database
+      .prepare(
+        `UPDATE chat_agent_commit_journals
+         SET status = ?, error_json = ?, finalized_at = ?, updated_at = ?
+         WHERE journal_id = ?`
+      )
+      .run('failed', '{"code":"commit_failed"}', '2026-07-28T08:01:00.000Z', '2026-07-28T08:01:00.000Z', 'journal-legacy-status');
+
+    expect(database.prepare('SELECT status, finalized_at FROM chat_agent_commit_journals WHERE journal_id = ?').get('journal-legacy-status')).toEqual({
+      status: 'failed',
+      finalized_at: '2026-07-28T08:01:00.000Z'
+    });
+    expect((): void => {
+      database.prepare('DELETE FROM chat_agent_commit_journals WHERE journal_id = ?').run('journal-legacy-status');
+    }).toThrow('agent_fact_delete_forbidden');
+    database.close();
+  });
+
   it('backfills legacy Attempt usage as an explicit incomplete lower-bound', (): void => {
     const database = new Database(':memory:');
     database.exec(`

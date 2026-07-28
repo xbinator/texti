@@ -2,6 +2,7 @@
  * @file file-commit.test.ts
  * @description 验证 Child 文件 changeset 的 commit boundary、崩溃注入与 journal 恢复。
  */
+import { writeFileSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -69,6 +70,8 @@ interface MemoryCommitStore extends AgentFileCommitStore {
   taskStatus: AgentTaskRecord['status'];
   /** cancelled 收敛次数。 */
   cancelCount: number;
+  /** changeset 当前持久化状态。 */
+  changesetStatus: AgentChangesetRecord['status'];
   /** 模拟提交期间到达的取消时间。 */
   cancelRequestedAt?: string;
 }
@@ -384,7 +387,7 @@ function createMemoryStore(changeset: AgentChangesetRecord): MemoryCommitStore {
       status,
       appliedOperationIds: operationId ? [...journal.appliedOperationIds, operationId] : journal.appliedOperationIds,
       updatedAt: NOW,
-      ...(['finalized', 'cancelled'].includes(status) ? { finalizedAt: NOW } : {})
+      ...(['finalized', 'cancelled', 'failed'].includes(status) ? { finalizedAt: NOW } : {})
     };
     return journal;
   }
@@ -392,6 +395,7 @@ function createMemoryStore(changeset: AgentChangesetRecord): MemoryCommitStore {
   const store: MemoryCommitStore = {
     taskStatus: 'queued',
     cancelCount: 0,
+    changesetStatus: 'approved',
     createCommitJournal(input): AgentCommitJournalRecord {
       if (journal) return journal;
       journal = {
@@ -410,6 +414,7 @@ function createMemoryStore(changeset: AgentChangesetRecord): MemoryCommitStore {
         updatedAt: input.occurredAt
       };
       store.taskStatus = 'committing';
+      store.changesetStatus = 'committing';
       return journal;
     },
     markJournalApplying(): AgentCommitJournalRecord {
@@ -425,13 +430,30 @@ function createMemoryStore(changeset: AgentChangesetRecord): MemoryCommitStore {
     finalizeCommit(input): AgentCheckpointRecord {
       store.finalizedResult = input.result;
       store.taskStatus = 'completed';
+      store.changesetStatus = 'committed';
       updateJournal('finalized');
       return {} as AgentCheckpointRecord;
     },
-    cancelCommitJournal(): AgentCheckpointRecord {
+    cancelCommitJournal(): AgentCommitJournalRecord {
       store.cancelCount += 1;
+      store.changesetStatus = 'discarded';
+      return updateJournal('cancelled');
+    },
+    finalizeCommitCancellation(): AgentCheckpointRecord {
       store.taskStatus = 'cancelled';
-      updateJournal('cancelled');
+      return {} as AgentCheckpointRecord;
+    },
+    finalizeCommitFailure(input): AgentCheckpointRecord {
+      if (!journal) throw new Error('journal_missing');
+      journal = {
+        ...journal,
+        status: 'failed',
+        error: input.error,
+        finalizedAt: input.occurredAt,
+        updatedAt: input.occurredAt
+      };
+      store.taskStatus = 'commit_failed';
+      store.changesetStatus = 'discarded';
       return {} as AgentCheckpointRecord;
     },
     markManualRecovery(input): AgentCheckpointRecord {
@@ -441,13 +463,15 @@ function createMemoryStore(changeset: AgentChangesetRecord): MemoryCommitStore {
       return {} as AgentCheckpointRecord;
     },
     listUnfinishedJournals(): AgentCommitJournalRecord[] {
-      return journal && journal.status !== 'finalized' && journal.status !== 'cancelled' ? [journal] : [];
+      return journal && journal.status !== 'finalized' && journal.status !== 'failed' && (journal.status !== 'cancelled' || store.taskStatus === 'committing')
+        ? [journal]
+        : [];
     },
     getCommitJournal(): AgentCommitJournalRecord | null {
       return journal ?? null;
     },
     getChangeset(changesetId: string): AgentChangesetRecord | null {
-      return changesetId === changeset.snapshot.changesetId ? changeset : null;
+      return changesetId === changeset.snapshot.changesetId ? { ...changeset, status: store.changesetStatus } : null;
     },
     getTask(taskId: string): AgentTaskRecord | null {
       if (taskId !== changeset.snapshot.taskId) return null;
@@ -491,6 +515,7 @@ function createCommitter(
   options: {
     readonly crashAt?: AgentCommitCrashPoint;
     readonly phases?: string[];
+    readonly onPhase?: AgentFileCommitDependencies['onPhase'];
     readonly writeFileAtomically?: AgentFileCommitDependencies['writeFileAtomically'];
   } = {}
 ) {
@@ -502,6 +527,7 @@ function createCommitter(
     getPermissionScopeIds: (): readonly string[] => ['workspace:write'],
     onPhase: (phase): void => {
       options.phases?.push(phase);
+      options.onPhase?.(phase);
     },
     injectCrash: (point): void => {
       if (point === options.crashAt) throw new Error(`crash:${point}`);
@@ -555,6 +581,78 @@ describe('agent file committer', (): void => {
       warnings: [{ code: 'cancel_arrived_too_late', message: expect.any(String) }]
     });
     expect(store.taskStatus).toBe('completed');
+  });
+
+  it('arbitrates cancellation against the durable journal boundary', async (): Promise<void> => {
+    const fixture = await createFixture();
+    const store = createMemoryStore(fixture.changeset);
+    const crashingCommitter = createCommitter(fixture, store, { crashAt: 'after_journal_created' });
+    await expect(crashingCommitter.commit(createCommitInput(fixture))).rejects.toThrow('crash:after_journal_created');
+    const committer = createCommitter(fixture, store);
+
+    const cancelled = await committer.cancelTask(fixture.task.taskId);
+
+    expect(cancelled).toMatchObject({
+      disposition: 'journal_cancelled',
+      journal: {
+        taskId: fixture.task.taskId,
+        status: 'cancelled',
+        appliedOperationIds: []
+      }
+    });
+    expect(store.cancelCount).toBe(1);
+    expect(store.taskStatus).toBe('committing');
+    expect(await committer.cancelTask(fixture.task.taskId)).toEqual(cancelled);
+  });
+
+  it('keeps applying journal ownership after the irreversible line', async (): Promise<void> => {
+    const fixture = await createFixture();
+    const store = createMemoryStore(fixture.changeset);
+    const crashingCommitter = createCommitter(fixture, store, { crashAt: 'after_journal_created' });
+    await expect(crashingCommitter.commit(createCommitInput(fixture))).rejects.toThrow('crash:after_journal_created');
+    store.markJournalApplying({
+      journalId: 'journal-commit',
+      occurredAt: NOW
+    });
+    const committer = createCommitter(fixture, store);
+
+    const disposition = await committer.cancelTask(fixture.task.taskId);
+
+    expect(disposition).toMatchObject({
+      disposition: 'commit_in_progress',
+      journal: {
+        status: 'applying'
+      }
+    });
+    expect(store.cancelCount).toBe(0);
+    expect(store.taskStatus).toBe('committing');
+  });
+
+  it('serializes a live cancellation before journal applying begins', async (): Promise<void> => {
+    const fixture = await createFixture();
+    const store = createMemoryStore(fixture.changeset);
+    let cancellation: ReturnType<ReturnType<typeof createCommitter>['cancelTask']> | undefined;
+    let requestCancel: ReturnType<typeof createCommitter>['cancelTask'] | undefined;
+    const committer = createCommitter(fixture, store, {
+      onPhase: (phase): void => {
+        if (phase === 'journal-created') cancellation = requestCancel?.(fixture.task.taskId);
+      }
+    });
+    requestCancel = committer.cancelTask.bind(committer);
+
+    await expect(committer.commit(createCommitInput(fixture))).rejects.toMatchObject({
+      code: 'cancelled',
+      phase: 'commit'
+    });
+    if (!cancellation) throw new Error('cancellation_not_requested');
+    await expect(cancellation).resolves.toMatchObject({
+      disposition: 'journal_cancelled',
+      journal: {
+        status: 'cancelled'
+      }
+    });
+    expect(store.cancelCount).toBe(1);
+    expect(await fs.readFile(fixture.targetPaths[0] as string, 'utf8')).toBe('old content 0');
   });
 
   it('fails closed before journal creation and external mutation when the lease is not the current exclusive commit', async (): Promise<void> => {
@@ -615,11 +713,118 @@ describe('agent file committer', (): void => {
 
     const recovery = await createCommitter(fixture, store).recover();
 
-    expect(recovery).toEqual([{ journalId: 'journal-commit', status: 'cancelled', taskId: fixture.task.taskId }]);
+    expect(recovery).toEqual([
+      {
+        journalId: 'journal-commit',
+        status: 'cancelled',
+        taskId: fixture.task.taskId,
+        attemptId: fixture.attempt.attemptId
+      }
+    ]);
     expect(await fs.readFile(fixture.targetPaths[0] as string, 'utf8')).toBe('old content 0');
-    expect(store.taskStatus).toBe('cancelled');
+    expect(store.taskStatus).toBe('committing');
     expect(store.cancelCount).toBe(1);
+    expect(await createCommitter(fixture, store).recover()).toEqual(recovery);
+    store.finalizeCommitCancellation({
+      journalId: 'journal-commit',
+      occurredAt: NOW,
+      startupRecovery: true
+    });
     expect(await createCommitter(fixture, store).recover()).toEqual([]);
+  });
+
+  it('converges a deterministic post-boundary failure to commit_failed without reporting cancellation', async (): Promise<void> => {
+    const fixture = await createFixture();
+    const store = createMemoryStore(fixture.changeset);
+    const writeFileAtomically = vi.fn(async (): Promise<void> => undefined);
+
+    await expect(createCommitter(fixture, store, { writeFileAtomically }).commit(createCommitInput(fixture))).rejects.toMatchObject({
+      code: 'commit_failed',
+      phase: 'commit'
+    });
+
+    expect(store.taskStatus).toBe('commit_failed');
+    expect(store.getCommitJournal('journal-commit')).toMatchObject({
+      status: 'failed',
+      error: {
+        code: 'commit_failed',
+        phase: 'commit'
+      }
+    });
+    expect(store.getCommitJournal('journal-commit')).not.toMatchObject({ status: 'cancelled' });
+  });
+
+  it('preserves partial workspace mutation and journal evidence when a later operation deterministically mismatches', async (): Promise<void> => {
+    const fixture = await createFixture(2);
+    const store = createMemoryStore(fixture.changeset);
+    let writeCount = 0;
+    const writeFileAtomically = vi.fn<AgentAtomicFileWriter>(async (filePath, content, options): Promise<void> => {
+      writeCount += 1;
+      if (writeCount === 1) await fs.writeFile(filePath, content, options);
+    });
+
+    await expect(createCommitter(fixture, store, { writeFileAtomically }).commit(createCommitInput(fixture))).rejects.toMatchObject({
+      code: 'manual_recovery_required'
+    });
+
+    expect(store.taskStatus).toBe('commit_failed');
+    expect(store.getCommitJournal('journal-commit')).toMatchObject({
+      status: 'manual_recovery',
+      appliedOperationIds: ['operation-0'],
+      error: {
+        code: 'manual_recovery_required'
+      }
+    });
+    expect(store.getChangeset(fixture.changeset.snapshot.changesetId)).toMatchObject({ status: 'committing' });
+    expect(await fs.readFile(fixture.targetPaths[0] as string, 'utf8')).toBe('new content 0');
+    expect(await fs.readFile(fixture.targetPaths[1] as string, 'utf8')).toBe('old content 1');
+    await expect(fs.access(fixture.changeset.snapshot.operations[0]?.candidateReference as string)).resolves.toBeUndefined();
+    await expect(fs.access(fixture.changeset.snapshot.operations[0]?.rollbackReference as string)).resolves.toBeUndefined();
+  });
+
+  it('enters manual recovery when final validation drifts after the journal is applied', async (): Promise<void> => {
+    const fixture = await createFixture();
+    const store = createMemoryStore(fixture.changeset);
+    const committer = createCommitter(fixture, store, {
+      onPhase: (phase): void => {
+        if (phase === 'journal-applied') writeFileSync(fixture.targetPaths[0] as string, 'external drift', 'utf8');
+      }
+    });
+
+    await expect(committer.commit(createCommitInput(fixture))).rejects.toMatchObject({
+      code: 'manual_recovery_required'
+    });
+
+    expect(store.taskStatus).toBe('commit_failed');
+    expect(store.getCommitJournal('journal-commit')).toMatchObject({
+      status: 'manual_recovery',
+      appliedOperationIds: ['operation-0'],
+      error: {
+        code: 'manual_recovery_required'
+      }
+    });
+    expect(await fs.readFile(fixture.targetPaths[0] as string, 'utf8')).toBe('external drift');
+  });
+
+  it('converges an unknown writer failure to manual recovery and preserves its journal', async (): Promise<void> => {
+    const fixture = await createFixture();
+    const store = createMemoryStore(fixture.changeset);
+    const writeFileAtomically = vi.fn(async (): Promise<void> => {
+      throw new Error('unknown writer outcome');
+    });
+
+    await expect(createCommitter(fixture, store, { writeFileAtomically }).commit(createCommitInput(fixture))).rejects.toMatchObject({
+      code: 'manual_recovery_required',
+      phase: 'commit'
+    });
+
+    expect(store.taskStatus).toBe('commit_failed');
+    expect(store.getCommitJournal('journal-commit')).toMatchObject({
+      status: 'manual_recovery',
+      error: {
+        code: 'manual_recovery_required'
+      }
+    });
   });
 
   it.each<AgentCommitCrashPoint>(['after_first_operation', 'after_all_operations', 'after_target_validation'])(
@@ -638,7 +843,14 @@ describe('agent file committer', (): void => {
 
       const recovery = await createCommitter(fixture, store, { writeFileAtomically }).recover();
 
-      expect(recovery).toEqual([{ journalId: 'journal-commit', status: 'finalized', taskId: fixture.task.taskId }]);
+      expect(recovery).toEqual([
+        {
+          journalId: 'journal-commit',
+          status: 'finalized',
+          taskId: fixture.task.taskId,
+          attemptId: fixture.attempt.attemptId
+        }
+      ]);
       expect(await Promise.all(fixture.targetPaths.map((targetPath): Promise<string> => fs.readFile(targetPath, 'utf8')))).toEqual([
         'new content 0',
         'new content 1'
@@ -657,7 +869,14 @@ describe('agent file committer', (): void => {
 
     const recovery = await createCommitter(fixture, store).recover();
 
-    expect(recovery).toEqual([{ journalId: 'journal-commit', status: 'manual_recovery', taskId: fixture.task.taskId }]);
+    expect(recovery).toEqual([
+      {
+        journalId: 'journal-commit',
+        status: 'manual_recovery',
+        taskId: fixture.task.taskId,
+        attemptId: fixture.attempt.attemptId
+      }
+    ]);
     expect(store.taskStatus).toBe('commit_failed');
     expect(store.listUnfinishedJournals()).toMatchObject([
       {

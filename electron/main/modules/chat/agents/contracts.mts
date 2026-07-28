@@ -1712,6 +1712,7 @@ const AGENT_EVENT_TYPES = new Set<ChatAgentEventType>([
   'tool.completed',
   'changeset.prepared',
   'commit.journal_created',
+  'commit.journal_cancelled',
   'commit.mutation_applied',
   'commit.finalized',
   'protocol.error',
@@ -1912,6 +1913,14 @@ function normalizeEventPayload(type: ChatAgentEventType, input: unknown): ChatAg
         isSha256(input.intentHash) &&
         Number.isInteger(input.confirmationVersion) &&
         (input.confirmationVersion as number) > 0;
+      break;
+    case 'commit.journal_cancelled':
+      valid =
+        hasExactKeys(input, ['journalId', 'changesetId']) &&
+        typeof input.journalId === 'string' &&
+        normalizeAgentIdentity(input.journalId) !== null &&
+        typeof input.changesetId === 'string' &&
+        normalizeAgentIdentity(input.changesetId) !== null;
       break;
     case 'commit.mutation_applied':
       valid =

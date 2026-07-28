@@ -16,6 +16,7 @@ import type {
 } from '../../../../../../electron/main/modules/chat/agents/types.mjs';
 import type {
   AgentChangesetRecord,
+  AgentCommitJournalRecord,
   AgentConfirmationRecord,
   AgentDelegationCreatedPayload,
   AgentTaskError,
@@ -1217,7 +1218,7 @@ describe('agent coordinator', (): void => {
     fixture.dependencies.getChangeset = vi.fn((): AgentChangesetRecord => changeset);
     fixture.dependencies.queueCommit = vi.fn();
     fixture.dependencies.createConfirmationId = (): string => confirmation.confirmationId;
-    fixture.dependencies.fileCommitter = { commit: vi.fn(), recover: vi.fn() };
+    fixture.dependencies.fileCommitter = { commit: vi.fn(), cancelTask: vi.fn(), recover: vi.fn() };
     const coordinator = createAgentCoordinator(fixture.dependencies);
     await coordinator.accept(payload);
     await vi.waitFor((): void => {
@@ -1242,7 +1243,7 @@ describe('agent coordinator', (): void => {
       })
     );
     expect(fixture.dependencies.queueCommit).not.toHaveBeenCalled();
-    expect(fixture.dependencies.fileCommitter.commit).not.toHaveBeenCalled();
+    expect(fixture.dependencies.fileCommitter?.commit).not.toHaveBeenCalled();
   });
 
   it('lets cancellation win after the commit lease is active but before external mutation', async (): Promise<void> => {
@@ -1313,7 +1314,7 @@ describe('agent coordinator', (): void => {
       return currentTask;
     });
     fixture.dependencies.createConfirmationId = (): string => confirmation.confirmationId;
-    fixture.dependencies.fileCommitter = { commit: vi.fn(), recover: vi.fn() };
+    fixture.dependencies.fileCommitter = { commit: vi.fn(), cancelTask: vi.fn(), recover: vi.fn() };
     fixture.enqueueTask.mockImplementation((request: AgentScheduleRequest): Promise<AgentResourceLease> => {
       if (request.phase === 'commit') {
         return new Promise<AgentResourceLease>((resolve): void => {
@@ -1351,10 +1352,10 @@ describe('agent coordinator', (): void => {
     await expect(cancellation).resolves.toBe('cancel_requested');
 
     expect(fixture.cancelTask).toHaveBeenCalledWith(task.taskId, 'user_cancelled');
-    expect(fixture.cancelTask.mock.invocationCallOrder[0]).toBeLessThan(fixture.requestTaskCancellation.mock.invocationCallOrder[0] as number);
+    expect(fixture.requestTaskCancellation.mock.invocationCallOrder[0]).toBeLessThan(fixture.cancelTask.mock.invocationCallOrder[0] as number);
     expect(revokeTask).not.toHaveBeenCalled();
     expect(fixture.dependencies.getConfirmation).toHaveReturnedWith(expect.objectContaining({ status: 'approved', version: 2 }));
-    expect(fixture.dependencies.fileCommitter.commit).not.toHaveBeenCalled();
+    expect(fixture.dependencies.fileCommitter?.commit).not.toHaveBeenCalled();
     expect(fixture.recordTaskResult).toHaveBeenCalledWith(
       expect.objectContaining({ taskId: task.taskId }),
       expect.objectContaining({
@@ -1365,6 +1366,234 @@ describe('agent coordinator', (): void => {
     );
     expect(fixture.discardRuntime).toHaveBeenCalledWith(runtimeId);
     expect(releaseCommit).toHaveBeenCalledOnce();
+  });
+
+  it('cleans one created journal overlay before finalizing cancellation', async (): Promise<void> => {
+    const source = createWriteTask();
+    let currentTask: AgentTaskRecord = {
+      ...source,
+      status: 'committing',
+      currentAttemptId: 'attempt-commit-cancel',
+      unfinishedJournalCount: 1
+    };
+    const fixture = createDependencies([currentTask]);
+    const order: string[] = [];
+    fixture.getTask.mockImplementation((): AgentTaskRecord => currentTask);
+    fixture.requestTaskCancellation.mockImplementation(() => {
+      order.push('request-persisted');
+      currentTask = { ...currentTask, cancelRequestedAt: '2026-07-27T00:00:00.000Z' };
+      return { previousStatus: 'committing', task: currentTask, disposition: 'commit_in_progress' as const };
+    });
+    const journal = {
+      journalId: 'journal-created-cancel',
+      taskId: currentTask.taskId,
+      attemptId: currentTask.currentAttemptId,
+      status: 'cancelled',
+      appliedOperationIds: []
+    } as unknown as AgentCommitJournalRecord;
+    const cancelCommit = vi.fn(async () => {
+      order.push('journal-cancelled');
+      currentTask = { ...currentTask, unfinishedJournalCount: 0 };
+      return { disposition: 'journal_cancelled' as const, journal };
+    });
+    fixture.dependencies.fileCommitter = {
+      commit: vi.fn(),
+      cancelTask: cancelCommit,
+      recover: vi.fn()
+    };
+    const discardOverlay = vi.fn(async (): Promise<void> => {
+      order.push('overlay-discarded');
+    });
+    const finalizeCancellation = vi.fn((): AgentCheckpointRecord => {
+      order.push('cancellation-finalized');
+      currentTask = {
+        ...currentTask,
+        status: 'cancelled',
+        result: createResult(currentTask, currentTask.currentAttemptId as string)
+      };
+      return { ...createCheckpoint([currentTask]), status: 'ready_to_resume' };
+    });
+    Reflect.set(fixture.dependencies, 'discardTaskOverlay', discardOverlay);
+    Reflect.set(fixture.dependencies, 'finalizeCommitCancellation', finalizeCancellation);
+    const coordinator = createAgentCoordinator(fixture.dependencies);
+
+    await expect(coordinator.cancelTask(currentTask.taskId)).resolves.toBe('cancel_requested');
+
+    expect(order).toEqual(['request-persisted', 'journal-cancelled', 'overlay-discarded', 'cancellation-finalized']);
+    expect(discardOverlay).toHaveBeenCalledWith({
+      taskId: currentTask.taskId,
+      attemptId: 'attempt-commit-cancel'
+    });
+    expect(finalizeCancellation).toHaveBeenCalledWith({
+      journalId: journal.journalId,
+      occurredAt: '2026-07-27T00:00:00.000Z'
+    });
+    expect(fixture.cancelTask).not.toHaveBeenCalled();
+    expect(fixture.abortTask).not.toHaveBeenCalled();
+    expect(fixture.discardRuntime).not.toHaveBeenCalled();
+    expect(fixture.recordTaskResult).not.toHaveBeenCalled();
+    expect(fixture.settleTask).toHaveBeenCalledWith(currentTask.taskId, expect.objectContaining({ totalTokens: expect.any(Number) }));
+  });
+
+  it('arbitrates a stale queued commit through the journal when commit wins the cancellation CAS', async (): Promise<void> => {
+    const source = createWriteTask();
+    const queuedTask: AgentTaskRecord = {
+      ...source,
+      status: 'queued',
+      queuePhase: 'commit',
+      currentAttemptId: 'attempt-journal-race'
+    };
+    let currentTask = queuedTask;
+    const fixture = createDependencies([queuedTask]);
+    fixture.getTask.mockImplementation((): AgentTaskRecord => currentTask);
+    fixture.requestTaskCancellation.mockImplementation(() => {
+      currentTask = {
+        ...currentTask,
+        status: 'committing',
+        queuePhase: undefined,
+        unfinishedJournalCount: 1,
+        cancelRequestedAt: '2026-07-27T00:00:00.000Z'
+      };
+      return { previousStatus: 'committing', task: currentTask, disposition: 'commit_in_progress' as const };
+    });
+    const journal = {
+      journalId: 'journal-race-winner',
+      taskId: currentTask.taskId,
+      attemptId: currentTask.currentAttemptId,
+      status: 'cancelled',
+      appliedOperationIds: []
+    } as unknown as AgentCommitJournalRecord;
+    fixture.dependencies.fileCommitter = {
+      commit: vi.fn(),
+      cancelTask: vi.fn(async () => {
+        currentTask = { ...currentTask, unfinishedJournalCount: 0 };
+        return { disposition: 'journal_cancelled' as const, journal };
+      }),
+      recover: vi.fn()
+    };
+    Reflect.set(
+      fixture.dependencies,
+      'discardTaskOverlay',
+      vi.fn(async (): Promise<void> => undefined)
+    );
+    Reflect.set(
+      fixture.dependencies,
+      'finalizeCommitCancellation',
+      vi.fn((): AgentCheckpointRecord => {
+        currentTask = {
+          ...currentTask,
+          status: 'cancelled',
+          result: createResult(currentTask, currentTask.currentAttemptId as string)
+        };
+        return { ...createCheckpoint([currentTask]), status: 'ready_to_resume' };
+      })
+    );
+    const coordinator = createAgentCoordinator(fixture.dependencies);
+
+    await expect(coordinator.cancelTask(currentTask.taskId)).resolves.toBe('cancel_requested');
+
+    expect(fixture.dependencies.fileCommitter.cancelTask).toHaveBeenCalledWith(currentTask.taskId);
+    expect(fixture.cancelTask).not.toHaveBeenCalled();
+    expect(fixture.settleTask).toHaveBeenCalledWith(currentTask.taskId, currentTask.result?.usage);
+  });
+
+  it('keeps a cancelled journal nonterminal when precise overlay cleanup fails', async (): Promise<void> => {
+    const source = createWriteTask();
+    let currentTask: AgentTaskRecord = {
+      ...source,
+      status: 'committing',
+      currentAttemptId: 'attempt-cleanup-failure',
+      unfinishedJournalCount: 1
+    };
+    const fixture = createDependencies([currentTask]);
+    fixture.getTask.mockImplementation((): AgentTaskRecord => currentTask);
+    fixture.requestTaskCancellation.mockImplementation(() => {
+      currentTask = { ...currentTask, cancelRequestedAt: '2026-07-27T00:00:00.000Z' };
+      return { previousStatus: 'committing', task: currentTask, disposition: 'commit_in_progress' as const };
+    });
+    const journal = {
+      journalId: 'journal-cleanup-failure',
+      taskId: currentTask.taskId,
+      attemptId: currentTask.currentAttemptId,
+      status: 'cancelled',
+      appliedOperationIds: []
+    } as unknown as AgentCommitJournalRecord;
+    fixture.dependencies.fileCommitter = {
+      commit: vi.fn(),
+      cancelTask: vi.fn(async () => {
+        currentTask = { ...currentTask, unfinishedJournalCount: 0 };
+        return { disposition: 'journal_cancelled' as const, journal };
+      }),
+      recover: vi.fn()
+    };
+    const discardOverlay = vi.fn(async (): Promise<void> => {
+      throw new Error('overlay_cleanup_failed');
+    });
+    const finalizeCancellation = vi.fn();
+    Reflect.set(fixture.dependencies, 'discardTaskOverlay', discardOverlay);
+    Reflect.set(fixture.dependencies, 'finalizeCommitCancellation', finalizeCancellation);
+    const coordinator = createAgentCoordinator(fixture.dependencies);
+
+    await expect(coordinator.cancelTask(currentTask.taskId)).rejects.toThrow('overlay_cleanup_failed');
+
+    expect(currentTask).toMatchObject({
+      status: 'committing',
+      unfinishedJournalCount: 0,
+      cancelRequestedAt: '2026-07-27T00:00:00.000Z'
+    });
+    expect(finalizeCancellation).not.toHaveBeenCalled();
+    expect(fixture.recordTaskResult).not.toHaveBeenCalled();
+    expect(fixture.discardRuntime).not.toHaveBeenCalled();
+  });
+
+  it('returns commit_in_progress without aborting or discarding after journal applying', async (): Promise<void> => {
+    const source = createWriteTask();
+    let currentTask: AgentTaskRecord = {
+      ...source,
+      status: 'committing',
+      currentAttemptId: 'attempt-applying-cancel',
+      unfinishedJournalCount: 1
+    };
+    const fixture = createDependencies([currentTask]);
+    fixture.getTask.mockImplementation((): AgentTaskRecord => currentTask);
+    fixture.requestTaskCancellation.mockImplementation(() => {
+      currentTask = { ...currentTask, cancelRequestedAt: '2026-07-27T00:00:00.000Z' };
+      return { previousStatus: 'committing', task: currentTask, disposition: 'commit_in_progress' as const };
+    });
+    const cancelCommit = vi.fn(
+      async () =>
+        ({
+          disposition: 'commit_in_progress',
+          journal: {
+            journalId: 'journal-applying-cancel',
+            taskId: currentTask.taskId,
+            attemptId: currentTask.currentAttemptId,
+            status: 'applying',
+            appliedOperationIds: []
+          } as unknown as AgentCommitJournalRecord
+        } as const)
+    );
+    fixture.dependencies.fileCommitter = {
+      commit: vi.fn(),
+      cancelTask: cancelCommit,
+      recover: vi.fn()
+    };
+    const discardOverlay = vi.fn();
+    const finalizeCancellation = vi.fn();
+    Reflect.set(fixture.dependencies, 'discardTaskOverlay', discardOverlay);
+    Reflect.set(fixture.dependencies, 'finalizeCommitCancellation', finalizeCancellation);
+    const coordinator = createAgentCoordinator(fixture.dependencies);
+
+    await expect(coordinator.cancelTask(currentTask.taskId)).resolves.toBe('commit_in_progress');
+
+    expect(currentTask.cancelRequestedAt).toBe('2026-07-27T00:00:00.000Z');
+    expect(cancelCommit).toHaveBeenCalledWith(currentTask.taskId);
+    expect(fixture.cancelTask).not.toHaveBeenCalled();
+    expect(fixture.abortTask).not.toHaveBeenCalled();
+    expect(fixture.abortRuntime).not.toHaveBeenCalled();
+    expect(fixture.discardRuntime).not.toHaveBeenCalled();
+    expect(discardOverlay).not.toHaveBeenCalled();
+    expect(finalizeCancellation).not.toHaveBeenCalled();
   });
 
   it('propagates target cleanup failure after independently releasing the lease and Runtime route', async (): Promise<void> => {
@@ -1699,6 +1928,7 @@ describe('agent coordinator', (): void => {
           targetHashes: [changeset.snapshot.operations[0]?.targetContentHash as string]
         } as unknown as AgentFileCommitResult;
       }),
+      cancelTask: vi.fn(),
       recover: vi.fn()
     };
     fixture.recordTaskResult.mockImplementation((): AgentCheckpointRecord => {
@@ -1839,6 +2069,7 @@ describe('agent coordinator', (): void => {
     fixture.dependencies.createConfirmationId = (): string => 'confirmation-1';
     fixture.dependencies.fileCommitter = {
       commit: vi.fn(),
+      cancelTask: vi.fn(),
       recover: vi.fn()
     };
     fixture.enqueueTask.mockImplementation(async (request: AgentScheduleRequest): Promise<AgentResourceLease> => {
@@ -1952,6 +2183,7 @@ describe('agent coordinator', (): void => {
     fixture.dependencies.createConfirmationId = (): string => 'confirmation-1';
     fixture.dependencies.fileCommitter = {
       commit: vi.fn(),
+      cancelTask: vi.fn(),
       recover: vi.fn()
     };
     const coordinator = createAgentCoordinator(fixture.dependencies);

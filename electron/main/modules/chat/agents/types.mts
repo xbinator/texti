@@ -649,6 +649,12 @@ export interface MarkAgentJournalOperationInput extends MarkAgentJournalInput {
 /** 尚未产生外部 mutation 的 commit journal 安全取消输入。 */
 export type CancelAgentCommitJournalInput = MarkAgentJournalInput;
 
+/** overlay 已清理后终态化安全取消 commit 的输入。 */
+export interface FinalizeAgentCommitCancellationInput extends MarkAgentJournalInput {
+  /** 启动恢复可补写 Checkpoint 级联请求；live 路径必须预先持久化请求。 */
+  readonly startupRecovery?: true;
+}
+
 /** commit journal 成功终态输入。 */
 export interface FinalizeAgentCommitInput extends MarkAgentJournalInput {
   /** 最终结构化 Task 结果。 */
@@ -657,6 +663,12 @@ export interface FinalizeAgentCommitInput extends MarkAgentJournalInput {
   readonly resultHash: string;
   /** 全部外部修改的最终完整性 hash。 */
   readonly finalHash: string;
+}
+
+/** commit journal 确定性失败终态输入。 */
+export interface FinalizeAgentCommitFailureInput extends MarkAgentJournalInput {
+  /** code 固定为 commit_failed 的结构化提交错误。 */
+  readonly error: AgentTaskError;
 }
 
 /** commit journal 人工恢复终态输入。 */
@@ -867,15 +879,27 @@ export interface AgentDelegationStore {
   /**
    * 原子取消仍处于 created 且没有外部操作进度的 journal。
    * @param input - journal 身份与恢复时间
+   * @returns cancelled journal
+   */
+  cancelCommitJournal(input: CancelAgentCommitJournalInput): AgentCommitJournalRecord;
+  /**
+   * 在外部 overlay 已成功清理后终态化安全取消的 commit。
+   * @param input - cancelled journal 身份与终态时间
    * @returns 汇合后的 Checkpoint
    */
-  cancelCommitJournal(input: CancelAgentCommitJournalInput): AgentCheckpointRecord;
+  finalizeCommitCancellation(input: FinalizeAgentCommitCancellationInput): AgentCheckpointRecord;
   /**
    * 原子完成 journal、Task、Attempt 和 Checkpoint 汇合。
    * @param input - 最终结果和完整性 hash
    * @returns 汇合后的 Checkpoint
    */
   finalizeCommit(input: FinalizeAgentCommitInput): AgentCheckpointRecord;
+  /**
+   * 把不可逆边界后的确定性失败收敛到 canonical commit_failed。
+   * @param input - journal 与确定性提交错误
+   * @returns 汇合后的 Checkpoint
+   */
+  finalizeCommitFailure(input: FinalizeAgentCommitFailureInput): AgentCheckpointRecord;
   /**
    * 把未知外部状态收敛到 manual_recovery。
    * @param input - journal 与结构化错误

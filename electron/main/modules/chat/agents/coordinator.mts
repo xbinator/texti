@@ -5,7 +5,6 @@
 import type { ChildActorRegistry } from './child-registry.mjs';
 import type { AgentConfirmationQueue } from './confirmation-store.mjs';
 import type { ChildTaskRuntimeExecutor } from './executor.mjs';
-import type { AgentFileCommitter } from './file-commit.mjs';
 import type { AgentResourceLease, AgentResourceScheduler, AgentScheduleRequest, AgentScheduleCancelDisposition } from './scheduler.mjs';
 import type {
   AgentAttemptProjection,
@@ -34,6 +33,7 @@ import type {
 } from 'types/chat-agent';
 import type { ChatRuntimeAddress } from 'types/chat-runtime';
 import { AGENT_CONFIRMATION_SCHEMA_VERSION, hashChangesetSnapshot, hashConfirmationRequestSnapshot, validateAgentTaskError } from './contracts.mjs';
+import { AgentFileCommitError, type AgentFileCommitter } from './file-commit.mjs';
 import { isTaskTerminal } from './state.mjs';
 
 /** 首版单个 Checkpoint 允许协调的最大 Task 数。 */
@@ -163,6 +163,22 @@ export interface AgentCoordinatorDependencies {
   queueCommit?: (input: QueueAgentCommitInput) => AgentTaskRecord;
   /** durable file commit boundary。 */
   fileCommitter?: AgentFileCommitter;
+  /**
+   * 删除安全取消 journal 对应的精确 Attempt overlay。
+   * @param input - Task 与当前 Attempt 身份
+   */
+  discardTaskOverlay?: (input: { readonly taskId: string; readonly attemptId: string }) => Promise<void>;
+  /**
+   * 在精确 overlay 删除成功后终态化 journal cancellation。
+   * @param input - cancelled journal 身份与终态时间
+   * @returns 汇合后的 Checkpoint
+   */
+  finalizeCommitCancellation?: (input: { readonly journalId: string; readonly occurredAt: string }) => AgentCheckpointRecord;
+  /**
+   * 发布 FileCommitter 已持久化收敛的 Checkpoint，并驱动 ready Outbox。
+   * @param checkpoint - Store 原子汇合结果
+   */
+  publishCommitCheckpoint?: (checkpoint: AgentCheckpointRecord) => void;
   /**
    * 创建 confirmation 身份。
    * @param task - confirmation 所属 Task
@@ -1220,6 +1236,24 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
         await commitTaskResult(commitTask, commitOutcome.value.result);
       } else {
         const failedCommitTask = dependencies.getTask?.(prepared.task.taskId);
+        const cancelledError = readAgentError(commitOutcome.reason);
+        if (
+          failedCommitTask?.status === 'cancelled' ||
+          (cancelledError?.code === 'cancelled' &&
+            failedCommitTask?.status === 'committing' &&
+            failedCommitTask.unfinishedJournalCount === 0 &&
+            failedCommitTask.cancelRequestedAt !== undefined)
+        ) {
+          setState(prepared.task.checkpointId, 'idle');
+          return;
+        }
+        if (failedCommitTask?.status === 'commit_failed' && failedCommitTask.result) {
+          const failureCheckpoint = commitOutcome.reason instanceof AgentFileCommitError ? commitOutcome.reason.checkpoint : undefined;
+          if (failureCheckpoint) dependencies.publishCommitCheckpoint?.(failureCheckpoint);
+          dependencies.settleTask(failedCommitTask.taskId, failedCommitTask.result.usage);
+          setState(prepared.task.checkpointId, failureCheckpoint && isCoordinatorTerminal(failureCheckpoint.status) ? 'terminal' : 'idle');
+          return;
+        }
         if ((failedCommitTask?.unfinishedJournalCount ?? 0) > 0) {
           setState(prepared.task.checkpointId, 'idle');
         } else {
@@ -1384,17 +1418,38 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
       await waitTaskRun(task.taskId);
       return 'cancel_requested';
     }
-    if (task.status === 'queued' && task.queuePhase === 'commit') {
-      const scheduleDisposition = dependencies.scheduler.cancel(task.taskId, reason);
-      if (scheduleDisposition !== 'queued_cancelled' && scheduleDisposition !== 'active_signalled') {
-        throw new Error('coordinator_commit_cancel_conflict');
-      }
-      const projection = dependencies.requestTaskCancellation(task.taskId, requestKind);
-      await waitTaskRun(task.taskId);
-      return projection.disposition;
-    }
     const projection = dependencies.requestTaskCancellation(task.taskId, requestKind);
-    if (projection.disposition === 'already_settled' || projection.disposition === 'commit_in_progress') return projection.disposition;
+    if (projection.disposition === 'already_settled') return projection.disposition;
+    if (task.status === 'committing' || projection.task.status === 'committing') {
+      if (!dependencies.fileCommitter || !dependencies.discardTaskOverlay || !dependencies.finalizeCommitCancellation || !projection.task.currentAttemptId) {
+        throw new Error('coordinator_commit_cancel_dependencies_missing');
+      }
+      const cancellation = await dependencies.fileCommitter.cancelTask(task.taskId);
+      if (cancellation.disposition === 'commit_in_progress') return cancellation.disposition;
+      if (
+        cancellation.journal.taskId !== task.taskId ||
+        cancellation.journal.attemptId !== projection.task.currentAttemptId ||
+        cancellation.journal.status !== 'cancelled' ||
+        cancellation.journal.appliedOperationIds.length !== 0
+      ) {
+        throw new Error('coordinator_commit_cancel_projection_invalid');
+      }
+      await dependencies.discardTaskOverlay({
+        taskId: cancellation.journal.taskId,
+        attemptId: cancellation.journal.attemptId
+      });
+      const checkpoint = dependencies.finalizeCommitCancellation({
+        journalId: cancellation.journal.journalId,
+        occurredAt: dependencies.now()
+      });
+      const cancelledTask = dependencies.getTask?.(task.taskId);
+      if (cancelledTask?.status === 'cancelled' && cancelledTask.result) {
+        dependencies.settleTask(cancelledTask.taskId, cancelledTask.result.usage);
+      }
+      setState(task.checkpointId, isCoordinatorTerminal(checkpoint.status) ? 'terminal' : 'running');
+      return 'cancel_requested';
+    }
+    if (projection.disposition === 'commit_in_progress') return projection.disposition;
     const currentTask = projection.task;
     if (task.status === 'waiting_confirmation') {
       dependencies.confirmationQueue?.revokeTask(task.taskId, reason);

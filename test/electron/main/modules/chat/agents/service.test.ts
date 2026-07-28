@@ -303,6 +303,7 @@ function createDependencies(): {
         finalizeResume,
         cancelCheckpoint,
         finalizeCancellation,
+        finalizeCommitCancellation: vi.fn(),
         listCancelledCheckpoints,
         listEvents,
         listPendingOutbox
@@ -1026,6 +1027,59 @@ describe('chat agent delegation service', (): void => {
     ).toBe(checkpoint);
     expect(fixture.publish).not.toHaveBeenCalled();
     expect(fixture.markOutboxDelivered).not.toHaveBeenCalled();
+  });
+
+  it('finalizes a safe commit cancellation through the service boundary before publishing ready delivery', async (): Promise<void> => {
+    const fixture = createDependencies();
+    const service = createChatAgentDelegationService(fixture.dependencies);
+    service.prepareDelegation(createInput());
+    const preparedInput = fixture.prepareDelegation.mock.calls.at(-1)?.[0];
+    if (!preparedInput) throw new Error('Prepared checkpoint fixture is missing');
+    const checkpoint = {
+      ...preparedInput.checkpoint,
+      checkpointId: 'checkpoint-safe-cancel',
+      status: 'ready_to_resume',
+      version: 2,
+      terminalResults: {},
+      recordState: 'active',
+      createdAt: '2026-07-23T00:00:00.000Z',
+      updatedAt: '2026-07-23T00:00:01.000Z'
+    } as AgentCheckpointRecord;
+    const readyOutbox = {
+      outboxId: 'outbox-ready-safe-cancel',
+      dedupeKey: `delegation.ready:${checkpoint.checkpointId}`,
+      eventType: 'delegation.ready' as const,
+      payload: {
+        checkpointId: checkpoint.checkpointId,
+        sessionId: checkpoint.sessionId,
+        turnId: checkpoint.turnId,
+        resultCount: 1
+      },
+      payloadHash: 'b'.repeat(64),
+      schemaVersion: 1,
+      deliveryStatus: 'pending' as const,
+      attemptCount: 0,
+      createdAt: checkpoint.updatedAt,
+      updatedAt: checkpoint.updatedAt
+    };
+    fixture.dependencies.store.finalizeCommitCancellation = vi.fn((): AgentCheckpointRecord => checkpoint);
+    fixture.getCheckpoint.mockReturnValue(checkpoint);
+    fixture.getOutbox.mockReturnValue(readyOutbox);
+    fixture.publishCheckpoint.mockImplementation((): void => {
+      throw new Error('renderer unavailable');
+    });
+
+    expect(
+      service.finalizeCommitCancellation({
+        journalId: 'journal-safe-cancel',
+        occurredAt: '2026-07-23T00:00:01.000Z'
+      })
+    ).toBe(checkpoint);
+
+    expect(fixture.dependencies.store.finalizeCommitCancellation).toHaveBeenCalledOnce();
+    await vi.waitFor((): void => {
+      expect(fixture.publish).toHaveBeenCalledWith('delegation.ready', readyOutbox.payload);
+    });
   });
 
   it('rechecks ready Outbox eligibility after the async Main consumer returns', async (): Promise<void> => {

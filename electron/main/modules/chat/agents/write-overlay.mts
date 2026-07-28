@@ -15,6 +15,7 @@ import type {
   AgentTaskErrorCode,
   AgentTaskErrorPhase
 } from 'types/chat-agent';
+import { asyncTo } from '../../../../../src/utils/asyncTo.js';
 import {
   AGENT_CHANGESET_SCHEMA_VERSION,
   AGENT_FILE_COMMIT_ADAPTER,
@@ -88,6 +89,16 @@ export interface CreateAgentWriteOverlayInput {
   readonly now: () => string;
   /** changeset 和 operation ID 工厂。 */
   readonly createId: (kind: 'changeset' | 'operation') => string;
+}
+
+/** 精确删除一个 Task Attempt overlay 的输入。 */
+export interface DiscardTaskOverlayInput {
+  /** Main 私有 overlay 总根。 */
+  readonly overlayRoot: string;
+  /** 单一安全目录段 Task 身份。 */
+  readonly taskId: string;
+  /** 单一安全目录段 Attempt 身份。 */
+  readonly attemptId: string;
 }
 
 /** 单个目标首次访问时冻结的基础事实。 */
@@ -248,6 +259,25 @@ function isSafeSegment(value: string): boolean {
 }
 
 /**
+ * 判断 cleanup 身份是否为跨平台安全单目录段。
+ * @param value - Task 或 Attempt 身份
+ * @returns 是否禁止 absolute、分隔符与特殊目录段
+ */
+function isCleanupSegment(value: string): boolean {
+  return isSafeSegment(value) && !path.isAbsolute(value) && !value.includes('/') && !value.includes('\\');
+}
+
+/**
+ * 判断 asyncTo 归一化错误是否源自路径不存在。
+ * @param error - asyncTo 返回的 Error
+ * @returns cause 是否为 ENOENT
+ */
+function isMissingPath(error: Error): boolean {
+  const { cause } = error;
+  return typeof cause === 'object' && cause !== null && Reflect.get(cause, 'code') === 'ENOENT';
+}
+
+/**
  * 判断路径是否位于指定根目录内。
  * @param targetPath - 待判断绝对路径
  * @param rootPath - canonical 根目录
@@ -256,6 +286,91 @@ function isSafeSegment(value: string): boolean {
 function isInside(targetPath: string, rootPath: string): boolean {
   const relativePath = path.relative(rootPath, targetPath);
   return relativePath === '' || (!relativePath.startsWith(`..${path.sep}`) && relativePath !== '..' && !path.isAbsolute(relativePath));
+}
+
+/**
+ * 精确删除一个 Attempt overlay，并仅在 Task 目录为空时清除其父目录。
+ * @param input - canonical root 与持久化 Task/Attempt 身份
+ */
+export async function discardTaskOverlay(input: DiscardTaskOverlayInput): Promise<void> {
+  if (!isCleanupSegment(input.taskId) || !isCleanupSegment(input.attemptId)) {
+    throw new AgentWriteOverlayError('overlay_cleanup_identity_invalid', 'Overlay cleanup identity must use safe path segments');
+  }
+  const [rootError, canonicalRoot] = await asyncTo(fs.realpath(input.overlayRoot));
+  if (rootError) {
+    throw new AgentWriteOverlayError('overlay_cleanup_root_invalid', 'Overlay cleanup root is unavailable', 'protocol_error', 'recovery', 'integrity');
+  }
+  const taskDirectory = path.join(canonicalRoot, input.taskId);
+  const attemptDirectory = path.join(taskDirectory, input.attemptId);
+  if (!isInside(taskDirectory, canonicalRoot) || !isInside(attemptDirectory, taskDirectory)) {
+    throw new AgentWriteOverlayError(
+      'overlay_cleanup_path_escape',
+      'Overlay cleanup target escaped its canonical root',
+      'protocol_error',
+      'recovery',
+      'integrity'
+    );
+  }
+
+  const [taskStatError, taskStat] = await asyncTo(fs.lstat(taskDirectory));
+  if (taskStatError) {
+    if (isMissingPath(taskStatError)) return;
+    throw new AgentWriteOverlayError('overlay_cleanup_inspection_failed', 'Task overlay could not be inspected', 'protocol_error', 'recovery', 'runtime');
+  }
+  if (taskStat.isSymbolicLink() || !taskStat.isDirectory()) {
+    throw new AgentWriteOverlayError(
+      'overlay_cleanup_symlink_denied',
+      'Task overlay must be a real private directory',
+      'protocol_error',
+      'recovery',
+      'integrity'
+    );
+  }
+  const [taskRealError, taskRealPath] = await asyncTo(fs.realpath(taskDirectory));
+  if (taskRealError || taskRealPath !== taskDirectory || !isInside(taskRealPath, canonicalRoot)) {
+    throw new AgentWriteOverlayError('overlay_cleanup_path_escape', 'Task overlay failed canonical containment', 'protocol_error', 'recovery', 'integrity');
+  }
+
+  const [attemptStatError, attemptStat] = await asyncTo(fs.lstat(attemptDirectory));
+  if (attemptStatError) {
+    if (isMissingPath(attemptStatError)) return;
+    throw new AgentWriteOverlayError('overlay_cleanup_inspection_failed', 'Attempt overlay could not be inspected', 'protocol_error', 'recovery', 'runtime');
+  }
+  if (attemptStat.isSymbolicLink() || !attemptStat.isDirectory()) {
+    throw new AgentWriteOverlayError(
+      'overlay_cleanup_symlink_denied',
+      'Attempt overlay must be a real private directory',
+      'protocol_error',
+      'recovery',
+      'integrity'
+    );
+  }
+  const [attemptRealError, attemptRealPath] = await asyncTo(fs.realpath(attemptDirectory));
+  if (attemptRealError || attemptRealPath !== attemptDirectory || !isInside(attemptRealPath, taskDirectory)) {
+    throw new AgentWriteOverlayError('overlay_cleanup_path_escape', 'Attempt overlay failed canonical containment', 'protocol_error', 'recovery', 'integrity');
+  }
+
+  const [removeError] = await asyncTo(fs.rm(attemptRealPath, { recursive: true, force: true }));
+  if (removeError) {
+    throw new AgentWriteOverlayError('overlay_cleanup_failed', 'Attempt overlay could not be removed', 'protocol_error', 'recovery', 'runtime');
+  }
+  const [entriesError, entries] = await asyncTo(fs.readdir(taskRealPath));
+  if (entriesError) {
+    if (isMissingPath(entriesError)) return;
+    throw new AgentWriteOverlayError(
+      'overlay_cleanup_inspection_failed',
+      'Task overlay could not be checked after cleanup',
+      'protocol_error',
+      'recovery',
+      'runtime'
+    );
+  }
+  if (entries.length === 0) {
+    const [taskRemoveError] = await asyncTo(fs.rmdir(taskRealPath));
+    if (taskRemoveError && !isMissingPath(taskRemoveError)) {
+      throw new AgentWriteOverlayError('overlay_cleanup_failed', 'Empty Task overlay could not be removed', 'protocol_error', 'recovery', 'runtime');
+    }
+  }
 }
 
 /**

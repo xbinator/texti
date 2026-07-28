@@ -17,6 +17,7 @@ import type {
   AgentTaskProjectionRecord,
   AgentTaskRecord,
   BeginAgentAttemptInput,
+  FinalizeAgentCommitCancellationInput,
   MarkAgentAttemptInput,
   PrepareAgentTaskInput,
   PrepareDelegationInput
@@ -88,12 +89,19 @@ import {
 } from './contracts.mjs';
 import { createAgentCoordinator, type AgentCoordinator } from './coordinator.mjs';
 import { createChildRuntimeExecutor } from './executor.mjs';
-import { createAgentFileCommitter, type AgentFileCommitInput, type AgentFileCommitResult, type AgentFileCommitter } from './file-commit.mjs';
+import {
+  createAgentFileCommitter,
+  type AgentFileCommitInput,
+  type AgentFileCommitResult,
+  type AgentFileCommitter,
+  type AgentJournalRecoveryResult
+} from './file-commit.mjs';
 import { compileAgentPlan, type AgentPlanCompileInput, type AgentPlanCompileResult } from './plan-compiler.mjs';
 import { resolveAgentScopes } from './resource-scopes.mjs';
 import { validateAgentResult } from './result.mjs';
 import { createAgentResourceScheduler } from './scheduler.mjs';
 import { createAgentDelegationStore } from './store.mjs';
+import { discardTaskOverlay as discardAgentTaskOverlay } from './write-overlay.mjs';
 
 /** Runtime B 续接允许保留的非敏感内存上下文。 */
 export type ContinuationRuntimeContext = ChatRuntimePrimaryContinuationContext;
@@ -114,6 +122,7 @@ export type ChatAgentDelegationStore = Pick<
   | 'finalizeResume'
   | 'cancelCheckpoint'
   | 'finalizeCancellation'
+  | 'finalizeCommitCancellation'
   | 'interruptCheckpoint'
   | 'interruptActive'
   | 'listEvents'
@@ -377,6 +386,7 @@ function mapEventCategory(type: ChatAgentTaskEventType): ChatAgentTaskTimelineEn
       return 'tool';
     case 'changeset.prepared':
     case 'commit.journal_created':
+    case 'commit.journal_cancelled':
     case 'commit.mutation_applied':
     case 'commit.finalized':
       return 'commit';
@@ -411,6 +421,7 @@ function isTaskEventType(value: string): value is ChatAgentTaskEventType {
     'tool.completed',
     'changeset.prepared',
     'commit.journal_created',
+    'commit.journal_cancelled',
     'commit.mutation_applied',
     'commit.finalized',
     'protocol.error',
@@ -825,6 +836,7 @@ class DefaultAgentTaskProjector implements AgentTaskProjector {
     const journalStatus = projection.journal?.status;
     switch (journalStatus) {
       case 'manual_recovery':
+      case 'failed':
         return 'recovery_required';
       case 'finalized':
         return 'finalized';
@@ -889,7 +901,7 @@ class DefaultAgentTaskProjector implements AgentTaskProjector {
       return Object.freeze({
         sequence: event.sequence,
         type: mapEventCategory(event.type),
-        code: event.type,
+        code: event.type === 'commit.journal_cancelled' ? 'journal_cancelled' : event.type,
         occurredAt: event.occurredAt
       });
     });
@@ -1225,7 +1237,7 @@ export interface ChatAgentDelegationServiceDependencies {
    * 删除 Main 私有目录中尚未进入 durable journal 的 write overlay。
    * 启动恢复专用；缺省表示隔离实例没有磁盘 overlay。
    */
-  discardWriteOverlays?: () => Promise<void>;
+  discardTaskOverlay?: (input: { readonly taskId: string; readonly attemptId: string }) => Promise<void>;
   /** Main-owned 委派灰度配置；缺省时受控写入保持关闭。 */
   featureConfig?: Readonly<PrimaryDelegationFeatureConfig>;
   /**
@@ -1392,7 +1404,7 @@ export interface ChatAgentDelegationService {
    * 启动时撤销无 journal write confirmation、清理 overlay 并中断不可恢复聚合。
    * @returns 被中断的 Checkpoint 数
    */
-  recoverInterruptedWrites(): Promise<number>;
+  recoverInterruptedWrites(recoveryResults: readonly AgentJournalRecoveryResult[]): Promise<number>;
   /**
    * 启动时中断无法跨进程恢复的 Checkpoint。
    * @returns 被中断的 Checkpoint 数
@@ -1403,6 +1415,17 @@ export interface ChatAgentDelegationService {
    * @returns 本进程确认完成收尾的 Checkpoint 数
    */
   recoverCancellations(): number;
+  /**
+   * 在服务边界内终态化安全取消 journal，并发布同一持久化 Checkpoint。
+   * @param input - journal 身份与终态时间
+   * @returns 已持久化 Checkpoint
+   */
+  finalizeCommitCancellation(input: FinalizeAgentCommitCancellationInput): AgentCheckpointRecord;
+  /**
+   * 发布 FileCommitter 已原子收敛的失败 Checkpoint，并排队其 ready Outbox。
+   * @param checkpoint - 已持久化 Checkpoint
+   */
+  publishCommitCheckpoint(checkpoint: AgentCheckpointRecord): void;
   /** 重放全部待交付 Outbox，并等待强制内部消费者接受。 */
   drainOutbox(): Promise<void>;
 }
@@ -1824,6 +1847,26 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
       // application event 是可通过 listActive 补偿的投影，发布失败不能回滚持久化事实。
     }
     return snapshot;
+  }
+
+  /**
+   * 发布 commit 终态化后的持久化 Checkpoint，并驱动 ready Outbox。
+   * @param checkpoint - 已持久化 Checkpoint
+   */
+  function publishCommitCheckpoint(checkpoint: AgentCheckpointRecord): void {
+    publishCheckpointSnapshot(checkpoint);
+    if (checkpoint.status === 'ready_to_resume') queueOutbox(findReadyOutbox(checkpoint));
+  }
+
+  /**
+   * 终态化安全取消 journal，并从持久化结果驱动公开投影与 ready 交付。
+   * @param input - journal 身份与终态时间
+   * @returns 已持久化 Checkpoint
+   */
+  function finishCommitCancel(input: FinalizeAgentCommitCancellationInput): AgentCheckpointRecord {
+    const checkpoint = dependencies.store.finalizeCommitCancellation(input);
+    publishCommitCheckpoint(checkpoint);
+    return checkpoint;
   }
 
   /**
@@ -2571,20 +2614,48 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
       return context ? structuredClone(context) : undefined;
     },
 
-    async recoverInterruptedWrites(): Promise<number> {
-      const activeWrites = dependencies.store
-        .listActive()
-        .flatMap((snapshot): AgentTaskRecord[] => snapshot.tasks)
-        .filter(
-          (task): boolean =>
-            task.contractSnapshot.mode === 'write' &&
-            task.unfinishedJournalCount === 0 &&
-            !['completed', 'failed', 'cancelled', 'deadline_exceeded', 'commit_failed', 'interrupted'].includes(task.status)
-        );
-      activeWrites.forEach((task): void => {
+    async recoverInterruptedWrites(recoveryResults: readonly AgentJournalRecoveryResult[]): Promise<number> {
+      const activeTasks = dependencies.store.listActive().flatMap((snapshot): AgentTaskRecord[] => snapshot.tasks);
+      const journalTaskIds = new Set(recoveryResults.map((result): string => result.taskId));
+      const orphanWrites = activeTasks.filter(
+        (task): boolean =>
+          task.contractSnapshot.mode === 'write' &&
+          task.unfinishedJournalCount === 0 &&
+          task.currentAttemptId !== undefined &&
+          !journalTaskIds.has(task.taskId) &&
+          !['completed', 'failed', 'cancelled', 'deadline_exceeded', 'commit_failed', 'interrupted'].includes(task.status)
+      );
+      const cancelledJournals = recoveryResults.filter(
+        (result): result is AgentJournalRecoveryResult & { readonly status: 'cancelled' } => result.status === 'cancelled'
+      );
+      orphanWrites.forEach((task): void => {
         dependencies.confirmationQueue?.revokeTask(task.taskId, 'process_restart');
       });
-      await dependencies.discardWriteOverlays?.();
+      const cleanupTargets = [
+        ...cancelledJournals.map((result): { taskId: string; attemptId: string } => ({
+          taskId: result.taskId,
+          attemptId: result.attemptId
+        })),
+        ...orphanWrites.map((task): { taskId: string; attemptId: string } => ({
+          taskId: task.taskId,
+          attemptId: task.currentAttemptId as string
+        }))
+      ];
+      if (cleanupTargets.length > 0 && !dependencies.discardTaskOverlay) {
+        throw new Error('agent_overlay_cleanup_missing');
+      }
+      for (const cleanupTarget of cleanupTargets) {
+        // Recovery cleanup stays ordered so no Task can be finalized before its exact overlay is gone.
+        // eslint-disable-next-line no-await-in-loop
+        await dependencies.discardTaskOverlay?.(cleanupTarget);
+      }
+      cancelledJournals.forEach((result): void => {
+        finishCommitCancel({
+          journalId: result.journalId,
+          occurredAt: dependencies.now(),
+          startupRecovery: true
+        });
+      });
       return interruptActiveCheckpoints();
     },
 
@@ -2598,6 +2669,14 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
         finishCancellation(checkpoint);
       });
       return checkpoints.length;
+    },
+
+    finalizeCommitCancellation(input: FinalizeAgentCommitCancellationInput): AgentCheckpointRecord {
+      return finishCommitCancel(input);
+    },
+
+    publishCommitCheckpoint(checkpoint: AgentCheckpointRecord): void {
+      publishCommitCheckpoint(checkpoint);
     },
 
     async drainOutbox(): Promise<void> {
@@ -2719,15 +2798,6 @@ async function ensureAgentDirectory(kind: 'overlays' | 'journals'): Promise<stri
   return fs.realpath(directory);
 }
 
-/**
- * 删除所有尚未进入 journal 的易失 write overlay，并重新创建私有根目录。
- */
-async function resetAgentOverlays(): Promise<void> {
-  const directory = path.join(app.getPath('userData'), 'agent-runtime', 'overlays');
-  await fs.rm(directory, { recursive: true, force: true });
-  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-}
-
 /** 延迟创建的 durable file committer，commit 与 recover 必须共享同一 Store 和 journal 根。 */
 let fileCommitterPromise: Promise<AgentFileCommitter> | null = null;
 
@@ -2756,6 +2826,9 @@ function getFileCommitter(): Promise<AgentFileCommitter> {
 export const chatAgentFileCommitter: AgentFileCommitter = {
   async commit(input: AgentFileCommitInput): Promise<AgentFileCommitResult> {
     return (await getFileCommitter()).commit(input);
+  },
+  async cancelTask(taskId: string): ReturnType<AgentFileCommitter['cancelTask']> {
+    return (await getFileCommitter()).cancelTask(taskId);
   },
   async recover(): ReturnType<AgentFileCommitter['recover']> {
     return (await getFileCommitter()).recover();
@@ -2803,7 +2876,10 @@ export const chatAgentDelegationService = createChatAgentDelegationService({
   },
   publishCheckpoint,
   confirmationQueue: chatAgentConfirmationQueue,
-  discardWriteOverlays: resetAgentOverlays,
+  async discardTaskOverlay(input: { readonly taskId: string; readonly attemptId: string }): Promise<void> {
+    const overlayRoot = await ensureAgentDirectory('overlays');
+    await discardAgentTaskOverlay({ overlayRoot, ...input });
+  },
   featureConfig: {
     enabled: process.env.TIBIS_PRIMARY_DELEGATION_ENABLED === '1',
     pureReadChildEnabled: true,
@@ -2897,6 +2973,12 @@ export const chatAgentCoordinator = createAgentCoordinator({
   getChangeset: (changesetId: string) => defaultAgentStore.getChangeset(changesetId),
   queueCommit: (input) => defaultAgentStore.queueCommit(input),
   fileCommitter: chatAgentFileCommitter,
+  async discardTaskOverlay(input: { readonly taskId: string; readonly attemptId: string }): Promise<void> {
+    const overlayRoot = await ensureAgentDirectory('overlays');
+    await discardAgentTaskOverlay({ overlayRoot, ...input });
+  },
+  finalizeCommitCancellation: (input) => chatAgentDelegationService.finalizeCommitCancellation(input),
+  publishCommitCheckpoint: (checkpoint) => chatAgentDelegationService.publishCommitCheckpoint(checkpoint),
   createConfirmationId: (task: AgentTaskRecord): string => `confirmation-${task.taskId}-${nanoid()}`,
   getTask: (taskId: string): AgentTaskRecord | null => defaultAgentStore.getTask(taskId),
   createRuntimeId: (task: AgentTaskRecord): string => `runtime-${task.taskId}-${nanoid()}`,
@@ -2915,10 +2997,10 @@ defaultCoordinator = chatAgentCoordinator;
  */
 export async function recoverChatAgentDelegations(): Promise<void> {
   controlledWriteReady = false;
-  await chatAgentFileCommitter.recover();
+  const journalResults = await chatAgentFileCommitter.recover();
   chatAgentConfirmationQueue.recover();
+  await chatAgentDelegationService.recoverInterruptedWrites(journalResults);
   chatAgentDelegationService.recoverCancellations();
-  await chatAgentDelegationService.recoverInterruptedWrites();
   controlledWriteReady = true;
   await chatAgentCoordinator.recover();
 }

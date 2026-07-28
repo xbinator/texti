@@ -1542,7 +1542,111 @@ describeWithSqlite('agent delegation store', (): void => {
     }).toThrowError(expect.objectContaining({ reason: 'task_journal_active' }));
   });
 
-  it('atomically cancels a created journal before any external operation was recorded', (): void => {
+  it.each([
+    { journalState: 'applying' as const, shouldFinalize: true },
+    { journalState: 'applied' as const, shouldFinalize: false }
+  ])('guards deterministic commit failure finalization from journal state $journalState', ({ journalState, shouldFinalize }): void => {
+    const { task } = startWriteTask(store, `commit-failure-${journalState}`);
+    const changeset = createChangeset(task);
+    invokeWriteStore(store, 'prepareChangeset', {
+      snapshot: changeset,
+      snapshotHash: hashChangeset(changeset),
+      occurredAt: changeset.createdAt
+    });
+    const request = createConfirmationRequest(task, changeset);
+    invokeWriteStore(store, 'createConfirmation', {
+      request,
+      requestHash: hashConfirmation(request),
+      occurredAt: request.createdAt
+    });
+    const approved = invokeWriteStore<{ version: number }>(store, 'resolveConfirmation', {
+      confirmationId: request.confirmationId,
+      expectedVersion: 1,
+      decision: 'approved',
+      occurredAt: '2026-07-23T08:02:30.000Z'
+    });
+    invokeWriteStore(store, 'queueCommit', {
+      taskId: task.taskId,
+      confirmationId: request.confirmationId,
+      confirmationVersion: approved.version,
+      occurredAt: '2026-07-23T08:02:40.000Z'
+    });
+    const intent = createCommitIntent(task, changeset, approved.version);
+    const journal = invokeWriteStore<{ journalId: string }>(store, 'createCommitJournal', {
+      journalId: `journal-${task.taskId}`,
+      changesetId: changeset.changesetId,
+      confirmationId: request.confirmationId,
+      confirmationVersion: approved.version,
+      intent,
+      intentHash: hashAgentPayload({ schemaVersion: intent.journalSchemaVersion, intent }),
+      occurredAt: intent.createdAt
+    });
+    invokeWriteStore(store, 'markJournalApplying', {
+      journalId: journal.journalId,
+      occurredAt: '2026-07-23T08:03:10.000Z'
+    });
+    if (journalState === 'applied') {
+      const operation = changeset.operations[0];
+      if (!operation) throw new Error('Commit failure fixture operation is missing');
+      invokeWriteStore(store, 'markJournalOperation', {
+        journalId: journal.journalId,
+        operationId: operation.operationId,
+        targetContentHash: operation.targetContentHash,
+        occurredAt: '2026-07-23T08:03:12.000Z'
+      });
+      invokeWriteStore(store, 'markJournalApplied', {
+        journalId: journal.journalId,
+        occurredAt: '2026-07-23T08:03:15.000Z'
+      });
+    }
+    const error = {
+      code: 'commit_failed' as const,
+      phase: 'commit' as const,
+      category: 'integrity' as const,
+      retryable: false,
+      details: { reason: 'commit_target_hash_mismatch' }
+    };
+
+    const finalize = (): { status: string } =>
+      invokeWriteStore(store, 'finalizeCommitFailure', {
+        journalId: journal.journalId,
+        occurredAt: '2026-07-23T08:03:20.000Z',
+        error
+      });
+    if (!shouldFinalize) {
+      expect(finalize).toThrowError(expect.objectContaining({ reason: 'commit_failure_state_invalid' }));
+      expect(store.getTask(task.taskId)).toMatchObject({ status: 'committing', unfinishedJournalCount: 1 });
+      expect(invokeWriteStore(store, 'getCommitJournal', journal.journalId)).toMatchObject({ status: 'applied' });
+      return;
+    }
+    const checkpoint = finalize();
+
+    expect(checkpoint.status).toBe('ready_to_resume');
+    expect(store.getTask(task.taskId)).toMatchObject({
+      status: 'commit_failed',
+      unfinishedJournalCount: 0,
+      error,
+      result: {
+        executionStatus: 'commit_failed',
+        usage: intent.resultDraft.usage,
+        error
+      }
+    });
+    expect(store.getAttempt(`attempt-${task.taskId}`)).toMatchObject({
+      status: 'failed',
+      usageSnapshot: intent.resultDraft.usage,
+      usageComplete: true
+    });
+    expect(store.getChangeset(changeset.changesetId)).toMatchObject({ status: 'discarded' });
+    expect(invokeWriteStore(store, 'getCommitJournal', journal.journalId)).toMatchObject({
+      status: 'failed',
+      error
+    });
+    expect(invokeWriteStore(store, 'listUnfinishedJournals')).toEqual([]);
+    expect(store.listEvents('checkpoint', task.checkpointId).slice(-2)).toMatchObject([{ type: 'child.result_recorded' }, { type: 'delegation.ready' }]);
+  });
+
+  it('cancels only the created journal before external cleanup succeeds', (): void => {
     const { task } = startWriteTask(store, 'journal-cancel');
     const changeset = createChangeset(task);
     invokeWriteStore(store, 'prepareChangeset', {
@@ -1579,15 +1683,151 @@ describeWithSqlite('agent delegation store', (): void => {
       occurredAt: intent.createdAt
     });
 
-    const checkpoint = invokeWriteStore<{ status: string }>(store, 'cancelCommitJournal', {
+    const eventsBefore = store.listEvents('task', task.taskId);
+    const checkpointEventsBefore = store.listEvents('checkpoint', task.checkpointId);
+    const readyOutboxBefore =
+      adapter.select<{ count: number }>('SELECT COUNT(*) AS count FROM chat_agent_outbox WHERE dedupe_key = ?', [`delegation.ready:${task.checkpointId}`])[0]
+        ?.count ?? 0;
+    const cancelled = invokeWriteStore<{ journalId: string; status: string }>(store, 'cancelCommitJournal', {
       journalId: journal.journalId,
       occurredAt: '2026-07-23T08:03:10.000Z'
+    });
+
+    expect(cancelled).toMatchObject({ journalId: journal.journalId, status: 'cancelled' });
+    expect(
+      invokeWriteStore(store, 'cancelCommitJournal', {
+        journalId: journal.journalId,
+        occurredAt: '2026-07-23T08:03:10.000Z'
+      })
+    ).toEqual(cancelled);
+    const committingTask = store.getTask(task.taskId);
+    expect(committingTask).toMatchObject({
+      status: 'committing',
+      unfinishedJournalCount: 0
+    });
+    expect(committingTask).not.toHaveProperty('result');
+    expect(committingTask).not.toHaveProperty('resultHash');
+    expect(store.getAttempt(`attempt-${task.taskId}`)).toMatchObject({
+      status: 'running',
+      usageComplete: false
+    });
+    expect(store.getChangeset(changeset.changesetId)).toMatchObject({
+      status: 'discarded'
+    });
+    expect(store.listEvents('task', task.taskId).slice(eventsBefore.length)).toEqual([
+      expect.objectContaining({
+        type: 'commit.journal_cancelled',
+        payload: {
+          journalId: journal.journalId,
+          changesetId: changeset.changesetId
+        }
+      })
+    ]);
+    expect(store.listEvents('checkpoint', task.checkpointId)).toEqual(checkpointEventsBefore);
+    expect(
+      adapter.select<{ count: number }>('SELECT COUNT(*) AS count FROM chat_agent_outbox WHERE dedupe_key = ?', [`delegation.ready:${task.checkpointId}`])[0]
+        ?.count ?? 0
+    ).toBe(readyOutboxBefore);
+    const restartedStore = createAgentDelegationStore(adapter);
+    expect(invokeWriteStore(restartedStore, 'listUnfinishedJournals')).toMatchObject([
+      {
+        journalId: journal.journalId,
+        status: 'cancelled',
+        taskId: task.taskId
+      }
+    ]);
+    expect((): void => {
+      invokeWriteStore(store, 'finalizeCommitCancellation', {
+        journalId: journal.journalId,
+        occurredAt: '2026-07-23T08:03:20.000Z'
+      });
+    }).toThrowError(expect.objectContaining({ reason: 'commit_cancel_request_missing' }));
+
+    const recovered = invokeWriteStore<{ status: string }>(store, 'finalizeCommitCancellation', {
+      journalId: journal.journalId,
+      occurredAt: '2026-07-23T08:03:20.000Z',
+      startupRecovery: true
+    });
+
+    expect(recovered.status).toBe('cancelled');
+    expect(store.getTask(task.taskId)).toMatchObject({
+      status: 'cancelled',
+      cancelRequestedAt: '2026-07-23T08:03:20.000Z',
+      unfinishedJournalCount: 0
+    });
+    expect(store.listEvents('task', task.taskId).slice(-2)).toMatchObject([
+      {
+        type: 'task.cancel_requested',
+        source: 'system',
+        payload: { requestKind: 'checkpoint_cascade' }
+      },
+      {
+        type: 'task.cancelled'
+      }
+    ]);
+    expect(invokeWriteStore(restartedStore, 'listUnfinishedJournals')).toEqual([]);
+    expect(
+      adapter.select<{ count: number }>('SELECT COUNT(*) AS count FROM chat_agent_outbox WHERE dedupe_key = ?', [`delegation.ready:${task.checkpointId}`])[0]
+        ?.count ?? 0
+    ).toBe(readyOutboxBefore);
+  });
+
+  it('finalizes a safely cancelled journal only after a persisted live request', (): void => {
+    const { task } = startWriteTask(store, 'journal-cancel-finalize');
+    const changeset = createChangeset(task);
+    invokeWriteStore(store, 'prepareChangeset', {
+      snapshot: changeset,
+      snapshotHash: hashChangeset(changeset),
+      occurredAt: changeset.createdAt
+    });
+    const request = createConfirmationRequest(task, changeset);
+    invokeWriteStore(store, 'createConfirmation', {
+      request,
+      requestHash: hashConfirmation(request),
+      occurredAt: request.createdAt
+    });
+    const approved = invokeWriteStore<{ version: number }>(store, 'resolveConfirmation', {
+      confirmationId: request.confirmationId,
+      expectedVersion: 1,
+      decision: 'approved',
+      occurredAt: '2026-07-23T08:02:30.000Z'
+    });
+    invokeWriteStore(store, 'queueCommit', {
+      taskId: task.taskId,
+      confirmationId: request.confirmationId,
+      confirmationVersion: approved.version,
+      occurredAt: '2026-07-23T08:02:40.000Z'
+    });
+    const intent = createCommitIntent(task, changeset, approved.version);
+    const journal = invokeWriteStore<{ journalId: string }>(store, 'createCommitJournal', {
+      journalId: `journal-${task.taskId}`,
+      changesetId: changeset.changesetId,
+      confirmationId: request.confirmationId,
+      confirmationVersion: approved.version,
+      intent,
+      intentHash: hashAgentPayload({ schemaVersion: intent.journalSchemaVersion, intent }),
+      occurredAt: intent.createdAt
+    });
+    invokeWriteStore(store, 'requestTaskCancellation', {
+      taskId: task.taskId,
+      requestKind: 'single_task',
+      occurredAt: '2026-07-23T08:03:05.000Z'
+    });
+    invokeWriteStore(store, 'cancelCommitJournal', {
+      journalId: journal.journalId,
+      occurredAt: '2026-07-23T08:03:10.000Z'
+    });
+
+    const checkpoint = invokeWriteStore<{ status: string }>(store, 'finalizeCommitCancellation', {
+      journalId: journal.journalId,
+      occurredAt: '2026-07-23T08:03:20.000Z'
     });
 
     expect(checkpoint.status).toBe('ready_to_resume');
     expect(store.getTask(task.taskId)).toMatchObject({
       status: 'cancelled',
       unfinishedJournalCount: 0,
+      cancelRequestedAt: '2026-07-23T08:03:05.000Z',
       result: {
         executionStatus: 'cancelled',
         error: {
@@ -1600,9 +1840,20 @@ describeWithSqlite('agent delegation store', (): void => {
       status: 'cancelled',
       usageSnapshot: intent.resultDraft.usage,
       usageComplete: true,
-      usageUpdatedAt: '2026-07-23T08:03:10.000Z'
+      usageUpdatedAt: '2026-07-23T08:03:20.000Z'
     });
-    expect(invokeWriteStore(store, 'listUnfinishedJournals')).toEqual([]);
+    expect(
+      store
+        .listEvents('task', task.taskId)
+        .filter((event): boolean => ['task.cancel_requested', 'commit.journal_cancelled', 'task.cancelled'].includes(event.type))
+        .map((event): string => event.type)
+    ).toEqual(['task.cancel_requested', 'commit.journal_cancelled', 'task.cancelled']);
+    expect(
+      store
+        .listEvents('checkpoint', task.checkpointId)
+        .slice(-2)
+        .map((event): string => event.type)
+    ).toEqual(['child.result_recorded', 'delegation.ready']);
   });
 
   it('atomically persists immutable facts, ordered events, and one outbox record', (): void => {
