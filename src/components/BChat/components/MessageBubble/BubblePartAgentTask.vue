@@ -882,7 +882,7 @@ async function openArtifact(artifact: ChatAgentTaskArtifactSnapshot): Promise<vo
  */
 function createSafePart(part: ChatMessageToolPart): ChatMessageToolPart {
   const safePart: ChatMessageToolPart = {
-    ...(part.id ? { id: part.id } : {}),
+    id: part.id,
     type: 'tool',
     toolCallId: part.toolCallId,
     toolName: 'delegate_task',

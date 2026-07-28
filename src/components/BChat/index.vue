@@ -305,10 +305,11 @@ async function handleConfirmationSheetAction(payload: ConfirmationSheetActionPay
         decision: action === 'cancel' ? 'rejected' : 'approved'
       })
     );
+    const responseError = response?.ok === false ? response.error : undefined;
     if (requestError || !response?.ok) {
       interactionAPI.showToast({
         type: 'error',
-        content: requestError?.message ?? response?.error ?? '提交 Child Agent 确认失败'
+        content: requestError?.message ?? responseError ?? '提交 Child Agent 确认失败'
       });
       return;
     }
