@@ -221,6 +221,8 @@ function createDependencies(
     prepareDelegation: vi.fn(),
     authorizeTask: vi.fn(),
     recordPreAttemptFailure: vi.fn(),
+    recordPreAttemptCancellation: vi.fn(),
+    requestTaskCancellation: vi.fn(),
     recordTaskResult: vi.fn(),
     getTask: vi.fn(),
     getCheckpoint: vi.fn((checkpointId: string): AgentCheckpointRecord | null => checkpoints.get(checkpointId) ?? null),
@@ -228,10 +230,12 @@ function createDependencies(
     claimResume: vi.fn(),
     finalizeResume: vi.fn(),
     cancelCheckpoint: vi.fn(),
+    finalizeCancellation: vi.fn(),
     interruptCheckpoint: vi.fn(),
     interruptActive,
     listEvents: vi.fn(() => []),
     listActive: vi.fn((): AgentDelegationRecoverySnapshot[] => active),
+    listCancelledCheckpoints: vi.fn((): AgentCheckpointRecord[] => []),
     listPendingOutbox: vi.fn((): AgentOutboxRecord[] => outboxes.filter((outbox): boolean => outbox.deliveryStatus === 'pending')),
     markOutboxDelivered
   };

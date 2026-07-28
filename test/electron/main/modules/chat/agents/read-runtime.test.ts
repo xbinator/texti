@@ -473,6 +473,9 @@ describeWithSqlite('real read child delegation runtime', (): void => {
       }),
       recordToolStarted: (): void => undefined,
       recordToolCompleted: (): void => undefined,
+      recordAttemptUsage: (input): void => {
+        store.recordAttemptUsage(input);
+      },
       now: (): number => Date.now()
     });
     const contracts = createContracts();
@@ -565,10 +568,14 @@ describeWithSqlite('real read child delegation runtime', (): void => {
       listActive: () => store.listActive(),
       authorizeTask: (taskId: string): AgentTaskRecord => agentService.authorizeTask(taskId),
       recordPreFailure: (task: AgentTaskRecord, error: AgentTaskError) => agentService.recordPreFailure(task, error),
+      recordPreCancellation: (task, requestKind) => agentService.recordPreCancellation(task, requestKind),
+      requestTaskCancellation: (taskId, requestKind) => agentService.requestTaskCancellation(taskId, requestKind),
       reserveResume: (checkpointId: string, budget: AgentBudgetSnapshot): void => budgetLedger.reserveResume(checkpointId, budget),
       scheduler,
       beginAttempt: (input) => store.beginAttempt(input),
       markAttemptRunning: (input) => store.markAttemptRunning(input),
+      getAttempt: (attemptId: string) => store.getAttempt(attemptId),
+      recordAttemptUsage: (input) => store.recordAttemptUsage(input),
       recordTaskResult: (task: AgentTaskRecord, result) =>
         agentService.recordTaskResult({
           taskId: task.taskId,
@@ -579,6 +586,7 @@ describeWithSqlite('real read child delegation runtime', (): void => {
       settleTask: (taskId: string, usage: AgentUsageAccounting): void => budgetLedger.settleAttempt(taskId, usage),
       releaseBudget: (taskId: string): void => budgetLedger.releaseTask(taskId),
       executor: childExecutor,
+      getTask: (taskId: string): AgentTaskRecord | null => store.getTask(taskId),
       createRuntimeId(task: AgentTaskRecord): string {
         const runtimeId = `runtime-${task.taskId}`;
         generatedRuntimeIds.push(runtimeId);

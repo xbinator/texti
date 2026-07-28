@@ -678,6 +678,9 @@ const electronAPI: ElectronAPI = {
   /** 请求 Checkpoint cooperative cancellation。 */
   chatAgentCancelCheckpoint: (input) => ipcRenderer.invoke('chat:agent:cancel-checkpoint', input),
 
+  /** 请求单 Task cooperative cancellation。 */
+  chatAgentCancelTask: (input) => ipcRenderer.invoke('chat:agent:cancel-task', input),
+
   /** 监听持久化 Agent application event。 */
   chatAgentOnEvent: (callback) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: ChatAgentApplicationEvent): void => callback(payload);

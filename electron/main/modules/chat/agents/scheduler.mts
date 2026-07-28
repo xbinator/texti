@@ -53,6 +53,9 @@ export interface AgentResourceLease {
   release(): void;
 }
 
+/** Scheduler 单 Task 取消仲裁结果。 */
+export type AgentScheduleCancelDisposition = 'not_found' | 'queued_cancelled' | 'active_signalled';
+
 /** resource-scoped Child Task 调度器边界。 */
 export interface AgentResourceScheduler {
   /**
@@ -65,9 +68,9 @@ export interface AgentResourceScheduler {
    * 取消排队 Task，或向活动 Task 传播协作中止。
    * @param taskId - Task 身份
    * @param reason - 稳定取消原因
-   * @returns 是否找到可取消 Task
+   * @returns 未找到、赢得队列移除或向活动 lease 发出信号
    */
-  cancel(taskId: string, reason: string): boolean;
+  cancel(taskId: string, reason: string): AgentScheduleCancelDisposition;
   /** @returns 当前活动 lease 数。 */
   activeCount(): number;
   /** @returns 当前等待 lease 数。 */
@@ -475,22 +478,22 @@ export function createAgentResourceScheduler(): AgentResourceScheduler {
       return entry.promise;
     },
 
-    cancel(taskId: string, reason: string): boolean {
+    cancel(taskId: string, reason: string): AgentScheduleCancelDisposition {
       const normalizedTaskId = taskId.trim();
       const normalizedReason = reason.trim();
       if (!normalizedTaskId || !normalizedReason) {
         throw createScheduleError('protocol_error', 'schedule_cancel_input_invalid');
       }
       const entry = [...entries.values()].find((candidate): boolean => candidate.request.taskId === normalizedTaskId);
-      if (!entry || entry.state === 'released') return false;
+      if (!entry || entry.state === 'released') return 'not_found';
       const error = createScheduleError('cancelled', normalizedReason);
       if (entry.state === 'queued') {
         rejectQueued(entry, error);
         drainQueue();
-        return true;
+        return 'queued_cancelled';
       }
       if (!entry.controller.signal.aborted) entry.controller.abort(error);
-      return true;
+      return 'active_signalled';
     },
 
     activeCount(): number {

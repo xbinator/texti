@@ -217,6 +217,8 @@ interface ProjectionOptions {
   readonly resultSummary?: string;
   /** 可选取消请求时间。 */
   readonly cancelRequestedAt?: string;
+  /** 可选取消请求事件种类；省略时用于构造损坏的缺失 Event。 */
+  readonly cancelRequestKind?: 'single_task' | 'checkpoint_cascade';
   /** 可选任务描述。 */
   readonly taskText?: string;
   /** Task 更新时间。 */
@@ -314,6 +316,42 @@ function createProjection(options: ProjectionOptions = {}): AgentTaskProjectionR
     updatedAt: options.updatedAt ?? '2026-07-28T08:00:03.000Z'
   };
 
+  const baseEvent: ChatAgentEvent = {
+    eventId: `event-${suffix}`,
+    aggregate: { kind: 'task', id: taskId },
+    taskId,
+    checkpointId,
+    sequence: 7,
+    attemptId,
+    runtimeId: `runtime-current-${suffix}`,
+    type: 'tool.completed',
+    occurredAt: task.updatedAt,
+    source: 'runtime',
+    schemaVersion: 1,
+    payload: {
+      toolCallId: `child-tool-${suffix}`,
+      toolName: 'read_file',
+      resultHash: '3'.repeat(64)
+    }
+  };
+  const cancellationEvent: ChatAgentEvent | undefined =
+    options.cancelRequestedAt && options.cancelRequestKind
+      ? {
+          eventId: `event-${suffix}-cancel`,
+          aggregate: { kind: 'task', id: taskId },
+          taskId,
+          checkpointId,
+          sequence: 8,
+          attemptId,
+          runtimeId: `runtime-current-${suffix}`,
+          type: 'task.cancel_requested',
+          occurredAt: options.cancelRequestedAt,
+          source: options.cancelRequestKind === 'single_task' ? 'user' : 'system',
+          schemaVersion: 1,
+          payload: { requestKind: options.cancelRequestKind }
+        }
+      : undefined;
+
   return {
     task,
     checkpoint: {
@@ -362,31 +400,25 @@ function createProjection(options: ProjectionOptions = {}): AgentTaskProjectionR
       currentRuntimeId: `runtime-current-${suffix}`,
       runtimeSequence: 2,
       status: options.status === 'completed' ? 'completed' : 'running',
+      usageSnapshot: result?.usage ?? {
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        modelCalls: 0,
+        toolRounds: 0,
+        queueDurationMs: 0,
+        executionDurationMs: 0,
+        externalRequests: 0,
+        monetaryCost: { currency: 'USD', pricingVersion: 'private-pricing', estimated: 0, actual: 'unknown' }
+      },
+      usageComplete: options.status === 'completed',
+      usageUpdatedAt: '2026-07-28T08:00:02.000Z',
       startedAt: '2026-07-28T08:00:01.000Z',
       ...(options.status === 'completed' ? { finishedAt: '2026-07-28T08:00:02.000Z' } : {}),
       createdAt: '2026-07-28T08:00:00.500Z'
     },
-    taskSequence: 7,
-    events: [
-      {
-        eventId: `event-${suffix}`,
-        aggregate: { kind: 'task', id: taskId },
-        taskId,
-        checkpointId,
-        sequence: 7,
-        attemptId,
-        runtimeId: `runtime-current-${suffix}`,
-        type: 'tool.completed',
-        occurredAt: task.updatedAt,
-        source: 'runtime',
-        schemaVersion: 1,
-        payload: {
-          toolCallId: `child-tool-${suffix}`,
-          toolName: 'read_file',
-          resultHash: '3'.repeat(64)
-        }
-      }
-    ]
+    taskSequence: cancellationEvent ? 8 : 7,
+    events: cancellationEvent ? [baseEvent, cancellationEvent] : [baseEvent]
   };
 }
 
@@ -675,7 +707,29 @@ describe('Agent Task Summary projector', (): void => {
     expect(Object.keys(tombstone ?? {})).toHaveLength(10);
   });
 
-  it('fails closed instead of guessing an unsupported cancellation projection', (): void => {
+  it('projects the unique cancellation Event whose time and request kind match the Task', (): void => {
+    const projection = createProjection({
+      suffix: 'cancel-valid',
+      cancelRequestedAt: '2026-07-28T08:00:02.000Z',
+      cancelRequestKind: 'checkpoint_cascade'
+    });
+    const fixture = createProjectorStore([projection]);
+    const projector = createAgentTaskProjector({
+      store: fixture.store,
+      resolveResource: (): null => null,
+      resolveArtifact: (): null => null
+    });
+
+    expect(projector.projectSummary(projection.task.taskId)).toMatchObject({
+      taskSequence: 8,
+      cancellation: {
+        requestKind: 'checkpoint_cascade',
+        requestedAt: '2026-07-28T08:00:02.000Z'
+      }
+    });
+  });
+
+  it('fails closed when a cancellation timestamp has no matching Event', (): void => {
     const projection = createProjection({
       suffix: 'cancel-requested',
       cancelRequestedAt: '2026-07-28T08:00:02.000Z'
@@ -689,7 +743,49 @@ describe('Agent Task Summary projector', (): void => {
 
     expect((): void => {
       projector.projectSummary(projection.task.taskId);
-    }).toThrow('agent_task_cancellation_unsupported');
+    }).toThrow('agent_task_cancellation_invalid');
+  });
+
+  it.each(['duplicate', 'time_mismatch', 'event_without_timestamp'] as const)('fails closed for %s cancellation history', (failureKind): void => {
+    const requestedAt = '2026-07-28T08:00:02.000Z';
+    const valid = createProjection({
+      suffix: `cancel-${failureKind}`,
+      ...(failureKind === 'event_without_timestamp' ? {} : { cancelRequestedAt: requestedAt }),
+      cancelRequestKind: 'single_task'
+    });
+    const cancelEvent =
+      valid.events.find((event): boolean => event.type === 'task.cancel_requested') ??
+      ({
+        ...valid.events[0],
+        eventId: `event-${failureKind}-cancel`,
+        sequence: 8,
+        type: 'task.cancel_requested',
+        occurredAt: requestedAt,
+        source: 'user',
+        payload: { requestKind: 'single_task' }
+      } as ChatAgentEvent);
+    let events: ChatAgentEvent[];
+    // 分别构造重复事件、投影时间不一致、无投影时间但存在事件三种非法历史。
+    if (failureKind === 'duplicate') {
+      events = [...valid.events, { ...cancelEvent, eventId: `${cancelEvent.eventId}-duplicate`, sequence: cancelEvent.sequence + 1 }];
+    } else if (failureKind === 'time_mismatch') {
+      events = valid.events.map(
+        (event): ChatAgentEvent => (event.type === 'task.cancel_requested' ? { ...event, occurredAt: '2026-07-28T08:00:03.000Z' } : event)
+      );
+    } else {
+      events = [...valid.events, cancelEvent];
+    }
+    const projection: AgentTaskProjectionRecord = { ...valid, events };
+    const fixture = createProjectorStore([projection]);
+    const projector = createAgentTaskProjector({
+      store: fixture.store,
+      resolveResource: (): null => null,
+      resolveArtifact: (): null => null
+    });
+
+    expect((): void => {
+      projector.projectSummary(projection.task.taskId);
+    }).toThrow('agent_task_cancellation_invalid');
   });
 });
 

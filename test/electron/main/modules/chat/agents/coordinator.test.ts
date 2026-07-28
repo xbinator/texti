@@ -6,10 +6,12 @@ import type { ChildExecutionOutcome, ChildRuntimeInput } from '../../../../../..
 import type { AgentFileCommitResult } from '../../../../../../electron/main/modules/chat/agents/file-commit.mjs';
 import type { AgentResourceLease, AgentResourceScheduler, AgentScheduleRequest } from '../../../../../../electron/main/modules/chat/agents/scheduler.mjs';
 import type {
+  AgentAttemptRecord,
   AgentAttemptProjection,
   BeginAgentAttemptInput,
   AgentCheckpointRecord,
   AgentDelegationRecoverySnapshot,
+  RecordAttemptUsageInput,
   AgentTaskRecord
 } from '../../../../../../electron/main/modules/chat/agents/types.mjs';
 import type {
@@ -17,6 +19,7 @@ import type {
   AgentConfirmationRecord,
   AgentDelegationCreatedPayload,
   AgentTaskError,
+  AgentUsageAccounting,
   AgentWriteResultDraft,
   ChatAgentResult
 } from 'types/chat-agent';
@@ -252,6 +255,29 @@ function createResult(task: AgentTaskRecord, attemptId: string, executionStatus:
 }
 
 /**
+ * 创建 Attempt 尚未调用 Provider 时的零 usage。
+ * @param task - 用于取得冻结定价身份的 Task
+ * @returns 与测试计划定价一致的零累计快照
+ */
+function createAttemptUsage(task: AgentTaskRecord): AgentUsageAccounting {
+  const { monetaryCost } = createResult(task, 'attempt-usage-fixture').usage;
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    modelCalls: 0,
+    toolRounds: 0,
+    queueDurationMs: 0,
+    executionDurationMs: 0,
+    externalRequests: 0,
+    monetaryCost: {
+      ...monetaryCost,
+      estimated: monetaryCost.estimated === 'unknown' ? 'unknown' : 0
+    }
+  };
+}
+
+/**
  * 创建 write result draft。
  * @param task - running write Task
  * @param attemptId - 当前 Attempt
@@ -325,14 +351,20 @@ function createDependencies(tasks: AgentTaskRecord[]): {
   ensureActor: ReturnType<typeof vi.fn>;
   enqueueTask: ReturnType<typeof vi.fn>;
   cancelTask: ReturnType<typeof vi.fn>;
+  requestTaskCancellation: ReturnType<typeof vi.fn>;
+  recordPreCancellation: ReturnType<typeof vi.fn>;
   reserveResume: ReturnType<typeof vi.fn>;
   beginAttempt: ReturnType<typeof vi.fn>;
   markAttemptRunning: ReturnType<typeof vi.fn>;
   executeTask: ReturnType<typeof vi.fn>;
+  recordAttemptUsage: ReturnType<typeof vi.fn>;
   recordTaskResult: ReturnType<typeof vi.fn>;
   settleTask: ReturnType<typeof vi.fn>;
   releaseBudget: ReturnType<typeof vi.fn>;
   releaseTask: ReturnType<typeof vi.fn>;
+  releaseActor: ReturnType<typeof vi.fn>;
+  getTask: ReturnType<typeof vi.fn>;
+  getAttempt: ReturnType<typeof vi.fn>;
   listActive: ReturnType<typeof vi.fn>;
   cancelCheckpoint: ReturnType<typeof vi.fn>;
   abortTask: ReturnType<typeof vi.fn>;
@@ -344,11 +376,14 @@ function createDependencies(tasks: AgentTaskRecord[]): {
 } {
   const checkpoint = createCheckpoint(tasks);
   const recovery: AgentDelegationRecoverySnapshot = { checkpoint, tasks, eventSequence: 2 };
+  const currentTasks = new Map(tasks.map((task): [string, AgentTaskRecord] => [task.taskId, task]));
   const listActive = vi.fn((): AgentDelegationRecoverySnapshot[] => [recovery]);
   const authorizeTaskMock = vi.fn((taskId: string): AgentTaskRecord => {
-    const task = tasks.find((entry): boolean => entry.taskId === taskId);
+    const task = currentTasks.get(taskId);
     if (!task) throw new Error('task_missing');
-    return authorizeTask(task);
+    const authorized = authorizeTask(task);
+    currentTasks.set(taskId, authorized);
+    return authorized;
   });
   const recordPreFailure = vi.fn((): AgentCheckpointRecord => {
     return {
@@ -375,7 +410,7 @@ function createDependencies(tasks: AgentTaskRecord[]): {
       release: releaseTask
     };
   });
-  const cancelTask = vi.fn((): boolean => true);
+  const cancelTask = vi.fn(() => 'active_signalled' as const);
   const scheduler: AgentResourceScheduler = {
     enqueue: enqueueTask,
     cancel: cancelTask,
@@ -384,9 +419,13 @@ function createDependencies(tasks: AgentTaskRecord[]): {
   };
   const reserveResume = vi.fn();
   const beginAttempt = vi.fn((input: BeginAgentAttemptInput): AgentAttemptProjection => {
-    const source = authorizeTask(tasks.find((task): boolean => task.taskId === input.taskId) ?? (tasks[0] as AgentTaskRecord));
+    const latestAuthorization = authorizeTaskMock.mock.results.at(-1)?.value as AgentTaskRecord | undefined;
+    const source =
+      latestAuthorization?.taskId === input.taskId ? latestAuthorization : currentTasks.get(input.taskId) ?? authorizeTask(tasks[0] as AgentTaskRecord);
+    const startingTask = { ...source, status: 'starting' as const, queuePhase: undefined, currentAttemptId: input.attemptId };
+    currentTasks.set(input.taskId, startingTask);
     return {
-      task: { ...source, status: 'starting', currentAttemptId: input.attemptId },
+      task: startingTask,
       attempt: {
         attemptId: input.attemptId,
         taskId: input.taskId,
@@ -397,16 +436,32 @@ function createDependencies(tasks: AgentTaskRecord[]): {
         currentRuntimeId: input.runtimeId,
         runtimeSequence: 1,
         status: 'starting',
+        usageSnapshot: createAttemptUsage(source),
+        usageComplete: true,
+        usageUpdatedAt: '2026-07-27T00:00:00.000Z',
         createdAt: '2026-07-27T00:00:00.000Z'
       }
     };
   });
   const markAttemptRunning = vi.fn((): AgentAttemptProjection => {
     const projection = beginAttempt.mock.results.at(-1)?.value as AgentAttemptProjection;
-    return {
+    const runningProjection = {
       task: { ...projection.task, status: 'running' },
-      attempt: { ...projection.attempt, status: 'running', startedAt: '2026-07-27T00:00:00.000Z' }
-    };
+      attempt: {
+        ...projection.attempt,
+        status: 'running',
+        usageComplete: false,
+        startedAt: '2026-07-27T00:00:00.000Z'
+      }
+    } as AgentAttemptProjection;
+    currentTasks.set(runningProjection.task.taskId, runningProjection.task);
+    return runningProjection;
+  });
+  const getAttempt = vi.fn((attemptId: string): AgentAttemptRecord | null => {
+    const running = markAttemptRunning.mock.results.at(-1)?.value as AgentAttemptProjection | undefined;
+    if (running?.attempt.attemptId === attemptId) return running.attempt;
+    const starting = beginAttempt.mock.results.at(-1)?.value as AgentAttemptProjection | undefined;
+    return starting?.attempt.attemptId === attemptId ? starting.attempt : null;
   });
   const executeTask = vi.fn(
     async (input: ChildRuntimeInput): Promise<ChildExecutionOutcome> => ({
@@ -414,16 +469,49 @@ function createDependencies(tasks: AgentTaskRecord[]): {
       result: createResult(input.task, input.attempt.attemptId)
     })
   );
-  const recordTaskResult = vi.fn((): AgentCheckpointRecord => ({ ...checkpoint, status: 'ready_to_resume', version: 2 }));
+  const recordAttemptUsage = vi.fn((input: RecordAttemptUsageInput): AgentAttemptRecord => {
+    const projection = markAttemptRunning.mock.results.at(-1)?.value as AgentAttemptProjection;
+    return {
+      ...projection.attempt,
+      usageSnapshot: input.usage,
+      usageComplete: input.complete,
+      usageUpdatedAt: input.occurredAt
+    };
+  });
+  const recordTaskResult = vi.fn((task: AgentTaskRecord, result: ChatAgentResult): AgentCheckpointRecord => {
+    currentTasks.set(task.taskId, { ...task, status: result.executionStatus, queuePhase: undefined, result });
+    return { ...checkpoint, status: 'ready_to_resume', version: 2 };
+  });
   const settleTask = vi.fn();
   const releaseBudget = vi.fn();
   const cancelCheckpoint = vi.fn((): AgentCheckpointRecord => ({ ...checkpoint, status: 'cancelled', version: 2 }));
+  const getTask = vi.fn((taskId: string): AgentTaskRecord | null => {
+    return currentTasks.get(taskId) ?? null;
+  });
+  const requestTaskCancellation = vi.fn((taskId: string) => {
+    const task = currentTasks.get(taskId) ?? (tasks[0] as AgentTaskRecord);
+    if (['completed', 'failed', 'cancelled', 'deadline_exceeded', 'commit_failed'].includes(task.status)) {
+      return { previousStatus: task.status, task, disposition: 'already_settled' as const };
+    }
+    const cancelling = { ...task, status: 'cancelling' as const, queuePhase: undefined, cancelRequestedAt: '2026-07-27T00:00:00.000Z' };
+    currentTasks.set(taskId, cancelling);
+    return {
+      previousStatus: task.status,
+      task: cancelling,
+      disposition: task.status === 'committing' ? ('commit_in_progress' as const) : ('cancel_requested' as const)
+    };
+  });
+  const recordPreCancellation = vi.fn((task: AgentTaskRecord): AgentCheckpointRecord => {
+    currentTasks.set(task.taskId, { ...task, status: 'cancelled', queuePhase: undefined, cancelRequestedAt: '2026-07-27T00:00:00.000Z' });
+    return { ...checkpoint, status: 'cancelled', version: 2 };
+  });
   const abortTask = vi.fn();
   const getActor = vi.fn();
   const bindRuntime = vi.fn();
   const unbindRuntime = vi.fn();
   const abortRuntime = vi.fn();
   const discardRuntime = vi.fn(async (): Promise<void> => undefined);
+  const releaseActor = vi.fn();
 
   return {
     dependencies: {
@@ -434,9 +522,14 @@ function createDependencies(tasks: AgentTaskRecord[]): {
       scheduler,
       beginAttempt,
       markAttemptRunning,
+      getAttempt,
+      recordAttemptUsage,
       recordTaskResult,
       settleTask,
       releaseBudget,
+      requestTaskCancellation,
+      recordPreCancellation,
+      getTask,
       executor: {
         execute: executeTask,
         abort: abortRuntime,
@@ -452,6 +545,7 @@ function createDependencies(tasks: AgentTaskRecord[]): {
         bindRuntime,
         unbindRuntime,
         abortTask,
+        releaseTask: releaseActor,
         getActor,
         getRuntime: vi.fn()
       }
@@ -461,14 +555,20 @@ function createDependencies(tasks: AgentTaskRecord[]): {
     ensureActor,
     enqueueTask,
     cancelTask,
+    requestTaskCancellation,
+    recordPreCancellation,
     reserveResume,
     beginAttempt,
     markAttemptRunning,
     executeTask,
+    recordAttemptUsage,
     recordTaskResult,
     settleTask,
     releaseBudget,
     releaseTask,
+    releaseActor,
+    getTask,
+    getAttempt,
     listActive,
     cancelCheckpoint,
     abortTask,
@@ -481,6 +581,77 @@ function createDependencies(tasks: AgentTaskRecord[]): {
 }
 
 describe('agent coordinator', (): void => {
+  it('reuses one cancelTask flight and terminalizes queued start without creating Runtime', async (): Promise<void> => {
+    const task = createTask(1);
+    const fixture = createDependencies([task]);
+    let rejectLease: (error: unknown) => void = (): void => undefined;
+    fixture.enqueueTask.mockImplementationOnce(
+      (): Promise<AgentResourceLease> =>
+        new Promise<AgentResourceLease>((_resolve, reject): void => {
+          rejectLease = reject;
+        })
+    );
+    fixture.cancelTask.mockImplementationOnce((_taskId: string, reason: string) => {
+      rejectLease({ code: 'cancelled', reason });
+      return 'queued_cancelled';
+    });
+    const coordinator = createAgentCoordinator(fixture.dependencies);
+    await coordinator.accept(payload);
+
+    const first = coordinator.cancelTask(task.taskId);
+    const replay = coordinator.cancelTask(task.taskId);
+
+    expect(replay).toBe(first);
+    await expect(first).resolves.toBe('cancel_requested');
+    expect(fixture.cancelTask).toHaveBeenCalledOnce();
+    expect(fixture.cancelTask).toHaveBeenCalledWith(task.taskId, 'user_cancelled');
+    expect(fixture.recordPreCancellation).toHaveBeenCalledWith(expect.objectContaining({ taskId: task.taskId }), 'single_task');
+    expect(fixture.cancelTask.mock.invocationCallOrder[0]).toBeLessThan(fixture.recordPreCancellation.mock.invocationCallOrder[0] as number);
+    expect(fixture.beginAttempt).not.toHaveBeenCalled();
+    expect(fixture.bindRuntime).not.toHaveBeenCalled();
+    expect(fixture.executeTask).not.toHaveBeenCalled();
+    expect(fixture.releaseBudget).toHaveBeenCalledWith(task.taskId);
+    expect(fixture.cancelCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('lets cancellation win after the start lease is active but before beginAttempt', async (): Promise<void> => {
+    const task = createTask(1);
+    const fixture = createDependencies([task]);
+    const controller = new AbortController();
+    const release = vi.fn();
+    let resolveLease: (lease: AgentResourceLease) => void = (): void => undefined;
+    fixture.enqueueTask.mockImplementationOnce(
+      (): Promise<AgentResourceLease> =>
+        new Promise<AgentResourceLease>((resolve): void => {
+          resolveLease = resolve;
+        })
+    );
+    fixture.cancelTask.mockImplementationOnce((_taskId: string, reason: string) => {
+      controller.abort(reason);
+      return 'active_signalled';
+    });
+    const coordinator = createAgentCoordinator(fixture.dependencies);
+    await coordinator.accept(payload);
+    await vi.waitFor((): void => {
+      expect(fixture.enqueueTask).toHaveBeenCalledOnce();
+    });
+
+    resolveLease({
+      taskId: task.taskId,
+      phase: 'start',
+      kind: 'shared-read',
+      signal: controller.signal,
+      release
+    });
+    const cancellation = coordinator.cancelTask(task.taskId);
+
+    await expect(cancellation).resolves.toBe('cancel_requested');
+    expect(fixture.recordPreCancellation).toHaveBeenCalledWith(expect.objectContaining({ taskId: task.taskId }), 'single_task');
+    expect(fixture.beginAttempt).not.toHaveBeenCalled();
+    expect(fixture.executeTask).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledOnce();
+  });
+
   it('deduplicates concurrent realtime and recovery acceptance by checkpoint ID', async (): Promise<void> => {
     const fixture = createDependencies([createTask(1)]);
     const coordinator = createAgentCoordinator(fixture.dependencies);
@@ -623,7 +794,15 @@ describe('agent coordinator', (): void => {
       expect(fixture.beginAttempt.mock.invocationCallOrder[0]).toBeLessThan(fixture.bindRuntime.mock.invocationCallOrder[0] as number);
       expect(fixture.bindRuntime.mock.invocationCallOrder[0]).toBeLessThan(fixture.markAttemptRunning.mock.invocationCallOrder[0] as number);
       expect(fixture.markAttemptRunning.mock.invocationCallOrder[0]).toBeLessThan(fixture.executeTask.mock.invocationCallOrder[0] as number);
-      expect(fixture.executeTask.mock.invocationCallOrder[0]).toBeLessThan(fixture.recordTaskResult.mock.invocationCallOrder[0] as number);
+      expect(fixture.recordAttemptUsage).toHaveBeenCalledWith({
+        taskId: task.taskId,
+        attemptId: `attempt-runtime-${task.taskId}`,
+        usage: expect.objectContaining({ totalTokens: 15 }),
+        complete: true,
+        occurredAt: '2026-07-27T00:00:00.000Z'
+      });
+      expect(fixture.executeTask.mock.invocationCallOrder[0]).toBeLessThan(fixture.recordAttemptUsage.mock.invocationCallOrder[0] as number);
+      expect(fixture.recordAttemptUsage.mock.invocationCallOrder[0]).toBeLessThan(fixture.recordTaskResult.mock.invocationCallOrder[0] as number);
       expect(fixture.recordTaskResult.mock.invocationCallOrder[0]).toBeLessThan(fixture.settleTask.mock.invocationCallOrder[0] as number);
       expect(fixture.settleTask.mock.invocationCallOrder[0]).toBeLessThan(fixture.unbindRuntime.mock.invocationCallOrder[0] as number);
       expect(release).toHaveBeenCalledTimes(1);
@@ -650,6 +829,70 @@ describe('agent coordinator', (): void => {
       expect(fixture.settleTask).toHaveBeenCalledWith(task.taskId, expect.objectContaining({ totalTokens: 0 }));
       expect(fixture.unbindRuntime).toHaveBeenCalledWith(`runtime-${task.taskId}`);
       expect(fixture.releaseTask).toHaveBeenCalledTimes(1);
+      expect(coordinator.getCheckpointState(payload.checkpointId)).toBe('terminal');
+    });
+  });
+
+  it('uses persisted Attempt usage when an injected executor rejects after a usage boundary', async (): Promise<void> => {
+    const task = createTask(1);
+    const fixture = createDependencies([task]);
+    const partialUsage: AgentUsageAccounting = {
+      ...createAttemptUsage(task),
+      inputTokens: 9,
+      outputTokens: 3,
+      totalTokens: 12,
+      modelCalls: 1,
+      monetaryCost: {
+        ...createAttemptUsage(task).monetaryCost,
+        estimated: 0.001
+      }
+    };
+    let persistedAttempt: AgentAttemptRecord | null = null;
+    fixture.recordAttemptUsage.mockImplementation((input: RecordAttemptUsageInput): AgentAttemptRecord => {
+      const projection = fixture.markAttemptRunning.mock.results.at(-1)?.value as AgentAttemptProjection | undefined;
+      if (!projection) throw new Error('running_attempt_missing');
+      const current = persistedAttempt ?? projection.attempt;
+      if (input.usage.totalTokens < current.usageSnapshot.totalTokens) {
+        throw new Error('attempt_usage_regression');
+      }
+      persistedAttempt = {
+        ...current,
+        usageSnapshot: input.usage,
+        usageComplete: input.complete,
+        usageUpdatedAt: input.occurredAt
+      };
+      return persistedAttempt;
+    });
+    fixture.getAttempt.mockImplementation((): AgentAttemptRecord | null => persistedAttempt);
+    fixture.executeTask.mockImplementationOnce(async (input: ChildRuntimeInput): Promise<ChildExecutionOutcome> => {
+      fixture.dependencies.recordAttemptUsage({
+        taskId: input.task.taskId,
+        attemptId: input.attempt.attemptId,
+        usage: partialUsage,
+        complete: false,
+        occurredAt: '2026-07-27T00:00:00.000Z'
+      });
+      throw new Error('injected_executor_rejected');
+    });
+    const coordinator = createAgentCoordinator(fixture.dependencies);
+
+    await coordinator.accept(payload);
+
+    await vi.waitFor((): void => {
+      expect(fixture.recordTaskResult).toHaveBeenCalledWith(
+        expect.objectContaining({ taskId: task.taskId }),
+        expect.objectContaining({
+          executionStatus: 'failed',
+          usage: partialUsage,
+          error: expect.objectContaining({ code: 'runtime_failed' })
+        })
+      );
+      expect(fixture.recordAttemptUsage).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          usage: partialUsage,
+          complete: true
+        })
+      );
       expect(coordinator.getCheckpointState(payload.checkpointId)).toBe('terminal');
     });
   });
@@ -740,9 +983,9 @@ describe('agent coordinator', (): void => {
           rejectLease = reject;
         })
     );
-    fixture.cancelTask.mockImplementationOnce((_taskId: string, reason: string): boolean => {
+    fixture.cancelTask.mockImplementationOnce((_taskId: string, reason: string) => {
       rejectLease({ code: 'cancelled', reason });
-      return true;
+      return 'queued_cancelled';
     });
     const coordinator = createAgentCoordinator(fixture.dependencies);
     await coordinator.accept(payload);
@@ -750,13 +993,432 @@ describe('agent coordinator', (): void => {
     await coordinator.cancel(payload.checkpointId, 'user_cancelled');
 
     expect(fixture.cancelCheckpoint).toHaveBeenCalledWith(payload.checkpointId, 'user_cancelled');
-    expect(fixture.cancelCheckpoint).toHaveBeenCalledOnce();
+    expect(fixture.cancelCheckpoint).toHaveBeenCalledTimes(2);
     expect(fixture.cancelTask).toHaveBeenCalledWith(task.taskId, 'user_cancelled');
     expect(fixture.cancelCheckpoint.mock.invocationCallOrder[0]).toBeLessThan(fixture.cancelTask.mock.invocationCallOrder[0] as number);
     expect(fixture.beginAttempt).not.toHaveBeenCalled();
     expect(fixture.executeTask).not.toHaveBeenCalled();
     expect(fixture.releaseBudget).toHaveBeenCalledOnce();
     expect(coordinator.getCheckpointState(payload.checkpointId)).toBe('terminal');
+  });
+
+  it('cancels only the targeted running Task and normalizes a late success with its actual usage', async (): Promise<void> => {
+    const tasks = [createTask(1), createTask(2)];
+    const fixture = createDependencies(tasks);
+    const controllers = new Map<string, AbortController>();
+    const runtimeInputs = new Map<string, ChildRuntimeInput>();
+    const finishers = new Map<string, (outcome: ChildExecutionOutcome) => void>();
+    const attempts = new Map<string, AgentAttemptProjection>();
+    const taskStates = new Map(tasks.map((task): [string, AgentTaskRecord] => [task.taskId, task]));
+    fixture.authorizeTask.mockImplementation((taskId: string): AgentTaskRecord => {
+      const source = taskStates.get(taskId);
+      if (!source) throw new Error('Parallel Task fixture is missing');
+      const authorized = authorizeTask(source);
+      taskStates.set(taskId, authorized);
+      return authorized;
+    });
+    fixture.getTask.mockImplementation((taskId: string): AgentTaskRecord | null => taskStates.get(taskId) ?? null);
+    fixture.requestTaskCancellation.mockImplementation((taskId: string) => {
+      const source = taskStates.get(taskId);
+      if (!source) throw new Error('Parallel cancellation fixture is missing');
+      const cancelling = {
+        ...source,
+        status: 'cancelling' as const,
+        queuePhase: undefined,
+        cancelRequestedAt: '2026-07-27T00:00:00.000Z'
+      };
+      taskStates.set(taskId, cancelling);
+      return {
+        previousStatus: source.status,
+        task: cancelling,
+        disposition: 'cancel_requested' as const
+      };
+    });
+    fixture.beginAttempt.mockImplementation((input: BeginAgentAttemptInput): AgentAttemptProjection => {
+      const source = tasks.find((task): boolean => task.taskId === input.taskId);
+      if (!source) throw new Error('Parallel Task fixture is missing');
+      const authorized = taskStates.get(input.taskId);
+      if (!authorized?.executionPlanSnapshotHash) throw new Error('Parallel Task was not authorized');
+      const projection: AgentAttemptProjection = {
+        task: { ...authorized, status: 'starting', queuePhase: undefined, currentAttemptId: input.attemptId },
+        attempt: {
+          attemptId: input.attemptId,
+          taskId: input.taskId,
+          attemptNumber: 1,
+          parentRuntimeId: input.parentRuntimeId,
+          planHash: authorized.executionPlanSnapshotHash as string,
+          initialRuntimeId: input.runtimeId,
+          currentRuntimeId: input.runtimeId,
+          runtimeSequence: 1,
+          status: 'starting',
+          usageSnapshot: createAttemptUsage(authorized),
+          usageComplete: true,
+          usageUpdatedAt: '2026-07-27T00:00:00.000Z',
+          createdAt: '2026-07-27T00:00:00.000Z'
+        }
+      };
+      attempts.set(input.attemptId, projection);
+      taskStates.set(input.taskId, projection.task);
+      return projection;
+    });
+    fixture.markAttemptRunning.mockImplementation((input): AgentAttemptProjection => {
+      const projection = attempts.get(input.attemptId);
+      if (!projection) throw new Error('Parallel Attempt fixture is missing');
+      const running: AgentAttemptProjection = {
+        task: { ...projection.task, status: 'running' },
+        attempt: { ...projection.attempt, status: 'running', startedAt: '2026-07-27T00:00:00.000Z' }
+      };
+      taskStates.set(input.taskId, running.task);
+      return running;
+    });
+    fixture.enqueueTask.mockImplementation(async (request: AgentScheduleRequest): Promise<AgentResourceLease> => {
+      const controller = new AbortController();
+      controllers.set(request.taskId, controller);
+      return {
+        taskId: request.taskId,
+        phase: request.phase,
+        kind: request.kind,
+        signal: controller.signal,
+        release: vi.fn()
+      };
+    });
+    fixture.executeTask.mockImplementation(
+      (input: ChildRuntimeInput): Promise<ChildExecutionOutcome> =>
+        new Promise<ChildExecutionOutcome>((resolve): void => {
+          runtimeInputs.set(input.task.taskId, input);
+          finishers.set(input.task.taskId, resolve);
+        })
+    );
+    fixture.cancelTask.mockImplementation((taskId: string, reason: string) => {
+      controllers.get(taskId)?.abort(reason);
+      return 'active_signalled';
+    });
+    fixture.getActor.mockImplementation((taskId: string) => ({ taskId }));
+    const coordinator = createAgentCoordinator(fixture.dependencies);
+    await coordinator.accept(payload);
+    await vi.waitFor((): void => {
+      expect(fixture.executeTask).toHaveBeenCalledTimes(2);
+    });
+
+    const cancellation = coordinator.cancelTask(tasks[0]!.taskId);
+    const targetInput = runtimeInputs.get(tasks[0]!.taskId);
+    if (!targetInput) throw new Error('Target Runtime input must be captured');
+    finishers.get(tasks[0]!.taskId)?.({
+      kind: 'terminal',
+      result: createResult(targetInput.task, targetInput.attempt.attemptId, 'completed')
+    });
+    await expect(cancellation).resolves.toBe('cancel_requested');
+
+    const siblingInput = runtimeInputs.get(tasks[1]!.taskId);
+    if (!siblingInput) throw new Error('Sibling Runtime input must be captured');
+    finishers.get(tasks[1]!.taskId)?.({
+      kind: 'terminal',
+      result: createResult(siblingInput.task, siblingInput.attempt.attemptId, 'completed')
+    });
+    await vi.waitFor((): void => {
+      expect(fixture.recordTaskResult).toHaveBeenCalledTimes(2);
+    });
+
+    expect(fixture.requestTaskCancellation).toHaveBeenCalledWith(tasks[0]!.taskId, 'single_task');
+    expect(fixture.requestTaskCancellation).not.toHaveBeenCalledWith(tasks[1]!.taskId, expect.anything());
+    expect(fixture.cancelTask).toHaveBeenCalledOnce();
+    expect(fixture.cancelTask).toHaveBeenCalledWith(tasks[0]!.taskId, 'user_cancelled');
+    expect(fixture.abortTask).toHaveBeenCalledWith(tasks[0]!.taskId, expect.objectContaining({ code: 'cancelled', details: { reason: 'user_cancelled' } }));
+    expect(fixture.recordTaskResult).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: tasks[0]!.taskId }),
+      expect.objectContaining({
+        executionStatus: 'cancelled',
+        usage: expect.objectContaining({ totalTokens: 15 })
+      })
+    );
+    expect(fixture.recordTaskResult).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: tasks[1]!.taskId }),
+      expect.objectContaining({ executionStatus: 'completed' })
+    );
+    expect(fixture.releaseBudget).not.toHaveBeenCalledWith(tasks[1]!.taskId);
+    expect(fixture.releaseActor).toHaveBeenCalledWith(tasks[0]!.taskId);
+    expect(fixture.releaseActor).toHaveBeenCalledWith(tasks[1]!.taskId);
+  });
+
+  it('revokes a pending confirmation and records a cancelled write Result before cleanup', async (): Promise<void> => {
+    const task = createWriteTask();
+    const fixture = createDependencies([task]);
+    const authorized = authorizeWriteTask(task);
+    const runtimeId = `runtime-${task.taskId}`;
+    const attemptId = `attempt-${runtimeId}`;
+    const runningTask: AgentTaskRecord = {
+      ...authorized,
+      status: 'running',
+      queuePhase: undefined,
+      currentAttemptId: attemptId
+    };
+    const changeset = createChangeset(runningTask, attemptId, runtimeId);
+    const draft = createWriteDraft(runningTask, attemptId);
+    let currentTask = task;
+    let confirmationStatus: AgentConfirmationRecord['status'] = 'pending';
+    let finishConfirmation: (decision: { decision: 'rejected'; version: number }) => void = (): void => undefined;
+    const confirmation: AgentConfirmationRecord = {
+      confirmationId: 'confirmation-1',
+      changesetId: changeset.snapshot.changesetId,
+      request: {} as AgentConfirmationRecord['request'],
+      requestHash: '9'.repeat(64),
+      status: 'pending',
+      version: 1,
+      createdAt: '2026-07-27T00:00:00.000Z',
+      updatedAt: '2026-07-27T00:00:00.000Z'
+    };
+    fixture.authorizeTask.mockImplementation((): AgentTaskRecord => {
+      currentTask = authorized;
+      return authorized;
+    });
+    fixture.getTask.mockImplementation((): AgentTaskRecord => currentTask);
+    fixture.requestTaskCancellation.mockImplementation(() => {
+      const previousStatus = currentTask.status;
+      currentTask = {
+        ...currentTask,
+        status: 'cancelling',
+        queuePhase: undefined,
+        cancelRequestedAt: '2026-07-27T00:00:00.000Z'
+      };
+      return { previousStatus, task: currentTask, disposition: 'cancel_requested' as const };
+    });
+    fixture.executeTask.mockResolvedValue({
+      kind: 'changeset_prepared',
+      changeset: changeset.snapshot,
+      draft
+    });
+    fixture.dependencies.prepareChangeset = vi.fn((): AgentChangesetRecord => {
+      currentTask = { ...runningTask, status: 'waiting_confirmation' };
+      return changeset;
+    });
+    const revokeTask = vi.fn((): [] => {
+      confirmationStatus = 'revoked';
+      finishConfirmation({ decision: 'rejected', version: 2 });
+      return [];
+    });
+    fixture.dependencies.confirmationQueue = {
+      request: vi.fn(
+        (): Promise<{ decision: 'rejected'; version: number }> =>
+          new Promise((resolve): void => {
+            finishConfirmation = resolve;
+          })
+      ),
+      revokeTask,
+      invalidate: vi.fn()
+    };
+    fixture.dependencies.getConfirmation = vi.fn(
+      (): AgentConfirmationRecord => ({
+        ...confirmation,
+        status: confirmationStatus,
+        version: confirmationStatus === 'revoked' ? 2 : 1,
+        updatedAt: confirmationStatus === 'revoked' ? '2026-07-27T00:00:01.000Z' : confirmation.updatedAt
+      })
+    );
+    fixture.dependencies.getChangeset = vi.fn((): AgentChangesetRecord => changeset);
+    fixture.dependencies.queueCommit = vi.fn();
+    fixture.dependencies.createConfirmationId = (): string => confirmation.confirmationId;
+    fixture.dependencies.fileCommitter = { commit: vi.fn(), recover: vi.fn() };
+    const coordinator = createAgentCoordinator(fixture.dependencies);
+    await coordinator.accept(payload);
+    await vi.waitFor((): void => {
+      expect(fixture.dependencies.confirmationQueue?.request).toHaveBeenCalledOnce();
+      expect(currentTask.status).toBe('waiting_confirmation');
+    });
+
+    await expect(coordinator.cancelTask(task.taskId)).resolves.toBe('cancel_requested');
+
+    expect(revokeTask).toHaveBeenCalledWith(task.taskId, 'user_cancelled');
+    expect(fixture.cancelTask).not.toHaveBeenCalled();
+    expect(fixture.discardRuntime).toHaveBeenCalledWith(runtimeId);
+    expect(fixture.recordTaskResult).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: task.taskId }),
+      expect.objectContaining({
+        executionStatus: 'cancelled',
+        usage: expect.objectContaining({ totalTokens: 15 }),
+        error: expect.objectContaining({
+          code: 'cancelled',
+          details: { reason: 'confirmation_revoked' }
+        })
+      })
+    );
+    expect(fixture.dependencies.queueCommit).not.toHaveBeenCalled();
+    expect(fixture.dependencies.fileCommitter.commit).not.toHaveBeenCalled();
+  });
+
+  it('lets cancellation win after the commit lease is active but before external mutation', async (): Promise<void> => {
+    const task = createWriteTask();
+    const fixture = createDependencies([task]);
+    const authorized = authorizeWriteTask(task);
+    const runtimeId = `runtime-${task.taskId}`;
+    const attemptId = `attempt-${runtimeId}`;
+    const runningTask: AgentTaskRecord = {
+      ...authorized,
+      status: 'running',
+      queuePhase: undefined,
+      currentAttemptId: attemptId
+    };
+    const changeset = createChangeset(runningTask, attemptId, runtimeId);
+    const approvedChangeset: AgentChangesetRecord = {
+      ...changeset,
+      status: 'approved',
+      confirmationId: 'confirmation-1'
+    };
+    const draft = createWriteDraft(runningTask, attemptId);
+    const confirmation: AgentConfirmationRecord = {
+      confirmationId: 'confirmation-1',
+      changesetId: changeset.snapshot.changesetId,
+      request: {} as AgentConfirmationRecord['request'],
+      requestHash: '9'.repeat(64),
+      status: 'approved',
+      version: 2,
+      decision: 'approved',
+      createdAt: '2026-07-27T00:00:00.000Z',
+      updatedAt: '2026-07-27T00:00:01.000Z'
+    };
+    let currentTask = task;
+    const commitController = new AbortController();
+    const releaseCommit = vi.fn();
+    let resolveCommitLease: (lease: AgentResourceLease) => void = (): void => undefined;
+    fixture.authorizeTask.mockImplementation((): AgentTaskRecord => {
+      currentTask = authorized;
+      return authorized;
+    });
+    fixture.getTask.mockImplementation((): AgentTaskRecord => currentTask);
+    fixture.requestTaskCancellation.mockImplementation(() => {
+      const previousStatus = currentTask.status;
+      currentTask = {
+        ...currentTask,
+        status: 'cancelling',
+        queuePhase: undefined,
+        cancelRequestedAt: '2026-07-27T00:00:00.000Z'
+      };
+      return { previousStatus, task: currentTask, disposition: 'cancel_requested' as const };
+    });
+    fixture.executeTask.mockResolvedValue({
+      kind: 'changeset_prepared',
+      changeset: changeset.snapshot,
+      draft
+    });
+    fixture.dependencies.prepareChangeset = vi.fn((): AgentChangesetRecord => changeset);
+    const revokeTask = vi.fn();
+    fixture.dependencies.confirmationQueue = {
+      request: vi.fn(async (): Promise<{ decision: 'approved'; version: number }> => ({ decision: 'approved', version: 2 })),
+      revokeTask,
+      invalidate: vi.fn()
+    };
+    fixture.dependencies.getConfirmation = vi.fn((): AgentConfirmationRecord => confirmation);
+    fixture.dependencies.getChangeset = vi.fn((): AgentChangesetRecord => approvedChangeset);
+    fixture.dependencies.queueCommit = vi.fn((): AgentTaskRecord => {
+      currentTask = { ...runningTask, status: 'queued', queuePhase: 'commit' };
+      return currentTask;
+    });
+    fixture.dependencies.createConfirmationId = (): string => confirmation.confirmationId;
+    fixture.dependencies.fileCommitter = { commit: vi.fn(), recover: vi.fn() };
+    fixture.enqueueTask.mockImplementation((request: AgentScheduleRequest): Promise<AgentResourceLease> => {
+      if (request.phase === 'commit') {
+        return new Promise<AgentResourceLease>((resolve): void => {
+          resolveCommitLease = resolve;
+        });
+      }
+      return Promise.resolve({
+        taskId: request.taskId,
+        phase: request.phase,
+        kind: request.kind,
+        signal: new AbortController().signal,
+        release: vi.fn()
+      });
+    });
+    fixture.cancelTask.mockImplementation((_taskId: string, reason: string) => {
+      commitController.abort(reason);
+      return 'active_signalled';
+    });
+    const coordinator = createAgentCoordinator(fixture.dependencies);
+    await coordinator.accept(payload);
+    await vi.waitFor((): void => {
+      expect(currentTask).toMatchObject({ status: 'queued', queuePhase: 'commit' });
+      expect(fixture.enqueueTask).toHaveBeenCalledWith(expect.objectContaining({ taskId: task.taskId, phase: 'commit' }));
+    });
+
+    resolveCommitLease({
+      taskId: task.taskId,
+      phase: 'commit',
+      kind: 'exclusive-commit',
+      signal: commitController.signal,
+      release: releaseCommit
+    });
+    const cancellation = coordinator.cancelTask(task.taskId);
+
+    await expect(cancellation).resolves.toBe('cancel_requested');
+
+    expect(fixture.cancelTask).toHaveBeenCalledWith(task.taskId, 'user_cancelled');
+    expect(fixture.cancelTask.mock.invocationCallOrder[0]).toBeLessThan(fixture.requestTaskCancellation.mock.invocationCallOrder[0] as number);
+    expect(revokeTask).not.toHaveBeenCalled();
+    expect(fixture.dependencies.getConfirmation).toHaveReturnedWith(expect.objectContaining({ status: 'approved', version: 2 }));
+    expect(fixture.dependencies.fileCommitter.commit).not.toHaveBeenCalled();
+    expect(fixture.recordTaskResult).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: task.taskId }),
+      expect.objectContaining({
+        executionStatus: 'cancelled',
+        usage: expect.objectContaining({ totalTokens: 15 }),
+        error: expect.objectContaining({ phase: 'commit' })
+      })
+    );
+    expect(fixture.discardRuntime).toHaveBeenCalledWith(runtimeId);
+    expect(releaseCommit).toHaveBeenCalledOnce();
+  });
+
+  it('propagates target cleanup failure after independently releasing the lease and Runtime route', async (): Promise<void> => {
+    const task = createTask(1);
+    const fixture = createDependencies([task]);
+    const controller = new AbortController();
+    const release = vi.fn();
+    let runtimeInput: ChildRuntimeInput | undefined;
+    let finishExecution: (outcome: ChildExecutionOutcome) => void = (): void => undefined;
+    fixture.enqueueTask.mockResolvedValue({
+      taskId: task.taskId,
+      phase: 'start',
+      kind: 'shared-read',
+      signal: controller.signal,
+      release
+    });
+    fixture.executeTask.mockImplementation(
+      (input: ChildRuntimeInput): Promise<ChildExecutionOutcome> =>
+        new Promise<ChildExecutionOutcome>((resolve): void => {
+          runtimeInput = input;
+          finishExecution = resolve;
+        })
+    );
+    fixture.cancelTask.mockImplementation((_taskId: string, reason: string) => {
+      controller.abort(reason);
+      return 'active_signalled';
+    });
+    fixture.getActor.mockReturnValue({ taskId: task.taskId });
+    fixture.releaseActor.mockImplementation((): never => {
+      throw new Error('registry_cleanup_failed');
+    });
+    const coordinator = createAgentCoordinator(fixture.dependencies);
+    await coordinator.accept(payload);
+    await vi.waitFor((): void => {
+      expect(runtimeInput).toBeDefined();
+    });
+    const cancellation = coordinator.cancelTask(task.taskId);
+    const cancellationFailure = expect(cancellation).rejects.toThrowError('registry_cleanup_failed');
+    if (!runtimeInput) throw new Error('Cleanup Runtime input must be captured');
+    finishExecution({
+      kind: 'terminal',
+      result: createResult(runtimeInput.task, runtimeInput.attempt.attemptId, 'completed')
+    });
+
+    await cancellationFailure;
+
+    expect(fixture.recordTaskResult).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: task.taskId }),
+      expect.objectContaining({ executionStatus: 'cancelled' })
+    );
+    expect(fixture.unbindRuntime).toHaveBeenCalledWith(`runtime-${task.taskId}`);
+    expect(release).toHaveBeenCalledOnce();
+    expect(fixture.releaseActor).toHaveBeenCalledWith(task.taskId);
+    await expect(coordinator.cancelTask(task.taskId)).resolves.toBe('already_settled');
   });
 
   it('persists running cancellation before the signal and hard-aborts only after the grace period', async (): Promise<void> => {
@@ -772,9 +1434,9 @@ describe('agent coordinator', (): void => {
       signal: controller.signal,
       release
     });
-    fixture.cancelTask.mockImplementationOnce((): boolean => {
+    fixture.cancelTask.mockImplementationOnce(() => {
       controller.abort('user_cancelled');
-      return true;
+      return 'active_signalled';
     });
     let finishExecution: (result: ChildExecutionOutcome) => void = (): void => undefined;
     fixture.executeTask.mockImplementationOnce(
@@ -833,6 +1495,8 @@ describe('agent coordinator', (): void => {
     const task = createTask(1);
     const fixture = createDependencies([task]);
     const controller = new AbortController();
+    let runtimeInput: ChildRuntimeInput | undefined;
+    let finishExecution: (result: ChildExecutionOutcome) => void = (): void => undefined;
     fixture.enqueueTask.mockResolvedValueOnce({
       taskId: task.taskId,
       phase: 'start',
@@ -840,32 +1504,51 @@ describe('agent coordinator', (): void => {
       signal: controller.signal,
       release: vi.fn()
     });
-    fixture.cancelTask.mockImplementationOnce((): boolean => {
+    fixture.cancelTask.mockImplementationOnce(() => {
       controller.abort('user_cancelled');
-      return true;
+      return 'active_signalled';
     });
     fixture.executeTask.mockImplementationOnce(
-      (): Promise<ChildExecutionOutcome> =>
-        new Promise<ChildExecutionOutcome>(() => {
-          // 故意保持 pending，以验证 Primary cancel 的等待上界。
+      (input: ChildRuntimeInput): Promise<ChildExecutionOutcome> =>
+        new Promise<ChildExecutionOutcome>((resolve): void => {
+          runtimeInput = input;
+          finishExecution = resolve;
         })
     );
     fixture.getActor.mockReturnValue({ taskId: task.taskId });
     fixture.cancelCheckpoint.mockReturnValue({ ...createCheckpoint([task]), status: 'cancelling', version: 2 });
+    fixture.recordTaskResult.mockReturnValue({ ...createCheckpoint([task]), status: 'cancelled', version: 3 });
     const coordinator = createAgentCoordinator(fixture.dependencies);
     await coordinator.accept(payload);
     await vi.waitFor((): void => {
-      expect(fixture.executeTask).toHaveBeenCalledOnce();
+      expect(runtimeInput).toBeDefined();
     });
 
     const cancellation = coordinator.cancel(payload.checkpointId, 'user_cancelled');
+    const cancellationFailure = expect(cancellation).rejects.toThrowError('coordinator_cancel_cleanup_timeout');
     await vi.advanceTimersByTimeAsync(200);
-    await cancellation;
+    await cancellationFailure;
 
     expect(fixture.abortRuntime).toHaveBeenCalledWith(`runtime-${task.taskId}`, 'user_cancelled');
+    // 即使有界等待超时，也要执行一次当下可完成的幂等汇合；此时仍为 cancelling。
     expect(fixture.cancelCheckpoint).toHaveBeenCalledTimes(2);
     expect(fixture.recordTaskResult).not.toHaveBeenCalled();
     expect(coordinator.getCheckpointState(payload.checkpointId)).toBe('running');
+
+    if (!runtimeInput) throw new Error('Late Runtime input must be captured');
+    finishExecution({
+      kind: 'terminal',
+      result: createResult(runtimeInput.task, runtimeInput.attempt.attemptId, 'completed')
+    });
+    await vi.runAllTimersAsync();
+
+    expect(fixture.recordTaskResult).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: task.taskId }),
+      expect.objectContaining({ executionStatus: 'cancelled' })
+    );
+    // 调用方超时只结束有界等待；迟到 Result 仍必须重新驱动 cancelled Checkpoint 的收尾边界。
+    expect(fixture.cancelCheckpoint).toHaveBeenCalledTimes(3);
+    expect(coordinator.getCheckpointState(payload.checkpointId)).toBe('terminal');
     vi.useRealTimers();
   });
 
@@ -888,12 +1571,16 @@ describe('agent coordinator', (): void => {
         currentRuntimeId: runtimeId,
         runtimeSequence: 1,
         status: 'running',
+        usageSnapshot: createAttemptUsage(authorized),
+        usageComplete: false,
+        usageUpdatedAt: '2026-07-27T00:00:00.000Z',
         createdAt: '2026-07-27T00:00:00.000Z',
         startedAt: '2026-07-27T00:00:00.000Z'
       }
     };
     const changeset = createChangeset(runningProjection.task, attemptId, runtimeId);
     const draft = createWriteDraft(runningProjection.task, attemptId);
+    let currentTask = authorized;
     const confirmation: AgentConfirmationRecord = {
       confirmationId: 'confirmation-1',
       changesetId: changeset.snapshot.changesetId,
@@ -935,13 +1622,23 @@ describe('agent coordinator', (): void => {
         planHash: changeset.snapshot.planHash
       }
     };
-    fixture.authorizeTask.mockReturnValue(authorized);
+    fixture.authorizeTask.mockImplementation((): AgentTaskRecord => {
+      currentTask = authorized;
+      return authorized;
+    });
+    fixture.getTask.mockImplementation((): AgentTaskRecord => currentTask);
     fixture.beginAttempt.mockImplementation((): AgentAttemptProjection => {
       order.push('attempt-started');
-      return { task: { ...runningProjection.task, status: 'starting' }, attempt: { ...runningProjection.attempt, status: 'starting' } };
+      const projection = {
+        task: { ...runningProjection.task, status: 'starting' as const },
+        attempt: { ...runningProjection.attempt, status: 'starting' as const }
+      };
+      currentTask = projection.task;
+      return projection;
     });
     fixture.markAttemptRunning.mockImplementation((): AgentAttemptProjection => {
       order.push('runtime-started');
+      currentTask = runningProjection.task;
       return runningProjection;
     });
     fixture.executeTask.mockImplementation(
@@ -973,6 +1670,7 @@ describe('agent coordinator', (): void => {
         order.push('confirmation-approved');
         return { decision: 'approved', version: 2 };
       }),
+      revokeTask: vi.fn(),
       invalidate: vi.fn()
     };
     fixture.dependencies.getConfirmation = vi.fn((): AgentConfirmationRecord => confirmation);
@@ -985,7 +1683,8 @@ describe('agent coordinator', (): void => {
     );
     fixture.dependencies.queueCommit = vi.fn((): AgentTaskRecord => {
       order.push('commit-queued');
-      return { ...runningProjection.task, status: 'queued', queuePhase: 'commit' };
+      currentTask = { ...runningProjection.task, status: 'queued', queuePhase: 'commit' };
+      return currentTask;
     });
     fixture.dependencies.createConfirmationId = (): string => 'confirmation-1';
     fixture.dependencies.fileCommitter = {
@@ -1058,6 +1757,7 @@ describe('agent coordinator', (): void => {
     const task = createWriteTask();
     const fixture = createDependencies([task]);
     const authorized = authorizeWriteTask(task);
+    let currentTask = authorized;
     const confirmation: AgentConfirmationRecord = {
       confirmationId: 'confirmation-1',
       changesetId: 'changeset-1',
@@ -1069,7 +1769,39 @@ describe('agent coordinator', (): void => {
       createdAt: '2026-07-27T00:00:00.000Z',
       updatedAt: '2026-07-27T00:00:01.000Z'
     } as AgentConfirmationRecord;
-    fixture.authorizeTask.mockReturnValue(authorized);
+    fixture.authorizeTask.mockImplementation((): AgentTaskRecord => {
+      currentTask = authorized;
+      return authorized;
+    });
+    fixture.getTask.mockImplementation((): AgentTaskRecord => currentTask);
+    fixture.beginAttempt.mockImplementation((input: BeginAgentAttemptInput): AgentAttemptProjection => {
+      const projection: AgentAttemptProjection = {
+        task: { ...authorized, status: 'starting', queuePhase: undefined, currentAttemptId: input.attemptId },
+        attempt: {
+          attemptId: input.attemptId,
+          taskId: input.taskId,
+          attemptNumber: 1,
+          parentRuntimeId: input.parentRuntimeId,
+          planHash: authorized.executionPlanSnapshotHash as string,
+          initialRuntimeId: input.runtimeId,
+          currentRuntimeId: input.runtimeId,
+          runtimeSequence: 1,
+          status: 'starting',
+          usageSnapshot: createAttemptUsage(authorized),
+          usageComplete: true,
+          usageUpdatedAt: '2026-07-27T00:00:00.000Z',
+          createdAt: '2026-07-27T00:00:00.000Z'
+        }
+      };
+      currentTask = projection.task;
+      return projection;
+    });
+    fixture.markAttemptRunning.mockImplementation((): AgentAttemptProjection => {
+      const projection = fixture.beginAttempt.mock.results.at(-1)?.value as AgentAttemptProjection;
+      const running = { task: { ...projection.task, status: 'running' as const }, attempt: { ...projection.attempt, status: 'running' as const } };
+      currentTask = running.task;
+      return running;
+    });
     fixture.executeTask.mockImplementation(async (input: ChildRuntimeInput): Promise<ChildExecutionOutcome> => {
       const changeset = createChangeset(input.task, input.attempt.attemptId, input.attempt.currentRuntimeId);
       return {
@@ -1089,6 +1821,7 @@ describe('agent coordinator', (): void => {
     );
     fixture.dependencies.confirmationQueue = {
       request: vi.fn(async (): Promise<{ decision: 'approved'; version: number }> => ({ decision: 'approved', version: 2 })),
+      revokeTask: vi.fn(),
       invalidate: vi.fn()
     };
     fixture.dependencies.getConfirmation = vi.fn((): AgentConfirmationRecord => confirmation);
@@ -1099,13 +1832,10 @@ describe('agent coordinator', (): void => {
         confirmationId: confirmation.confirmationId
       })
     );
-    fixture.dependencies.queueCommit = vi.fn(
-      (): AgentTaskRecord => ({
-        ...authorized,
-        status: 'queued',
-        queuePhase: 'commit'
-      })
-    );
+    fixture.dependencies.queueCommit = vi.fn((): AgentTaskRecord => {
+      currentTask = { ...currentTask, status: 'queued', queuePhase: 'commit' };
+      return currentTask;
+    });
     fixture.dependencies.createConfirmationId = (): string => 'confirmation-1';
     fixture.dependencies.fileCommitter = {
       commit: vi.fn(),
@@ -1147,7 +1877,40 @@ describe('agent coordinator', (): void => {
     const task = createWriteTask();
     const fixture = createDependencies([task]);
     const authorized = authorizeWriteTask(task);
-    fixture.authorizeTask.mockReturnValue(authorized);
+    let currentTask = authorized;
+    fixture.authorizeTask.mockImplementation((): AgentTaskRecord => {
+      currentTask = authorized;
+      return authorized;
+    });
+    fixture.getTask.mockImplementation((): AgentTaskRecord => currentTask);
+    fixture.beginAttempt.mockImplementation((input: BeginAgentAttemptInput): AgentAttemptProjection => {
+      const projection: AgentAttemptProjection = {
+        task: { ...authorized, status: 'starting', queuePhase: undefined, currentAttemptId: input.attemptId },
+        attempt: {
+          attemptId: input.attemptId,
+          taskId: input.taskId,
+          attemptNumber: 1,
+          parentRuntimeId: input.parentRuntimeId,
+          planHash: authorized.executionPlanSnapshotHash as string,
+          initialRuntimeId: input.runtimeId,
+          currentRuntimeId: input.runtimeId,
+          runtimeSequence: 1,
+          status: 'starting',
+          usageSnapshot: createAttemptUsage(authorized),
+          usageComplete: true,
+          usageUpdatedAt: '2026-07-27T00:00:00.000Z',
+          createdAt: '2026-07-27T00:00:00.000Z'
+        }
+      };
+      currentTask = projection.task;
+      return projection;
+    });
+    fixture.markAttemptRunning.mockImplementation((): AgentAttemptProjection => {
+      const projection = fixture.beginAttempt.mock.results.at(-1)?.value as AgentAttemptProjection;
+      const running = { task: { ...projection.task, status: 'running' as const }, attempt: { ...projection.attempt, status: 'running' as const } };
+      currentTask = running.task;
+      return running;
+    });
     fixture.executeTask.mockImplementation(async (input: ChildRuntimeInput): Promise<ChildExecutionOutcome> => {
       const changeset = createChangeset(input.task, input.attempt.attemptId, input.attempt.currentRuntimeId);
       return {
@@ -1167,6 +1930,7 @@ describe('agent coordinator', (): void => {
     );
     fixture.dependencies.confirmationQueue = {
       request: vi.fn(async (): Promise<{ decision: 'rejected'; version: number }> => ({ decision: 'rejected', version: 2 })),
+      revokeTask: vi.fn(),
       invalidate: vi.fn()
     };
     fixture.dependencies.getConfirmation = vi.fn(

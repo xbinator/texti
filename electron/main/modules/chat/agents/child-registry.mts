@@ -69,6 +69,11 @@ export interface ChildActorRegistry {
    */
   abortTask(taskId: string, reason: AgentTaskError): void;
   /**
+   * 幂等释放一个 Task 的 Actor 与当前 Runtime 路由。
+   * @param taskId - 目标 Task
+   */
+  releaseTask(taskId: string): void;
+  /**
    * 读取稳定 Actor。
    * @param taskId - Actor 所属 Task
    * @returns Actor，不存在时为 undefined
@@ -215,11 +220,16 @@ export function createChildActorRegistry(): ChildActorRegistry {
       if (!actor) throw createRegistryError('actor_not_registered');
       if (!validated) throw createRegistryError('actor_abort_reason_invalid');
       actor.abortReason = Object.freeze(structuredClone(validated));
+    },
+
+    releaseTask(taskId: string): void {
+      const actor = actorsByTask.get(taskId);
+      if (!actor) return;
       const runtimeId = runtimeByTask.get(taskId);
-      if (runtimeId) {
-        runtimes.delete(runtimeId);
-        runtimeByTask.delete(taskId);
-      }
+      if (runtimeId) runtimes.delete(runtimeId);
+      runtimeByTask.delete(taskId);
+      actorsByTask.delete(taskId);
+      taskByAgent.delete(actor.agentId);
     },
 
     getActor(taskId: string): ChildActorHandle | undefined {

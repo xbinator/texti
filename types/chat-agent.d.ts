@@ -225,7 +225,8 @@ export type AgentTaskErrorDetailKey =
   | 'checkpointId'
   | 'attemptId'
   | 'runtimeId'
-  | 'operationId';
+  | 'operationId'
+  | 'usageIncomplete';
 
 /** 机器可判断的 Agent 错误阶段。 */
 export type AgentTaskErrorPhase =
@@ -675,12 +676,41 @@ export interface AgentPreAttemptFailureResult {
   artifacts: AgentArtifactReference[];
   /** 未启动 Runtime 的零成本记账。 */
   usage: AgentUsageAccounting;
-  /** 不可重试的授权、计划或资源错误。 */
+  /** 不可重试的授权、计划、资源或无 Attempt 恢复错误。 */
   error: AgentTaskError;
 }
 
-/** Checkpoint rendezvous 可消费的真实 Attempt 结果或授权前失败。 */
-export type AgentTaskResult = ChatAgentResult | AgentPreAttemptFailureResult;
+/** Runtime/Attempt 创建前的合作式取消结果。 */
+export interface AgentPreAttemptCancellationResult {
+  /** 判别无 Attempt 取消。 */
+  readonly resultKind: 'pre_attempt_cancelled';
+  /** 结果所属 Task。 */
+  readonly taskId: string;
+  /** 稳定 Child Actor。 */
+  readonly agentId: string;
+  /** 机器执行终态。 */
+  readonly executionStatus: 'cancelled';
+  /** 未执行时不能声明任何验收完成。 */
+  readonly completion: {
+    /** 无 Attempt 取消没有验收完成度。 */
+    readonly level: 'none';
+    /** 与不可变 Contract 精确对齐的未知结论。 */
+    readonly criteria: readonly AgentCriteriaResult[];
+  };
+  /** 面向 Primary 的稳定摘要。 */
+  readonly summary: string;
+  /** 无 Attempt 取消不产生非终止性警告。 */
+  readonly warnings: readonly [];
+  /** 无 Attempt 取消不产生 artifact。 */
+  readonly artifacts: readonly [];
+  /** 所有计数为零、货币成本为 unknown。 */
+  readonly usage: AgentUsageAccounting;
+  /** 固定 queue/user cancellation 错误。 */
+  readonly error: AgentTaskError;
+}
+
+/** Checkpoint rendezvous 可消费的全部 Child 终态结果。 */
+export type AgentTaskResult = ChatAgentResult | AgentPreAttemptFailureResult | AgentPreAttemptCancellationResult;
 
 /** 基础阶段 delegation.created Outbox 的唯一 payload。 */
 export interface AgentDelegationCreatedPayload {
@@ -710,6 +740,7 @@ export type ChatAgentEventSource = 'primary' | 'coordinator' | 'child' | 'runtim
 /** 当前基础阶段可持久化的 Agent Event 类型。 */
 export type ChatAgentEventType =
   | 'task.created'
+  | 'task.cancel_requested'
   | 'task.status_changed'
   | 'plan.authorized'
   | 'task.queued'
@@ -742,6 +773,7 @@ export type ChatAgentEventType =
 /** 以 Task 作为历史聚合根的 Event。 */
 export type ChatAgentTaskEventType =
   | 'task.created'
+  | 'task.cancel_requested'
   | 'task.status_changed'
   | 'plan.authorized'
   | 'task.queued'
@@ -770,6 +802,8 @@ export type ChatAgentCheckpointEventType = Exclude<ChatAgentEventType, ChatAgent
 export interface ChatAgentEventPayloadMap {
   /** Task 创建事件。 */
   'task.created': { checkpointId: string; toolCallId: string };
+  /** Task 收到 cooperative cancellation 请求。 */
+  'task.cancel_requested': { requestKind: 'single_task' | 'checkpoint_cascade' };
   /** 通用 Task 状态投影变化。 */
   'task.status_changed': { from: AgentTaskStatus; to: AgentTaskStatus; queuePhase?: AgentTaskQueuePhase };
   /** Execution Plan 首次冻结。 */
@@ -823,7 +857,7 @@ export interface ChatAgentEventPayloadMap {
   /** Task 失败。 */
   'task.failed': { error?: AgentTaskError; resultHash?: string };
   /** Task 已合作式取消。 */
-  'task.cancelled': { resultHash?: string };
+  'task.cancelled': { resultHash: string };
   /** Task 被逻辑删除。 */
   'task.tombstoned': { reason: string };
 }

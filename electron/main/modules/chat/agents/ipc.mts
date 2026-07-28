@@ -4,6 +4,7 @@
  */
 import type {
   ChatAgentCancelCheckpointInput,
+  ChatAgentCancelTaskInput,
   ChatAgentGetTaskInput,
   ChatAgentHandlerResult,
   ChatAgentListTasksInput,
@@ -95,6 +96,20 @@ function parseCancelInput(input: unknown): ChatAgentCancelCheckpointInput {
   assertExactKeys(input, ['checkpointId']);
   return {
     checkpointId: requireIdentity(input.checkpointId, 'checkpointId')
+  };
+}
+
+/**
+ * 校验单 Task cooperative cancellation 输入。
+ * @param input - 未可信 IPC payload
+ * @returns 精确 Session/Task 身份
+ */
+function parseTaskCancelInput(input: unknown): ChatAgentCancelTaskInput {
+  if (!isPlainObject(input)) throw createInputError('cancelTask input must be a plain object');
+  assertExactKeys(input, ['sessionId', 'taskId']);
+  return {
+    sessionId: requireIdentity(input.sessionId, 'sessionId'),
+    taskId: requireIdentity(input.taskId, 'taskId')
   };
 }
 
@@ -241,6 +256,13 @@ export function registerChatAgentHandlers(): void {
     wrapAgentHandler((_event, ...inputs) => {
       if (inputs.length !== 1) throw createInputError('cancelCheckpoint accepts exactly one input');
       return chatAgentDelegationService.cancelCheckpoint(parseCancelInput(inputs[0]));
+    })
+  );
+  ipcMain.handle(
+    'chat:agent:cancel-task',
+    wrapAgentHandler(async (_event, ...inputs) => {
+      if (inputs.length !== 1) throw createInputError('cancelTask accepts exactly one input');
+      return chatAgentDelegationService.cancelTask(parseTaskCancelInput(inputs[0]));
     })
   );
   ipcMain.handle(

@@ -5,7 +5,12 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { AgentAttemptRecord, AgentCheckpointRecord, AgentTaskRecord } from '../../../../../../electron/main/modules/chat/agents/types.mjs';
+import type {
+  AgentAttemptRecord,
+  AgentCheckpointRecord,
+  AgentTaskRecord,
+  RecordAttemptUsageInput
+} from '../../../../../../electron/main/modules/chat/agents/types.mjs';
 import type { ChatModelResolution, ChatModelResolver } from '../../../../../../electron/main/modules/chat/runtime/model/resolver.mjs';
 import type { RuntimeStreamText } from '../../../../../../electron/main/modules/chat/runtime/stream/index.mjs';
 import type { AIStreamResult, AIToolExecutionResult } from 'types/ai';
@@ -114,6 +119,24 @@ function createAttempt(): AgentAttemptRecord {
     currentRuntimeId: 'runtime-child-1',
     runtimeSequence: 0,
     status: 'running',
+    usageSnapshot: {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      modelCalls: 0,
+      toolRounds: 0,
+      queueDurationMs: 0,
+      executionDurationMs: 0,
+      externalRequests: 0,
+      monetaryCost: {
+        currency: 'USD',
+        pricingVersion: 'pricing-v1',
+        estimated: 0,
+        actual: 'unknown'
+      }
+    },
+    usageComplete: false,
+    usageUpdatedAt: '2026-07-27T00:00:01.000Z',
     startedAt: '2026-07-27T00:00:01.000Z',
     createdAt: '2026-07-27T00:00:01.000Z'
   };
@@ -211,6 +234,8 @@ interface ToolEventCallbacks {
   readonly started?: (input: unknown) => void;
   /** 观察裁剪后的 completed 写入。 */
   readonly completed?: (input: unknown) => void;
+  /** 观察每个 Provider 完整 usage 边界。 */
+  readonly usage?: (input: RecordAttemptUsageInput) => void;
 }
 
 /**
@@ -244,6 +269,7 @@ function createExecutor(
     },
     recordToolStarted: (input): void => toolEvents.started?.(input),
     recordToolCompleted: (input): void => toolEvents.completed?.(input),
+    recordAttemptUsage: (input): void => toolEvents.usage?.(input),
     now: (): number => Date.parse('2026-07-27T00:00:02.000Z')
   });
 }
@@ -322,7 +348,8 @@ describe('child task runtime executor', (): void => {
           { type: 'finish', finishReason: 'stop', totalUsage: { inputTokens: 6, outputTokens: 4, totalTokens: 10 } }
         ])
       );
-    const executor = createExecutor(workspaceRoot, streamText, resolver);
+    const usage = vi.fn<(input: RecordAttemptUsageInput) => void>();
+    const executor = createExecutor(workspaceRoot, streamText, resolver, { usage });
     const task = createTask(filePath);
 
     const outcome = await executor.execute({
@@ -335,6 +362,21 @@ describe('child task runtime executor', (): void => {
 
     expect(resolver.resolve).toHaveBeenCalledWith(task.executionPlanSnapshot?.modelSnapshot);
     expect(streamText).toHaveBeenCalledTimes(2);
+    expect(usage).toHaveBeenCalledTimes(2);
+    expect(usage.mock.calls.map((call): RecordAttemptUsageInput => call[0])).toEqual([
+      expect.objectContaining({
+        taskId: 'task-1',
+        attemptId: 'attempt-1',
+        usage: expect.objectContaining({ inputTokens: 8, outputTokens: 2, totalTokens: 10, modelCalls: 1, toolRounds: 1 }),
+        complete: false
+      }),
+      expect.objectContaining({
+        taskId: 'task-1',
+        attemptId: 'attempt-1',
+        usage: expect.objectContaining({ inputTokens: 14, outputTokens: 6, totalTokens: 20, modelCalls: 2, toolRounds: 1 }),
+        complete: false
+      })
+    ]);
     expect(streamText.mock.calls[0]?.[1]).toMatchObject({
       modelId: 'gpt-5',
       tools: [{ name: 'read_file' }],

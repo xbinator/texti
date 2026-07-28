@@ -13,6 +13,7 @@ import type {
   AgentDelegationContinuationSnapshot,
   AgentExecutionPlanSnapshot,
   AgentFileOperationSnapshot,
+  AgentPreAttemptCancellationResult,
   AgentPreAttemptFailureResult,
   AgentRecordState,
   AgentTaskPriority,
@@ -20,6 +21,7 @@ import type {
   AgentTaskError,
   AgentTaskResult,
   AgentTaskStatus,
+  AgentUsageAccounting,
   ChatAgentEvent,
   ChatAgentEventPayloadMap,
   ChatAgentEventSource,
@@ -39,6 +41,8 @@ import {
   validateExecutionPlanSnapshot,
   validateFoundationContract,
   validateFoundationOutbox,
+  normalizeUsage,
+  validatePreAttemptCancellation,
   validatePreAttemptFailure
 } from './contracts.mjs';
 import { canTransitionCheckpoint, canTransitionTask, isCheckpointTerminal, isTaskTerminal } from './state.mjs';
@@ -66,6 +70,7 @@ import {
   type CreateAgentConfirmationInput,
   type DeliverAgentOutboxInput,
   type FinalizeAgentCommitInput,
+  type FinalizeCancellationInput,
   type FinalizeCheckpointInput,
   type InterruptAgentCheckpointInput,
   type ListAgentTasksInput,
@@ -76,11 +81,15 @@ import {
   type PrepareAgentChangesetInput,
   type PrepareDelegationInput,
   type QueueAgentCommitInput,
+  type RecordPreAttemptCancellationInput,
+  type RecordAttemptUsageInput,
   type RecordPreAttemptFailureInput,
   type RecordAgentToolCompletedInput,
   type RecordAgentToolStartedInput,
   type RecordTaskResultInput,
   type ResolveAgentConfirmationInput,
+  type RequestAgentTaskCancellationInput,
+  type AgentTaskCancellationProjection,
   type TombstoneAgentTaskInput,
   type TransitionAgentTaskInput
 } from './types.mjs';
@@ -132,6 +141,7 @@ interface CheckpointRow {
   terminal_results_json: unknown;
   resume_runtime_id: unknown;
   error_json: unknown;
+  cancellation_finalized_at: unknown;
   record_state: unknown;
   created_at: unknown;
   updated_at: unknown;
@@ -165,6 +175,7 @@ interface OutboxRow {
   delivery_status: unknown;
   attempt_count: unknown;
   delivered_at: unknown;
+  superseded_at: unknown;
   created_at: unknown;
   updated_at: unknown;
 }
@@ -180,6 +191,9 @@ interface AttemptRow {
   current_runtime_id: unknown;
   runtime_sequence: unknown;
   status: unknown;
+  usage_snapshot_json: unknown;
+  usage_complete: unknown;
+  usage_updated_at: unknown;
   started_at: unknown;
   finished_at: unknown;
   error_json: unknown;
@@ -284,6 +298,26 @@ interface ValidatedAgentAggregate {
   tasks: AgentTaskRecord[];
 }
 
+/** 单个 Task 经完整恢复预检后冻结的终态写入计划。 */
+interface AgentRecoveryTaskPlan {
+  /** 待终态化 Task。 */
+  task: AgentTaskRecord;
+  /** Attempt-bearing Task 的当前 Attempt。 */
+  attempt?: AgentAttemptRecord;
+  /** 从持久化 usage 构造的规范结果。 */
+  result: AgentTaskResult;
+  /** 结果 canonical hash。 */
+  resultHash: string;
+}
+
+/** 一个 Checkpoint 经只读预检后的原子恢复计划。 */
+interface AgentRecoveryPlan {
+  /** 预检时读取的完整聚合。 */
+  aggregate: ValidatedAgentAggregate;
+  /** 仅包含尚未终态化的 Tasks。 */
+  taskPlans: AgentRecoveryTaskPlan[];
+}
+
 /** Event 可选 Attempt 与 Runtime 谱系链接。 */
 interface AgentEventLinks {
   /** Event 关联的 Attempt。 */
@@ -333,6 +367,89 @@ const TASK_RUNNING_ATTEMPT_STATUSES = new Set<AgentTaskStatus>(['running', 'wait
 /** 必须持有结构化错误的 Attempt 失败终态。 */
 const ATTEMPT_ERROR_REQUIRED_STATUSES = new Set<AgentAttemptStatus>(['failed', 'deadline_exceeded', 'interrupted']);
 
+/** Attempt usage 中必须单调递增的整数累计字段。 */
+const ATTEMPT_USAGE_FIELDS = [
+  'inputTokens',
+  'outputTokens',
+  'totalTokens',
+  'modelCalls',
+  'toolRounds',
+  'queueDurationMs',
+  'executionDurationMs',
+  'externalRequests'
+] as const;
+
+/**
+ * 从冻结计划创建 Attempt 的初始零用量。
+ * @param task - 已授权并冻结计划的 Task
+ * @returns 与冻结定价版本一致的零用量快照
+ */
+function createAttemptUsage(task: AgentTaskRecord): AgentUsageAccounting {
+  const pricingVersion = task.executionPlanSnapshot?.budget.pricingVersion ?? 'unknown';
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    modelCalls: 0,
+    toolRounds: 0,
+    queueDurationMs: 0,
+    executionDurationMs: 0,
+    externalRequests: 0,
+    monetaryCost:
+      pricingVersion === 'unknown'
+        ? {
+            currency: 'unknown',
+            pricingVersion: 'unknown',
+            estimated: 'unknown',
+            actual: 'unknown'
+          }
+        : {
+            currency: 'USD',
+            pricingVersion,
+            estimated: 0,
+            actual: 'unknown'
+          }
+  };
+}
+
+/**
+ * 校验单个可未知成本累计值是否单调。
+ * @param currentValue - 已持久化成本
+ * @param nextValue - 新观察到的成本
+ * @returns 新值是否没有丢失或回退既有事实
+ */
+function isCostMonotonic(currentValue: number | 'unknown', nextValue: number | 'unknown'): boolean {
+  if (currentValue === 'unknown') return true;
+  return nextValue !== 'unknown' && nextValue >= currentValue;
+}
+
+/**
+ * 校验新 usage 是否保持累计值、定价身份与已知成本单调。
+ * @param current - 已持久化快照
+ * @param next - 待写入快照
+ * @returns 是否为同一 Attempt 的合法累计进展
+ */
+function isUsageMonotonic(current: AgentUsageAccounting, next: AgentUsageAccounting): boolean {
+  if (ATTEMPT_USAGE_FIELDS.some((field): boolean => next[field] < current[field])) return false;
+  const currentCost = current.monetaryCost;
+  const nextCost = next.monetaryCost;
+  if (currentCost.currency !== nextCost.currency || currentCost.pricingVersion !== nextCost.pricingVersion) return false;
+  return isCostMonotonic(currentCost.estimated, nextCost.estimated) && isCostMonotonic(currentCost.actual, nextCost.actual);
+}
+
+/**
+ * 校验终态 usage 是否遵守 incomplete 单调、complete 精确相等的冻结规则。
+ * @param attempt - 当前持久化 Attempt
+ * @param next - terminalizer 提交的 usage
+ * @returns terminalizer 是否可消费该 usage
+ */
+function canFinalizeUsage(attempt: AgentAttemptRecord, next: AgentUsageAccounting): boolean {
+  if (attempt.usageComplete) {
+    return hashAgentPayload(attempt.usageSnapshot) === hashAgentPayload(next);
+  }
+  return isUsageMonotonic(attempt.usageSnapshot, next);
+}
+
 /** Changeset 可变状态 allowlist。 */
 const CHANGESET_STATUSES = new Set<AgentChangesetRecord['status']>([
   'prepared',
@@ -355,7 +472,7 @@ const JOURNAL_STATUSES = new Set<AgentCommitJournalStatus>(['created', 'applying
 const TASK_FAILURE_STATUSES = new Set<AgentTaskStatus>(['failed', 'deadline_exceeded', 'commit_failed']);
 
 /** 除 cooperative cancellation 外必须持有结构化结果的 Task 终态。 */
-const TASK_RESULT_REQUIRED_STATUSES = new Set<AgentTaskStatus>(['completed', 'failed', 'deadline_exceeded', 'commit_failed']);
+const TASK_RESULT_REQUIRED_STATUSES = new Set<AgentTaskStatus>(['completed', 'failed', 'cancelled', 'deadline_exceeded', 'commit_failed']);
 
 /** Checkpoint 状态 allowlist。 */
 const CHECKPOINT_STATUSES = new Set<AgentCheckpointStatus>([
@@ -478,6 +595,24 @@ function isPreAttemptFailure(result: AgentTaskResult): result is AgentPreAttempt
 }
 
 /**
+ * 判断结果是否为 Runtime 创建前的合作式取消。
+ * @param result - 已通过共享 validator 的 Task 结果
+ * @returns 是否为 Coordinator 无 Attempt 取消
+ */
+function isPreAttemptCancellation(result: AgentTaskResult): result is AgentPreAttemptCancellationResult {
+  return 'resultKind' in result && result.resultKind === 'pre_attempt_cancelled';
+}
+
+/**
+ * 判断结果是否明确不拥有 Attempt。
+ * @param result - 已通过共享 validator 的 Task 结果
+ * @returns 是否为任一 pre-Attempt 结果
+ */
+function isPreAttemptResult(result: AgentTaskResult): result is AgentPreAttemptFailureResult | AgentPreAttemptCancellationResult {
+  return isPreAttemptFailure(result) || isPreAttemptCancellation(result);
+}
+
+/**
  * 校验持久化 Task 结果的判别式协议。
  * @param value - SQLite 或 Checkpoint 中的未可信结果
  * @returns 规范化真实 Attempt 结果或授权前失败
@@ -487,6 +622,11 @@ function parseTaskResult(value: unknown): AgentTaskResult {
     const validation = validatePreAttemptFailure(value);
     if (validation.ok) return validation.result;
     throw new AgentStoreProtocolError(validation.error.details?.reason?.toString() ?? 'pre_attempt_result_invalid', validation.error.message);
+  }
+  if (isRecord(value) && value.resultKind === 'pre_attempt_cancelled') {
+    const validation = validatePreAttemptCancellation(value);
+    if (validation.ok) return validation.result;
+    throw new AgentStoreProtocolError(validation.error.details?.reason?.toString() ?? 'pre_attempt_cancel_invalid', validation.error.message);
   }
   const validation = validateChatAgentResult(value);
   if (validation.ok) return validation.result;
@@ -570,9 +710,9 @@ function parseTask(row: TaskRow): AgentTaskRecord {
     if (
       parsedResult.taskId !== taskId ||
       parsedResult.agentId !== agentId ||
-      (!isPreAttemptFailure(parsedResult) && (currentAttemptId === undefined || parsedResult.attemptId !== currentAttemptId)) ||
-      (isPreAttemptFailure(parsedResult) && currentAttemptId !== undefined) ||
-      (!isPreAttemptFailure(parsedResult) &&
+      (!isPreAttemptResult(parsedResult) && (currentAttemptId === undefined || parsedResult.attemptId !== currentAttemptId)) ||
+      (isPreAttemptResult(parsedResult) && currentAttemptId !== undefined) ||
+      (!isPreAttemptResult(parsedResult) &&
         ((validation.contractSnapshot.mode === 'read' && parsedResult.changeset !== undefined) ||
           (validation.contractSnapshot.mode === 'write' && parsedResult.executionStatus === 'completed' && parsedResult.changeset === undefined))) ||
       !hasExactCriteria(parsedResult, validation.contractSnapshot.acceptanceCriteria)
@@ -652,6 +792,12 @@ function parseAttempt(row: AttemptRow): AgentAttemptRecord {
   }
   const startedAt = optionalString(row.started_at, 'attempt started at');
   const finishedAt = optionalString(row.finished_at, 'attempt finished at');
+  const usageSnapshot = normalizeUsage(parseJson(row.usage_snapshot_json, 'attempt usage snapshot'));
+  const usageComplete = requireInteger(row.usage_complete, 'attempt usage completeness');
+  const usageUpdatedAt = requireString(row.usage_updated_at, 'attempt usage updated at');
+  if (!usageSnapshot || (usageComplete !== 0 && usageComplete !== 1)) {
+    throw new AgentStoreProtocolError('attempt_usage_projection_invalid', 'Attempt usage snapshot or completeness is invalid');
+  }
   const attemptStatus = status as AgentAttemptStatus;
   if ((attemptStatus === 'starting' && startedAt !== undefined) || (attemptStatus === 'running' && startedAt === undefined)) {
     throw new AgentStoreProtocolError('attempt_started_projection_invalid', 'Attempt status and started time do not describe the same projection');
@@ -675,6 +821,9 @@ function parseAttempt(row: AttemptRow): AgentAttemptRecord {
     currentRuntimeId: requireString(row.current_runtime_id, 'attempt current runtime id'),
     runtimeSequence,
     status: attemptStatus,
+    usageSnapshot,
+    usageComplete: usageComplete === 1,
+    usageUpdatedAt,
     ...(startedAt ? { startedAt } : {}),
     ...(finishedAt ? { finishedAt } : {}),
     ...(error ? { error } : {}),
@@ -915,6 +1064,13 @@ function parseCheckpoint(row: CheckpointRow): AgentCheckpointRecord {
     error = validateAgentTaskError(parseJson(row.error_json, 'checkpoint error'));
     if (!error) throw new AgentStoreProtocolError('checkpoint_error_invalid', 'Persisted Checkpoint error failed validation');
   }
+  const cancellationFinalizedAt = optionalString(row.cancellation_finalized_at, 'checkpoint cancellation finalized at');
+  if (cancellationFinalizedAt && status !== 'cancelled') {
+    throw new AgentStoreProtocolError(
+      'checkpoint_cancellation_finalization_invalid',
+      'Only a cancelled Checkpoint may carry a cancellation finalization marker'
+    );
+  }
   return {
     checkpointId: requireString(row.checkpoint_id, 'checkpoint id'),
     sessionId: requireString(row.session_id, 'checkpoint session id'),
@@ -930,6 +1086,7 @@ function parseCheckpoint(row: CheckpointRow): AgentCheckpointRecord {
     terminalResults,
     ...(optionalString(row.resume_runtime_id, 'resume runtime id') ? { resumeRuntimeId: row.resume_runtime_id as string } : {}),
     ...(error ? { error } : {}),
+    ...(cancellationFinalizedAt ? { cancellationFinalizedAt } : {}),
     recordState: recordState as AgentRecordState,
     createdAt: requireString(row.created_at, 'checkpoint created at'),
     updatedAt: requireString(row.updated_at, 'checkpoint updated at')
@@ -988,14 +1145,24 @@ function parseOutbox(row: OutboxRow): AgentOutboxRecord {
   if (deliveryStatus !== 'pending' && deliveryStatus !== 'delivered') {
     throw new AgentStoreProtocolError('outbox_status_invalid', 'Invalid persisted outbox status');
   }
+  const deliveredAt = optionalString(row.delivered_at, 'outbox delivered at');
+  const supersededAt = optionalString(row.superseded_at, 'outbox superseded at');
+  if (
+    (deliveryStatus === 'delivered') !== (deliveredAt !== undefined) ||
+    (supersededAt !== undefined && (deliveryStatus !== 'pending' || deliveredAt !== undefined))
+  ) {
+    throw new AgentStoreProtocolError('outbox_delivery_projection_invalid', 'Outbox delivery timestamps do not match its terminal state');
+  }
+  const projectedStatus = supersededAt ? 'superseded' : deliveryStatus;
   const base = {
     outboxId: requireString(row.outbox_id, 'outbox id'),
     dedupeKey: requireString(row.dedupe_key, 'outbox dedupe key'),
     payloadHash: validation.outbox.payloadHash,
     schemaVersion: validation.outbox.schemaVersion,
-    deliveryStatus: deliveryStatus as 'pending' | 'delivered',
+    deliveryStatus: projectedStatus as 'pending' | 'delivered' | 'superseded',
     attemptCount: requireInteger(row.attempt_count, 'outbox attempt count'),
-    ...(optionalString(row.delivered_at, 'outbox delivered at') ? { deliveredAt: row.delivered_at as string } : {}),
+    ...(deliveredAt ? { deliveredAt } : {}),
+    ...(supersededAt ? { supersededAt } : {}),
     createdAt: requireString(row.created_at, 'outbox created at'),
     updatedAt: requireString(row.updated_at, 'outbox updated at')
   };
@@ -1575,12 +1742,25 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
 
     let projectedStatus: AgentTaskStatus = 'created';
     let planAuthorizedCount = 0;
+    let cancelRequestedAt: string | undefined;
     events.forEach((event, index): void => {
       if (event.sequence !== index + 1) {
         throw new AgentStoreProtocolError('event_sequence_invalid', 'Task Event sequence is not continuous from one');
       }
       if (index > 0 && event.type === 'task.created') {
         throw new AgentStoreProtocolError('task_event_duplicate_create', 'Task Event history contains a duplicate creation Event');
+      }
+      if (event.type === 'task.cancel_requested') {
+        if (cancelRequestedAt !== undefined) {
+          throw new AgentStoreProtocolError('task_cancel_event_duplicate', 'Task cancellation request Event cannot repeat');
+        }
+        const payload = event.payload as ChatAgentEventPayloadMap['task.cancel_requested'];
+        const expectedSource: ChatAgentEventSource = payload.requestKind === 'single_task' ? 'user' : 'system';
+        if (event.source !== expectedSource) {
+          throw new AgentStoreProtocolError('task_cancel_event_source_invalid', 'Task cancellation request kind and source do not match');
+        }
+        cancelRequestedAt = event.occurredAt;
+        return;
       }
       if (event.type === 'task.status_changed') {
         const payload = event.payload as ChatAgentEventPayloadMap['task.status_changed'];
@@ -1628,10 +1808,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       }
       if (event.type === 'task.cancelled') {
         const payload = event.payload as ChatAgentEventPayloadMap['task.cancelled'];
-        if (
-          isTaskTerminal(projectedStatus) ||
-          (payload.resultHash !== undefined && (payload.resultHash !== task.resultHash || task.result?.executionStatus !== 'cancelled'))
-        ) {
+        if (isTaskTerminal(projectedStatus) || payload.resultHash !== task.resultHash || task.result?.executionStatus !== 'cancelled') {
           throw new AgentStoreProtocolError('task_event_cancellation_invalid', 'Task cancellation Event does not match its persisted result');
         }
         projectedStatus = 'cancelled';
@@ -1654,6 +1831,9 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
     });
     if (projectedStatus !== task.status) {
       throw new AgentStoreProtocolError('task_event_projection_invalid', 'Task Event projection does not match the persisted Task status');
+    }
+    if (cancelRequestedAt !== task.cancelRequestedAt) {
+      throw new AgentStoreProtocolError('task_cancel_event_invalid', 'Task cancellation request Event does not match its persisted timestamp');
     }
     if (planAuthorizedCount !== (task.executionPlanSnapshot ? 1 : 0)) {
       throw new AgentStoreProtocolError('task_event_plan_invalid', 'Task plan and authorization Event are not an exact pair');
@@ -1735,6 +1915,9 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         throw new AgentStoreProtocolError('delegation_attempt_missing', 'Task current Attempt does not exist');
       }
       const attempt = parseAttempt(attemptRow);
+      const recoveryInterrupted =
+        task.status === 'failed' && task.result?.executionStatus === 'failed' && task.result.error?.phase === 'recovery' && attempt.status === 'interrupted';
+      const commitFailedAttempt = task.status === 'commit_failed' && task.result?.executionStatus === 'commit_failed' && attempt.status === 'failed';
       const attemptStateMatches =
         (task.status === 'starting' && attempt.status === 'starting') ||
         (TASK_RUNNING_ATTEMPT_STATUSES.has(task.status) && attempt.status === 'running') ||
@@ -1746,7 +1929,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         task.executionPlanSnapshotHash === undefined ||
         attempt.planHash !== task.executionPlanSnapshotHash ||
         !attemptStateMatches ||
-        (task.result !== undefined && attempt.status !== task.result.executionStatus)
+        (task.result !== undefined && attempt.status !== task.result.executionStatus && !recoveryInterrupted && !commitFailedAttempt)
       ) {
         throw new AgentStoreProtocolError('delegation_attempt_state_invalid', 'Task current Attempt does not match its identity, plan, state, or result');
       }
@@ -1769,9 +1952,9 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
             envelope.resultHash !== task.resultHash ||
             envelope.result.taskId !== task.taskId ||
             envelope.result.agentId !== task.agentId ||
-            (isPreAttemptFailure(envelope.result)
-              ? task.currentAttemptId !== undefined || !isPreAttemptFailure(task.result)
-              : isPreAttemptFailure(task.result) || envelope.result.attemptId !== task.currentAttemptId)
+            (isPreAttemptResult(envelope.result)
+              ? task.currentAttemptId !== undefined || !isPreAttemptResult(task.result) || task.result.resultKind !== envelope.result.resultKind
+              : isPreAttemptResult(task.result) || envelope.result.attemptId !== task.currentAttemptId)
           );
         })
       ) {
@@ -2070,11 +2253,13 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         maxAttemptRow === undefined || maxAttemptRow.max_attempt_number === null
           ? 1
           : requireInteger(maxAttemptRow.max_attempt_number, 'attempt number cursor') + 1;
+      const initialUsage = createAttemptUsage(task);
       this.database.execute(
         `INSERT INTO chat_agent_attempts (
           attempt_id, task_id, attempt_number, parent_runtime_id, plan_hash,
-          initial_runtime_id, current_runtime_id, runtime_sequence, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          initial_runtime_id, current_runtime_id, runtime_sequence, status,
+          usage_snapshot_json, usage_complete, usage_updated_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           input.attemptId,
           task.taskId,
@@ -2085,6 +2270,9 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
           input.runtimeId,
           1,
           'starting',
+          JSON.stringify(initialUsage),
+          1,
+          input.occurredAt,
           input.occurredAt
         ]
       );
@@ -2151,9 +2339,9 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
 
       const attemptUpdate = this.database.execute(
         `UPDATE chat_agent_attempts
-         SET status = ?, started_at = ?
+         SET status = ?, usage_complete = 0, usage_updated_at = ?, started_at = ?
          WHERE attempt_id = ? AND task_id = ? AND current_runtime_id = ? AND status = ? AND started_at IS NULL`,
-        ['running', input.occurredAt, attempt.attemptId, task.taskId, input.runtimeId, 'starting']
+        ['running', input.occurredAt, input.occurredAt, attempt.attemptId, task.taskId, input.runtimeId, 'starting']
       );
       if (attemptUpdate.changes !== 1) {
         throw new AgentStoreProtocolError('attempt_running_conflict', 'Attempt changed while acknowledging Runtime start', 'starting');
@@ -2177,6 +2365,56 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         throw new AgentStoreProtocolError('attempt_projection_missing', 'Running Attempt projection is missing', 'starting');
       }
       return Object.freeze({ task: updatedTask, attempt: updatedAttempt });
+    });
+  }
+
+  /** @inheritdoc */
+  recordAttemptUsage(input: RecordAttemptUsageInput): AgentAttemptRecord {
+    return this.runTaskTransaction((): AgentAttemptRecord => {
+      const usage = normalizeUsage(input.usage);
+      if (!usage || typeof input.complete !== 'boolean' || !Number.isFinite(Date.parse(input.occurredAt))) {
+        throw new AgentStoreProtocolError('attempt_usage_input_invalid', 'Attempt usage boundary is invalid', 'runtime');
+      }
+      const task = this.getTask(input.taskId);
+      const attempt = this.getAttempt(input.attemptId);
+      if (!task || !attempt || task.recordState !== 'active' || task.currentAttemptId !== attempt.attemptId || attempt.taskId !== task.taskId) {
+        throw new AgentStoreProtocolError('attempt_usage_context_invalid', 'Attempt usage does not match its Task identity', 'runtime');
+      }
+      const sameUsage = hashAgentPayload(attempt.usageSnapshot) === hashAgentPayload(usage);
+      if (sameUsage && attempt.usageComplete === input.complete) {
+        return attempt;
+      }
+      if (
+        (attempt.status !== 'starting' && attempt.status !== 'running') ||
+        !['starting', 'running', 'waiting_confirmation', 'queued', 'cancelling', 'committing'].includes(task.status)
+      ) {
+        throw new AgentStoreProtocolError('attempt_usage_context_invalid', 'Attempt usage does not match the active execution context', 'runtime');
+      }
+      if (!isUsageMonotonic(attempt.usageSnapshot, usage) || attempt.usageComplete) {
+        throw new AgentStoreProtocolError('attempt_usage_regression', 'Attempt usage boundary cannot regress persisted facts', 'runtime');
+      }
+      const update = this.database.execute(
+        `UPDATE chat_agent_attempts
+         SET usage_snapshot_json = ?, usage_complete = ?, usage_updated_at = ?
+         WHERE attempt_id = ? AND task_id = ? AND status = ?
+           AND usage_snapshot_json = ? AND usage_complete = ?`,
+        [
+          JSON.stringify(usage),
+          input.complete ? 1 : 0,
+          input.occurredAt,
+          attempt.attemptId,
+          task.taskId,
+          attempt.status,
+          JSON.stringify(attempt.usageSnapshot),
+          attempt.usageComplete ? 1 : 0
+        ]
+      );
+      if (update.changes !== 1) {
+        throw new AgentStoreProtocolError('attempt_usage_conflict', 'Attempt usage changed concurrently', 'runtime');
+      }
+      const updated = this.getAttempt(attempt.attemptId);
+      if (!updated) throw new AgentStoreProtocolError('attempt_projection_missing', 'Updated Attempt usage projection is missing', 'runtime');
+      return updated;
     });
   }
 
@@ -2574,7 +2812,10 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       }
       const changeset = this.getChangeset(confirmation.changesetId);
       const task = changeset ? this.getTask(changeset.snapshot.taskId) : null;
-      const pendingState = confirmation.status === 'pending' && changeset?.status === 'awaiting_confirmation' && task?.status === 'waiting_confirmation';
+      const pendingState =
+        confirmation.status === 'pending' &&
+        changeset?.status === 'awaiting_confirmation' &&
+        (task?.status === 'waiting_confirmation' || (task?.status === 'cancelling' && task.cancelRequestedAt !== undefined));
       const approvedState =
         confirmation.status === 'approved' &&
         changeset?.status === 'approved' &&
@@ -2937,6 +3178,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         task.currentAttemptId !== attempt.attemptId ||
         attempt.status !== 'running' ||
         changeset.status !== 'committing' ||
+        !canFinalizeUsage(attempt, journal.intent.resultDraft.usage) ||
         !canTransitionTask('committing', 'cancelled', { mode: 'write' })
       ) {
         throw new AgentStoreProtocolError('commit_cancel_state_invalid', 'Only an unapplied created journal can be cancelled', 'recovery');
@@ -2987,9 +3229,10 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       const resultHash = hashAgentPayload(result);
       const attemptUpdate = this.database.execute(
         `UPDATE chat_agent_attempts
-         SET status = ?, finished_at = ?, error_json = ?
+         SET status = ?, usage_snapshot_json = ?, usage_complete = 1,
+             usage_updated_at = ?, finished_at = ?, error_json = ?
          WHERE attempt_id = ? AND task_id = ? AND status = ?`,
-        ['cancelled', input.occurredAt, JSON.stringify(error), attempt.attemptId, task.taskId, 'running']
+        ['cancelled', JSON.stringify(result.usage), input.occurredAt, input.occurredAt, JSON.stringify(error), attempt.attemptId, task.taskId, 'running']
       );
       const taskUpdate = this.database.execute(
         `UPDATE chat_agent_tasks
@@ -3099,6 +3342,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         hashAgentPayload(result.changeset) !== hashAgentPayload(expectedChangeset) ||
         hashAgentPayload(draftProjection) !== hashAgentPayload(frozenDraftProjection) ||
         result.artifacts.length !== 0 ||
+        !canFinalizeUsage(attempt, result.usage) ||
         !canTransitionTask('committing', 'completed', { mode: 'write' })
       ) {
         throw new AgentStoreProtocolError(
@@ -3110,9 +3354,10 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
 
       const attemptUpdate = this.database.execute(
         `UPDATE chat_agent_attempts
-         SET status = ?, finished_at = ?
+         SET status = ?, usage_snapshot_json = ?, usage_complete = 1,
+             usage_updated_at = ?, finished_at = ?
          WHERE attempt_id = ? AND task_id = ? AND status = ?`,
-        ['completed', input.occurredAt, attempt.attemptId, task.taskId, 'running']
+        ['completed', JSON.stringify(result.usage), input.occurredAt, input.occurredAt, attempt.attemptId, task.taskId, 'running']
       );
       const taskUpdate = this.database.execute(
         `UPDATE chat_agent_tasks
@@ -3180,7 +3425,8 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         journal.status === 'cancelled' ||
         task.status !== 'committing' ||
         attempt.status !== 'running' ||
-        changeset.status !== 'committing'
+        changeset.status !== 'committing' ||
+        !canFinalizeUsage(attempt, journal.intent.resultDraft.usage)
       ) {
         throw new AgentStoreProtocolError('manual_recovery_state_invalid', 'Commit aggregate cannot enter manual recovery', 'recovery');
       }
@@ -3222,9 +3468,10 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       const resultHash = hashAgentPayload(result);
       const attemptUpdate = this.database.execute(
         `UPDATE chat_agent_attempts
-         SET status = ?, finished_at = ?, error_json = ?
+         SET status = ?, usage_snapshot_json = ?, usage_complete = 1,
+             usage_updated_at = ?, finished_at = ?, error_json = ?
          WHERE attempt_id = ? AND task_id = ? AND status = ?`,
-        ['failed', input.occurredAt, JSON.stringify(error), attempt.attemptId, task.taskId, 'running']
+        ['failed', JSON.stringify(result.usage), input.occurredAt, input.occurredAt, JSON.stringify(error), attempt.attemptId, task.taskId, 'running']
       );
       const taskUpdate = this.database.execute(
         `UPDATE chat_agent_tasks
@@ -3279,6 +3526,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
    * @returns 可持久化并注入 Primary 的稳定结果
    */
   private createPreAttemptResult(task: AgentTaskRecord, error: AgentTaskError): Readonly<AgentPreAttemptFailureResult> {
+    const recoveryFailure = error.phase === 'recovery';
     const candidate: AgentPreAttemptFailureResult = {
       resultKind: 'pre_attempt_failure',
       taskId: task.taskId,
@@ -3290,7 +3538,9 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
           criterionIndex,
           claim: {
             status: 'unknown',
-            summary: 'Authorization failed before this criterion could be evaluated.',
+            summary: recoveryFailure
+              ? 'Recovery stopped the Task before this criterion could be evaluated.'
+              : 'Authorization failed before this criterion could be evaluated.',
             evidence: []
           },
           verification: {
@@ -3300,7 +3550,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
           }
         }))
       },
-      summary: 'Task authorization failed before execution.',
+      summary: recoveryFailure ? 'Task recovery stopped before execution.' : 'Task authorization failed before execution.',
       warnings: [],
       artifacts: [],
       usage: {
@@ -3330,6 +3580,77 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       );
     }
     return validation.result;
+  }
+
+  /**
+   * 从 Attempt 已确认 usage 构造重启中断的规范失败结果。
+   * @param task - 尚未终态化的 Attempt-bearing Task
+   * @param attempt - Task 当前 Attempt
+   * @param reason - 基础恢复错误
+   * @returns 绑定 persisted lower-bound usage 的失败结果
+   */
+  private createRecoveryResult(task: AgentTaskRecord, attempt: AgentAttemptRecord, reason: AgentTaskError): Readonly<ChatAgentResult> {
+    const details = {
+      ...(reason.details ?? {}),
+      ...(!attempt.usageComplete ? { usageIncomplete: true } : {})
+    };
+    const error = validateAgentTaskError({
+      ...reason,
+      ...(Object.keys(details).length > 0 ? { details } : {})
+    });
+    if (!error) {
+      throw new AgentStoreProtocolError('interrupt_error_invalid', 'Recovery Result error failed validation', 'recovery');
+    }
+    const candidate: ChatAgentResult = {
+      taskId: task.taskId,
+      agentId: task.agentId,
+      attemptId: attempt.attemptId,
+      executionStatus: 'failed',
+      completion: {
+        level: 'none',
+        criteria: task.contractSnapshot.acceptanceCriteria.map((_criterion, criterionIndex) => ({
+          criterionIndex,
+          claim: {
+            status: 'unknown',
+            summary: 'Recovery interrupted execution before this criterion could be confirmed.',
+            evidence: []
+          },
+          verification: {
+            status: 'unverified',
+            verifier: 'policy',
+            evidence: []
+          }
+        }))
+      },
+      summary: 'Task execution was interrupted during process recovery.',
+      warnings: [],
+      artifacts: [],
+      usage: attempt.usageSnapshot,
+      error
+    };
+    const validation = validateChatAgentResult(candidate);
+    if (!validation.ok) {
+      throw new AgentStoreProtocolError(validation.error.details?.reason?.toString() ?? 'interrupt_result_invalid', validation.error.message, 'recovery');
+    }
+    return validation.result;
+  }
+
+  /**
+   * 把 Checkpoint 已失去消费资格的 created/ready Outbox 标记为 superseded。
+   * @param checkpointId - Checkpoint 身份
+   * @param occurredAt - 同一状态迁移时间
+   */
+  private supersedeOutboxes(checkpointId: string, occurredAt: string): void {
+    this.database.execute(
+      `UPDATE chat_agent_outbox
+       SET superseded_at = ?, updated_at = ?
+       WHERE (
+           (dedupe_key = ? AND event_type = ?)
+           OR (dedupe_key = ? AND event_type = ?)
+         )
+         AND delivery_status = ? AND delivered_at IS NULL AND superseded_at IS NULL`,
+      [occurredAt, occurredAt, `delegation.created:${checkpointId}`, 'delegation.created', `delegation.ready:${checkpointId}`, 'delegation.ready', 'pending']
+    );
   }
 
   /**
@@ -3375,6 +3696,9 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
     );
     if (checkpointUpdate.changes !== 1) {
       throw new AgentStoreProtocolError('checkpoint_result_conflict', 'Checkpoint result projection changed concurrently');
+    }
+    if (nextStatus !== checkpoint.status) {
+      this.supersedeOutboxes(checkpoint.checkpointId, occurredAt);
     }
     this.appendEvent('checkpoint', checkpoint.checkpointId, 'child.result_recorded', { toolCallId: task.toolCallId, resultHash }, occurredAt, source);
     if (allTerminal && checkpoint.status === 'waiting_children') {
@@ -3422,6 +3746,195 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
   }
 
   /** @inheritdoc */
+  requestTaskCancellation(input: RequestAgentTaskCancellationInput): AgentTaskCancellationProjection {
+    return this.runTaskTransaction((): AgentTaskCancellationProjection => {
+      if ((input.requestKind !== 'single_task' && input.requestKind !== 'checkpoint_cascade') || !Number.isFinite(Date.parse(input.occurredAt))) {
+        throw new AgentStoreProtocolError('task_cancel_input_invalid', 'Task cancellation input is invalid', 'queue');
+      }
+      const task = this.getTask(input.taskId);
+      if (!task) throw new AgentStoreProtocolError('task_not_found', 'Task does not exist', 'queue');
+      if (task.recordState !== 'active') throw new AgentStoreProtocolError('task_tombstoned', 'Task is tombstoned', 'queue');
+      const previousStatus = task.status;
+      if (isTaskTerminal(task.status)) {
+        this.listEvents('task', task.taskId);
+        return Object.freeze({
+          previousStatus,
+          task,
+          disposition: 'already_settled'
+        });
+      }
+      if (task.cancelRequestedAt !== undefined || task.status === 'cancelling') {
+        this.listEvents('task', task.taskId);
+        return Object.freeze({
+          previousStatus,
+          task,
+          disposition: task.status === 'committing' ? 'commit_in_progress' : 'cancel_requested'
+        });
+      }
+      const preAttemptState =
+        task.currentAttemptId === undefined &&
+        (task.status === 'created' || task.status === 'planning' || task.status === 'authorized' || (task.status === 'queued' && task.queuePhase === 'start'));
+      if (preAttemptState) {
+        throw new AgentStoreProtocolError(
+          'task_pre_attempt_cancel_required',
+          'Task without an Attempt requires the atomic pre-Attempt cancellation protocol',
+          'queue'
+        );
+      }
+      const eventSource: Extract<ChatAgentEventSource, 'user' | 'system'> = input.requestKind === 'single_task' ? 'user' : 'system';
+      if (task.status === 'committing') {
+        const update = this.database.execute(
+          `UPDATE chat_agent_tasks
+           SET cancel_requested_at = ?, updated_at = ?
+           WHERE task_id = ? AND status = ? AND cancel_requested_at IS NULL AND record_state = ?`,
+          [input.occurredAt, input.occurredAt, task.taskId, 'committing', 'active']
+        );
+        if (update.changes !== 1) {
+          throw new AgentStoreProtocolError('task_cancel_conflict', 'Committing Task cancellation changed concurrently', 'queue');
+        }
+        this.appendEvent('task', task.taskId, 'task.cancel_requested', { requestKind: input.requestKind }, input.occurredAt, eventSource);
+        const updated = this.getTask(task.taskId);
+        if (!updated) throw new AgentStoreProtocolError('task_projection_missing', 'Cancellation Task projection is missing', 'queue');
+        return Object.freeze({
+          previousStatus,
+          task: updated,
+          disposition: 'commit_in_progress'
+        });
+      }
+      if (
+        task.currentAttemptId === undefined ||
+        !canTransitionTask(task.status, 'cancelling', {
+          mode: task.contractSnapshot.mode,
+          queuePhase: task.queuePhase
+        })
+      ) {
+        throw new AgentStoreProtocolError('task_cancel_state_invalid', 'Task cannot accept cooperative cancellation', 'queue');
+      }
+      const update = this.database.execute(
+        `UPDATE chat_agent_tasks
+         SET status = ?, queue_phase = NULL, cancel_requested_at = ?, updated_at = ?
+         WHERE task_id = ? AND status = ? AND cancel_requested_at IS NULL
+           AND current_attempt_id = ? AND record_state = ?`,
+        ['cancelling', input.occurredAt, input.occurredAt, task.taskId, task.status, task.currentAttemptId, 'active']
+      );
+      if (update.changes !== 1) {
+        throw new AgentStoreProtocolError('task_cancel_conflict', 'Task cancellation changed concurrently', 'queue');
+      }
+      const attempt = this.getAttempt(task.currentAttemptId);
+      const links = attempt ? { attemptId: attempt.attemptId, runtimeId: attempt.currentRuntimeId } : {};
+      this.appendEvent('task', task.taskId, 'task.cancel_requested', { requestKind: input.requestKind }, input.occurredAt, eventSource, links);
+      this.appendEvent('task', task.taskId, 'task.status_changed', { from: task.status, to: 'cancelling' }, input.occurredAt, eventSource, links);
+      const updated = this.getTask(task.taskId);
+      if (!updated) throw new AgentStoreProtocolError('task_projection_missing', 'Cancellation Task projection is missing', 'queue');
+      return Object.freeze({
+        previousStatus,
+        task: updated,
+        disposition: 'cancel_requested'
+      });
+    });
+  }
+
+  /** @inheritdoc */
+  recordPreAttemptCancellation(input: RecordPreAttemptCancellationInput): AgentCheckpointRecord {
+    return this.runTaskTransaction((): AgentCheckpointRecord => {
+      if ((input.requestKind !== 'single_task' && input.requestKind !== 'checkpoint_cascade') || !Number.isFinite(Date.parse(input.occurredAt))) {
+        throw new AgentStoreProtocolError('pre_attempt_cancel_input_invalid', 'Pre-Attempt cancellation input is invalid', 'queue');
+      }
+      const task = this.getTask(input.taskId);
+      const checkpoint = this.getCheckpoint(input.checkpointId);
+      if (!task || !checkpoint) {
+        throw new AgentStoreProtocolError('pre_attempt_cancel_target_missing', 'Task or Checkpoint does not exist', 'queue');
+      }
+      if (
+        task.checkpointId !== input.checkpointId ||
+        task.toolCallId !== input.toolCallId ||
+        task.recordState !== 'active' ||
+        checkpoint.recordState !== 'active'
+      ) {
+        throw new AgentStoreProtocolError('pre_attempt_cancel_target_mismatch', 'Pre-Attempt cancellation target identity is invalid', 'queue');
+      }
+      const resultValidation = validatePreAttemptCancellation(input.result);
+      if (!resultValidation.ok) {
+        throw new AgentStoreProtocolError(
+          resultValidation.error.details?.reason?.toString() ?? 'pre_attempt_cancel_result_invalid',
+          resultValidation.error.message,
+          'result_validation'
+        );
+      }
+      const { result } = resultValidation;
+      const computedHash = hashAgentPayload(result);
+      if (
+        computedHash !== input.resultHash ||
+        result.taskId !== task.taskId ||
+        result.agentId !== task.agentId ||
+        !hasExactCriteria(result, task.contractSnapshot.acceptanceCriteria)
+      ) {
+        throw new AgentStoreProtocolError('pre_attempt_cancel_identity_invalid', 'Pre-Attempt cancellation Result does not match Task', 'result_validation');
+      }
+      if (task.resultHash) {
+        const envelope = checkpoint.terminalResults[task.toolCallId];
+        if (
+          !task.result ||
+          !isPreAttemptCancellation(task.result) ||
+          !envelope ||
+          !isPreAttemptCancellation(envelope.result) ||
+          task.resultHash !== computedHash ||
+          envelope.resultHash !== computedHash ||
+          hashAgentPayload(task.result) !== computedHash ||
+          hashAgentPayload(envelope.result) !== computedHash
+        ) {
+          throw new AgentStoreProtocolError('pre_attempt_cancel_replay_conflict', 'Pre-Attempt cancellation replay conflicts with persisted facts');
+        }
+        return checkpoint;
+      }
+      const checkpointAccepts =
+        (input.requestKind === 'single_task' && checkpoint.status === 'waiting_children') ||
+        (input.requestKind === 'checkpoint_cascade' && checkpoint.status === 'cancelling');
+      const eligibleTask =
+        task.currentAttemptId === undefined &&
+        task.cancelRequestedAt === undefined &&
+        (task.status === 'created' || task.status === 'planning' || task.status === 'authorized' || (task.status === 'queued' && task.queuePhase === 'start'));
+      if (
+        !checkpointAccepts ||
+        !eligibleTask ||
+        !canTransitionTask(task.status, 'cancelling', {
+          mode: task.contractSnapshot.mode,
+          queuePhase: task.queuePhase
+        }) ||
+        !canTransitionTask('cancelling', 'cancelled', { mode: task.contractSnapshot.mode })
+      ) {
+        throw new AgentStoreProtocolError('pre_attempt_cancel_state_invalid', 'Task is not eligible for pre-Attempt cancellation', 'queue');
+      }
+      const update = this.database.execute(
+        `UPDATE chat_agent_tasks
+         SET status = ?, queue_phase = NULL, cancel_requested_at = ?,
+             result_json = ?, result_hash = ?, error_json = ?, updated_at = ?
+         WHERE task_id = ? AND status = ? AND current_attempt_id IS NULL
+           AND cancel_requested_at IS NULL AND result_hash IS NULL AND record_state = ?`,
+        [
+          'cancelled',
+          input.occurredAt,
+          JSON.stringify(result),
+          computedHash,
+          JSON.stringify(result.error),
+          input.occurredAt,
+          task.taskId,
+          task.status,
+          'active'
+        ]
+      );
+      if (update.changes !== 1) {
+        throw new AgentStoreProtocolError('pre_attempt_cancel_conflict', 'Task changed before pre-Attempt cancellation completed', 'queue');
+      }
+      const eventSource: Extract<ChatAgentEventSource, 'user' | 'system'> = input.requestKind === 'single_task' ? 'user' : 'system';
+      this.appendEvent('task', task.taskId, 'task.cancel_requested', { requestKind: input.requestKind }, input.occurredAt, eventSource);
+      this.appendEvent('task', task.taskId, 'task.status_changed', { from: task.status, to: 'cancelling' }, input.occurredAt, eventSource);
+      this.appendEvent('task', task.taskId, 'task.cancelled', { resultHash: computedHash }, input.occurredAt, 'coordinator');
+      return this.joinTerminalResult(task, checkpoint, result, computedHash, input.occurredAt, 'coordinator');
+    });
+  }
+
+  /** @inheritdoc */
   recordTaskResult(input: RecordTaskResultInput): AgentCheckpointRecord {
     let replayConflict: AgentStoreProtocolError | undefined;
     const recordedCheckpoint = this.runTaskTransaction((): AgentCheckpointRecord => {
@@ -3461,10 +3974,10 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         const envelope = checkpoint.terminalResults[task.toolCallId];
         if (
           !task.result ||
-          isPreAttemptFailure(task.result) ||
+          isPreAttemptResult(task.result) ||
           hashAgentPayload(task.result) !== task.resultHash ||
           !envelope ||
-          isPreAttemptFailure(envelope.result) ||
+          isPreAttemptResult(envelope.result) ||
           envelope.resultHash !== task.resultHash ||
           hashAgentPayload(envelope.result) !== task.resultHash ||
           envelope.result.taskId !== task.taskId ||
@@ -3545,12 +4058,21 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       ) {
         throw new AgentStoreProtocolError('result_source_state_invalid', 'Task cannot terminalize from its current state');
       }
+      if (!canFinalizeUsage(attempt, result.usage)) {
+        if (attempt.usageComplete) {
+          throw new AgentStoreProtocolError('result_usage_frozen_mismatch', 'Final Result usage must exactly match its complete Attempt snapshot');
+        }
+        throw new AgentStoreProtocolError('result_usage_regression', 'Final Result usage cannot regress its persisted Attempt lower-bound');
+      }
       const attemptUpdate = this.database.execute(
         `UPDATE chat_agent_attempts
-         SET status = ?, finished_at = ?, error_json = ?
+         SET status = ?, usage_snapshot_json = ?, usage_complete = 1,
+             usage_updated_at = ?, finished_at = ?, error_json = ?
          WHERE attempt_id = ? AND task_id = ? AND plan_hash = ? AND status = ?`,
         [
           targetStatus,
+          JSON.stringify(result.usage),
+          input.occurredAt,
           input.occurredAt,
           result.error ? JSON.stringify(result.error) : null,
           result.attemptId,
@@ -3636,15 +4158,12 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       ) {
         throw new AgentStoreProtocolError('pre_attempt_target_mismatch', 'Pre-Attempt result target does not match persisted facts', 'plan_validation');
       }
-      if (
-        !error ||
-        error.retryable ||
-        (error.phase !== 'plan_validation' && error.phase !== 'resource_validation') ||
-        !Number.isFinite(Date.parse(input.occurredAt))
-      ) {
+      const validationFailure = error?.phase === 'plan_validation' || error?.phase === 'resource_validation';
+      const recoveryFailure = error?.phase === 'recovery';
+      if (!error || error.retryable || (!validationFailure && !recoveryFailure) || !Number.isFinite(Date.parse(input.occurredAt))) {
         throw new AgentStoreProtocolError(
           'pre_attempt_error_invalid',
-          'Pre-Attempt failure requires a non-retryable plan or resource error',
+          'Pre-Attempt failure requires a non-retryable plan, resource, or recovery error',
           'plan_validation'
         );
       }
@@ -3832,6 +4351,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       } else if (checkpoint.status !== 'cancelling') {
         throw new AgentStoreProtocolError('checkpoint_cancel_state_invalid', 'Checkpoint cannot accept cancellation');
       }
+      this.supersedeOutboxes(checkpoint.checkpointId, input.occurredAt);
 
       const activeTaskRows = this.database.select<TaskRow>(
         `SELECT * FROM chat_agent_tasks
@@ -3840,89 +4360,76 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         [checkpoint.checkpointId, 'active']
       );
       activeTaskRows.map(parseTask).forEach((task): void => {
-        if (isTaskTerminal(task.status) || task.status === 'cancelling') return;
-        if (task.status === 'committing') {
-          const commitCancelUpdate = this.database.execute(
-            `UPDATE chat_agent_tasks
-             SET cancel_requested_at = COALESCE(cancel_requested_at, ?), updated_at = ?
-             WHERE task_id = ? AND status = ? AND record_state = ?`,
-            [input.occurredAt, input.occurredAt, task.taskId, 'committing', 'active']
-          );
-          if (commitCancelUpdate.changes !== 1) {
-            throw new AgentStoreProtocolError('task_cancel_conflict', 'Committing Task cancellation changed concurrently');
-          }
-          return;
-        }
-        if (!canTransitionTask(task.status, 'cancelling', { mode: task.contractSnapshot.mode })) return;
-        const taskUpdate = this.database.execute(
-          `UPDATE chat_agent_tasks
-           SET status = ?, queue_phase = NULL, cancel_requested_at = ?, updated_at = ?
-           WHERE task_id = ? AND status = ? AND record_state = ?`,
-          ['cancelling', input.occurredAt, input.occurredAt, task.taskId, task.status, 'active']
-        );
-        if (taskUpdate.changes !== 1) {
-          throw new AgentStoreProtocolError('task_cancel_conflict', 'Task cancellation changed concurrently');
-        }
-        this.appendEvent('task', task.taskId, 'task.status_changed', { from: task.status, to: 'cancelling' }, input.occurredAt, 'user');
+        if (isTaskTerminal(task.status) || task.status === 'cancelling' || task.cancelRequestedAt !== undefined) return;
+        const preAttemptState =
+          task.currentAttemptId === undefined &&
+          (task.status === 'created' ||
+            task.status === 'planning' ||
+            task.status === 'authorized' ||
+            (task.status === 'queued' && task.queuePhase === 'start'));
+        if (preAttemptState) return;
+        this.requestTaskCancellation({
+          taskId: task.taskId,
+          requestKind: 'checkpoint_cascade',
+          occurredAt: input.occurredAt
+        });
       });
-
-      const safety = this.database.select<{ live_attempts: unknown; journal_count: unknown }>(
-        `SELECT
-           COUNT(a.attempt_id) AS live_attempts,
-           COALESCE(SUM(t.unfinished_journal_count), 0) AS journal_count
-         FROM chat_agent_tasks t
-         LEFT JOIN chat_agent_attempts a
-           ON a.task_id = t.task_id
-          AND a.status NOT IN (?, ?, ?, ?, ?, ?)
-         WHERE t.checkpoint_id = ? AND t.record_state = ?`,
-        ['completed', 'failed', 'cancelled', 'deadline_exceeded', 'commit_failed', 'interrupted', checkpoint.checkpointId, 'active']
-      )[0];
-      if (
-        requireInteger(safety?.live_attempts, 'checkpoint live attempt count') !== 0 ||
-        requireInteger(safety?.journal_count, 'checkpoint journal count') !== 0
-      ) {
-        return checkpoint;
-      }
-      const cancellationTasks = this.database
-        .select<TaskRow>(
-          `SELECT * FROM chat_agent_tasks
-           WHERE checkpoint_id = ? AND record_state = ?
-           ORDER BY created_at ASC, task_id ASC`,
-          [checkpoint.checkpointId, 'active']
-        )
-        .map(parseTask);
-      if (cancellationTasks.some((task): boolean => !isTaskTerminal(task.status) && task.status !== 'cancelling')) {
-        return checkpoint;
-      }
-      cancellationTasks.forEach((task): void => {
-        if (task.status !== 'cancelling') return;
-        const taskUpdate = this.database.execute(
-          `UPDATE chat_agent_tasks
-           SET status = ?, queue_phase = NULL, updated_at = ?
-           WHERE task_id = ? AND status = ? AND record_state = ?`,
-          ['cancelled', input.occurredAt, task.taskId, 'cancelling', 'active']
-        );
-        if (taskUpdate.changes !== 1) {
-          throw new AgentStoreProtocolError('task_cancel_finalize_conflict', 'Task cancellation finalization changed concurrently');
-        }
-        this.appendEvent('task', task.taskId, 'task.cancelled', {}, input.occurredAt, 'coordinator');
-      });
-      if (!canTransitionCheckpoint(checkpoint.status, 'cancelled')) {
-        throw new AgentStoreProtocolError('checkpoint_cancel_finalize_invalid', 'Checkpoint cannot finish cancellation');
-      }
-      const finalUpdate = this.database.execute(
-        `UPDATE chat_agent_delegation_checkpoints
-         SET status = ?, version = version + 1, updated_at = ?
-         WHERE checkpoint_id = ? AND status = ? AND version = ? AND record_state = ?`,
-        ['cancelled', input.occurredAt, checkpoint.checkpointId, 'cancelling', checkpoint.version, 'active']
+      const requested = this.getCheckpoint(checkpoint.checkpointId);
+      if (!requested) throw new AgentStoreProtocolError('checkpoint_projection_missing', 'Cancelling Checkpoint is missing');
+      const allResultsJoined = requested.continuationSnapshot.orderedToolCalls.every(
+        (toolCall): boolean => requested.terminalResults[toolCall.toolCallId] !== undefined
       );
-      if (finalUpdate.changes !== 1) {
-        throw new AgentStoreProtocolError('checkpoint_cancel_finalize_conflict', 'Checkpoint cancellation finalization lost its CAS');
+      if (requested.status === 'cancelling' && allResultsJoined) {
+        if (!canTransitionCheckpoint(requested.status, 'cancelled')) {
+          throw new AgentStoreProtocolError('checkpoint_cancel_transition_invalid', 'Checkpoint cannot finish cancellation');
+        }
+        const completionUpdate = this.database.execute(
+          `UPDATE chat_agent_delegation_checkpoints
+           SET status = ?, version = version + 1, updated_at = ?
+           WHERE checkpoint_id = ? AND status = ? AND version = ? AND record_state = ?`,
+          ['cancelled', input.occurredAt, requested.checkpointId, 'cancelling', requested.version, 'active']
+        );
+        if (completionUpdate.changes !== 1) {
+          throw new AgentStoreProtocolError('checkpoint_cancel_conflict', 'Checkpoint cancellation completion changed concurrently');
+        }
+        this.appendEvent('checkpoint', requested.checkpointId, 'delegation.completed', { outcome: 'cancelled' }, input.occurredAt, 'coordinator');
+        const cancelled = this.getCheckpoint(requested.checkpointId);
+        if (!cancelled) throw new AgentStoreProtocolError('checkpoint_projection_missing', 'Cancelled Checkpoint is missing');
+        return cancelled;
       }
-      this.appendEvent('checkpoint', checkpoint.checkpointId, 'delegation.completed', { outcome: 'cancelled' }, input.occurredAt, 'coordinator');
-      const cancelled = this.getCheckpoint(checkpoint.checkpointId);
-      if (!cancelled) throw new AgentStoreProtocolError('checkpoint_projection_missing', 'Cancelled Checkpoint is missing');
-      return cancelled;
+      return requested;
+    });
+  }
+
+  /** @inheritdoc */
+  finalizeCancellation(input: FinalizeCancellationInput): AgentCheckpointRecord {
+    return this.database.transaction((): AgentCheckpointRecord => {
+      if (!Number.isFinite(Date.parse(input.finalizedAt))) {
+        throw new AgentStoreProtocolError('checkpoint_cancellation_finalize_time_invalid', 'Cancellation finalization time is invalid');
+      }
+      const checkpoint = this.getCheckpoint(input.checkpointId);
+      if (!checkpoint || checkpoint.recordState !== 'active') {
+        throw new AgentStoreProtocolError('checkpoint_cancellation_finalize_missing', 'Cancellation finalization Checkpoint is unavailable');
+      }
+      if (checkpoint.status !== 'cancelled') {
+        throw new AgentStoreProtocolError('checkpoint_cancellation_finalize_state_invalid', 'Only a cancelled Checkpoint may finish cancellation cleanup');
+      }
+      if (checkpoint.cancellationFinalizedAt) return checkpoint;
+      const update = this.database.execute(
+        `UPDATE chat_agent_delegation_checkpoints
+         SET cancellation_finalized_at = ?, version = version + 1, updated_at = ?
+         WHERE checkpoint_id = ? AND status = ? AND version = ?
+           AND cancellation_finalized_at IS NULL AND record_state = ?`,
+        [input.finalizedAt, input.finalizedAt, checkpoint.checkpointId, 'cancelled', checkpoint.version, 'active']
+      );
+      if (update.changes !== 1) {
+        throw new AgentStoreProtocolError('checkpoint_cancellation_finalize_conflict', 'Cancellation finalization marker changed concurrently');
+      }
+      const finalized = this.getCheckpoint(checkpoint.checkpointId);
+      if (!finalized) {
+        throw new AgentStoreProtocolError('checkpoint_projection_missing', 'Finalized cancellation Checkpoint is missing');
+      }
+      return finalized;
     });
   }
 
@@ -4200,15 +4707,27 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
         !task ||
         task.resultHash !== envelope.resultHash ||
         !task.result ||
-        (isPreAttemptFailure(envelope.result)
-          ? !isPreAttemptFailure(task.result)
-          : isPreAttemptFailure(task.result) || task.result.attemptId !== envelope.result.attemptId) ||
+        (isPreAttemptResult(envelope.result)
+          ? !isPreAttemptResult(task.result) || task.result.resultKind !== envelope.result.resultKind
+          : isPreAttemptResult(task.result) || task.result.attemptId !== envelope.result.attemptId) ||
         !hasExactCriteria(envelope.result, task.contractSnapshot.acceptanceCriteria)
       ) {
         throw new AgentStoreProtocolError('checkpoint_terminal_result_invalid', 'Checkpoint terminal result does not match its persisted Task projection');
       }
     });
     return checkpoint;
+  }
+
+  /** @inheritdoc */
+  listCancelledCheckpoints(): AgentCheckpointRecord[] {
+    return this.database
+      .select<CheckpointRow>(
+        `SELECT * FROM chat_agent_delegation_checkpoints
+         WHERE status = ? AND record_state = ? AND cancellation_finalized_at IS NULL
+         ORDER BY updated_at ASC, checkpoint_id ASC`,
+        ['cancelled', 'active']
+      )
+      .map((row): AgentCheckpointRecord => parseCheckpoint(row));
   }
 
   /** @inheritdoc */
@@ -4236,7 +4755,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
     return this.database
       .select<OutboxRow>(
         `SELECT * FROM chat_agent_outbox
-         WHERE delivery_status = ?
+         WHERE delivery_status = ? AND superseded_at IS NULL
          ORDER BY created_at ASC, outbox_id ASC`,
         ['pending']
       )
@@ -4252,11 +4771,11 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       const row = this.database.select<OutboxRow>('SELECT * FROM chat_agent_outbox WHERE outbox_id = ?', [input.outboxId])[0];
       if (!row) throw new AgentStoreProtocolError('outbox_not_found', 'Outbox record does not exist');
       const current = parseOutbox(row);
-      if (current.deliveryStatus === 'delivered') return current;
+      if (current.deliveryStatus !== 'pending') return current;
       const update = this.database.execute(
         `UPDATE chat_agent_outbox
          SET delivery_status = ?, attempt_count = attempt_count + 1, delivered_at = ?, updated_at = ?
-         WHERE outbox_id = ? AND delivery_status = ?`,
+         WHERE outbox_id = ? AND delivery_status = ? AND superseded_at IS NULL`,
         ['delivered', input.deliveredAt, input.deliveredAt, current.outboxId, 'pending']
       );
       if (update.changes !== 1) {
@@ -4266,6 +4785,154 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       if (!updatedRow) throw new AgentStoreProtocolError('outbox_projection_missing', 'Delivered Outbox is missing');
       return parseOutbox(updatedRow);
     });
+  }
+
+  /**
+   * 只读校验一个 Checkpoint 的全部恢复输入并冻结写入计划。
+   * @param aggregate - 已完成 hash、历史和交叉引用校验的聚合
+   * @param reason - 规范恢复错误
+   * @returns 不依赖后续猜测的恢复写入计划
+   */
+  private prepareInterruption(aggregate: ValidatedAgentAggregate, reason: AgentTaskError): AgentRecoveryPlan {
+    const { checkpoint, tasks } = aggregate;
+    if (checkpoint.status === 'preparing' || !canTransitionCheckpoint(checkpoint.status, 'interrupted')) {
+      throw new AgentStoreProtocolError('interrupt_checkpoint_state_invalid', 'Checkpoint cannot transition to interrupted');
+    }
+    if (tasks.some((task): boolean => task.status === 'committing' || task.unfinishedJournalCount > 0)) {
+      throw new AgentStoreProtocolError('interrupt_checkpoint_journal_blocked', 'Checkpoint interruption requires commit journal recovery');
+    }
+    const taskPlans = tasks.flatMap((task): AgentRecoveryTaskPlan[] => {
+      if (isTaskTerminal(task.status)) return [];
+      if (
+        !canTransitionTask(task.status, 'failed', {
+          mode: task.contractSnapshot.mode,
+          queuePhase: task.queuePhase
+        })
+      ) {
+        throw new AgentStoreProtocolError('interrupt_task_state_invalid', 'Recovery Task cannot transition to failed', 'recovery');
+      }
+      if (!task.currentAttemptId) {
+        const preAttemptState =
+          (checkpoint.status === 'waiting_children' || checkpoint.status === 'cancelling') &&
+          (task.status === 'created' ||
+            task.status === 'planning' ||
+            task.status === 'authorized' ||
+            (task.status === 'queued' && task.queuePhase === 'start'));
+        if (!preAttemptState) {
+          throw new AgentStoreProtocolError(
+            'interrupt_result_usage_unavailable',
+            'Checkpoint interruption cannot build a terminal Result for this Task state',
+            'recovery'
+          );
+        }
+        const result = this.createPreAttemptResult(task, reason);
+        return [{ task, result, resultHash: hashAgentPayload(result) }];
+      }
+      const attempt = this.getAttempt(task.currentAttemptId);
+      if (!attempt || attempt.taskId !== task.taskId || ATTEMPT_TERMINAL_STATUSES.has(attempt.status)) {
+        throw new AgentStoreProtocolError('interrupt_attempt_invalid', 'Recovery Attempt projection is unavailable', 'recovery');
+      }
+      const result = this.createRecoveryResult(task, attempt, reason);
+      return [{ task, attempt, result, resultHash: hashAgentPayload(result) }];
+    });
+    const plannedToolCalls = new Set(taskPlans.map((plan): string => plan.task.toolCallId));
+    if (
+      checkpoint.continuationSnapshot.orderedToolCalls.some(
+        (toolCall): boolean => checkpoint.terminalResults[toolCall.toolCallId] === undefined && !plannedToolCalls.has(toolCall.toolCallId)
+      )
+    ) {
+      throw new AgentStoreProtocolError('interrupt_result_usage_unavailable', 'Checkpoint interruption is missing a terminal Result', 'recovery');
+    }
+    return { aggregate, taskPlans };
+  }
+
+  /**
+   * 应用一个已完整预检的恢复计划；调用方必须持有最外层事务。
+   * @param plan - 冻结恢复计划
+   * @param reason - Checkpoint 级恢复错误
+   * @param occurredAt - 原子恢复时间
+   * @returns 中断后的 Checkpoint
+   */
+  private applyInterruption(plan: AgentRecoveryPlan, reason: AgentTaskError, occurredAt: string): AgentCheckpointRecord {
+    const { checkpoint } = plan.aggregate;
+    const terminalResults = { ...checkpoint.terminalResults };
+    plan.taskPlans.forEach((taskPlan): void => {
+      const { task, attempt, result, resultHash } = taskPlan;
+      const resultError = result.error;
+      if (!resultError) {
+        throw new AgentStoreProtocolError('interrupt_result_error_missing', 'Recovery Result must retain its error', 'recovery');
+      }
+      if (attempt) {
+        const attemptUpdate = this.database.execute(
+          `UPDATE chat_agent_attempts
+           SET status = ?, finished_at = ?, error_json = ?
+           WHERE attempt_id = ? AND task_id = ? AND status = ?
+             AND usage_snapshot_json = ? AND usage_complete = ?`,
+          [
+            'interrupted',
+            occurredAt,
+            JSON.stringify(resultError),
+            attempt.attemptId,
+            task.taskId,
+            attempt.status,
+            JSON.stringify(attempt.usageSnapshot),
+            attempt.usageComplete ? 1 : 0
+          ]
+        );
+        if (attemptUpdate.changes !== 1) {
+          throw new AgentStoreProtocolError('interrupt_attempt_conflict', 'Recovery Attempt changed after preflight', 'recovery');
+        }
+      }
+      const taskUpdate = this.database.execute(
+        `UPDATE chat_agent_tasks
+         SET status = ?, queue_phase = NULL, result_json = ?, result_hash = ?, error_json = ?, updated_at = ?
+         WHERE task_id = ? AND status = ? AND result_hash IS NULL AND record_state = ?
+           AND ${attempt ? 'current_attempt_id = ?' : 'current_attempt_id IS NULL'}`,
+        [
+          'failed',
+          JSON.stringify(result),
+          resultHash,
+          JSON.stringify(resultError),
+          occurredAt,
+          task.taskId,
+          task.status,
+          'active',
+          ...(attempt ? [attempt.attemptId] : [])
+        ]
+      );
+      if (taskUpdate.changes !== 1) {
+        throw new AgentStoreProtocolError('interrupt_task_conflict', 'Recovery Task changed after preflight', 'recovery');
+      }
+      const links = attempt ? { attemptId: attempt.attemptId, runtimeId: attempt.currentRuntimeId } : {};
+      this.appendEvent('task', task.taskId, 'task.failed', { error: resultError, resultHash }, occurredAt, 'coordinator', links);
+      terminalResults[task.toolCallId] = { result, resultHash };
+      this.appendEvent('checkpoint', checkpoint.checkpointId, 'child.result_recorded', { toolCallId: task.toolCallId, resultHash }, occurredAt, 'coordinator');
+    });
+    const update = this.database.execute(
+      `UPDATE chat_agent_delegation_checkpoints
+       SET status = ?, version = version + 1, terminal_results_json = ?, error_json = ?, updated_at = ?
+       WHERE checkpoint_id = ? AND status = ? AND version = ? AND record_state = ?`,
+      [
+        'interrupted',
+        JSON.stringify(terminalResults),
+        JSON.stringify(reason),
+        occurredAt,
+        checkpoint.checkpointId,
+        checkpoint.status,
+        checkpoint.version,
+        'active'
+      ]
+    );
+    if (update.changes !== 1) {
+      throw new AgentStoreProtocolError('interrupt_checkpoint_conflict', 'Checkpoint interruption changed after preflight');
+    }
+    this.supersedeOutboxes(checkpoint.checkpointId, occurredAt);
+    this.appendEvent('checkpoint', checkpoint.checkpointId, 'delegation.interrupted', { error: reason }, occurredAt, 'system');
+    const interrupted = this.getCheckpoint(checkpoint.checkpointId);
+    if (!interrupted) {
+      throw new AgentStoreProtocolError('checkpoint_projection_missing', 'Interrupted Checkpoint is missing');
+    }
+    return interrupted;
   }
 
   /** @inheritdoc */
@@ -4282,80 +4949,9 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       if (!aggregate) {
         throw new AgentStoreProtocolError('checkpoint_not_found', 'Checkpoint does not exist');
       }
-      const { checkpoint, tasks: aggregateTasks } = aggregate;
-      if (checkpoint.status === 'interrupted') return checkpoint;
-      if (checkpoint.status === 'preparing' || !canTransitionCheckpoint(checkpoint.status, 'interrupted')) {
-        throw new AgentStoreProtocolError('interrupt_checkpoint_state_invalid', 'Checkpoint cannot transition to interrupted');
-      }
-      if (aggregateTasks.some((task): boolean => task.status === 'committing' || task.unfinishedJournalCount > 0)) {
-        throw new AgentStoreProtocolError('interrupt_checkpoint_journal_blocked', 'Checkpoint interruption requires commit journal recovery');
-      }
-
-      this.database.execute(
-        `UPDATE chat_agent_attempts
-         SET status = ?, finished_at = ?, error_json = ?
-         WHERE task_id IN (
-           SELECT task_id FROM chat_agent_tasks WHERE checkpoint_id = ? AND record_state = ?
-         ) AND status NOT IN (?, ?, ?, ?, ?, ?)`,
-        [
-          'interrupted',
-          input.occurredAt,
-          JSON.stringify(validatedReason),
-          checkpoint.checkpointId,
-          'active',
-          'completed',
-          'failed',
-          'cancelled',
-          'deadline_exceeded',
-          'commit_failed',
-          'interrupted'
-        ]
-      );
-      aggregateTasks.forEach((task): void => {
-        if (isTaskTerminal(task.status)) return;
-        let sourceStatus = task.status;
-        if (sourceStatus !== 'cancelling') {
-          if (!canTransitionTask(sourceStatus, 'cancelling', { mode: task.contractSnapshot.mode })) {
-            throw new AgentStoreProtocolError('interrupt_task_state_invalid', 'Checkpoint Task cannot cooperate with cancellation');
-          }
-          const requestUpdate = this.database.execute(
-            `UPDATE chat_agent_tasks
-             SET status = ?, queue_phase = NULL, cancel_requested_at = ?, updated_at = ?
-             WHERE task_id = ? AND status = ? AND record_state = ?`,
-            ['cancelling', input.occurredAt, input.occurredAt, task.taskId, sourceStatus, 'active']
-          );
-          if (requestUpdate.changes !== 1) {
-            throw new AgentStoreProtocolError('interrupt_task_conflict', 'Checkpoint Task cancellation changed concurrently');
-          }
-          this.appendEvent('task', task.taskId, 'task.status_changed', { from: sourceStatus, to: 'cancelling' }, input.occurredAt, 'system');
-          sourceStatus = 'cancelling';
-        }
-        const finalUpdate = this.database.execute(
-          `UPDATE chat_agent_tasks
-           SET status = ?, queue_phase = NULL, updated_at = ?
-           WHERE task_id = ? AND status = ? AND record_state = ?`,
-          ['cancelled', input.occurredAt, task.taskId, sourceStatus, 'active']
-        );
-        if (finalUpdate.changes !== 1) {
-          throw new AgentStoreProtocolError('interrupt_task_finalize_conflict', 'Checkpoint Task cancellation finalization changed concurrently');
-        }
-        this.appendEvent('task', task.taskId, 'task.cancelled', {}, input.occurredAt, 'system');
-      });
-      const update = this.database.execute(
-        `UPDATE chat_agent_delegation_checkpoints
-         SET status = ?, version = version + 1, error_json = ?, updated_at = ?
-         WHERE checkpoint_id = ? AND status = ? AND version = ? AND record_state = ?`,
-        ['interrupted', JSON.stringify(validatedReason), input.occurredAt, checkpoint.checkpointId, checkpoint.status, checkpoint.version, 'active']
-      );
-      if (update.changes !== 1) {
-        throw new AgentStoreProtocolError('interrupt_checkpoint_conflict', 'Checkpoint interruption changed concurrently');
-      }
-      this.appendEvent('checkpoint', checkpoint.checkpointId, 'delegation.interrupted', { error: validatedReason }, input.occurredAt, 'system');
-      const interrupted = this.getCheckpoint(checkpoint.checkpointId);
-      if (!interrupted) {
-        throw new AgentStoreProtocolError('checkpoint_projection_missing', 'Interrupted Checkpoint is missing');
-      }
-      return interrupted;
+      if (aggregate.checkpoint.status === 'interrupted') return aggregate.checkpoint;
+      const plan = this.prepareInterruption(aggregate, validatedReason);
+      return this.applyInterruption(plan, validatedReason, input.occurredAt);
     });
   }
 
@@ -4366,91 +4962,44 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       throw new AgentStoreProtocolError('interrupt_reason_invalid', 'Recovery interruption requires a recovery error');
     }
     return this.runTaskTransaction((): number => {
+      // 所有候选先完成纯读取与协议预检，任何损坏都发生在首个 mutation 之前。
       const rows = this.database.select<CheckpointRow>(
         `SELECT * FROM chat_agent_delegation_checkpoints
          WHERE record_state = ?
            AND status NOT IN (?, ?, ?, ?)
-        ORDER BY created_at ASC, checkpoint_id ASC`,
+         ORDER BY created_at ASC, checkpoint_id ASC`,
         ['active', 'completed', 'failed', 'cancelled', 'interrupted']
       );
-      let interruptedCount = 0;
-      rows.forEach((row): void => {
+      // Journal-owned 聚合由 commit recovery 独占；先分类可避免它阻塞无关 Session 的安全恢复。
+      const survivorIds = new Set(
+        this.database
+          .select<Pick<TaskRow, 'checkpoint_id'>>(
+            `SELECT DISTINCT checkpoint_id FROM chat_agent_tasks
+             WHERE record_state = ?
+               AND (status = ? OR unfinished_journal_count > 0)`,
+            ['active', 'committing']
+          )
+          .map((row): string => requireString(row.checkpoint_id, 'journal-owned checkpoint id'))
+      );
+      const eligibleRows = rows.filter((row): boolean => !survivorIds.has(requireString(row.checkpoint_id, 'interrupt checkpoint id')));
+      const aggregates = eligibleRows.map((row): ValidatedAgentAggregate => {
         const checkpointId = requireString(row.checkpoint_id, 'interrupt checkpoint id');
         const aggregate = this.loadValidatedAggregate(checkpointId);
         if (!aggregate) {
           throw new AgentStoreProtocolError('checkpoint_projection_missing', 'Recovery Checkpoint is missing');
         }
-        const { checkpoint, tasks: aggregateTasks } = aggregate;
-        if (checkpoint.status === 'preparing' || !canTransitionCheckpoint(checkpoint.status, 'interrupted')) {
-          throw new AgentStoreProtocolError('interrupt_checkpoint_state_invalid', 'Recovery encountered a Checkpoint that cannot transition to interrupted');
+        if (aggregate.checkpoint.status === 'preparing' || !canTransitionCheckpoint(aggregate.checkpoint.status, 'interrupted')) {
+          throw new AgentStoreProtocolError('interrupt_checkpoint_state_invalid', 'Recovery Checkpoint cannot transition to interrupted');
         }
-        const occurredAt = new Date().toISOString();
-
-        // Commit recovery 尚未实现时，任一 committing/journal Task 都阻断整个聚合且不得先产生副作用。
-        if (aggregateTasks.some((task): boolean => task.status === 'committing' || task.unfinishedJournalCount > 0)) {
-          return;
-        }
-        this.database.execute(
-          `UPDATE chat_agent_attempts
-           SET status = ?, finished_at = ?, error_json = ?
-           WHERE task_id IN (
-             SELECT task_id FROM chat_agent_tasks WHERE checkpoint_id = ? AND record_state = ?
-           ) AND status NOT IN (?, ?, ?, ?, ?, ?)`,
-          [
-            'interrupted',
-            occurredAt,
-            JSON.stringify(validatedReason),
-            checkpoint.checkpointId,
-            'active',
-            'completed',
-            'failed',
-            'cancelled',
-            'deadline_exceeded',
-            'commit_failed',
-            'interrupted'
-          ]
-        );
-        aggregateTasks.forEach((task): void => {
-          if (isTaskTerminal(task.status)) return;
-          let sourceStatus = task.status;
-          if (sourceStatus !== 'cancelling') {
-            if (!canTransitionTask(sourceStatus, 'cancelling', { mode: task.contractSnapshot.mode })) {
-              throw new AgentStoreProtocolError('interrupt_task_state_invalid', 'Recovery encountered a Task that cannot cooperate with cancellation');
-            }
-            const requestUpdate = this.database.execute(
-              `UPDATE chat_agent_tasks
-               SET status = ?, queue_phase = NULL, cancel_requested_at = ?, updated_at = ?
-               WHERE task_id = ? AND status = ? AND record_state = ?`,
-              ['cancelling', occurredAt, occurredAt, task.taskId, sourceStatus, 'active']
-            );
-            if (requestUpdate.changes !== 1) {
-              throw new AgentStoreProtocolError('interrupt_task_conflict', 'Recovery Task cancellation changed concurrently');
-            }
-            this.appendEvent('task', task.taskId, 'task.status_changed', { from: sourceStatus, to: 'cancelling' }, occurredAt, 'system');
-            sourceStatus = 'cancelling';
-          }
-          const finalUpdate = this.database.execute(
-            `UPDATE chat_agent_tasks
-             SET status = ?, queue_phase = NULL, updated_at = ?
-             WHERE task_id = ? AND status = ? AND record_state = ?`,
-            ['cancelled', occurredAt, task.taskId, sourceStatus, 'active']
-          );
-          if (finalUpdate.changes !== 1) {
-            throw new AgentStoreProtocolError('interrupt_task_finalize_conflict', 'Recovery Task cancellation finalization changed concurrently');
-          }
-          this.appendEvent('task', task.taskId, 'task.cancelled', {}, occurredAt, 'system');
-        });
-        const update = this.database.execute(
-          `UPDATE chat_agent_delegation_checkpoints
-           SET status = ?, version = version + 1, error_json = ?, updated_at = ?
-           WHERE checkpoint_id = ? AND status = ? AND version = ? AND record_state = ?`,
-          ['interrupted', JSON.stringify(validatedReason), occurredAt, checkpoint.checkpointId, checkpoint.status, checkpoint.version, 'active']
-        );
-        if (update.changes !== 1) return;
-        this.appendEvent('checkpoint', checkpoint.checkpointId, 'delegation.interrupted', { error: validatedReason }, occurredAt, 'system');
-        interruptedCount += 1;
+        return aggregate;
       });
-      return interruptedCount;
+      // Eligible 集合必须全部通过只读校验和计划冻结，才可在同一事务开始 mutation。
+      const plans = aggregates.map((aggregate): AgentRecoveryPlan => this.prepareInterruption(aggregate, validatedReason));
+      const occurredAt = new Date().toISOString();
+      plans.forEach((plan): void => {
+        this.applyInterruption(plan, validatedReason, occurredAt);
+      });
+      return plans.length;
     });
   }
 

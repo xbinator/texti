@@ -130,6 +130,19 @@ function createFacts(resourceScopes: readonly string[]): OverlayFacts {
     currentRuntimeId: 'runtime-write',
     runtimeSequence: 1,
     status: 'running',
+    usageSnapshot: {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      modelCalls: 0,
+      toolRounds: 0,
+      queueDurationMs: 0,
+      executionDurationMs: 0,
+      externalRequests: 0,
+      monetaryCost: { currency: 'USD', pricingVersion: 'test-v1', estimated: 0, actual: 'unknown' }
+    },
+    usageComplete: false,
+    usageUpdatedAt: occurredAt,
     startedAt: occurredAt,
     createdAt: occurredAt
   };

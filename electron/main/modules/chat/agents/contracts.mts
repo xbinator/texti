@@ -21,6 +21,7 @@ import type {
   AgentModelSnapshot,
   AgentOrderedToolCallSnapshot,
   AgentPlanToolEffect,
+  AgentPreAttemptCancellationResult,
   AgentPreAttemptFailureResult,
   AgentResourceReference,
   AgentTaskContractSnapshot,
@@ -149,6 +150,17 @@ export interface PreAttemptFailureSuccess {
 
 /** 授权前失败结果校验返回值。 */
 export type PreAttemptFailureValidation = PreAttemptFailureSuccess | ChatAgentResultFailure;
+
+/** Runtime 创建前取消结果成功校验。 */
+export interface PreAttemptCancellationSuccess {
+  /** 校验是否成功。 */
+  ok: true;
+  /** 深冻结且不含 Attempt 身份的取消结果。 */
+  result: Readonly<AgentPreAttemptCancellationResult>;
+}
+
+/** Runtime 创建前取消结果校验返回值。 */
+export type PreAttemptCancellationValidation = PreAttemptCancellationSuccess | ChatAgentResultFailure;
 
 /** Execution Plan 成功校验结果。 */
 export interface ExecutionPlanValidationSuccess {
@@ -299,7 +311,8 @@ const ERROR_DETAIL_KEYS = new Set<AgentTaskErrorDetailKey>([
   'checkpointId',
   'attemptId',
   'runtimeId',
-  'operationId'
+  'operationId',
+  'usageIncomplete'
 ]);
 
 /**
@@ -386,7 +399,7 @@ const AGENT_ERROR_RULES: Readonly<Record<AgentTaskErrorCode, AgentErrorRule>> = 
     categories: ['integrity', 'runtime']
   },
   cancelled: {
-    phases: ['runtime', 'commit', 'recovery'],
+    phases: ['queue', 'runtime', 'commit', 'recovery'],
     categories: ['user', 'runtime']
   },
   protocol_error: {
@@ -888,7 +901,7 @@ function normalizeArtifact(value: unknown): AgentArtifactReference | null {
  * @param value - 未可信 usage
  * @returns 规范化 usage，非法时返回 null
  */
-function normalizeUsage(value: unknown): AgentUsageAccounting | null {
+export function normalizeUsage(value: unknown): AgentUsageAccounting | null {
   const usageKeys = new Set([
     'inputTokens',
     'outputTokens',
@@ -1683,6 +1696,7 @@ export function validateContinuationSnapshot(input: unknown, expectedHash: unkno
 /** 当前共享类型声明的全部 Event 类型。 */
 const AGENT_EVENT_TYPES = new Set<ChatAgentEventType>([
   'task.created',
+  'task.cancel_requested',
   'task.status_changed',
   'plan.authorized',
   'task.queued',
@@ -1790,6 +1804,9 @@ function normalizeEventPayload(type: ChatAgentEventType, input: unknown): ChatAg
   switch (type) {
     case 'task.created':
       valid = hasEventStrings(input, ['checkpointId', 'toolCallId']);
+      break;
+    case 'task.cancel_requested':
+      valid = hasExactKeys(input, ['requestKind']) && (input.requestKind === 'single_task' || input.requestKind === 'checkpoint_cascade');
       break;
     case 'task.status_changed':
       valid =
@@ -1963,7 +1980,7 @@ function normalizeEventPayload(type: ChatAgentEventType, input: unknown): ChatAg
       break;
     }
     case 'task.cancelled':
-      valid = hasOnlyKeys(input, new Set(['resultHash'])) && (input.resultHash === undefined || isSha256(input.resultHash));
+      valid = hasExactKeys(input, ['resultHash']) && isSha256(input.resultHash);
       break;
     case 'task.tombstoned': {
       const normalized = normalizeEventReason(input, []);
@@ -2050,6 +2067,13 @@ export function validateChatAgentEvent(input: unknown): ChatAgentEventValidation
   }
   const payload = normalizeEventPayload(type, input.payload);
   if (!payload) return fail('event_payload_invalid', 'Agent Event payload is invalid');
+  if (type === 'task.cancel_requested') {
+    const { requestKind } = payload as ChatAgentEventPayloadMap['task.cancel_requested'];
+    const expectedSource: ChatAgentEventSource = requestKind === 'single_task' ? 'user' : 'system';
+    if (input.source !== expectedSource) {
+      return fail('event_source_invalid', 'Task cancellation Event source does not match its request kind');
+    }
+  }
 
   const base = {
     eventId,
@@ -2351,7 +2375,7 @@ export function validateChatAgentResult(input: unknown): ChatAgentResultValidati
 
 /**
  * 校验 Coordinator 在 Runtime 创建前生成的失败结果。
- * 该协议只接受不可重试的计划或资源失败、零 usage、空产物和未验证 criteria。
+ * 该协议只接受不可重试的计划、资源失败或无 Attempt 恢复中断，并要求零 usage、空产物和未验证 criteria。
  * @param input - Store 生成或恢复读取的未可信结果
  * @returns 深冻结失败结果或稳定协议错误
  */
@@ -2411,8 +2435,10 @@ export function validatePreAttemptFailure(input: unknown): PreAttemptFailureVali
     return resultFailure('pre_attempt_result_usage_invalid', 'Pre-Attempt results require canonical zero usage');
   }
   const error = normalizeTaskError(input.error);
-  if (!error || error.retryable || (error.phase !== 'plan_validation' && error.phase !== 'resource_validation') || !matchesResultError('failed', error)) {
-    return resultFailure('pre_attempt_result_error_invalid', 'Pre-Attempt result requires a non-retryable planning or resource error');
+  const validationFailure = error?.phase === 'plan_validation' || error?.phase === 'resource_validation';
+  const recoveryFailure = error?.phase === 'recovery';
+  if (!error || error.retryable || (!validationFailure && !recoveryFailure) || !matchesResultError('failed', error)) {
+    return resultFailure('pre_attempt_result_error_invalid', 'Pre-Attempt result requires a non-retryable planning, resource, or recovery error');
   }
   return {
     ok: true,
@@ -2421,6 +2447,99 @@ export function validatePreAttemptFailure(input: unknown): PreAttemptFailureVali
       taskId,
       agentId,
       executionStatus: 'failed',
+      completion: {
+        level: 'none',
+        criteria: criteria as AgentCriteriaResult[]
+      },
+      summary,
+      warnings: [],
+      artifacts: [],
+      usage,
+      error
+    })
+  };
+}
+
+/**
+ * 校验 Runtime/Attempt 创建前生成的合作式取消结果。
+ * 该协议只接受 queue/user cancellation、零 usage、空集合和未验证 criteria。
+ * @param input - Coordinator 或 Store 提供的未可信取消结果
+ * @returns 深冻结取消结果或稳定协议错误
+ */
+export function validatePreAttemptCancellation(input: unknown): PreAttemptCancellationValidation {
+  const allowedKeys = new Set(['resultKind', 'taskId', 'agentId', 'executionStatus', 'completion', 'summary', 'warnings', 'artifacts', 'usage', 'error']);
+  if (!isPlainRecord(input) || !hasOnlyKeys(input, allowedKeys)) {
+    return resultFailure('pre_attempt_cancel_unknown_field', 'Pre-Attempt cancellation contains unknown fields');
+  }
+  const taskId = normalizeAgentIdentity(input.taskId);
+  const agentId = normalizeAgentIdentity(input.agentId);
+  const summary = normalizeDisplayText(input.summary);
+  if (input.resultKind !== 'pre_attempt_cancelled' || input.executionStatus !== 'cancelled' || !taskId || !agentId || !summary) {
+    return resultFailure('pre_attempt_cancel_identity_invalid', 'Pre-Attempt cancellation identity and discriminants are invalid');
+  }
+  if (
+    !isPlainRecord(input.completion) ||
+    !hasOnlyKeys(input.completion, new Set(['level', 'criteria'])) ||
+    input.completion.level !== 'none' ||
+    !Array.isArray(input.completion.criteria)
+  ) {
+    return resultFailure('pre_attempt_cancel_completion_invalid', 'Pre-Attempt cancellation completion must be none with ordered criteria');
+  }
+  const criteria = input.completion.criteria.map(normalizeCriteria);
+  if (
+    criteria.some((criterion): boolean => criterion === null) ||
+    new Set((criteria as AgentCriteriaResult[]).map((criterion): number => criterion.criterionIndex)).size !== criteria.length ||
+    (criteria as AgentCriteriaResult[]).some(
+      (criterion): boolean =>
+        criterion.claim.status !== 'unknown' ||
+        criterion.claim.evidence.length !== 0 ||
+        criterion.verification.status !== 'unverified' ||
+        criterion.verification.verifier !== 'policy' ||
+        criterion.verification.evidence.length !== 0
+    )
+  ) {
+    return resultFailure('pre_attempt_cancel_criteria_invalid', 'Pre-Attempt cancellation criteria cannot claim execution evidence');
+  }
+  if (!Array.isArray(input.warnings) || input.warnings.length !== 0 || !Array.isArray(input.artifacts) || input.artifacts.length !== 0) {
+    return resultFailure('pre_attempt_cancel_collections_invalid', 'Pre-Attempt cancellation cannot contain warnings or artifacts');
+  }
+  const usage = normalizeUsage(input.usage);
+  if (
+    !usage ||
+    usage.inputTokens !== 0 ||
+    usage.outputTokens !== 0 ||
+    usage.totalTokens !== 0 ||
+    usage.modelCalls !== 0 ||
+    usage.toolRounds !== 0 ||
+    usage.queueDurationMs !== 0 ||
+    usage.executionDurationMs !== 0 ||
+    usage.externalRequests !== 0 ||
+    usage.monetaryCost.currency !== 'unknown' ||
+    usage.monetaryCost.pricingVersion !== 'unknown' ||
+    usage.monetaryCost.estimated !== 'unknown' ||
+    usage.monetaryCost.actual !== 'unknown'
+  ) {
+    return resultFailure('pre_attempt_cancel_usage_invalid', 'Pre-Attempt cancellation requires canonical zero usage');
+  }
+  const error = normalizeTaskError(input.error);
+  if (
+    !error ||
+    error.code !== 'cancelled' ||
+    error.phase !== 'queue' ||
+    error.category !== 'user' ||
+    error.retryable ||
+    error.message !== undefined ||
+    error.details !== undefined
+  ) {
+    return resultFailure('pre_attempt_cancel_error_invalid', 'Pre-Attempt cancellation requires the canonical queue/user error');
+  }
+  return {
+    ok: true,
+    result: deepFreeze({
+      resultKind: 'pre_attempt_cancelled',
+      taskId,
+      agentId,
+      executionStatus: 'cancelled',
       completion: {
         level: 'none',
         criteria: criteria as AgentCriteriaResult[]

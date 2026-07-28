@@ -71,7 +71,7 @@ function seedBudgetFacts(database: InstanceType<typeof Database>, checkpointId: 
       'primary',
       `runtime-root-${turnId}`,
       `runtime-a-${turnId}`,
-      `assistant-${turnId}`,
+      `assistant-${checkpointId}`,
       '{"checkpointSchemaVersion":1}',
       'a'.repeat(64),
       'waiting_children',

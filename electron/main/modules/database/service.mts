@@ -6,6 +6,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import Database from 'better-sqlite3';
 import { app } from 'electron';
+import { normalizeAgentIdentity, normalizeUsage } from '../chat/agents/contracts.mjs';
 
 type DatabaseInstance = InstanceType<typeof Database>;
 type DatabaseTableName =
@@ -31,6 +32,135 @@ interface DatabaseTableInfoRow {
 interface AssistantMessageDuplicateRow {
   /** 发生重复的 Assistant Message 身份。 */
   assistant_message_id: string;
+}
+
+/**
+ * 旧版 Attempt usage 回填所需的不可变事实。
+ */
+interface LegacyAttemptUsageRow {
+  /** Attempt 身份。 */
+  attempt_id: string;
+  /** Task 冻结执行计划。 */
+  execution_plan_snapshot_json: string | null;
+  /** Task 终态 Result。 */
+  result_json: string | null;
+  /** 最新 commit journal 的不可变 intent。 */
+  journal_intent_json: string | null;
+}
+
+/** 旧库 Attempt migration 使用的 canonical 零 usage。 */
+const AGENT_ZERO_USAGE_JSON = JSON.stringify({
+  inputTokens: 0,
+  outputTokens: 0,
+  totalTokens: 0,
+  modelCalls: 0,
+  toolRounds: 0,
+  queueDurationMs: 0,
+  executionDurationMs: 0,
+  externalRequests: 0,
+  monetaryCost: {
+    currency: 'unknown',
+    pricingVersion: 'unknown',
+    estimated: 'unknown',
+    actual: 'unknown'
+  }
+});
+
+/**
+ * 安全读取 migration JSON object。
+ * @param value - SQLite JSON 字段
+ * @returns 合法 object，损坏或缺失时返回 null
+ */
+function parseMigrationJson(value: string | null): Record<string, unknown> | null {
+  if (!value) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 从 Task Result 或 commit intent 中读取可信 canonical usage。
+ * @param value - 不可变 JSON 字段
+ * @param source - Result 或 journal intent
+ * @returns 可信 usage，不满足 canonical schema 时返回 null
+ */
+function readLegacyUsage(value: string | null, source: 'result' | 'journal'): ReturnType<typeof normalizeUsage> {
+  const root = parseMigrationJson(value);
+  if (!root) return null;
+  if (source === 'result') return normalizeUsage(root.usage);
+  const { resultDraft } = root;
+  if (typeof resultDraft !== 'object' || resultDraft === null || Array.isArray(resultDraft)) return null;
+  return normalizeUsage((resultDraft as Record<string, unknown>).usage);
+}
+
+/**
+ * 从冻结执行计划构造已知定价身份的零 usage 下界。
+ * @param value - Execution Plan JSON
+ * @returns 已知定价零 usage；未知或损坏计划返回 null
+ */
+function readPlanZeroUsage(value: string | null): ReturnType<typeof normalizeUsage> {
+  const plan = parseMigrationJson(value);
+  const budget = plan?.budget;
+  if (typeof budget !== 'object' || budget === null || Array.isArray(budget)) return null;
+  const pricingVersion = normalizeAgentIdentity((budget as Record<string, unknown>).pricingVersion);
+  if (!pricingVersion || pricingVersion === 'unknown') return null;
+  return normalizeUsage({
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    modelCalls: 0,
+    toolRounds: 0,
+    queueDurationMs: 0,
+    executionDurationMs: 0,
+    externalRequests: 0,
+    monetaryCost: {
+      currency: 'USD',
+      pricingVersion,
+      estimated: 0,
+      actual: 'unknown'
+    }
+  });
+}
+
+/**
+ * 使用 legacy 不可变事实回填 Attempt usage 身份、下界和完整性。
+ * @param database - Agent 表共享 SQLite 连接
+ */
+function backfillAttemptUsage(database: Pick<DatabaseInstance, 'prepare'>): void {
+  const rows = database
+    .prepare<[string], LegacyAttemptUsageRow>(
+      `SELECT
+         attempt.attempt_id,
+         task.execution_plan_snapshot_json,
+         task.result_json,
+         (
+           SELECT journal.intent_json
+           FROM chat_agent_commit_journals AS journal
+           WHERE journal.attempt_id = attempt.attempt_id
+           ORDER BY journal.created_at DESC, journal.journal_id DESC
+           LIMIT 1
+         ) AS journal_intent_json
+       FROM chat_agent_attempts AS attempt
+       LEFT JOIN chat_agent_tasks AS task ON task.task_id = attempt.task_id
+       WHERE attempt.usage_complete = 0 AND attempt.usage_snapshot_json = ?
+       ORDER BY attempt.created_at ASC, attempt.attempt_id ASC`
+    )
+    .all(AGENT_ZERO_USAGE_JSON);
+  const update = database.prepare(
+    `UPDATE chat_agent_attempts
+     SET usage_snapshot_json = ?, usage_complete = ?
+     WHERE attempt_id = ? AND usage_complete = 0 AND usage_snapshot_json = ?`
+  );
+  rows.forEach((row): void => {
+    const resultUsage = readLegacyUsage(row.result_json, 'result');
+    const journalUsage = readLegacyUsage(row.journal_intent_json, 'journal');
+    const usage = resultUsage ?? journalUsage ?? readPlanZeroUsage(row.execution_plan_snapshot_json);
+    if (!usage) return;
+    update.run(JSON.stringify(usage), resultUsage !== null || journalUsage !== null ? 1 : 0, row.attempt_id, AGENT_ZERO_USAGE_JSON);
+  });
 }
 
 let db: DatabaseInstance | null = null;
@@ -131,12 +261,16 @@ export function createAgentTables(database: Pick<DatabaseInstance, 'exec' | 'pre
       current_runtime_id TEXT NOT NULL,
       runtime_sequence INTEGER NOT NULL DEFAULT 1,
       status TEXT NOT NULL,
+      usage_snapshot_json TEXT NOT NULL DEFAULT '${AGENT_ZERO_USAGE_JSON}',
+      usage_complete INTEGER NOT NULL DEFAULT 1,
+      usage_updated_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00.000Z',
       started_at TEXT,
       finished_at TEXT,
       error_json TEXT,
       created_at TEXT NOT NULL,
       CHECK (attempt_number > 0),
       CHECK (runtime_sequence > 0),
+      CHECK (usage_complete IN (0, 1)),
       UNIQUE (task_id, attempt_number)
     );
 
@@ -155,6 +289,7 @@ export function createAgentTables(database: Pick<DatabaseInstance, 'exec' | 'pre
       terminal_results_json TEXT NOT NULL DEFAULT '{}',
       resume_runtime_id TEXT,
       error_json TEXT,
+      cancellation_finalized_at TEXT,
       record_state TEXT NOT NULL DEFAULT 'active',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -195,6 +330,7 @@ export function createAgentTables(database: Pick<DatabaseInstance, 'exec' | 'pre
       delivery_status TEXT NOT NULL DEFAULT 'pending',
       attempt_count INTEGER NOT NULL DEFAULT 0,
       delivered_at TEXT,
+      superseded_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       CHECK (schema_version > 0),
@@ -574,6 +710,28 @@ export function createAgentTables(database: Pick<DatabaseInstance, 'exec' | 'pre
     CREATE INDEX IF NOT EXISTS idx_chat_agent_commit_journals_status
     ON chat_agent_commit_journals(status, updated_at ASC);
   `);
+
+  const checkpointColumns = database.prepare<[], DatabaseTableInfoRow>('PRAGMA table_info(chat_agent_delegation_checkpoints)').all();
+  if (!checkpointColumns.some((column): boolean => column.name === 'cancellation_finalized_at')) {
+    database.exec('ALTER TABLE chat_agent_delegation_checkpoints ADD COLUMN cancellation_finalized_at TEXT');
+  }
+  const outboxColumns = database.prepare<[], DatabaseTableInfoRow>('PRAGMA table_info(chat_agent_outbox)').all();
+  if (!outboxColumns.some((column): boolean => column.name === 'superseded_at')) {
+    database.exec('ALTER TABLE chat_agent_outbox ADD COLUMN superseded_at TEXT');
+  }
+  const attemptColumns = database.prepare<[], DatabaseTableInfoRow>('PRAGMA table_info(chat_agent_attempts)').all();
+  const requiresUsageColumn = !attemptColumns.some((column): boolean => column.name === 'usage_snapshot_json');
+  if (requiresUsageColumn) {
+    database.exec(`ALTER TABLE chat_agent_attempts ADD COLUMN usage_snapshot_json TEXT NOT NULL DEFAULT '${AGENT_ZERO_USAGE_JSON}'`);
+  }
+  if (!attemptColumns.some((column): boolean => column.name === 'usage_complete')) {
+    database.exec('ALTER TABLE chat_agent_attempts ADD COLUMN usage_complete INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!attemptColumns.some((column): boolean => column.name === 'usage_updated_at')) {
+    database.exec('ALTER TABLE chat_agent_attempts ADD COLUMN usage_updated_at TEXT');
+    database.exec('UPDATE chat_agent_attempts SET usage_updated_at = created_at WHERE usage_updated_at IS NULL');
+  }
+  backfillAttemptUsage(database);
 
   // 唯一索引创建前只读审计，避免 SQLite 原始错误掩盖稳定迁移错误。
   const duplicateMessage = database

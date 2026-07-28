@@ -232,6 +232,19 @@ async function createFixture(fileCount = 1): Promise<CommitFixture> {
     currentRuntimeId: runtimeId,
     runtimeSequence: 1,
     status: 'running',
+    usageSnapshot: {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      modelCalls: 0,
+      toolRounds: 0,
+      queueDurationMs: 0,
+      executionDurationMs: 0,
+      externalRequests: 0,
+      monetaryCost: { currency: 'USD', pricingVersion: 'test-v1', estimated: 0, actual: 'unknown' }
+    },
+    usageComplete: false,
+    usageUpdatedAt: NOW,
     startedAt: NOW,
     createdAt: NOW
   };

@@ -14,6 +14,7 @@ import type {
   AgentDelegationContinuationSnapshot,
   AgentDelegationReadyPayload,
   AgentExecutionPlanSnapshot,
+  AgentPreAttemptCancellationResult,
   AgentRecordState,
   AgentTaskContractSnapshot,
   AgentTaskError,
@@ -22,6 +23,7 @@ import type {
   AgentTaskQueuePhase,
   AgentTaskResult,
   AgentTaskStatus,
+  AgentUsageAccounting,
   ChatAgentEvent,
   ChatAgentEventSource,
   ChatAgentResult
@@ -163,6 +165,12 @@ export interface AgentAttemptRecord {
   runtimeSequence: number;
   /** Attempt 当前状态。 */
   status: AgentAttemptStatus;
+  /** 最近一次完整可观测边界确认的累计 usage；执行中可为 lower-bound。 */
+  usageSnapshot: AgentUsageAccounting;
+  /** usageSnapshot 是否覆盖 Attempt 的最终完整 outcome。 */
+  usageComplete: boolean;
+  /** usage snapshot 最近持久化时间。 */
+  usageUpdatedAt: string;
   /** 可选启动时间。 */
   startedAt?: string;
   /** 可选终止时间。 */
@@ -219,6 +227,8 @@ export interface AgentCheckpointRecord {
   resumeRuntimeId?: string;
   /** 中断或失败错误。 */
   error?: AgentTaskError;
+  /** source assistant、预算、广播与 continuation fence 已完成取消收尾的持久化标记。 */
+  cancellationFinalizedAt?: string;
   /** 逻辑记录状态。 */
   recordState: AgentRecordState;
   /** 不可变创建时间。 */
@@ -238,11 +248,13 @@ interface AgentOutboxRecordBase {
   /** payload Schema 版本。 */
   schemaVersion: number;
   /** 可变交付状态。 */
-  deliveryStatus: 'pending' | 'delivered';
+  deliveryStatus: 'pending' | 'delivered' | 'superseded';
   /** 交付尝试次数。 */
   attemptCount: number;
   /** 成功交付时间。 */
   deliveredAt?: string;
+  /** 事件在发布前失去资格的持久化终态时间。 */
+  supersededAt?: string;
   /** 不可变创建时间。 */
   createdAt: string;
   /** 投影更新时间。 */
@@ -404,6 +416,20 @@ export interface MarkAgentAttemptInput {
   occurredAt: string;
 }
 
+/** 持久化 Attempt 累计 usage 可观测边界的输入。 */
+export interface RecordAttemptUsageInput {
+  /** Attempt 所属 Task。 */
+  taskId: string;
+  /** 当前 Attempt。 */
+  attemptId: string;
+  /** 截至本边界确认的累计 usage。 */
+  usage: AgentUsageAccounting;
+  /** 是否已经覆盖最终完整 outcome。 */
+  complete: boolean;
+  /** usage 观察时间。 */
+  occurredAt: string;
+}
+
 /** 写入单个 Child 终态结果的输入。 */
 export interface RecordTaskResultInput {
   /** 结果所属 Task。 */
@@ -428,10 +454,42 @@ export interface RecordPreAttemptFailureInput {
   checkpointId: string;
   /** 原始 Provider tool-call ID。 */
   toolCallId: string;
-  /** 不可重试的计划或资源错误。 */
+  /** 不可重试的计划、资源或无 Attempt 恢复错误。 */
   error: AgentTaskError;
   /** 失败发生时间。 */
   occurredAt: string;
+}
+
+/** 原子记录单 Task cooperative cancellation 的输入。 */
+export interface RequestAgentTaskCancellationInput {
+  /** 目标 Task。 */
+  readonly taskId: string;
+  /** 区分单 Task 与 Checkpoint 级联。 */
+  readonly requestKind: 'single_task' | 'checkpoint_cascade';
+  /** 取消请求发生时间。 */
+  readonly occurredAt: string;
+}
+
+/** cooperative cancellation 请求写入后的权威投影。 */
+export interface AgentTaskCancellationProjection {
+  /** CAS 前读取到的 Task 状态。 */
+  readonly previousStatus: AgentTaskStatus;
+  /** 命令事务完成后的 Task。 */
+  readonly task: AgentTaskRecord;
+  /** 取消请求的权威处理结果。 */
+  readonly disposition: 'cancel_requested' | 'commit_in_progress' | 'already_settled';
+}
+
+/** 无 Attempt 取消的完整原子 rendezvous 输入。 */
+export interface RecordPreAttemptCancellationInput extends RequestAgentTaskCancellationInput {
+  /** 汇合结果的 Checkpoint。 */
+  readonly checkpointId: string;
+  /** 原始 Provider tool-call ID。 */
+  readonly toolCallId: string;
+  /** 已规范化的无 Attempt 取消结果。 */
+  readonly result: AgentPreAttemptCancellationResult;
+  /** canonical 结果 hash。 */
+  readonly resultHash: string;
 }
 
 /** Checkpoint 单次 resume claim 输入。 */
@@ -470,6 +528,14 @@ export interface CancelCheckpointInput {
   reason: string;
   /** 请求时间。 */
   occurredAt: string;
+}
+
+/** cancelled Checkpoint 外部收尾成功后的最终 CAS 输入。 */
+export interface FinalizeCancellationInput {
+  /** 目标 cancelled Checkpoint。 */
+  checkpointId: string;
+  /** 所有外部收尾副作用成功的时间。 */
+  finalizedAt: string;
 }
 
 /** Task 逻辑删除输入。 */
@@ -723,6 +789,12 @@ export interface AgentDelegationStore {
    */
   markAttemptRunning(input: MarkAgentAttemptInput): AgentAttemptProjection;
   /**
+   * 单调持久化一次 Provider 或最终 outcome 的累计 usage 边界。
+   * @param input - Attempt、累计 usage 与完整性
+   * @returns 更新后的 Attempt
+   */
+  recordAttemptUsage(input: RecordAttemptUsageInput): AgentAttemptRecord;
+  /**
    * 记录裁剪后的 Child 工具开始 Event。
    * @param input - 已由 Runtime 冻结的工具身份
    * @returns 持久化 Event
@@ -833,6 +905,18 @@ export interface AgentDelegationStore {
    */
   getConfirmation(confirmationId: string): AgentConfirmationRecord | null;
   /**
+   * 原子记录单 Task cooperative cancellation 意图。
+   * @param input - Task、请求种类与时间
+   * @returns 权威 Task 投影和处理结果
+   */
+  requestTaskCancellation(input: RequestAgentTaskCancellationInput): AgentTaskCancellationProjection;
+  /**
+   * 不创建 Attempt，原子写入取消 Result 并推进 rendezvous。
+   * @param input - Task、tool-call、Result 与 hash
+   * @returns 更新后的 Checkpoint
+   */
+  recordPreAttemptCancellation(input: RecordPreAttemptCancellationInput): AgentCheckpointRecord;
+  /**
    * 幂等写入单个终态结果并推进 Checkpoint。
    * @param input - Child 结果
    * @returns 更新后的 Checkpoint
@@ -862,6 +946,12 @@ export interface AgentDelegationStore {
    * @returns 当前 Checkpoint
    */
   cancelCheckpoint(input: CancelCheckpointInput): AgentCheckpointRecord;
+  /**
+   * 在 assistant、预算、广播和 fence 收尾全部成功后 CAS 写入最终标记。
+   * @param input - cancelled Checkpoint 与收尾时间
+   * @returns 首次或幂等重放后的 Checkpoint
+   */
+  finalizeCancellation(input: FinalizeCancellationInput): AgentCheckpointRecord;
   /**
    * 在所有引用稳定后逻辑删除终态 Task。
    * @param input - tombstone 请求
@@ -904,6 +994,8 @@ export interface AgentDelegationStore {
    * @returns Checkpoint，不存在时为 null
    */
   getCheckpoint(checkpointId: string): AgentCheckpointRecord | null;
+  /** @returns 所有需要恢复或确认取消收尾的 active cancelled Checkpoint。 */
+  listCancelledCheckpoints(): AgentCheckpointRecord[];
   /**
    * 读取聚合的有序 Event 历史。
    * @param aggregateKind - 聚合种类

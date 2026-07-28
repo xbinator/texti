@@ -271,7 +271,7 @@ describe('agent resource scheduler', (): void => {
     const phase = kind === 'exclusive-commit' ? 'commit' : 'start';
     const lease = await scheduler.enqueue(createRequest(`cancel-${kind}`, kind, { phase }));
 
-    expect(scheduler.cancel(lease.taskId, 'user_cancelled')).toBe(true);
+    expect(scheduler.cancel(lease.taskId, 'user_cancelled')).toBe('active_signalled');
     expect(lease.signal.aborted).toBe(true);
     expect(lease.signal.reason).toMatchObject({ code: 'cancelled', reason: 'user_cancelled' });
     lease.release();
@@ -318,12 +318,29 @@ describe('agent resource scheduler', (): void => {
         reason: 'user_cancelled'
       });
 
-      expect(scheduler.cancel(taskId, 'user_cancelled')).toBe(true);
+      expect(scheduler.cancel(taskId, 'user_cancelled')).toBe('queued_cancelled');
       await assertion;
       expect(scheduler.queuedCount()).toBe(0);
       releaseLeases(blockers);
     }
   );
+
+  it('returns not_found without affecting sibling queue or leases', async (): Promise<void> => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const scheduler = createAgentResourceScheduler();
+    const active = await scheduler.enqueue(createRequest('active-sibling'));
+    const queued = scheduler.enqueue(createRequest('queued-sibling', 'write-intent'));
+
+    expect(scheduler.cancel('missing-task', 'user_cancelled')).toBe('not_found');
+    expect(active.signal.aborted).toBe(false);
+    expect(scheduler.activeCount()).toBe(1);
+    expect(scheduler.queuedCount()).toBe(1);
+
+    active.release();
+    const queuedLease = await queued;
+    queuedLease.release();
+  });
 
   it('keeps deterministic priority, creation-time and task-id ordering', async (): Promise<void> => {
     vi.useFakeTimers();

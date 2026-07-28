@@ -13,6 +13,7 @@ import type {
   AgentDelegationStore,
   AgentOutboxRecord,
   AgentStoreDatabase,
+  AgentTaskCancellationProjection,
   AgentTaskProjectionRecord,
   AgentTaskRecord,
   BeginAgentAttemptInput,
@@ -25,12 +26,15 @@ import type { ChatMessageRecord } from 'types/chat';
 import type {
   AgentBudgetSnapshot,
   AgentArtifactReference,
+  AgentPreAttemptCancellationResult,
   AgentResourceReference,
   AgentDelegationContinuationSnapshot,
   AgentDelegationCreatedPayload,
   AgentDelegationReadyPayload,
   ChatAgentApplicationEvent,
   ChatAgentCancelCheckpointInput,
+  ChatAgentCancelTaskInput,
+  ChatAgentCancelTaskResult,
   ChatAgentCheckpointSnapshot,
   ChatAgentConfirmationSnapshot,
   ChatAgentGetTaskInput,
@@ -100,6 +104,8 @@ export type ChatAgentDelegationStore = Pick<
   | 'prepareDelegation'
   | 'authorizeTask'
   | 'recordPreAttemptFailure'
+  | 'recordPreAttemptCancellation'
+  | 'requestTaskCancellation'
   | 'recordTaskResult'
   | 'getTask'
   | 'getCheckpoint'
@@ -107,10 +113,12 @@ export type ChatAgentDelegationStore = Pick<
   | 'claimResume'
   | 'finalizeResume'
   | 'cancelCheckpoint'
+  | 'finalizeCancellation'
   | 'interruptCheckpoint'
   | 'interruptActive'
   | 'listEvents'
   | 'listActive'
+  | 'listCancelledCheckpoints'
   | 'listPendingOutbox'
   | 'markOutboxDelivered'
 >;
@@ -216,6 +224,14 @@ const AGENT_TASK_WARNING_LIMIT = 16;
  */
 function createProjectorError(reason: string): Error {
   return new Error(reason);
+}
+
+/**
+ * 创建不泄露 Task 存在性的稳定命令错误。
+ * @returns IPC 可识别的 not-found 错误
+ */
+function createTaskNotFound(): Error & { readonly code: 'NOT_FOUND' } {
+  return Object.assign(new Error('agent_task_not_found'), { code: 'NOT_FOUND' as const });
 }
 
 /**
@@ -339,6 +355,7 @@ function isSafeRepoPath(value: string): boolean {
 function mapEventCategory(type: ChatAgentTaskEventType): ChatAgentTaskTimelineEntry['type'] {
   switch (type) {
     case 'task.created':
+    case 'task.cancel_requested':
     case 'task.status_changed':
     case 'plan.authorized':
     case 'task.queued':
@@ -380,6 +397,7 @@ function mapEventCategory(type: ChatAgentTaskEventType): ChatAgentTaskTimelineEn
 function isTaskEventType(value: string): value is ChatAgentTaskEventType {
   return [
     'task.created',
+    'task.cancel_requested',
     'task.status_changed',
     'plan.authorized',
     'task.queued',
@@ -947,8 +965,28 @@ class DefaultAgentTaskProjector implements AgentTaskProjector {
       enforceSnapshotSize(tombstone);
       return Object.freeze(tombstone);
     }
+    const cancelEvents = projection.events.filter((event): boolean => event.type === 'task.cancel_requested');
+    let cancellation: ChatAgentTaskSummarySnapshot['cancellation'];
     if (task.cancelRequestedAt !== undefined) {
-      throw createProjectorError('agent_task_cancellation_unsupported');
+      const event = cancelEvents[0];
+      const payload = event?.payload;
+      if (
+        cancelEvents.length !== 1 ||
+        !event ||
+        event.occurredAt !== task.cancelRequestedAt ||
+        typeof payload !== 'object' ||
+        payload === null ||
+        !('requestKind' in payload) ||
+        (payload.requestKind !== 'single_task' && payload.requestKind !== 'checkpoint_cascade')
+      ) {
+        throw createProjectorError('agent_task_cancellation_invalid');
+      }
+      cancellation = Object.freeze({
+        requestKind: payload.requestKind,
+        requestedAt: task.cancelRequestedAt
+      });
+    } else if (cancelEvents.length !== 0) {
+      throw createProjectorError('agent_task_cancellation_invalid');
     }
 
     const taskText = sanitizeAgentDisplayText(task.contractSnapshot.task, 4000);
@@ -986,6 +1024,7 @@ class DefaultAgentTaskProjector implements AgentTaskProjector {
             })
           }
         : {}),
+      ...(cancellation ? { cancellation } : {}),
       ...(resultSummary ? { summary: resultSummary } : {}),
       createdAt: task.createdAt,
       updatedAt: task.updatedAt
@@ -1220,6 +1259,18 @@ export interface ChatAgentDelegationServiceDependencies {
    * @returns 安全完成或已持久化失败
    */
   startPrimaryContinuation: (input: ChatAgentPrimaryContinuationInput) => Promise<ChatAgentPrimaryContinuationResult>;
+  /**
+   * 等待 Main Coordinator 完成单 Task 取消仲裁。
+   * @param taskId - 目标 Task
+   * @returns 权威 disposition
+   */
+  cancelTaskExecution?: (taskId: string) => Promise<AgentTaskCancellationProjection['disposition']>;
+  /**
+   * 等待 Main Coordinator 完成 Checkpoint 级联与清理。
+   * @param checkpointId - 目标 Checkpoint
+   * @param reason - 稳定机器原因
+   */
+  cancelCheckpointExecution?: (checkpointId: string, reason: string) => Promise<void>;
 }
 
 /** 服务边界接收的未可信 Child 终态结果。 */
@@ -1262,6 +1313,23 @@ export interface ChatAgentDelegationService {
    */
   recordPreFailure(task: AgentTaskRecord, error: AgentTaskError): ReturnType<AgentDelegationStore['recordPreAttemptFailure']>;
   /**
+   * 原子记录无 Attempt cooperative cancellation。
+   * @param task - 目标 Task
+   * @param requestKind - 单 Task 或 Checkpoint 级联
+   * @returns 最新 Checkpoint
+   */
+  recordPreCancellation(
+    task: AgentTaskRecord,
+    requestKind: 'single_task' | 'checkpoint_cascade'
+  ): ReturnType<AgentDelegationStore['recordPreAttemptCancellation']>;
+  /**
+   * 持久化已有 Attempt Task 的 cooperative cancellation 请求。
+   * @param taskId - 目标 Task
+   * @param requestKind - 单 Task 或 Checkpoint 级联
+   * @returns 权威 Task 投影
+   */
+  requestTaskCancellation(taskId: string, requestKind: 'single_task' | 'checkpoint_cascade'): AgentTaskCancellationProjection;
+  /**
    * 使用当前 ready 版本 CAS claim 唯一 Runtime B。
    * @param checkpointId - ready Checkpoint
    * @returns claim 成功后的 Checkpoint，竞争失败为 null
@@ -1300,7 +1368,13 @@ export interface ChatAgentDelegationService {
    * @param input - 最小取消输入
    * @returns 当前公开 Checkpoint 投影
    */
-  cancelCheckpoint(input: ChatAgentCancelCheckpointInput): ChatAgentCheckpointSnapshot;
+  cancelCheckpoint(input: ChatAgentCancelCheckpointInput): Promise<ChatAgentCheckpointSnapshot>;
+  /**
+   * 取消当前 Session 内一个 Task。
+   * @param input - Session 与 Task 身份
+   * @returns Coordinator 清理后的权威 Summary
+   */
+  cancelTask(input: ChatAgentCancelTaskInput): Promise<ChatAgentCancelTaskResult>;
   /**
    * 由可信 Main 协调器使用稳定机器原因持久化 cooperative cancellation。
    * @param checkpointId - 目标 Checkpoint
@@ -1324,6 +1398,11 @@ export interface ChatAgentDelegationService {
    * @returns 被中断的 Checkpoint 数
    */
   interruptUnrecoverableCheckpoints(): number;
+  /**
+   * 启动时补偿已持久化 cancelled Checkpoint 的 assistant、预算与 fence 收尾。
+   * @returns 本进程确认完成收尾的 Checkpoint 数
+   */
+  recoverCancellations(): number;
   /** 重放全部待交付 Outbox，并等待强制内部消费者接受。 */
   drainOutbox(): Promise<void>;
 }
@@ -1650,15 +1729,17 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
     const existing = deliveryInFlight.get(outbox.outboxId);
     if (existing) return existing;
     const delivery = (async (): Promise<void> => {
-      if (outbox.eventType === 'delegation.created') {
-        if (dependencies.dispatchInternal) {
+      if (dependencies.dispatchInternal) {
+        if (outbox.eventType === 'delegation.created') {
           await dependencies.dispatchInternal('delegation.created', outbox.payload);
-        }
-        dependencies.publish('delegation.created', outbox.payload);
-      } else {
-        if (dependencies.dispatchInternal) {
+        } else {
           await dependencies.dispatchInternal('delegation.ready', outbox.payload);
         }
+      }
+      if (!isOutboxEligible(outbox)) return;
+      if (outbox.eventType === 'delegation.created') {
+        dependencies.publish('delegation.created', outbox.payload);
+      } else {
         dependencies.publish('delegation.ready', outbox.payload);
       }
       dependencies.store.markOutboxDelivered({
@@ -2010,6 +2091,52 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
   }
 
   /**
+   * 校验取消响应仍属于命令开始时的同一公开 Task。
+   * @param baseline - 命令前权威 Summary
+   * @param updated - Coordinator 完成后重新投影的 Summary
+   */
+  function assertCancelSummary(
+    baseline: ChatAgentTaskSummarySnapshot,
+    updated: ChatAgentTaskEventSnapshot | null
+  ): asserts updated is ChatAgentTaskSummarySnapshot {
+    if (
+      !updated ||
+      updated.recordState !== 'active' ||
+      updated.taskId !== baseline.taskId ||
+      updated.sessionId !== baseline.sessionId ||
+      updated.turnId !== baseline.turnId ||
+      updated.checkpointId !== baseline.checkpointId ||
+      updated.assistantMessageId !== baseline.assistantMessageId ||
+      updated.toolCallId !== baseline.toolCallId ||
+      updated.agentId !== baseline.agentId ||
+      updated.taskSequence < baseline.taskSequence
+    ) {
+      throw createProjectorError('agent_task_cancel_projection_invalid');
+    }
+  }
+
+  /**
+   * 等待 Coordinator 取消一个 Session-bound Task，再返回重新投影的 Summary。
+   * @param input - Session 与 Task 身份
+   * @returns 不包含 Detail 的权威结果
+   */
+  async function cancelTask(input: ChatAgentCancelTaskInput): Promise<ChatAgentCancelTaskResult> {
+    const baseline = dependencies.taskProjector.projectSummary(input.taskId);
+    if (!baseline || baseline.recordState !== 'active' || baseline.sessionId !== input.sessionId) throw createTaskNotFound();
+    if (!dependencies.cancelTaskExecution) throw createProjectorError('agent_task_cancel_unavailable');
+    const disposition = await dependencies.cancelTaskExecution(input.taskId);
+    const updated = dependencies.taskProjector.projectSummary(input.taskId);
+    assertCancelSummary(baseline, updated);
+    if (disposition !== 'already_settled' && !updated.cancellation) {
+      throw createProjectorError('agent_task_cancel_projection_invalid');
+    }
+    return Object.freeze({
+      disposition,
+      task: updated
+    });
+  }
+
+  /**
    * 返回所有公开 pending confirmation 投影。
    * @returns Main 持久化事实的 allowlist 快照
    */
@@ -2030,20 +2157,28 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
    * 终态化 cancelled Checkpoint 的 source assistant、预算和 continuation fence。
    * @param checkpoint - Store 已持久化的 cancelled Checkpoint
    */
-  function finishCancellation(checkpoint: AgentCheckpointRecord): void {
+  function finishCancellation(checkpoint: AgentCheckpointRecord): AgentCheckpointRecord {
+    const persisted = dependencies.store.getCheckpoint(checkpoint.checkpointId);
+    const current = persisted?.status === 'cancelled' ? persisted : checkpoint;
+    if (current.cancellationFinalizedAt) return current;
     const sourceAssistant = dependencies
-      .readMessages(checkpoint.sessionId)
-      .find((message): boolean => message.id === checkpoint.assistantMessageId && message.role === 'assistant');
+      .readMessages(current.sessionId)
+      .find((message): boolean => message.id === current.assistantMessageId && message.role === 'assistant');
     if (!sourceAssistant) {
-      throw createFenceError(checkpoint.checkpointId, 'cancel_source_assistant_missing');
+      throw createFenceError(current.checkpointId, 'cancel_source_assistant_missing');
     }
     const interruptedAssistant = structuredClone(sourceAssistant);
     finishAssistantMessageInterrupted(interruptedAssistant);
-    dependencies.persistAssistant(interruptedAssistant, checkpoint.checkpointId);
-    dependencies.publishAssistant(interruptedAssistant, checkpoint);
-    dependencies.budgetLedger?.releaseCheckpoint(checkpoint.checkpointId);
-    // Store cancellation、assistant 终态和预算释放都已持久化并广播后，才允许释放历史 fence。
-    releaseContinuation(checkpoint.checkpointId);
+    dependencies.persistAssistant(interruptedAssistant, current.checkpointId);
+    dependencies.budgetLedger?.releaseCheckpoint(current.checkpointId);
+    dependencies.publishAssistant(interruptedAssistant, current);
+    releaseContinuation(current.checkpointId);
+    // marker 必须最后 CAS；崩溃时宁可重放 publish，也不能遗漏 assistant、预算或 fence 补偿。
+    const finalized = dependencies.store.finalizeCancellation({
+      checkpointId: current.checkpointId,
+      finalizedAt: dependencies.now()
+    });
+    return finalized;
   }
 
   /**
@@ -2072,8 +2207,8 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
       return publishCheckpointSnapshot(checkpoint);
     }
 
-    finishCancellation(checkpoint);
-    return publishCheckpointSnapshot(checkpoint);
+    const finalized = finishCancellation(checkpoint);
+    return publishCheckpointSnapshot(finalized);
   }
 
   /**
@@ -2081,8 +2216,12 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
    * @param input - 最小取消输入
    * @returns 当前公开 Checkpoint
    */
-  function cancelCheckpoint(input: ChatAgentCancelCheckpointInput): ChatAgentCheckpointSnapshot {
-    return cancelWithReason(input.checkpointId, 'user_cancelled');
+  async function cancelCheckpoint(input: ChatAgentCancelCheckpointInput): Promise<ChatAgentCheckpointSnapshot> {
+    if (!dependencies.cancelCheckpointExecution) throw createFenceError(input.checkpointId, 'checkpoint_cancel_coordinator_unavailable');
+    await dependencies.cancelCheckpointExecution(input.checkpointId, 'user_cancelled');
+    const checkpoint = dependencies.store.getCheckpoint(input.checkpointId);
+    if (!checkpoint || checkpoint.recordState !== 'active') throw createFenceError(input.checkpointId, 'checkpoint_not_found');
+    return projectCheckpoint(checkpoint, readCheckpointSequence(checkpoint.checkpointId));
   }
 
   /**
@@ -2266,6 +2405,104 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
       return checkpoint;
     },
 
+    recordPreCancellation(
+      task: AgentTaskRecord,
+      requestKind: 'single_task' | 'checkpoint_cascade'
+    ): ReturnType<AgentDelegationStore['recordPreAttemptCancellation']> {
+      const current = dependencies.store.getTask(task.taskId);
+      if (
+        !current ||
+        current.checkpointId !== task.checkpointId ||
+        current.toolCallId !== task.toolCallId ||
+        current.agentId !== task.agentId ||
+        current.currentAttemptId !== undefined
+      ) {
+        throw new ChatAgentDelegationError({
+          code: 'protocol_error',
+          phase: 'queue',
+          category: 'protocol',
+          retryable: false,
+          details: { reason: 'pre_attempt_cancel_context_invalid', taskId: task.taskId }
+        });
+      }
+      const candidate: AgentPreAttemptCancellationResult = {
+        resultKind: 'pre_attempt_cancelled',
+        taskId: current.taskId,
+        agentId: current.agentId,
+        executionStatus: 'cancelled',
+        completion: {
+          level: 'none',
+          criteria: current.contractSnapshot.acceptanceCriteria.map((_criterion, criterionIndex) => ({
+            criterionIndex,
+            claim: {
+              status: 'unknown',
+              summary: 'Task was cancelled before this criterion could be evaluated.',
+              evidence: []
+            },
+            verification: {
+              status: 'unverified',
+              verifier: 'policy',
+              evidence: []
+            }
+          }))
+        },
+        summary: 'Task was cancelled before execution.',
+        warnings: [],
+        artifacts: [],
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          modelCalls: 0,
+          toolRounds: 0,
+          queueDurationMs: 0,
+          executionDurationMs: 0,
+          externalRequests: 0,
+          monetaryCost: {
+            currency: 'unknown',
+            pricingVersion: 'unknown',
+            estimated: 'unknown',
+            actual: 'unknown'
+          }
+        },
+        error: {
+          code: 'cancelled',
+          phase: 'queue',
+          category: 'user',
+          retryable: false
+        }
+      };
+      const validation = validateAgentResult(candidate, {
+        taskId: current.taskId,
+        agentId: current.agentId,
+        contractSnapshot: current.contractSnapshot
+      });
+      if (!validation.ok) throw new ChatAgentDelegationError(validation.error);
+      if (!('resultKind' in validation.result) || validation.result.resultKind !== 'pre_attempt_cancelled') {
+        throw createProjectorError('pre_attempt_cancel_result_invalid');
+      }
+      const checkpoint = dependencies.store.recordPreAttemptCancellation({
+        taskId: current.taskId,
+        checkpointId: current.checkpointId,
+        toolCallId: current.toolCallId,
+        requestKind,
+        result: structuredClone(validation.result),
+        resultHash: validation.resultHash,
+        occurredAt: dependencies.now()
+      });
+      publishCheckpointSnapshot(checkpoint);
+      if (checkpoint.status === 'ready_to_resume') queueOutbox(findReadyOutbox(checkpoint));
+      return checkpoint;
+    },
+
+    requestTaskCancellation(taskId: string, requestKind: 'single_task' | 'checkpoint_cascade'): AgentTaskCancellationProjection {
+      return dependencies.store.requestTaskCancellation({
+        taskId,
+        requestKind,
+        occurredAt: dependencies.now()
+      });
+    },
+
     recordTaskResult(input: ChatAgentRecordTaskResultInput): ReturnType<AgentDelegationStore['recordTaskResult']> {
       const task = dependencies.store.getTask(input.taskId);
       if (!task || task.checkpointId !== input.checkpointId || task.toolCallId !== input.toolCallId || !task.currentAttemptId || !task.executionPlanSnapshot) {
@@ -2296,7 +2533,6 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
         occurredAt
       });
       if (checkpoint.status === 'cancelled') {
-        finishCancellation(checkpoint);
         publishCheckpointSnapshot(checkpoint);
         return checkpoint;
       }
@@ -2317,6 +2553,8 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
     listTasks,
 
     getTask,
+
+    cancelTask,
 
     listConfirmations,
 
@@ -2352,6 +2590,14 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
 
     interruptUnrecoverableCheckpoints(): number {
       return interruptActiveCheckpoints();
+    },
+
+    recoverCancellations(): number {
+      const checkpoints = dependencies.store.listCancelledCheckpoints();
+      checkpoints.forEach((checkpoint): void => {
+        finishCancellation(checkpoint);
+      });
+      return checkpoints.length;
     },
 
     async drainOutbox(): Promise<void> {
@@ -2582,6 +2828,14 @@ export const chatAgentDelegationService = createChatAgentDelegationService({
   async startPrimaryContinuation(input: ChatAgentPrimaryContinuationInput): Promise<ChatAgentPrimaryContinuationResult> {
     const { chatRuntimeService } = await import('../runtime/service.mjs');
     return chatRuntimeService.resumePrimary(input);
+  },
+  cancelTaskExecution(taskId: string): Promise<AgentTaskCancellationProjection['disposition']> {
+    if (!defaultCoordinator) return Promise.reject(new Error('agent_coordinator_not_initialized'));
+    return defaultCoordinator.cancelTask(taskId);
+  },
+  cancelCheckpointExecution(checkpointId: string, reason: string): Promise<void> {
+    if (!defaultCoordinator) return Promise.reject(new Error('agent_coordinator_not_initialized'));
+    return defaultCoordinator.cancel(checkpointId, reason);
   }
 });
 
@@ -2607,6 +2861,9 @@ const defaultChildExecutor = createChildRuntimeExecutor({
   recordToolCompleted: (input): void => {
     defaultAgentStore.recordToolCompleted(input);
   },
+  recordAttemptUsage: (input): void => {
+    defaultAgentStore.recordAttemptUsage(input);
+  },
   now: (): number => Date.now()
 });
 
@@ -2615,10 +2872,14 @@ export const chatAgentCoordinator = createAgentCoordinator({
   listActive: () => defaultAgentStore.listActive(),
   authorizeTask: (taskId: string): AgentTaskRecord => chatAgentDelegationService.authorizeTask(taskId),
   recordPreFailure: (task: AgentTaskRecord, error: AgentTaskError): AgentCheckpointRecord => chatAgentDelegationService.recordPreFailure(task, error),
+  recordPreCancellation: (task, requestKind) => chatAgentDelegationService.recordPreCancellation(task, requestKind),
+  requestTaskCancellation: (taskId, requestKind) => chatAgentDelegationService.requestTaskCancellation(taskId, requestKind),
   reserveResume: (checkpointId: string, budget: AgentBudgetSnapshot): void => defaultBudgetLedger.reserveResume(checkpointId, budget),
   scheduler: defaultResourceScheduler,
   beginAttempt: (input: BeginAgentAttemptInput): AgentAttemptProjection => defaultAgentStore.beginAttempt(input),
   markAttemptRunning: (input: MarkAgentAttemptInput): AgentAttemptProjection => defaultAgentStore.markAttemptRunning(input),
+  getAttempt: (attemptId: string) => defaultAgentStore.getAttempt(attemptId),
+  recordAttemptUsage: (input) => defaultAgentStore.recordAttemptUsage(input),
   recordTaskResult: (task: AgentTaskRecord, result: ChatAgentResult): AgentCheckpointRecord =>
     chatAgentDelegationService.recordTaskResult({
       taskId: task.taskId,
@@ -2656,6 +2917,7 @@ export async function recoverChatAgentDelegations(): Promise<void> {
   controlledWriteReady = false;
   await chatAgentFileCommitter.recover();
   chatAgentConfirmationQueue.recover();
+  chatAgentDelegationService.recoverCancellations();
   await chatAgentDelegationService.recoverInterruptedWrites();
   controlledWriteReady = true;
   await chatAgentCoordinator.recover();

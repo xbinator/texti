@@ -3,7 +3,14 @@
  * @description 在无聊天消息持久化、无 Session 锁和无 Renderer Bridge 的边界内执行只读或受控写入 Child Attempt。
  */
 import * as fs from 'node:fs/promises';
-import type { AgentAttemptRecord, AgentCheckpointRecord, AgentTaskRecord, RecordAgentToolCompletedInput, RecordAgentToolStartedInput } from './types.mjs';
+import type {
+  AgentAttemptRecord,
+  AgentCheckpointRecord,
+  AgentTaskRecord,
+  RecordAgentToolCompletedInput,
+  RecordAgentToolStartedInput,
+  RecordAttemptUsageInput
+} from './types.mjs';
 import type { ChatModelResolver } from '../runtime/model/resolver.mjs';
 import type { RuntimeStreamText } from '../runtime/stream/index.mjs';
 import type { ActiveChatRuntime } from '../runtime/types.mjs';
@@ -129,6 +136,11 @@ export interface ChildExecutorDependencies {
    * @param input - 工具身份与 canonical 结果 hash
    */
   readonly recordToolCompleted: (input: RecordAgentToolCompletedInput) => void;
+  /**
+   * 在每次 Provider 返回完整累计 usage 后同步持久化 lower-bound。
+   * @param input - Attempt 身份、累计 usage 与观察时间
+   */
+  readonly recordAttemptUsage: (input: RecordAttemptUsageInput) => void;
   /**
    * 读取单调执行时钟。
    * @returns 毫秒时间戳
@@ -678,6 +690,13 @@ async function executeRuntime(
     state.modelCalls += 1;
     if ((runtime.currentToolStep?.toolCalls.length ?? 0) > 0) state.toolRounds += 1;
     state.usage = addRuntimeUsage(state.usage, streamResult.totalUsage);
+    dependencies.recordAttemptUsage({
+      taskId: input.task.taskId,
+      attemptId: input.attempt.attemptId,
+      usage: createUsage(dependencies, plan, state),
+      complete: false,
+      occurredAt: new Date(dependencies.now()).toISOString()
+    });
 
     if (controller.signal.aborted) {
       return disposeRuntimeTools(

@@ -387,6 +387,9 @@ async function createFixture(controlledWriteEnabled = true): Promise<WriteRuntim
     }),
     recordToolStarted: (): void => undefined,
     recordToolCompleted: (): void => undefined,
+    recordAttemptUsage: (input): void => {
+      store.recordAttemptUsage(input);
+    },
     now: (): number => Date.now()
   });
   const fileCommitter = createAgentFileCommitter({
@@ -447,10 +450,14 @@ async function createFixture(controlledWriteEnabled = true): Promise<WriteRuntim
     listActive: () => store.listActive(),
     authorizeTask: (taskId: string): AgentTaskRecord => service.authorizeTask(taskId),
     recordPreFailure: (task: AgentTaskRecord, error: AgentTaskError) => service.recordPreFailure(task, error),
+    recordPreCancellation: (task, requestKind) => service.recordPreCancellation(task, requestKind),
+    requestTaskCancellation: (taskId, requestKind) => service.requestTaskCancellation(taskId, requestKind),
     reserveResume: (checkpointId: string, budget: AgentBudgetSnapshot): void => budgetLedger.reserveResume(checkpointId, budget),
     scheduler,
     beginAttempt: (input) => store.beginAttempt(input),
     markAttemptRunning: (input) => store.markAttemptRunning(input),
+    getAttempt: (attemptId: string) => store.getAttempt(attemptId),
+    recordAttemptUsage: (input) => store.recordAttemptUsage(input),
     recordTaskResult: (task: AgentTaskRecord, result) =>
       service.recordTaskResult({
         taskId: task.taskId,

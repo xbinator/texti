@@ -2,8 +2,8 @@
  * @file result.mts
  * @description 在主进程中按不可变 Task 身份、验收标准和冻结预算规范化 Child 终态结果。
  */
-import type { AgentExecutionPlanSnapshot, AgentTaskContractSnapshot, AgentTaskError, ChatAgentResult } from 'types/chat-agent';
-import { hashAgentPayload, validateChatAgentResult } from './contracts.mjs';
+import type { AgentExecutionPlanSnapshot, AgentTaskContractSnapshot, AgentTaskError, AgentTaskResult, ChatAgentResult } from 'types/chat-agent';
+import { hashAgentPayload, validateChatAgentResult, validatePreAttemptCancellation, validatePreAttemptFailure } from './contracts.mjs';
 
 /** Task-aware 结果校验需要的最小不可变上下文。 */
 export interface AgentResultValidationContext {
@@ -12,11 +12,29 @@ export interface AgentResultValidationContext {
   /** 持久化 Child Actor 身份。 */
   readonly agentId: string;
   /** 当前 Attempt 身份。 */
-  readonly attemptId: string;
+  readonly attemptId?: string;
   /** 不可变任务契约。 */
   readonly contractSnapshot: AgentTaskContractSnapshot;
   /** 不可变执行计划。 */
+  readonly executionPlanSnapshot?: AgentExecutionPlanSnapshot;
+}
+
+/** 真实 Attempt 结果完成验证所需的完整上下文。 */
+export interface AgentAttemptResultValidationContext extends AgentResultValidationContext {
+  /** 真实 Attempt 结果必须绑定当前 Attempt。 */
+  readonly attemptId: string;
+  /** 真实 Attempt 结果必须绑定冻结计划。 */
   readonly executionPlanSnapshot: AgentExecutionPlanSnapshot;
+}
+
+/** 真实 Attempt 结果验证成功。 */
+interface AgentAttemptResultValidationSuccess {
+  /** 成功判别。 */
+  readonly ok: true;
+  /** 绑定当前 Attempt 的 canonical 结果。 */
+  readonly result: Readonly<ChatAgentResult>;
+  /** canonical 结果 hash。 */
+  readonly resultHash: string;
 }
 
 /** 已完成 Task-aware 规范化的 canonical 结果。 */
@@ -24,7 +42,7 @@ export interface AgentResultValidationSuccess {
   /** 成功判别。 */
   readonly ok: true;
   /** 深冻结、可安全持久化的结果。 */
-  readonly result: Readonly<ChatAgentResult>;
+  readonly result: Readonly<AgentTaskResult>;
   /** 由主进程对规范化结果计算的 canonical hash。 */
   readonly resultHash: string;
 }
@@ -36,6 +54,9 @@ export interface AgentResultValidationFailure {
   /** 不依赖展示消息作机器判断的稳定错误。 */
   readonly error: AgentTaskError;
 }
+
+/** 真实 Attempt 结果校验返回值。 */
+type AgentAttemptResultValidation = AgentAttemptResultValidationSuccess | AgentResultValidationFailure;
 
 /** Task-aware 结果校验返回值。 */
 export type AgentResultValidation = AgentResultValidationSuccess | AgentResultValidationFailure;
@@ -139,7 +160,7 @@ function normalizeCompletion(input: unknown): unknown {
  * @param context - 持久化 Task 上下文
  * @returns 不一致时的失败结果
  */
-function validateIdentity(result: Readonly<ChatAgentResult>, context: AgentResultValidationContext): AgentResultValidationFailure | null {
+function validateIdentity(result: Readonly<ChatAgentResult>, context: AgentAttemptResultValidationContext): AgentResultValidationFailure | null {
   if (result.taskId !== context.taskId || result.agentId !== context.agentId || result.attemptId !== context.attemptId) {
     return resultFailure('result_identity_invalid', 'Agent result identity does not match the persisted Task and Attempt');
   }
@@ -166,7 +187,7 @@ function validateIdentity(result: Readonly<ChatAgentResult>, context: AgentResul
  * @param context - Task 契约与冻结计划
  * @returns 越界时的失败结果
  */
-function validateChangeset(result: Readonly<ChatAgentResult>, context: AgentResultValidationContext): AgentResultValidationFailure | null {
+function validateChangeset(result: Readonly<ChatAgentResult>, context: AgentAttemptResultValidationContext): AgentResultValidationFailure | null {
   if (context.contractSnapshot.mode === 'read') {
     if (context.executionPlanSnapshot.commitPolicy.mode !== 'none') {
       return resultFailure('result_commit_policy_mismatch', 'Read Task results require a none commit policy');
@@ -234,7 +255,49 @@ function validateUsage(result: Readonly<ChatAgentResult>, plan: AgentExecutionPl
  * @param context - 持久化 Task/Attempt/Plan 上下文
  * @returns canonical 结果、hash 或稳定错误
  */
+export function validateAgentResult(input: unknown, context: AgentAttemptResultValidationContext): AgentAttemptResultValidation;
+export function validateAgentResult(input: unknown, context: AgentResultValidationContext): AgentResultValidation;
 export function validateAgentResult(input: unknown, context: AgentResultValidationContext): AgentResultValidation {
+  if (isRecord(input) && 'resultKind' in input) {
+    let preAttemptValidation = null;
+    if (input.resultKind === 'pre_attempt_cancelled') {
+      preAttemptValidation = validatePreAttemptCancellation(input);
+    } else if (input.resultKind === 'pre_attempt_failure') {
+      preAttemptValidation = validatePreAttemptFailure(input);
+    }
+    if (!preAttemptValidation) {
+      return resultFailure('pre_attempt_kind_invalid', 'Pre-Attempt result kind is unsupported');
+    }
+    if (!preAttemptValidation.ok) {
+      return {
+        ok: false,
+        error: preAttemptValidation.error
+      };
+    }
+    const { result } = preAttemptValidation;
+    if (context.attemptId !== undefined || result.taskId !== context.taskId || result.agentId !== context.agentId) {
+      return resultFailure('pre_attempt_identity_invalid', 'Pre-Attempt result requires matching Task and Agent identities without an Attempt');
+    }
+    if (
+      result.completion.criteria.length !== context.contractSnapshot.acceptanceCriteria.length ||
+      result.completion.criteria.some((criterion, index): boolean => criterion.criterionIndex !== index)
+    ) {
+      return resultFailure('result_criteria_identity_invalid', 'Agent result criteria must exactly preserve the Task acceptance-criteria order');
+    }
+    return {
+      ok: true,
+      result,
+      resultHash: hashAgentPayload(result)
+    };
+  }
+  if (!context.attemptId || !context.executionPlanSnapshot) {
+    return resultFailure('result_attempt_context_missing', 'Attempt results require current Attempt and frozen plan identities');
+  }
+  const attemptContext: AgentAttemptResultValidationContext = {
+    ...context,
+    attemptId: context.attemptId,
+    executionPlanSnapshot: context.executionPlanSnapshot
+  };
   const normalizedInput = normalizeCompletion(input);
   const shapeValidation = validateChatAgentResult(normalizedInput);
   if (!shapeValidation.ok) {
@@ -243,11 +306,11 @@ export function validateAgentResult(input: unknown, context: AgentResultValidati
       error: shapeValidation.error
     };
   }
-  const identityFailure = validateIdentity(shapeValidation.result, context);
+  const identityFailure = validateIdentity(shapeValidation.result, attemptContext);
   if (identityFailure) return identityFailure;
-  const changesetFailure = validateChangeset(shapeValidation.result, context);
+  const changesetFailure = validateChangeset(shapeValidation.result, attemptContext);
   if (changesetFailure) return changesetFailure;
-  const usageFailure = validateUsage(shapeValidation.result, context.executionPlanSnapshot);
+  const usageFailure = validateUsage(shapeValidation.result, attemptContext.executionPlanSnapshot);
   if (usageFailure) return usageFailure;
   return {
     ok: true,

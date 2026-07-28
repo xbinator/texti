@@ -4,6 +4,7 @@
  */
 import type {
   ChatAgentCheckpointSnapshot,
+  ChatAgentCancelTaskResult,
   ChatAgentConfirmationSnapshot,
   ChatAgentHandlerResult,
   ChatAgentResumeResult,
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   resolveConfirmation: vi.fn(),
   resumePrimary: vi.fn(),
   cancelCheckpoint: vi.fn(),
+  cancelTask: vi.fn(),
   listTasks: vi.fn(),
   getTask: vi.fn()
 }));
@@ -38,6 +40,7 @@ vi.mock('../../../../../../electron/main/modules/chat/agents/service.mjs', () =>
     resolveConfirmation: mocks.resolveConfirmation,
     resumePrimary: mocks.resumePrimary,
     cancelCheckpoint: mocks.cancelCheckpoint,
+    cancelTask: mocks.cancelTask,
     listTasks: mocks.listTasks,
     getTask: mocks.getTask
   }
@@ -98,6 +101,7 @@ describe('chat agent IPC', (): void => {
     mocks.resolveConfirmation.mockReset();
     mocks.resumePrimary.mockReset();
     mocks.cancelCheckpoint.mockReset();
+    mocks.cancelTask.mockReset();
     mocks.listTasks.mockReset();
     mocks.getTask.mockReset();
   });
@@ -165,6 +169,58 @@ describe('chat agent IPC', (): void => {
       code: 'INVALID_INPUT'
     });
     expect(mocks.getTask).not.toHaveBeenCalled();
+  });
+
+  it('registers one asynchronous strict cancel-task command', async (): Promise<void> => {
+    const task = {
+      recordState: 'active',
+      taskId: 'task-1',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      checkpointId: 'checkpoint-1',
+      assistantMessageId: 'assistant-1',
+      toolCallId: 'tool-call-1',
+      agentId: 'child-1',
+      projectionSchemaVersion: 1,
+      taskSequence: 4,
+      task: 'Inspect context',
+      mode: 'read',
+      required: true,
+      priority: 'normal',
+      status: 'cancelling',
+      cancellation: {
+        requestKind: 'single_task',
+        requestedAt: '2026-07-28T00:00:02.000Z'
+      },
+      createdAt: '2026-07-28T00:00:00.000Z',
+      updatedAt: '2026-07-28T00:00:02.000Z'
+    } satisfies ChatAgentTaskSummarySnapshot;
+    const result: ChatAgentCancelTaskResult = {
+      disposition: 'cancel_requested',
+      task
+    };
+    mocks.cancelTask.mockResolvedValue(result);
+    registerChatAgentHandlers();
+    const handler = mocks.handlers.get('chat:agent:cancel-task');
+    if (!handler) throw new Error('cancel-task handler was not registered');
+
+    expect(await handler({}, { sessionId: 'session-1', taskId: 'task-1' })).toEqual({ ok: true, data: result });
+    expect(mocks.cancelTask).toHaveBeenCalledWith({ sessionId: 'session-1', taskId: 'task-1' });
+
+    await Promise.all(
+      [
+        null,
+        [],
+        { sessionId: 'session-1' },
+        { taskId: 'task-1' },
+        { sessionId: 'session-1', taskId: 'task-1', reason: 'forged' },
+        { sessionId: ' session-1', taskId: 'task-1' },
+        { sessionId: 'session-1', taskId: 'task-\n1' }
+      ].map(async (input): Promise<void> => {
+        expect(await handler({}, input)).toMatchObject({ ok: false, code: 'INVALID_INPUT' });
+      })
+    );
+    expect(await handler({}, { sessionId: 'session-1', taskId: 'task-1' }, 'extra')).toMatchObject({ ok: false, code: 'INVALID_INPUT' });
   });
 
   it('registers narrow confirmation list and CAS resolution handlers', async (): Promise<void> => {

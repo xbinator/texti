@@ -136,7 +136,103 @@ function createResult(): ChatAgentResult {
   };
 }
 
+/**
+ * 创建 Runtime/Attempt 建立前的 canonical 取消结果。
+ * @returns 与不可变验收标准精确对齐的取消结果
+ */
+function createPreCancel(): object {
+  return {
+    resultKind: 'pre_attempt_cancelled',
+    taskId: validationContext.taskId,
+    agentId: validationContext.agentId,
+    executionStatus: 'cancelled',
+    completion: {
+      level: 'none',
+      criteria: contractSnapshot.acceptanceCriteria.map((_criterion, criterionIndex) => ({
+        criterionIndex,
+        claim: {
+          status: 'unknown',
+          summary: 'Task was cancelled before this criterion could be evaluated.',
+          evidence: []
+        },
+        verification: {
+          status: 'unverified',
+          verifier: 'policy',
+          evidence: []
+        }
+      }))
+    },
+    summary: 'Task was cancelled before execution.',
+    warnings: [],
+    artifacts: [],
+    usage: {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      modelCalls: 0,
+      toolRounds: 0,
+      queueDurationMs: 0,
+      executionDurationMs: 0,
+      externalRequests: 0,
+      monetaryCost: {
+        currency: 'unknown',
+        pricingVersion: 'unknown',
+        estimated: 'unknown',
+        actual: 'unknown'
+      }
+    },
+    error: {
+      code: 'cancelled',
+      phase: 'queue',
+      category: 'user',
+      retryable: false
+    }
+  };
+}
+
 describe('agent result validation', (): void => {
+  it('discriminates a pre-Attempt cancellation before reading Attempt or plan identity', (): void => {
+    const context = {
+      taskId: validationContext.taskId,
+      agentId: validationContext.agentId,
+      contractSnapshot
+    } as AgentResultValidationContext;
+
+    expect(validateAgentResult(createPreCancel(), context)).toMatchObject({
+      ok: true,
+      result: {
+        resultKind: 'pre_attempt_cancelled',
+        taskId: validationContext.taskId,
+        agentId: validationContext.agentId,
+        executionStatus: 'cancelled'
+      },
+      resultHash: expect.stringMatching(/^[a-f0-9]{64}$/)
+    });
+  });
+
+  it('rejects a pre-Attempt result when an Attempt exists or criteria diverge from the Contract', (): void => {
+    expect(validateAgentResult(createPreCancel(), validationContext)).toMatchObject({
+      ok: false,
+      error: { details: { reason: 'pre_attempt_identity_invalid' } }
+    });
+    const cancellation = createPreCancel() as {
+      completion: {
+        criteria: Array<{ criterionIndex: number }>;
+      };
+    };
+    cancellation.completion.criteria.pop();
+    const context = {
+      taskId: validationContext.taskId,
+      agentId: validationContext.agentId,
+      contractSnapshot
+    } as AgentResultValidationContext;
+
+    expect(validateAgentResult(cancellation, context)).toMatchObject({
+      ok: false,
+      error: { details: { reason: 'result_criteria_identity_invalid' } }
+    });
+  });
+
   it('downgrades Child-supplied verification and derives completion without trusting its level', (): void => {
     const result = createResult();
     result.completion.criteria[1].verification.status = 'contradicted';

@@ -251,4 +251,30 @@ describe('AgentConfirmationQueue', (): void => {
       queue.listPending();
     }).toThrowError(expect.objectContaining({ reason: 'confirmation_diff_integrity_invalid' }));
   });
+
+  it('does not revoke an already approved confirmation during Task cancellation', async (): Promise<void> => {
+    const fixture = createStore();
+    const queue = createAgentConfirmationQueue({
+      store: fixture.store,
+      readUnifiedDiff: (): string => UNIFIED_DIFF,
+      publish: vi.fn(),
+      now: (): string => '2026-07-27T00:02:00.000Z'
+    });
+    const waiting = queue.request(createInput());
+    const approved = queue.resolve({
+      confirmationId: 'confirmation-1',
+      expectedVersion: 1,
+      decision: 'approved'
+    });
+
+    expect(queue.revokeTask('task-1', 'task_cancelled')).toEqual([]);
+    await expect(waiting).resolves.toEqual({ decision: 'approved', version: 2 });
+    expect(fixture.records.get('confirmation-1')).toEqual(
+      expect.objectContaining({
+        status: 'approved',
+        version: approved.version,
+        decision: 'approved'
+      })
+    );
+  });
 });

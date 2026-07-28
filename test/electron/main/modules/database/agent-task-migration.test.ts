@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createAgentDelegationStore, type AgentStoreDatabase } from '../../../../../electron/main/modules/chat/agents/store.mts';
 import { closeDatabase, createAgentTables, dbExecute, dbSelect, initDatabase } from '../../../../../electron/main/modules/database/service.mts';
 
 const testState = vi.hoisted(() => ({
@@ -18,6 +19,19 @@ vi.mock('electron', () => ({
     getPath: (): string => testState.userDataPath
   }
 }));
+
+/**
+ * 把 migration 内存库适配到真实 Agent Store 窄边界。
+ * @param database - 已迁移 SQLite
+ * @returns 可读取迁移投影的 Store database
+ */
+function createStoreDatabase(database: InstanceType<typeof Database>): AgentStoreDatabase {
+  return {
+    execute: (sql: string, params: readonly unknown[] = []): { changes: number; lastInsertRowid: number | bigint } => database.prepare(sql).run(...params),
+    select: <T>(sql: string, params: readonly unknown[] = []): T[] => database.prepare(sql).all(...params) as T[],
+    transaction: <T>(operation: () => T): T => database.transaction(operation)()
+  };
+}
 
 /** 仅在 ABI 与 better-sqlite3 一致的 Electron Node 进程中执行真实数据库测试。 */
 const describeWithSqlite = 'electron' in process.versions ? describe : describe.skip;
@@ -217,6 +231,9 @@ describeWithSqlite('agent task additive migration', (): void => {
 
     const tableNames = dbSelect<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'").map((row): string => row.name);
     const indexNames = dbSelect<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'index'").map((row): string => row.name);
+    const attemptColumns = dbSelect<{ name: string }>('PRAGMA table_info(chat_agent_attempts)').map((row): string => row.name);
+    const checkpointColumns = dbSelect<{ name: string }>('PRAGMA table_info(chat_agent_delegation_checkpoints)').map((row): string => row.name);
+    const outboxColumns = dbSelect<{ name: string }>('PRAGMA table_info(chat_agent_outbox)').map((row): string => row.name);
 
     expect(tableNames).toEqual(
       expect.arrayContaining([
@@ -242,7 +259,367 @@ describeWithSqlite('agent task additive migration', (): void => {
         'idx_chat_agent_budget_task'
       ])
     );
+    expect(attemptColumns).toEqual(expect.arrayContaining(['usage_snapshot_json', 'usage_complete', 'usage_updated_at']));
+    expect(checkpointColumns).toContain('cancellation_finalized_at');
+    expect(outboxColumns).toContain('superseded_at');
     expect(dbSelect<{ title: string }>('SELECT title FROM chat_sessions WHERE id = ?', ['legacy-session'])).toEqual([{ title: 'Legacy' }]);
+  });
+
+  it('backfills legacy Attempt usage as an explicit incomplete lower-bound', (): void => {
+    const database = new Database(':memory:');
+    database.exec(`
+      CREATE TABLE chat_agent_attempts (
+        attempt_id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        attempt_number INTEGER NOT NULL,
+        parent_runtime_id TEXT NOT NULL,
+        plan_hash TEXT NOT NULL,
+        initial_runtime_id TEXT NOT NULL,
+        current_runtime_id TEXT NOT NULL,
+        runtime_sequence INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT,
+        error_json TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE (task_id, attempt_number)
+      );
+      INSERT INTO chat_agent_attempts (
+        attempt_id, task_id, attempt_number, parent_runtime_id, plan_hash,
+        initial_runtime_id, current_runtime_id, runtime_sequence, status,
+        started_at, created_at
+      ) VALUES (
+        'attempt-legacy', 'task-legacy', 1, 'runtime-parent', '${'a'.repeat(64)}',
+        'runtime-child', 'runtime-child', 1, 'running',
+        '2026-07-27T00:00:01.000Z', '2026-07-27T00:00:00.000Z'
+      );
+    `);
+
+    createAgentTables(database);
+
+    const row = database
+      .prepare(
+        `SELECT usage_snapshot_json, usage_complete, usage_updated_at
+         FROM chat_agent_attempts
+         WHERE attempt_id = ?`
+      )
+      .get('attempt-legacy') as {
+      usage_snapshot_json: string;
+      usage_complete: number;
+      usage_updated_at: string;
+    };
+    expect(JSON.parse(row.usage_snapshot_json)).toMatchObject({
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      modelCalls: 0
+    });
+    expect(row.usage_complete).toBe(0);
+    expect(row.usage_updated_at).toBe('2026-07-27T00:00:00.000Z');
+    database.close();
+  });
+
+  it('backfills legacy Attempt usage from frozen pricing and immutable terminal facts', (): void => {
+    const database = new Database(':memory:');
+    createAgentTables(database);
+    database.exec(`
+      DROP TABLE chat_agent_attempts;
+      CREATE TABLE chat_agent_attempts (
+        attempt_id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        attempt_number INTEGER NOT NULL,
+        parent_runtime_id TEXT NOT NULL,
+        plan_hash TEXT NOT NULL,
+        initial_runtime_id TEXT NOT NULL,
+        current_runtime_id TEXT NOT NULL,
+        runtime_sequence INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT,
+        error_json TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE (task_id, attempt_number)
+      );
+    `);
+    const plan = JSON.stringify({
+      planSchemaVersion: 1,
+      budget: {
+        tokenLimit: 100,
+        costLimitUsd: 0.01,
+        pricingVersion: 'pricing-v7'
+      }
+    });
+    const journalUsage = {
+      inputTokens: 7,
+      outputTokens: 3,
+      totalTokens: 10,
+      modelCalls: 1,
+      toolRounds: 1,
+      queueDurationMs: 2,
+      executionDurationMs: 8,
+      externalRequests: 0,
+      monetaryCost: {
+        currency: 'USD',
+        pricingVersion: 'pricing-v7',
+        estimated: 0.002,
+        actual: 'unknown'
+      }
+    };
+    const resultUsage = {
+      ...journalUsage,
+      inputTokens: 9,
+      outputTokens: 3,
+      totalTokens: 12,
+      monetaryCost: {
+        ...journalUsage.monetaryCost,
+        estimated: 0.003
+      }
+    };
+    const insertTask = database.prepare(
+      `INSERT INTO chat_agent_tasks (
+        task_id, session_id, turn_id, agent_id, parent_agent_id, root_runtime_id,
+        checkpoint_id, tool_call_id, contract_snapshot_json, contract_snapshot_hash,
+        execution_plan_snapshot_json, execution_plan_snapshot_hash, status, priority,
+        current_attempt_id, result_json, result_hash, record_state,
+        unfinished_journal_count, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    const taskFacts = [
+      ['task-known', 'running', 'attempt-known', null, null, 0],
+      ['task-journal', 'committing', 'attempt-journal', null, null, 1],
+      ['task-result', 'completed', 'attempt-result', JSON.stringify({ usage: resultUsage }), 'f'.repeat(64), 0]
+    ] as const;
+    taskFacts.forEach(([taskId, status, attemptId, resultJson, resultHash, journalCount]): void => {
+      insertTask.run(
+        taskId,
+        `session-${taskId}`,
+        `turn-${taskId}`,
+        `child-${taskId}`,
+        'primary',
+        `runtime-root-${taskId}`,
+        `checkpoint-${taskId}`,
+        `tool-${taskId}`,
+        '{}',
+        'a'.repeat(64),
+        plan,
+        'b'.repeat(64),
+        status,
+        'normal',
+        attemptId,
+        resultJson,
+        resultHash,
+        'active',
+        journalCount,
+        '2026-07-27T00:00:00.000Z',
+        '2026-07-27T00:00:01.000Z'
+      );
+    });
+    const insertAttempt = database.prepare(
+      `INSERT INTO chat_agent_attempts (
+        attempt_id, task_id, attempt_number, parent_runtime_id, plan_hash,
+        initial_runtime_id, current_runtime_id, runtime_sequence, status,
+        started_at, finished_at, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    insertAttempt.run(
+      'attempt-known',
+      'task-known',
+      1,
+      'runtime-parent',
+      'b'.repeat(64),
+      'runtime-known',
+      'runtime-known',
+      1,
+      'running',
+      '2026-07-27T00:00:01.000Z',
+      null,
+      '2026-07-27T00:00:00.000Z'
+    );
+    insertAttempt.run(
+      'attempt-journal',
+      'task-journal',
+      1,
+      'runtime-parent',
+      'b'.repeat(64),
+      'runtime-journal',
+      'runtime-journal',
+      1,
+      'running',
+      '2026-07-27T00:00:01.000Z',
+      null,
+      '2026-07-27T00:00:00.000Z'
+    );
+    insertAttempt.run(
+      'attempt-result',
+      'task-result',
+      1,
+      'runtime-parent',
+      'b'.repeat(64),
+      'runtime-result',
+      'runtime-result',
+      1,
+      'completed',
+      '2026-07-27T00:00:01.000Z',
+      '2026-07-27T00:00:02.000Z',
+      '2026-07-27T00:00:00.000Z'
+    );
+    database
+      .prepare(
+        `INSERT INTO chat_agent_commit_journals (
+          journal_id, task_id, attempt_id, changeset_id, confirmation_id,
+          confirmation_version, plan_hash, intent_json, intent_hash, status,
+          operation_progress_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        'journal-legacy',
+        'task-journal',
+        'attempt-journal',
+        'changeset-legacy',
+        'confirmation-legacy',
+        1,
+        'b'.repeat(64),
+        JSON.stringify({ resultDraft: { usage: journalUsage } }),
+        'c'.repeat(64),
+        'created',
+        '[]',
+        '2026-07-27T00:00:01.000Z',
+        '2026-07-27T00:00:01.000Z'
+      );
+
+    createAgentTables(database);
+
+    const rows = database
+      .prepare(
+        `SELECT attempt_id, usage_snapshot_json, usage_complete
+         FROM chat_agent_attempts
+         ORDER BY attempt_id ASC`
+      )
+      .all() as Array<{ attempt_id: string; usage_snapshot_json: string; usage_complete: number }>;
+    expect(rows).toEqual([
+      {
+        attempt_id: 'attempt-journal',
+        usage_snapshot_json: JSON.stringify(journalUsage),
+        usage_complete: 1
+      },
+      {
+        attempt_id: 'attempt-known',
+        usage_snapshot_json: JSON.stringify({
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          modelCalls: 0,
+          toolRounds: 0,
+          queueDurationMs: 0,
+          executionDurationMs: 0,
+          externalRequests: 0,
+          monetaryCost: {
+            currency: 'USD',
+            pricingVersion: 'pricing-v7',
+            estimated: 0,
+            actual: 'unknown'
+          }
+        }),
+        usage_complete: 0
+      },
+      {
+        attempt_id: 'attempt-result',
+        usage_snapshot_json: JSON.stringify(resultUsage),
+        usage_complete: 1
+      }
+    ]);
+    const store = createAgentDelegationStore(createStoreDatabase(database));
+    expect(store.getAttempt('attempt-known')).toMatchObject({
+      usageSnapshot: {
+        totalTokens: 0,
+        monetaryCost: {
+          currency: 'USD',
+          pricingVersion: 'pricing-v7',
+          estimated: 0
+        }
+      },
+      usageComplete: false
+    });
+    expect(store.getAttempt('attempt-journal')).toMatchObject({
+      usageSnapshot: journalUsage,
+      usageComplete: true
+    });
+    const unknownSentinel = {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      modelCalls: 0,
+      toolRounds: 0,
+      queueDurationMs: 0,
+      executionDurationMs: 0,
+      externalRequests: 0,
+      monetaryCost: {
+        currency: 'unknown',
+        pricingVersion: 'unknown',
+        estimated: 'unknown',
+        actual: 'unknown'
+      }
+    };
+    const realLowerBound = {
+      ...journalUsage,
+      inputTokens: 4,
+      outputTokens: 2,
+      totalTokens: 6,
+      monetaryCost: {
+        ...journalUsage.monetaryCost,
+        estimated: 0.001
+      }
+    };
+    database
+      .prepare(
+        `UPDATE chat_agent_attempts
+         SET usage_snapshot_json = ?, usage_complete = 0
+         WHERE attempt_id = ?`
+      )
+      .run(JSON.stringify(unknownSentinel), 'attempt-known');
+    database
+      .prepare(
+        `INSERT INTO chat_agent_attempts (
+          attempt_id, task_id, attempt_number, parent_runtime_id, plan_hash,
+          initial_runtime_id, current_runtime_id, runtime_sequence, status,
+          usage_snapshot_json, usage_complete, usage_updated_at, started_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        'attempt-partial',
+        'task-known',
+        2,
+        'runtime-parent',
+        'b'.repeat(64),
+        'runtime-partial',
+        'runtime-partial',
+        1,
+        'running',
+        JSON.stringify(realLowerBound),
+        0,
+        '2026-07-27T00:00:02.000Z',
+        '2026-07-27T00:00:02.000Z',
+        '2026-07-27T00:00:02.000Z'
+      );
+
+    createAgentTables(database);
+
+    const recoveredStore = createAgentDelegationStore(createStoreDatabase(database));
+    expect(recoveredStore.getAttempt('attempt-known')).toMatchObject({
+      usageSnapshot: {
+        monetaryCost: {
+          currency: 'USD',
+          pricingVersion: 'pricing-v7',
+          estimated: 0
+        }
+      },
+      usageComplete: false
+    });
+    expect(recoveredStore.getAttempt('attempt-partial')).toMatchObject({
+      usageSnapshot: realLowerBound,
+      usageComplete: false
+    });
+    database.close();
   });
 
   it('rejects duplicate Assistant Message identities without rewriting legacy Checkpoints', (): void => {

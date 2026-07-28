@@ -34,6 +34,12 @@ type WriteSnapshotContracts = typeof agentContracts & {
   validateCommitIntentSnapshot?: (input: unknown, expectedHash: string) => { ok: boolean; intent?: unknown };
 };
 
+/** Task 6 期望新增的无 Attempt 取消结果校验模块视图。 */
+type CancellationContracts = typeof agentContracts & {
+  /** 校验并冻结 Runtime 创建前的取消结果。 */
+  validatePreAttemptCancellation?: (input: unknown) => { ok: boolean; result?: unknown; error?: unknown };
+};
+
 /** 可被基础阶段接受的最小只读委派契约。 */
 const validContract: DelegateTaskInput = {
   task: 'Inspect one runtime file',
@@ -99,6 +105,57 @@ const validResult: ChatAgentResult = {
     }
   }
 };
+
+/** Runtime 创建前取消使用的 canonical 结果 fixture。 */
+const validPreAttemptCancellation = {
+  resultKind: 'pre_attempt_cancelled',
+  taskId: 'task-1',
+  agentId: 'child-1',
+  executionStatus: 'cancelled',
+  completion: {
+    level: 'none',
+    criteria: [
+      {
+        criterionIndex: 0,
+        claim: {
+          status: 'unknown',
+          summary: 'Task was cancelled before this criterion could be evaluated.',
+          evidence: []
+        },
+        verification: {
+          status: 'unverified',
+          verifier: 'policy',
+          evidence: []
+        }
+      }
+    ]
+  },
+  summary: 'Task was cancelled before execution.',
+  warnings: [],
+  artifacts: [],
+  usage: {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    modelCalls: 0,
+    toolRounds: 0,
+    queueDurationMs: 0,
+    executionDurationMs: 0,
+    externalRequests: 0,
+    monetaryCost: {
+      currency: 'unknown',
+      pricingVersion: 'unknown',
+      estimated: 'unknown',
+      actual: 'unknown'
+    }
+  },
+  error: {
+    code: 'cancelled',
+    phase: 'queue',
+    category: 'user',
+    retryable: false
+  }
+} as const;
 
 /**
  * 创建与基础契约绑定的只读执行计划。
@@ -665,6 +722,102 @@ describe('foundation delegation contract', (): void => {
     ).toMatchObject({ ok: false });
   });
 
+  it('accepts only the Task-owned cancellation request payload and requires a cancelled result hash', (): void => {
+    const baseEvent = {
+      eventId: 'event-task-cancel-requested',
+      aggregate: { kind: 'task', id: 'task-1' },
+      taskId: 'task-1',
+      sequence: 2,
+      type: 'task.cancel_requested',
+      occurredAt: '2026-07-23T08:00:00.000Z',
+      source: 'user',
+      schemaVersion: 1
+    };
+
+    expect(validateChatAgentEvent({ ...baseEvent, payload: { requestKind: 'single_task' } })).toMatchObject({ ok: true });
+    expect(
+      validateChatAgentEvent({
+        ...baseEvent,
+        eventId: 'event-task-cancel-cascade',
+        source: 'system',
+        payload: { requestKind: 'checkpoint_cascade' }
+      })
+    ).toMatchObject({ ok: true });
+    expect(validateChatAgentEvent({ ...baseEvent, source: 'system', payload: { requestKind: 'single_task' } })).toMatchObject({ ok: false });
+    expect(validateChatAgentEvent({ ...baseEvent, source: 'user', payload: { requestKind: 'checkpoint_cascade' } })).toMatchObject({ ok: false });
+    expect(validateChatAgentEvent({ ...baseEvent, payload: { requestKind: 'turn_cancelled' } })).toMatchObject({ ok: false });
+    expect(
+      validateChatAgentEvent({
+        ...baseEvent,
+        eventId: 'event-task-cancelled',
+        sequence: 3,
+        type: 'task.cancelled',
+        source: 'coordinator',
+        payload: {}
+      })
+    ).toMatchObject({ ok: false });
+  });
+
+  it('validates canonical pre-Attempt cancellation without accepting invented execution facts', (): void => {
+    const validateCancellation = (agentContracts as CancellationContracts).validatePreAttemptCancellation;
+
+    expect(validateCancellation).toEqual(expect.any(Function));
+    if (!validateCancellation) return;
+    expect(validateCancellation(validPreAttemptCancellation)).toMatchObject({
+      ok: true,
+      result: {
+        resultKind: 'pre_attempt_cancelled',
+        executionStatus: 'cancelled',
+        completion: { level: 'none' },
+        warnings: [],
+        artifacts: [],
+        usage: {
+          totalTokens: 0,
+          monetaryCost: {
+            currency: 'unknown',
+            pricingVersion: 'unknown',
+            estimated: 'unknown',
+            actual: 'unknown'
+          }
+        },
+        error: {
+          code: 'cancelled',
+          phase: 'queue',
+          category: 'user',
+          retryable: false
+        }
+      }
+    });
+    expect(validateCancellation({ ...validPreAttemptCancellation, attemptId: 'attempt-forged' })).toMatchObject({ ok: false });
+    expect(
+      validateCancellation({
+        ...validPreAttemptCancellation,
+        usage: {
+          ...validPreAttemptCancellation.usage,
+          modelCalls: 1
+        }
+      })
+    ).toMatchObject({ ok: false });
+    expect(
+      validateCancellation({
+        ...validPreAttemptCancellation,
+        completion: {
+          level: 'none',
+          criteria: [
+            {
+              ...validPreAttemptCancellation.completion.criteria[0],
+              claim: {
+                status: 'satisfied',
+                summary: 'Invented completion.',
+                evidence: []
+              }
+            }
+          ]
+        }
+      })
+    ).toMatchObject({ ok: false });
+  });
+
   it.each([
     [
       'delegation.cancel_requested',
@@ -928,6 +1081,7 @@ describe('foundation delegation contract', (): void => {
     ['commit_failed', { code: 'commit_failed', phase: 'recovery', category: 'integrity', retryable: false }],
     ['manual_recovery_required', { code: 'manual_recovery_required', phase: 'commit', category: 'runtime', retryable: false }],
     ['cancelled', { code: 'cancelled', phase: 'commit', category: 'user', retryable: false }],
+    ['cancelled before Attempt', { code: 'cancelled', phase: 'queue', category: 'user', retryable: false }],
     ['protocol_error', { code: 'protocol_error', phase: 'resource_validation', category: 'protocol', retryable: false }]
   ])('accepts the global %s error matrix', (_name: string, error: object): void => {
     expect(validateAgentTaskError(error)).toEqual(error);
@@ -948,7 +1102,6 @@ describe('foundation delegation contract', (): void => {
     ['stale_context', { code: 'stale_context', phase: 'commit_validation', category: 'user', retryable: false }],
     ['commit_failed', { code: 'commit_failed', phase: 'runtime', category: 'integrity', retryable: false }],
     ['manual_recovery_required', { code: 'manual_recovery_required', phase: 'recovery', category: 'resource', retryable: false }],
-    ['cancelled', { code: 'cancelled', phase: 'queue', category: 'user', retryable: false }],
     ['protocol_error', { code: 'protocol_error', phase: 'runtime', category: 'integrity', retryable: false }]
   ])('rejects the global %s error matrix violation', (_name: string, error: object): void => {
     expect(validateAgentTaskError(error)).toBeNull();

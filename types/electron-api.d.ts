@@ -27,6 +27,8 @@ import type {
 import type {
   ChatAgentApplicationEvent,
   ChatAgentCancelCheckpointInput,
+  ChatAgentCancelTaskInput,
+  ChatAgentCancelTaskResult,
   ChatAgentCheckpointSnapshot,
   ChatAgentConfirmationSnapshot,
   ChatAgentGetTaskInput,
@@ -640,6 +642,7 @@ export interface ElectronAPI {
   chatAgentResolveConfirmation: (input: ChatAgentResolveConfirmationInput) => Promise<ChatAgentHandlerResult<ChatAgentConfirmationSnapshot>>;
   chatAgentResumePrimary: (input: ChatAgentResumePrimaryInput) => Promise<ChatAgentHandlerResult<ChatAgentResumeResult>>;
   chatAgentCancelCheckpoint: (input: ChatAgentCancelCheckpointInput) => Promise<ChatAgentHandlerResult<ChatAgentCheckpointSnapshot>>;
+  chatAgentCancelTask: (input: ChatAgentCancelTaskInput) => Promise<ChatAgentHandlerResult<ChatAgentCancelTaskResult>>;
   chatAgentOnEvent: (callback: (event: ChatAgentApplicationEvent) => void) => () => void;
 
   // MCP runtime 操作

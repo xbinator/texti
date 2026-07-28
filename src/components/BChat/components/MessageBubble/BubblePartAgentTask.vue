@@ -34,7 +34,20 @@
       </span>
       <span v-if="elapsedText" :class="bem('elapsed')">{{ elapsedText }}</span>
       <span :class="bem('priority')">{{ PRIORITY_LABELS[resolvedTask.priority] }}</span>
+      <button
+        v-if="canCancelTask"
+        :class="bem('cancel')"
+        type="button"
+        data-action="cancel-task"
+        :disabled="cancelBusy || Boolean(resolvedTask.cancellation)"
+        @click="cancelTask"
+      >
+        {{ cancelButtonLabel }}
+      </button>
     </div>
+    <p v-if="cancelError" :class="bem('notice')" role="alert">
+      <code>{{ cancelError }}</code>
+    </p>
     <p v-if="resolvedTask.summary" :class="bem('summary')">{{ resolvedTask.summary }}</p>
 
     <div v-if="expanded" :id="detailPanelId" :class="bem('detail')">
@@ -258,6 +271,7 @@ import type {
   AgentTaskMode,
   AgentTaskPriority,
   AgentTaskStatus,
+  ChatAgentCancelTaskResult,
   ChatAgentTaskArtifactSnapshot,
   ChatAgentTaskDetailSnapshot,
   ChatAgentTaskErrorDetailKey,
@@ -268,6 +282,7 @@ import type {
 import { computed, onScopeDispose, ref, watch } from 'vue';
 import { canOpenArtifact, openAgentArtifact } from '@/components/BChat/utils/agentArtifact';
 import { readTaskResultId, readTaskResultStatus } from '@/components/BChat/utils/agentTaskPart';
+import { getElectronAPI } from '@/shared/platform/electron-api';
 import { createTaskIndexKey, isTaskProjectionError, useChatAgentTaskStore } from '@/stores/chat/agentTask';
 import { useChatConfirmationQueueStore, type ChatAgentConfirmationItem } from '@/stores/chat/confirmationQueue';
 import { asyncTo } from '@/utils/asyncTo';
@@ -371,12 +386,18 @@ const confirmationBusy = ref(false);
 const confirmationError = ref<string | null>(null);
 /** artifact 打开的稳定本地错误。 */
 const artifactError = ref<string | null>(null);
+/** 单 Task 取消请求是否进行中。 */
+const cancelBusy = ref(false);
+/** 单 Task 取消的稳定本地错误。 */
+const cancelError = ref<string | null>(null);
 /** 详情请求 epoch，阻止收起或身份切换后的迟到响应改写局部状态。 */
 let detailEpoch = 0;
 /** 确认定位 epoch，阻止身份或 Detail 更新后的迟到恢复定位。 */
 let confirmationEpoch = 0;
 /** artifact 导航 epoch，阻止收起或身份更新后的迟到失败污染当前卡片。 */
 let artifactEpoch = 0;
+/** 取消身份 epoch，阻止旧 Task 响应污染当前卡片。 */
+let cancelEpoch = 0;
 
 /** Result 中仅用于交叉验证的 Task 身份。 */
 const resultTaskId = computed<string | undefined>(() => readTaskResultId(props.part));
@@ -502,6 +523,74 @@ const statusLabel = computed<string>(() => {
 });
 /** 当前是否只为已解析的活动 Task 计时。 */
 const shouldTick = computed<boolean>(() => resolvedTask.value?.recordState === 'active' && !statusView.value.terminal);
+/** 当前非终态 Task 是否显示取消操作。 */
+const canCancelTask = computed<boolean>(() => resolvedTask.value?.recordState === 'active' && !statusView.value.terminal);
+/** committing 仅记录意图，文案不得暗示已中止提交。 */
+const cancelButtonLabel = computed<string>(() => {
+  const snapshot = resolvedTask.value;
+  if (snapshot?.recordState === 'active' && snapshot.status === 'committing') return '请求取消';
+  return cancelBusy.value ? '正在取消…' : '取消任务';
+});
+
+/**
+ * 校验取消响应仍属于点击时的原消息位置与 Task 身份。
+ * @param baseline - 点击时 Summary
+ * @param result - Main 返回的权威结果
+ * @returns 身份和 sequence 是否可信
+ */
+function matchesCancelResult(baseline: ChatAgentTaskSummarySnapshot, result: ChatAgentCancelTaskResult): boolean {
+  const updated = result.task;
+  return (
+    updated.recordState === 'active' &&
+    updated.taskId === baseline.taskId &&
+    updated.sessionId === baseline.sessionId &&
+    updated.turnId === baseline.turnId &&
+    updated.checkpointId === baseline.checkpointId &&
+    updated.assistantMessageId === baseline.assistantMessageId &&
+    updated.toolCallId === baseline.toolCallId &&
+    updated.agentId === baseline.agentId &&
+    updated.taskSequence >= baseline.taskSequence
+  );
+}
+
+/**
+ * 请求 Main 取消当前 Task，仅应用响应中的权威 Summary。
+ */
+async function cancelTask(): Promise<void> {
+  const baseline = resolvedTask.value;
+  if (cancelBusy.value || baseline?.recordState !== 'active' || statusView.value.terminal || baseline.cancellation) return;
+  const epoch = ++cancelEpoch;
+  cancelBusy.value = true;
+  cancelError.value = null;
+  const [requestError, response] = await asyncTo(
+    Promise.resolve().then(() => getElectronAPI().chatAgentCancelTask({ sessionId: baseline.sessionId, taskId: baseline.taskId }))
+  );
+  const current = resolvedTask.value;
+  if (
+    epoch !== cancelEpoch ||
+    current?.recordState !== 'active' ||
+    current.taskId !== baseline.taskId ||
+    current.sessionId !== baseline.sessionId ||
+    current.turnId !== baseline.turnId ||
+    current.checkpointId !== baseline.checkpointId ||
+    current.assistantMessageId !== baseline.assistantMessageId ||
+    current.toolCallId !== baseline.toolCallId ||
+    current.agentId !== baseline.agentId
+  ) {
+    return;
+  }
+  cancelBusy.value = false;
+  if (requestError || !response?.ok) {
+    cancelError.value = 'agent_task_cancel_failed';
+    return;
+  }
+  if (!matchesCancelResult(baseline, response.data)) {
+    cancelError.value = 'agent_task_cancel_projection_invalid';
+    return;
+  }
+  const outcome = agentTaskStore.applySummary(response.data.task);
+  if (outcome !== 'applied' && outcome !== 'stale') cancelError.value = 'agent_task_cancel_projection_invalid';
+}
 
 /**
  * 停止活动 Task 近似计时器。
@@ -890,12 +979,15 @@ watch(detailIdentityKey, (): void => {
   detailEpoch += 1;
   confirmationEpoch += 1;
   artifactEpoch += 1;
+  cancelEpoch += 1;
   expanded.value = false;
   detailLoading.value = false;
   detailError.value = null;
   confirmationBusy.value = false;
   confirmationError.value = null;
   artifactError.value = null;
+  cancelBusy.value = false;
+  cancelError.value = null;
 });
 
 watch(detailSequence, (): void => {
@@ -912,6 +1004,7 @@ onScopeDispose((): void => {
   detailEpoch += 1;
   confirmationEpoch += 1;
   artifactEpoch += 1;
+  cancelEpoch += 1;
   stopElapsedTimer();
 });
 </script>
@@ -971,6 +1064,21 @@ onScopeDispose((): void => {
   gap: 4px;
   align-items: center;
   color: var(--text-primary);
+}
+
+.b-agent-task-card__cancel {
+  padding: 0;
+  margin-left: auto;
+  font: inherit;
+  color: var(--color-primary);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.b-agent-task-card__cancel:disabled {
+  color: var(--text-tertiary);
+  cursor: not-allowed;
 }
 
 .b-agent-task-card__elapsed,

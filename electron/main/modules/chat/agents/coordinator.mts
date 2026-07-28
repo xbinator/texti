@@ -6,17 +6,19 @@ import type { ChildActorRegistry } from './child-registry.mjs';
 import type { AgentConfirmationQueue } from './confirmation-store.mjs';
 import type { ChildTaskRuntimeExecutor } from './executor.mjs';
 import type { AgentFileCommitter } from './file-commit.mjs';
-import type { AgentResourceLease, AgentResourceScheduler, AgentScheduleRequest } from './scheduler.mjs';
+import type { AgentResourceLease, AgentResourceScheduler, AgentScheduleRequest, AgentScheduleCancelDisposition } from './scheduler.mjs';
 import type {
   AgentAttemptProjection,
   AgentAttemptRecord,
   AgentCheckpointRecord,
   AgentDelegationRecoverySnapshot,
+  AgentTaskCancellationProjection,
   AgentTaskRecord,
   BeginAgentAttemptInput,
   MarkAgentAttemptInput,
   PrepareAgentChangesetInput,
-  QueueAgentCommitInput
+  QueueAgentCommitInput,
+  RecordAttemptUsageInput
 } from './types.mjs';
 import type {
   AgentBudgetSnapshot,
@@ -64,6 +66,20 @@ export interface AgentCoordinatorDependencies {
    */
   recordPreFailure(task: AgentTaskRecord, error: AgentTaskError): AgentCheckpointRecord;
   /**
+   * 原子写入无 Attempt 取消结果并推进 Task rendezvous。
+   * @param task - 取消所属 Task
+   * @param requestKind - 单 Task 或 Checkpoint 级联
+   * @returns 推进后的 Checkpoint
+   */
+  recordPreCancellation(task: AgentTaskRecord, requestKind: 'single_task' | 'checkpoint_cascade'): AgentCheckpointRecord;
+  /**
+   * CAS 持久化已有 Attempt Task 的 cooperative cancellation 请求。
+   * @param taskId - 目标 Task
+   * @param requestKind - 单 Task 或 Checkpoint 级联
+   * @returns 权威取消投影
+   */
+  requestTaskCancellation(taskId: string, requestKind: 'single_task' | 'checkpoint_cascade'): AgentTaskCancellationProjection;
+  /**
    * 在任何 Child Task 分配之前幂等预留 Primary Runtime B 预算。
    * @param checkpointId - Checkpoint 身份
    * @param budget - 冻结续接预算
@@ -83,6 +99,18 @@ export interface AgentCoordinatorDependencies {
    * @returns running Task/Attempt 投影
    */
   markAttemptRunning(input: MarkAgentAttemptInput): AgentAttemptProjection;
+  /**
+   * 读取当前 Attempt 的权威持久化投影。
+   * @param attemptId - Attempt 身份
+   * @returns 当前 Attempt，不存在时返回 null
+   */
+  getAttempt(attemptId: string): AgentAttemptRecord | null;
+  /**
+   * 在结果 rendezvous 之前冻结 Attempt 的最终完整 usage。
+   * @param input - Attempt 身份与 complete usage
+   * @returns 最终 usage 已持久化的 Attempt
+   */
+  recordAttemptUsage(input: RecordAttemptUsageInput): AgentAttemptRecord;
   /**
    * 校验并汇合一个 Child 终态结果。
    * @param task - 结果所属 Task
@@ -109,7 +137,7 @@ export interface AgentCoordinatorDependencies {
    */
   prepareChangeset?: (input: PrepareAgentChangesetInput) => AgentChangesetRecord;
   /** write Task 的 Main-owned 持久化确认队列。 */
-  confirmationQueue?: Pick<AgentConfirmationQueue, 'request' | 'invalidate'>;
+  confirmationQueue?: Pick<AgentConfirmationQueue, 'request' | 'invalidate' | 'revokeTask'>;
   /**
    * 判断启动恢复是否已经完成；恢复前 write Task 只能保持 queued。
    * 缺省为 true，避免改变显式隔离实例与只读 fixture。
@@ -185,6 +213,13 @@ export interface AgentCoordinator {
    * @param reason - 稳定取消原因
    */
   cancel(checkpointId: string, reason: string): Promise<void>;
+  /**
+   * 发起单 Task cooperative cancellation。
+   * 非 async 包装保证重复调用取得同一个 Promise。
+   * @param taskId - 目标 Task
+   * @returns 权威取消 disposition
+   */
+  cancelTask(taskId: string): Promise<AgentTaskCancellationProjection['disposition']>;
   /**
    * 读取进程内协调状态。
    * @param checkpointId - 目标 Checkpoint
@@ -543,15 +578,10 @@ function readAbortResult(
  * @param signal - Scheduler lease 信号
  * @returns 与中止原因一致的结果
  */
-function normalizeAbortResult(result: ChatAgentResult, signal: AbortSignal): ChatAgentResult {
+function normalizeAbortResult(result: ChatAgentResult, signal: AbortSignal, projection: AgentAttemptProjection): ChatAgentResult {
   const abortResult = readAbortResult(signal);
-  if (!abortResult || abortResult.status !== 'deadline_exceeded' || result.executionStatus !== 'cancelled') return result;
-  return {
-    ...result,
-    executionStatus: 'deadline_exceeded',
-    summary: 'Child execution exceeded its deadline.',
-    error: abortResult.error
-  };
+  if (!abortResult || result.executionStatus === abortResult.status) return result;
+  return createFailureResult(projection, abortResult.status, abortResult.error, result.usage);
 }
 
 /**
@@ -696,6 +726,10 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
   const executions = new Map<string, CoordinatorExecution>();
   const inFlight = new Map<string, Promise<void>>();
   const taskRuns = new Map<string, Promise<void>>();
+  const cancelFlights = new Map<string, Promise<AgentTaskCancellationProjection['disposition']>>();
+  const cancelReasons = new Map<string, string>();
+  const pendingFinalizations = new Map<string, string>();
+  const preparedWrites = new Map<string, PreparedWriteExecution>();
   const runtimeIds = new Map<string, string>();
   const abortTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const systemChildTimeoutMs = dependencies.systemChildTimeoutMs ?? DEFAULT_CHILD_TIMEOUT_MS;
@@ -738,6 +772,21 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
   }
 
   /**
+   * 为运行中的目标 Runtime 安排一次 hard abort。
+   * @param taskId - 目标 Task
+   * @param runtimeId - 当前 Runtime
+   * @param reason - 稳定取消原因
+   */
+  function scheduleHardAbort(taskId: string, runtimeId: string, reason: string): void {
+    if (abortTimers.has(taskId)) return;
+    const timer = setTimeout((): void => {
+      abortTimers.delete(taskId);
+      dependencies.executor.abort(runtimeId, reason);
+    }, cancellationGraceMs);
+    abortTimers.set(taskId, timer);
+  }
+
+  /**
    * 在 Attempt 尚未创建时，把调度或启动失败收敛为持久化取消终态。
    * @param task - 尚无 Attempt 的已授权 Task
    * @param checkpoint - Task 所属 Checkpoint
@@ -772,14 +821,15 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
    * 有界等待 cooperative cancellation 与 hard abort 后的 Task 清理。
    * @param executionsToWait - 取消时仍在活动的 Task 执行
    */
-  async function waitTaskRuns(executionsToWait: readonly Promise<void>[]): Promise<void> {
-    if (executionsToWait.length === 0) return;
+  async function waitTaskRuns(executionsToWait: readonly Promise<void>[]): Promise<boolean> {
+    if (executionsToWait.length === 0) return true;
     let timeout: ReturnType<typeof setTimeout> | undefined;
-    const boundedWait = new Promise<void>((resolve): void => {
-      timeout = setTimeout(resolve, cancellationGraceMs * 2);
+    const boundedWait = new Promise<boolean>((resolve): void => {
+      timeout = setTimeout((): void => resolve(false), cancellationGraceMs * 2);
     });
-    await Promise.race([Promise.allSettled(executionsToWait).then((): void => undefined), boundedWait]);
+    const completed = await Promise.race([Promise.allSettled(executionsToWait).then((): boolean => true), boundedWait]);
     if (timeout) clearTimeout(timeout);
+    return completed;
   }
 
   /**
@@ -788,6 +838,22 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
    * @param result - 完整 Child 结果
    */
   async function commitTaskResult(task: AgentTaskRecord, result: ChatAgentResult): Promise<void> {
+    const [usageOutcome] = await Promise.allSettled([
+      Promise.resolve().then(
+        (): AgentAttemptRecord =>
+          dependencies.recordAttemptUsage({
+            taskId: task.taskId,
+            attemptId: result.attemptId,
+            usage: result.usage,
+            complete: true,
+            occurredAt: dependencies.now()
+          })
+      )
+    ]);
+    if (usageOutcome.status === 'rejected') {
+      if (executions.get(task.checkpointId)?.status !== 'terminal') setState(task.checkpointId, 'idle');
+      return;
+    }
     const [recordOutcome] = await Promise.allSettled([Promise.resolve().then((): AgentCheckpointRecord => dependencies.recordTaskResult(task, result))]);
     if (recordOutcome.status === 'rejected') {
       if (executions.get(task.checkpointId)?.status !== 'terminal') setState(task.checkpointId, 'idle');
@@ -803,6 +869,18 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
     if (settleOutcome.status === 'rejected') {
       if (!checkpointTerminal) setState(task.checkpointId, 'idle');
     }
+    const pendingReason = pendingFinalizations.get(task.checkpointId);
+    if (recordOutcome.value.status === 'cancelled' && pendingReason) {
+      const [finalizeOutcome] = await Promise.allSettled([
+        Promise.resolve().then((): Pick<AgentCheckpointRecord, 'status'> => dependencies.cancelCheckpoint(task.checkpointId, pendingReason))
+      ]);
+      if (finalizeOutcome.status === 'fulfilled') {
+        pendingFinalizations.delete(task.checkpointId);
+        setState(task.checkpointId, 'terminal');
+      } else {
+        setState(task.checkpointId, 'idle');
+      }
+    }
   }
 
   /**
@@ -813,10 +891,30 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
    * @returns write 交接事实；read/终态路径为 null
    */
   async function executeLease(task: AgentTaskRecord, checkpoint: AgentCheckpointRecord, lease: AgentResourceLease): Promise<PreparedWriteExecution | null> {
-    const runtimeId = dependencies.createRuntimeId(task);
+    const authoritativeTask = dependencies.getTask?.(task.taskId);
+    if (!authoritativeTask || authoritativeTask.recordState !== 'active') return null;
+    if (
+      authoritativeTask.status !== 'queued' ||
+      authoritativeTask.queuePhase !== 'start' ||
+      authoritativeTask.currentAttemptId !== undefined ||
+      authoritativeTask.cancelRequestedAt !== undefined
+    ) {
+      return null;
+    }
+    const handoffAbort = readAbortResult(lease.signal);
+    if (handoffAbort) {
+      const requestKind = cancelReasons.get(task.taskId) === 'user_cancelled' ? 'single_task' : 'checkpoint_cascade';
+      dependencies.recordPreCancellation(authoritativeTask, requestKind);
+      dependencies.releaseBudget(authoritativeTask.taskId);
+      if (!cancelReasons.has(task.taskId)) {
+        dependencies.cancelCheckpoint(checkpoint.checkpointId, handoffAbort.error.details?.reason?.toString() ?? 'schedule_cancelled');
+      }
+      return null;
+    }
+    const runtimeId = dependencies.createRuntimeId(authoritativeTask);
     const attemptId = `attempt-${runtimeId}`;
     const beginInput: BeginAgentAttemptInput = {
-      taskId: task.taskId,
+      taskId: authoritativeTask.taskId,
       attemptId,
       parentRuntimeId: checkpoint.sourceRuntimeId,
       runtimeId,
@@ -824,7 +922,7 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
     };
     const [beginOutcome] = await Promise.allSettled([Promise.resolve().then((): AgentAttemptProjection => dependencies.beginAttempt(beginInput))]);
     if (beginOutcome.status === 'rejected') {
-      await cancelBeforeAttempt(task, checkpoint, 'attempt_start_rejected');
+      await cancelBeforeAttempt(authoritativeTask, checkpoint, 'attempt_start_rejected');
       return null;
     }
 
@@ -862,15 +960,19 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
     ]);
     const abortResult = readAbortResult(lease.signal);
     if (executionOutcome.status === 'rejected') {
+      const currentAttempt = dependencies.getAttempt(projection.attempt.attemptId);
+      if (!currentAttempt || currentAttempt.taskId !== projection.task.taskId) {
+        throw new Error('coordinator_attempt_usage_unavailable');
+      }
       const result = abortResult
-        ? createFailureResult(projection, abortResult.status, abortResult.error)
-        : createFailureResult(projection, 'failed', createRuntimeError('runtime', 'runtime_execution_rejected', runtimeId));
+        ? createFailureResult(projection, abortResult.status, abortResult.error, currentAttempt.usageSnapshot)
+        : createFailureResult(projection, 'failed', createRuntimeError('runtime', 'runtime_execution_rejected', runtimeId), currentAttempt.usageSnapshot);
       await commitTaskResult(projection.task, result);
       return null;
     }
     const execution = executionOutcome.value;
     if (execution.kind === 'terminal') {
-      await commitTaskResult(projection.task, normalizeAbortResult(execution.result, lease.signal));
+      await commitTaskResult(projection.task, normalizeAbortResult(execution.result, lease.signal, projection));
       return null;
     }
     if (abortResult) {
@@ -922,12 +1024,14 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
       await commitTaskResult(projection.task, createFailureResult(projection, 'failed', error, execution.draft.usage));
       return null;
     }
-    return {
+    const prepared = {
       task: projection.task,
       attempt: projection.attempt,
       changeset: prepareOutcome.value,
       draft: execution.draft
     };
+    preparedWrites.set(task.taskId, prepared);
+    return prepared;
   }
 
   /**
@@ -1042,6 +1146,26 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
       dependencies.scheduler.enqueue(createScheduleRequest(commitTask, checkpoint, dependencies.now(), systemChildTimeoutMs, 'commit'))
     ]);
     if (leaseOutcome.status === 'rejected') {
+      const currentTask = dependencies.getTask?.(prepared.task.taskId);
+      if (currentTask?.status === 'cancelled') {
+        await Promise.allSettled([dependencies.executor.discard(prepared.attempt.currentRuntimeId)]);
+        return;
+      }
+      if (currentTask?.status === 'cancelling') {
+        const cancellationError: AgentTaskError = {
+          code: 'cancelled',
+          phase: 'commit',
+          category: 'user',
+          retryable: false,
+          details: { reason: cancelReasons.get(prepared.task.taskId) ?? 'cooperative_cancellation' }
+        };
+        await commitTaskResult(
+          currentTask,
+          createFailureResult({ task: currentTask, attempt: prepared.attempt }, 'cancelled', cancellationError, prepared.draft.usage)
+        );
+        await dependencies.executor.discard(prepared.attempt.currentRuntimeId);
+        return;
+      }
       const error = createCommitError(leaseOutcome.reason);
       await commitTaskResult(
         commitTask,
@@ -1051,7 +1175,37 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
       return;
     }
     const lease = leaseOutcome.value;
-    try {
+    /** 在 commit lease 内执行受控外部写入并持久化最终结果。 */
+    const applyCommit = async (): Promise<void> => {
+      const currentTask = dependencies.getTask?.(prepared.task.taskId);
+      const handoffAbort = readAbortResult(lease.signal);
+      if (currentTask?.status === 'cancelled') return;
+      if (currentTask?.status === 'cancelling' || handoffAbort) {
+        const cancellation =
+          currentTask?.status === 'queued' && currentTask.queuePhase === 'commit'
+            ? dependencies.requestTaskCancellation(currentTask.taskId, 'checkpoint_cascade').task
+            : currentTask;
+        if (!cancellation?.currentAttemptId || cancellation.currentAttemptId !== prepared.attempt.attemptId) {
+          throw new Error('coordinator_commit_cancel_projection_invalid');
+        }
+        const cancellationError: AgentTaskError = handoffAbort
+          ? { ...handoffAbort.error, phase: 'commit' }
+          : {
+              code: 'cancelled',
+              phase: 'commit',
+              category: 'user',
+              retryable: false,
+              details: { reason: cancelReasons.get(prepared.task.taskId) ?? 'cooperative_cancellation' }
+            };
+        await commitTaskResult(
+          cancellation,
+          createFailureResult({ task: cancellation, attempt: prepared.attempt }, handoffAbort?.status ?? 'cancelled', cancellationError, prepared.draft.usage)
+        );
+        return;
+      }
+      if (currentTask?.status !== 'queued' || currentTask.queuePhase !== 'commit') {
+        throw new Error('coordinator_commit_handoff_invalid');
+      }
       const [commitOutcome] = await Promise.allSettled([
         writeDependencies.fileCommitter.commit({
           task: commitTask,
@@ -1065,8 +1219,8 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
       if (commitOutcome.status === 'fulfilled') {
         await commitTaskResult(commitTask, commitOutcome.value.result);
       } else {
-        const currentTask = dependencies.getTask?.(prepared.task.taskId);
-        if ((currentTask?.unfinishedJournalCount ?? 0) > 0) {
+        const failedCommitTask = dependencies.getTask?.(prepared.task.taskId);
+        if ((failedCommitTask?.unfinishedJournalCount ?? 0) > 0) {
           setState(prepared.task.checkpointId, 'idle');
         } else {
           const error = createCommitError(commitOutcome.reason);
@@ -1081,9 +1235,35 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
           );
         }
       }
-    } finally {
-      await Promise.allSettled([Promise.resolve().then((): void => lease.release()), dependencies.executor.discard(prepared.attempt.currentRuntimeId)]);
-    }
+    };
+    const [operationOutcome] = await Promise.allSettled([applyCommit()]);
+    const cleanupOutcomes = await Promise.allSettled([
+      Promise.resolve().then((): void => lease.release()),
+      dependencies.executor.discard(prepared.attempt.currentRuntimeId)
+    ]);
+    const cleanupFailure = cleanupOutcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+    // 业务错误优先，避免清理异常覆盖真正的提交失败。
+    if (operationOutcome.status === 'rejected') throw operationOutcome.reason;
+    if (cleanupFailure) throw cleanupFailure.reason;
+  }
+
+  /**
+   * 独立清理 start lease 与 Runtime 路由。
+   * @param taskId - 目标 Task
+   * @param lease - 已取得 start lease
+   */
+  async function releaseStartResources(taskId: string, lease: AgentResourceLease): Promise<void> {
+    clearAbortTimer(taskId);
+    const runtimeId = runtimeIds.get(taskId);
+    runtimeIds.delete(taskId);
+    const outcomes = await Promise.allSettled([
+      Promise.resolve().then((): void => {
+        if (runtimeId) dependencies.registry.unbindRuntime(runtimeId);
+      }),
+      Promise.resolve().then((): void => lease.release())
+    ]);
+    const failure = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+    if (failure) throw failure.reason;
   }
 
   /**
@@ -1092,31 +1272,47 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
    * @param checkpoint - Task 所属 Checkpoint
    */
   async function runScheduledTask(task: AgentTaskRecord, checkpoint: AgentCheckpointRecord): Promise<void> {
-    const [leaseOutcome] = await Promise.allSettled([
-      dependencies.scheduler.enqueue(createScheduleRequest(task, checkpoint, dependencies.now(), systemChildTimeoutMs, 'start'))
-    ]);
-    if (leaseOutcome.status === 'rejected') {
-      await cancelBeforeAttempt(task, checkpoint, readScheduleReason(leaseOutcome.reason));
-      return;
-    }
-    const lease = leaseOutcome.value;
-    const [executionOutcome] = await Promise.allSettled([executeLease(task, checkpoint, lease)]);
+    let lease: AgentResourceLease | undefined;
+    /** 执行 start 调度、Child Runtime 运行以及可能的受控提交。 */
+    const executeScheduled = async (): Promise<void> => {
+      const [leaseOutcome] = await Promise.allSettled([
+        dependencies.scheduler.enqueue(createScheduleRequest(task, checkpoint, dependencies.now(), systemChildTimeoutMs, 'start'))
+      ]);
+      if (leaseOutcome.status === 'rejected') {
+        const currentTask = dependencies.getTask?.(task.taskId);
+        if (currentTask?.status !== 'cancelled' && currentTask?.status !== 'cancelling') {
+          await cancelBeforeAttempt(task, checkpoint, readScheduleReason(leaseOutcome.reason));
+        }
+      } else {
+        lease = leaseOutcome.value;
+        const [executionOutcome] = await Promise.allSettled([executeLease(task, checkpoint, lease)]);
+        await releaseStartResources(task.taskId, lease);
+        lease = undefined;
+        if (executionOutcome.status === 'fulfilled' && executionOutcome.value) {
+          await commitPrepared(executionOutcome.value, checkpoint);
+        } else if (executionOutcome.status === 'rejected') {
+          setState(task.checkpointId, 'idle');
+        }
+      }
+    };
+    const [operationOutcome] = await Promise.allSettled([executeScheduled()]);
     clearAbortTimer(task.taskId);
     const runtimeId = runtimeIds.get(task.taskId);
-    if (runtimeId) {
-      await Promise.allSettled([
-        Promise.resolve().then((): void => {
-          dependencies.registry.unbindRuntime(runtimeId);
-        })
-      ]);
-    }
     runtimeIds.delete(task.taskId);
-    lease.release();
-    if (executionOutcome.status === 'fulfilled' && executionOutcome.value) {
-      await commitPrepared(executionOutcome.value, checkpoint);
-    } else if (executionOutcome.status === 'rejected') {
-      setState(task.checkpointId, 'idle');
-    }
+    preparedWrites.delete(task.taskId);
+    const cleanupOutcomes = await Promise.allSettled([
+      Promise.resolve().then((): void => {
+        if (runtimeId) dependencies.registry.unbindRuntime(runtimeId);
+      }),
+      Promise.resolve().then((): void => {
+        lease?.release();
+      }),
+      Promise.resolve().then((): void => dependencies.registry.releaseTask(task.taskId))
+    ]);
+    const cleanupFailure = cleanupOutcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+    // 保留执行主错误；只有执行成功时才把清理失败上抛给统一收敛逻辑。
+    if (operationOutcome.status === 'rejected') throw operationOutcome.reason;
+    if (cleanupFailure) throw cleanupFailure.reason;
   }
 
   /**
@@ -1133,6 +1329,116 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
       if (taskRuns.get(task.taskId) === execution) taskRuns.delete(task.taskId);
     };
     execution.then(clearRun, clearRun);
+  }
+
+  /**
+   * 等待目标 Task 当前执行完成，等待时间受取消策略约束。
+   * @param taskId - 目标 Task
+   */
+  async function waitTaskRun(taskId: string): Promise<void> {
+    const execution = taskRuns.get(taskId);
+    if (!execution) return;
+    if (!(await waitTaskRuns([execution]))) throw new Error('coordinator_cancel_cleanup_timeout');
+    await execution;
+  }
+
+  /**
+   * 从当前 Store 投影读取一个可取消 Task。
+   * @param taskId - 目标身份
+   * @returns 当前 Task
+   */
+  function readCancelTask(taskId: string): AgentTaskRecord {
+    const task = dependencies.getTask?.(taskId);
+    if (!task || task.recordState !== 'active') throw new Error('coordinator_task_not_found');
+    return task;
+  }
+
+  /**
+   * 归一化单 Task 与 Checkpoint 级联取消。
+   * @param taskId - 目标 Task
+   * @param requestKind - 首次持久化的请求种类
+   * @returns 权威 disposition
+   */
+  async function cancelTaskInternal(
+    taskId: string,
+    requestKind: 'single_task' | 'checkpoint_cascade'
+  ): Promise<AgentTaskCancellationProjection['disposition']> {
+    const task = readCancelTask(taskId);
+    const reason = cancelReasons.get(taskId) ?? (requestKind === 'single_task' ? 'user_cancelled' : 'checkpoint_cancelled');
+    if (isTaskTerminal(task.status)) {
+      return dependencies.requestTaskCancellation(task.taskId, requestKind).disposition;
+    }
+    if (
+      task.currentAttemptId === undefined &&
+      (task.status === 'created' || task.status === 'planning' || task.status === 'authorized' || (task.status === 'queued' && task.queuePhase === 'start'))
+    ) {
+      if (task.status === 'queued') {
+        const scheduleDisposition = dependencies.scheduler.cancel(task.taskId, reason);
+        if (scheduleDisposition !== 'queued_cancelled' && scheduleDisposition !== 'active_signalled') {
+          throw new Error('coordinator_queued_cancel_conflict');
+        }
+      }
+      dependencies.recordPreCancellation(task, requestKind);
+      dependencies.releaseBudget(task.taskId);
+      dependencies.registry.releaseTask(task.taskId);
+      await waitTaskRun(task.taskId);
+      return 'cancel_requested';
+    }
+    if (task.status === 'queued' && task.queuePhase === 'commit') {
+      const scheduleDisposition = dependencies.scheduler.cancel(task.taskId, reason);
+      if (scheduleDisposition !== 'queued_cancelled' && scheduleDisposition !== 'active_signalled') {
+        throw new Error('coordinator_commit_cancel_conflict');
+      }
+      const projection = dependencies.requestTaskCancellation(task.taskId, requestKind);
+      await waitTaskRun(task.taskId);
+      return projection.disposition;
+    }
+    const projection = dependencies.requestTaskCancellation(task.taskId, requestKind);
+    if (projection.disposition === 'already_settled' || projection.disposition === 'commit_in_progress') return projection.disposition;
+    const currentTask = projection.task;
+    if (task.status === 'waiting_confirmation') {
+      dependencies.confirmationQueue?.revokeTask(task.taskId, reason);
+      const runtimeId = runtimeIds.get(task.taskId) ?? preparedWrites.get(task.taskId)?.attempt.currentRuntimeId;
+      if (runtimeId) await dependencies.executor.discard(runtimeId);
+      await waitTaskRun(task.taskId);
+      return projection.disposition;
+    }
+    const scheduleDisposition: AgentScheduleCancelDisposition = dependencies.scheduler.cancel(task.taskId, reason);
+    if (scheduleDisposition === 'active_signalled') {
+      const error: AgentTaskError = {
+        code: 'cancelled',
+        phase: 'runtime',
+        category: 'user',
+        retryable: false,
+        details: { reason }
+      };
+      if (dependencies.registry.getActor(task.taskId)) dependencies.registry.abortTask(task.taskId, error);
+      const runtimeId = runtimeIds.get(task.taskId);
+      if (runtimeId) scheduleHardAbort(task.taskId, runtimeId, reason);
+    } else if (scheduleDisposition === 'not_found' && currentTask.status !== 'cancelling') {
+      throw new Error('coordinator_active_cancel_route_missing');
+    }
+    await waitTaskRun(task.taskId);
+    return projection.disposition;
+  }
+
+  /**
+   * 返回或创建单 Task 取消 flight。
+   * @param taskId - 目标 Task
+   * @param requestKind - 首次请求种类
+   * @returns 同一 Task 当前共享 Promise
+   */
+  function getCancelFlight(taskId: string, requestKind: 'single_task' | 'checkpoint_cascade'): Promise<AgentTaskCancellationProjection['disposition']> {
+    const existing = cancelFlights.get(taskId);
+    if (existing) return existing;
+    const execution = cancelTaskInternal(taskId, requestKind).finally((): void => {
+      if (cancelFlights.get(taskId) === execution) {
+        cancelFlights.delete(taskId);
+        cancelReasons.delete(taskId);
+      }
+    });
+    cancelFlights.set(taskId, execution);
+    return execution;
   }
 
   /**
@@ -1266,34 +1572,27 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
       if (!normalizedReason) throw new Error('coordinator_cancel_reason_invalid');
       const recovery = dependencies.listActive().find((entry): boolean => entry.checkpoint.checkpointId === checkpointId);
       const checkpoint = dependencies.cancelCheckpoint(checkpointId, normalizedReason);
-      const error: AgentTaskError = {
-        code: 'cancelled',
-        phase: 'runtime',
-        category: 'user',
-        retryable: false,
-        details: { reason: normalizedReason }
-      };
-      recovery?.tasks.forEach((task): void => {
-        const runtimeId = runtimeIds.get(task.taskId);
-        dependencies.scheduler.cancel(task.taskId, normalizedReason);
-        if (dependencies.registry.getActor(task.taskId)) dependencies.registry.abortTask(task.taskId, error);
-        if (runtimeId && !abortTimers.has(task.taskId)) {
-          const timer = setTimeout((): void => {
-            abortTimers.delete(task.taskId);
-            dependencies.executor.abort(runtimeId, normalizedReason);
-          }, cancellationGraceMs);
-          abortTimers.set(task.taskId, timer);
-        }
-      });
       setState(checkpointId, isCoordinatorTerminal(checkpoint.status) ? 'terminal' : 'running');
-      const activeRuns = recovery?.tasks
-        .map((task): Promise<void> | undefined => taskRuns.get(task.taskId))
-        .filter((execution): execution is Promise<void> => execution !== undefined);
-      if (activeRuns && activeRuns.length > 0) await waitTaskRuns(activeRuns);
-      if (executions.get(checkpointId)?.status !== 'terminal') {
-        const finalized = dependencies.cancelCheckpoint(checkpointId, normalizedReason);
-        setState(checkpointId, isCoordinatorTerminal(finalized.status) ? 'terminal' : 'running');
+      const cancellationOutcomes = await Promise.allSettled(
+        recovery?.tasks.map((task): Promise<AgentTaskCancellationProjection['disposition']> => {
+          if (!cancelFlights.has(task.taskId)) cancelReasons.set(task.taskId, normalizedReason);
+          return getCancelFlight(task.taskId, 'checkpoint_cascade');
+        }) ?? []
+      );
+      // 所有 Task flight 完成后必须再次驱动 Store 汇合，不能用易失 Coordinator 状态跳过
+      // assistant/fence 的最终清理。ready_to_resume 取消也在这一步直接收敛。
+      const finalized = dependencies.cancelCheckpoint(checkpointId, normalizedReason);
+      setState(checkpointId, isCoordinatorTerminal(finalized.status) ? 'terminal' : 'running');
+      const cancellationFailure = cancellationOutcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+      if (cancellationFailure) {
+        if (!isCoordinatorTerminal(finalized.status)) pendingFinalizations.set(checkpointId, normalizedReason);
+        throw cancellationFailure.reason;
       }
+    },
+
+    cancelTask(taskId: string): Promise<AgentTaskCancellationProjection['disposition']> {
+      if (!cancelFlights.has(taskId)) cancelReasons.set(taskId, 'user_cancelled');
+      return getCancelFlight(taskId, 'single_task');
     },
 
     getCheckpointState(checkpointId: string): AgentCoordinatorState {

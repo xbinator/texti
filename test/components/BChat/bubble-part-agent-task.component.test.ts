@@ -8,6 +8,7 @@ import type { ChatMessageToolPart } from 'types/chat';
 import type {
   AgentTaskQueuePhase,
   AgentTaskStatus,
+  ChatAgentCancelTaskResult,
   ChatAgentConfirmationSnapshot,
   ChatAgentGetTaskResult,
   ChatAgentHandlerResult,
@@ -27,7 +28,8 @@ import { useChatConfirmationQueueStore } from '@/stores/chat/confirmationQueue';
 /** Agent Task IPC 测试边界。 */
 const agentAPI = vi.hoisted(() => ({
   getTask: vi.fn(),
-  listConfirmations: vi.fn()
+  listConfirmations: vi.fn(),
+  cancelTask: vi.fn()
 }));
 
 /** Artifact 导航测试边界。 */
@@ -43,7 +45,8 @@ const loggerAPI = vi.hoisted(() => ({
 vi.mock('@/shared/platform/electron-api', () => ({
   getElectronAPI: (): Record<string, unknown> => ({
     chatAgentGetTask: agentAPI.getTask,
-    chatAgentListConfirmations: agentAPI.listConfirmations
+    chatAgentListConfirmations: agentAPI.listConfirmations,
+    chatAgentCancelTask: agentAPI.cancelTask
   })
 }));
 
@@ -608,6 +611,7 @@ describe('BubblePartAgentTask', (): void => {
   beforeEach((): void => {
     agentAPI.getTask.mockReset();
     agentAPI.listConfirmations.mockReset();
+    agentAPI.cancelTask.mockReset();
     routerAPI.push.mockReset();
     routerAPI.push.mockResolvedValue(undefined);
     loggerAPI.error.mockReset();
@@ -631,6 +635,101 @@ describe('BubblePartAgentTask', (): void => {
     expect(wrapper.text()).toContain('约 10 秒');
     expect(wrapper.find('[data-icon="lucide:play-circle"]').exists()).toBe(true);
     expect(agentAPI.getTask).not.toHaveBeenCalled();
+  });
+
+  it('does not optimistically mutate status while a Task cancellation is pending', async (): Promise<void> => {
+    const cancellation = createDeferred<ChatAgentHandlerResult<ChatAgentCancelTaskResult>>();
+    agentAPI.cancelTask.mockReturnValue(cancellation.promise);
+    const { wrapper } = mountProjected(createSummary());
+    const taskStore = useChatAgentTaskStore();
+    const button = wrapper.find('[data-action="cancel-task"]');
+
+    expect(button.exists()).toBe(true);
+    await button.trigger('click');
+
+    expect(agentAPI.cancelTask).toHaveBeenCalledWith({ sessionId: 'session-1', taskId: 'task-1' });
+    expect(button.attributes('disabled')).toBeDefined();
+    expect(taskStore.tasksById['task-1']).toMatchObject({
+      status: 'running',
+      taskSequence: 1
+    });
+    expect(taskStore.tasksById['task-1']?.recordState === 'active' ? taskStore.tasksById['task-1'].cancellation : undefined).toBeUndefined();
+    expect(wrapper.text()).toContain('运行中');
+    expect(wrapper.text()).not.toContain('取消中');
+  });
+
+  it('applies only the authoritative cancellation Summary returned by Main', async (): Promise<void> => {
+    const updated = createSummary({
+      status: 'cancelling',
+      taskSequence: 2,
+      cancellation: {
+        requestKind: 'single_task',
+        requestedAt: '2026-07-28T00:00:11.000Z'
+      },
+      updatedAt: '2026-07-28T00:00:11.000Z'
+    });
+    agentAPI.cancelTask.mockResolvedValue({
+      ok: true,
+      data: {
+        disposition: 'cancel_requested',
+        task: updated
+      }
+    });
+    const { wrapper } = mountProjected(createSummary());
+    const taskStore = useChatAgentTaskStore();
+
+    await wrapper.find('[data-action="cancel-task"]').trigger('click');
+    await flushPromises();
+
+    expect(taskStore.tasksById['task-1']).toEqual(updated);
+    expect(wrapper.text()).toContain('取消中');
+    expect(wrapper.find('[data-action="cancel-task"]').attributes('disabled')).toBeDefined();
+  });
+
+  it('keeps the current Summary on cancellation failure and exposes only a stable local error', async (): Promise<void> => {
+    agentAPI.cancelTask.mockResolvedValue({
+      ok: false,
+      error: 'SECRET_CANCEL_FAILURE',
+      code: 'CANCEL_FAILED'
+    });
+    const baseline = createSummary();
+    const { wrapper } = mountProjected(baseline);
+    const taskStore = useChatAgentTaskStore();
+
+    await wrapper.find('[data-action="cancel-task"]').trigger('click');
+    await flushPromises();
+
+    expect(taskStore.tasksById['task-1']).toEqual(baseline);
+    expect(wrapper.text()).toContain('agent_task_cancel_failed');
+    expect(wrapper.html()).not.toContain('SECRET_CANCEL_FAILURE');
+  });
+
+  it('ignores a late cancellation response after the card identity changes', async (): Promise<void> => {
+    const cancellation = createDeferred<ChatAgentHandlerResult<ChatAgentCancelTaskResult>>();
+    agentAPI.cancelTask.mockReturnValue(cancellation.promise);
+    const baseline = createSummary();
+    const { wrapper } = mountProjected(baseline);
+    const taskStore = useChatAgentTaskStore();
+    await wrapper.find('[data-action="cancel-task"]').trigger('click');
+
+    await wrapper.setProps({ sessionId: 'session-2' });
+    cancellation.resolve({
+      ok: true,
+      data: {
+        disposition: 'cancel_requested',
+        task: createSummary({
+          status: 'cancelling',
+          taskSequence: 2,
+          cancellation: {
+            requestKind: 'single_task',
+            requestedAt: '2026-07-28T00:00:11.000Z'
+          }
+        })
+      }
+    });
+    await flushPromises();
+
+    expect(taskStore.tasksById['task-1']).toEqual(baseline);
   });
 
   it('loads Detail only on first expansion and reuses the trusted cached sequence', async (): Promise<void> => {

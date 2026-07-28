@@ -121,4 +121,36 @@ describe('child actor registry', (): void => {
       registry.bindRuntime(createAddress(task, 'runtime-after-abort'), task.executionPlanSnapshotHash as string);
     }).toThrowError(/actor_aborted/);
   });
+
+  it('keeps an aborted Runtime routable until idempotent target-only release', (): void => {
+    const registry = createChildActorRegistry();
+    const target = createTask('target');
+    const sibling = createTask('sibling');
+    const targetRuntimeId = 'runtime-target';
+    const siblingRuntimeId = 'runtime-sibling';
+    const error: AgentTaskError = {
+      code: 'cancelled',
+      phase: 'runtime',
+      category: 'user',
+      retryable: false,
+      details: { reason: 'user_cancelled' }
+    };
+    registry.ensureActor(target);
+    registry.ensureActor(sibling);
+    registry.bindRuntime(createAddress(target, targetRuntimeId), target.executionPlanSnapshotHash as string);
+    registry.bindRuntime(createAddress(sibling, siblingRuntimeId), sibling.executionPlanSnapshotHash as string);
+
+    registry.abortTask(target.taskId, error);
+
+    expect(registry.getRuntime(targetRuntimeId)?.taskId).toBe(target.taskId);
+    expect(registry.getRuntime(siblingRuntimeId)?.taskId).toBe(sibling.taskId);
+
+    registry.releaseTask(target.taskId);
+    registry.releaseTask(target.taskId);
+
+    expect(registry.getActor(target.taskId)).toBeUndefined();
+    expect(registry.getRuntime(targetRuntimeId)).toBeUndefined();
+    expect(registry.getActor(sibling.taskId)?.taskId).toBe(sibling.taskId);
+    expect(registry.getRuntime(siblingRuntimeId)?.taskId).toBe(sibling.taskId);
+  });
 });

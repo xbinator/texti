@@ -857,8 +857,10 @@ git commit -m "feat(chat): 完善 Child Task 详情交互"
 - Modify: `electron/main/modules/chat/agents/store.mts`
 - Modify: `electron/main/modules/chat/agents/scheduler.mts`
 - Modify: `electron/main/modules/chat/agents/coordinator.mts`
+- Modify: `electron/main/modules/chat/agents/executor.mts`
 - Modify: `electron/main/modules/chat/agents/service.mts`
 - Modify: `electron/main/modules/chat/agents/ipc.mts`
+- Modify: `electron/main/modules/database/service.mts`
 - Modify: `electron/preload/index.mts`
 - Modify: `types/electron-api.d.ts`
 - Modify: `electron/main/modules/chat/agents/child-registry.mts`
@@ -871,8 +873,13 @@ git commit -m "feat(chat): 完善 Child Task 详情交互"
 - Modify: `test/electron/main/modules/chat/agents/store.test.ts`
 - Modify: `test/electron/main/modules/chat/agents/scheduler.test.ts`
 - Modify: `test/electron/main/modules/chat/agents/coordinator.test.ts`
+- Modify: `test/electron/main/modules/chat/agents/executor.test.ts`
+- Modify: `test/electron/main/modules/chat/agents/service.test.ts`
+- Modify: `test/electron/main/modules/chat/agents/startup-recovery.test.ts`
+- Modify: `test/electron/main/modules/chat/agents/task-projection.test.ts`
 - Modify: `test/electron/main/modules/chat/agents/ipc.test.ts`
 - Modify: `test/electron/main/modules/chat/runtime/main-boundary.test.ts`
+- Modify: `test/electron/main/modules/database/agent-task-migration.test.ts`
 - Modify: `test/electron/main/modules/chat/agents/child-registry.test.ts`
 - Modify: `test/electron/main/modules/chat/agents/confirmation-store.test.ts`
 - Modify: `test/electron/main/modules/chat/agents/budget.test.ts`
@@ -886,8 +893,9 @@ git commit -m "feat(chat): 完善 Child Task 详情交互"
 - Changes Scheduler cancellation from boolean to an explicit arbitration outcome.
 - Produces Coordinator `cancelTask(taskId)`.
 - Card applies only the returned authoritative Summary.
+- Persists Attempt usage lower-bounds, cancellation finalization markers, and superseded Outbox facts for crash-safe recovery.
 
-- [ ] **Step 1: Write failing contract, Result, state and Store tests**
+- [x] **Step 1: Write failing contract, Result, state and Store tests**
 
 Add the exact discriminated result:
 
@@ -921,7 +929,7 @@ Assert:
 - Checkpoint cascade also creates a terminal cancelled Result rather than a result-less cancelled Task, but never creates a ready Primary resume Outbox.
 - recovery `interruptCheckpoint()`/`interruptActive()` never leaves a result-less cancelled Task.
 
-- [ ] **Step 2: Run contract and Store tests and verify RED**
+- [x] **Step 2: Run contract and Store tests and verify RED**
 
 Run:
 
@@ -937,7 +945,7 @@ pnpm exec cross-env ELECTRON_RUN_AS_NODE=1 HOST=127.0.0.1 electron node_modules/
 
 Expected: FAIL because the cancellation result and atomic Store methods do not exist.
 
-- [ ] **Step 3: Add cancellation contracts and Store CAS**
+- [x] **Step 3: Add cancellation contracts and Store CAS**
 
 Extend:
 
@@ -988,7 +996,9 @@ Update `result.mts` so result validation is discriminated by `resultKind` before
 
 Refactor `interruptCheckpoint()` and `interruptActive()` so recovery never writes `Task cancelled` without a Result. An unfinished Task without an Attempt receives a validated `AgentPreAttemptFailureResult` and becomes `failed`; an Attempt-bearing Task receives a failed `ChatAgentResult`, freezes its usage and becomes `failed`. Persist terminal envelopes and `child.result_recorded`, then finish the aggregate as `interrupted` without producing a ready Outbox.
 
-- [ ] **Step 4: Make Scheduler arbitration explicit**
+Persist `usage_snapshot_json + usage_complete` on each Attempt, `cancellation_finalized_at` on cancelled Checkpoints, and `superseded_at` on invalidated Outbox rows. Recovery freezes only observed usage lower-bounds, marks incomplete crash usage in the Result error details, replays cancellation cleanup until the durable marker is written last, and never republishes stale `delegation.created` or `delegation.ready` events.
+
+- [x] **Step 4: Make Scheduler arbitration explicit**
 
 Replace boolean cancellation with:
 
@@ -1006,7 +1016,7 @@ cancel(
 
 Use the scheduler’s existing serial dispatch boundary so queue removal and start/commit acquisition have one ordering. Never cancel entries belonging to sibling Tasks.
 
-- [ ] **Step 5: Write failing orchestration and cleanup tests**
+- [x] **Step 5: Write failing orchestration and cleanup tests**
 
 Cover:
 
@@ -1024,7 +1034,7 @@ Cover:
 - wrong Session cannot cancel or enumerate another Session’s Task;
 - preload exposes `chatAgentCancelTask` only after Coordinator behavior exists.
 
-- [ ] **Step 6: Run orchestration tests and verify RED**
+- [x] **Step 6: Run orchestration tests and verify RED**
 
 Run:
 
@@ -1034,7 +1044,7 @@ pnpm exec vitest run test/electron/main/modules/chat/agents/scheduler.test.ts te
 
 Expected: FAIL because single-Task orchestration and Renderer cancel handling do not exist.
 
-- [ ] **Step 7: Implement Coordinator cancellation and no-throw cleanup**
+- [x] **Step 7: Implement Coordinator cancellation and no-throw cleanup**
 
 Add:
 
@@ -1085,7 +1095,7 @@ releaseTask(taskId: string): void;
 
 In `finally`, execute lease release, Registry release, timer cleanup, `taskRuns` cleanup, cancel-flight cleanup and budget settlement independently. An Attempt settles actual usage; no-Attempt cancellation releases only that Task reservation. Never release the Checkpoint continuation fence.
 
-- [ ] **Step 8: Wire Service and card without optimistic state**
+- [x] **Step 8: Wire Service and card without optimistic state**
 
 Register `chat:agent:cancel-task` with the same strict plain-object, exact-key, identity and cross-Session rules used by the query IPC. Expose:
 
@@ -1115,13 +1125,13 @@ async function requestTaskCancel(): Promise<void>;
 
 After a successful IPC response, call only `taskStore.applySummary(response.data.task)`. Do not mutate status optimistically. Disable duplicate requests once Summary has cancellation; use “请求取消” for `committing`.
 
-- [ ] **Step 9: Run all Task 6 tests and verify GREEN**
+- [x] **Step 9: Run all Task 6 tests and verify GREEN**
 
 Run the commands from Steps 2 and 6.
 
 Expected: PASS.
 
-- [ ] **Step 10: Update changelog and commit**
+- [x] **Step 10: Update changelog and commit**
 
 Add under `## Added`:
 
@@ -1132,7 +1142,7 @@ Add under `## Added`:
 Commit:
 
 ```bash
-git add types/chat-agent.d.ts electron/main/modules/chat/agents/contracts.mts electron/main/modules/chat/agents/result.mts electron/main/modules/chat/agents/state.mts electron/main/modules/chat/agents/types.mts electron/main/modules/chat/agents/store.mts electron/main/modules/chat/agents/scheduler.mts electron/main/modules/chat/agents/coordinator.mts electron/main/modules/chat/agents/service.mts electron/main/modules/chat/agents/ipc.mts electron/preload/index.mts types/electron-api.d.ts electron/main/modules/chat/agents/child-registry.mts electron/main/modules/chat/agents/confirmation-store.mts electron/main/modules/chat/agents/budget.mts src/components/BChat/components/MessageBubble/BubblePartAgentTask.vue test/electron/main/modules/chat/agents/contracts.test.ts test/electron/main/modules/chat/agents/result.test.ts test/electron/main/modules/chat/agents/state.test.ts test/electron/main/modules/chat/agents/store.test.ts test/electron/main/modules/chat/agents/scheduler.test.ts test/electron/main/modules/chat/agents/coordinator.test.ts test/electron/main/modules/chat/agents/ipc.test.ts test/electron/main/modules/chat/runtime/main-boundary.test.ts test/electron/main/modules/chat/agents/child-registry.test.ts test/electron/main/modules/chat/agents/confirmation-store.test.ts test/electron/main/modules/chat/agents/budget.test.ts test/components/BChat/bubble-part-agent-task.component.test.ts changelog/2026-07-28.md
+git add changelog/2026-07-28.md docs/superpowers/plans/2026-07-28-child-agent-task-card.md types/chat-agent.d.ts types/electron-api.d.ts electron/main/modules/chat/agents/child-registry.mts electron/main/modules/chat/agents/contracts.mts electron/main/modules/chat/agents/coordinator.mts electron/main/modules/chat/agents/executor.mts electron/main/modules/chat/agents/ipc.mts electron/main/modules/chat/agents/result.mts electron/main/modules/chat/agents/scheduler.mts electron/main/modules/chat/agents/service.mts electron/main/modules/chat/agents/store.mts electron/main/modules/chat/agents/types.mts electron/main/modules/database/service.mts electron/preload/index.mts src/components/BChat/components/MessageBubble/BubblePartAgentTask.vue test/components/BChat/bubble-part-agent-task.component.test.ts test/electron/main/modules/chat/agents/budget.test.ts test/electron/main/modules/chat/agents/child-registry.test.ts test/electron/main/modules/chat/agents/confirmation-store.test.ts test/electron/main/modules/chat/agents/contracts.test.ts test/electron/main/modules/chat/agents/coordinator.test.ts test/electron/main/modules/chat/agents/executor.test.ts test/electron/main/modules/chat/agents/file-commit.test.ts test/electron/main/modules/chat/agents/ipc.test.ts test/electron/main/modules/chat/agents/read-runtime.test.ts test/electron/main/modules/chat/agents/result.test.ts test/electron/main/modules/chat/agents/scheduler.test.ts test/electron/main/modules/chat/agents/service.test.ts test/electron/main/modules/chat/agents/startup-recovery.test.ts test/electron/main/modules/chat/agents/store.test.ts test/electron/main/modules/chat/agents/task-projection.test.ts test/electron/main/modules/chat/agents/write-overlay.test.ts test/electron/main/modules/chat/agents/write-runtime.test.ts test/electron/main/modules/chat/agents/write-tools.test.ts test/electron/main/modules/chat/runtime/main-boundary.test.ts test/electron/main/modules/database/agent-task-migration.test.ts
 git commit -m "feat(chat): 支持单 Child Task 协作取消"
 ```
 

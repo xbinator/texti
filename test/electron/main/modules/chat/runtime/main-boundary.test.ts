@@ -108,6 +108,7 @@ describe('chat runtime main boundary', (): void => {
     expect([...new Set(agentMethods)].sort()).toEqual(
       [
         'chatAgentCancelCheckpoint',
+        'chatAgentCancelTask',
         'chatAgentGetTask',
         'chatAgentListActive',
         'chatAgentListConfirmations',
