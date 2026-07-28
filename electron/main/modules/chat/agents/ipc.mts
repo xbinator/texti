@@ -2,7 +2,14 @@
  * @file ipc.mts
  * @description Chat Agent application IPC 的严格输入校验与窄 handler 注册。
  */
-import type { ChatAgentCancelCheckpointInput, ChatAgentHandlerResult, ChatAgentResolveConfirmationInput, ChatAgentResumePrimaryInput } from 'types/chat-agent';
+import type {
+  ChatAgentCancelCheckpointInput,
+  ChatAgentGetTaskInput,
+  ChatAgentHandlerResult,
+  ChatAgentListTasksInput,
+  ChatAgentResolveConfirmationInput,
+  ChatAgentResumePrimaryInput
+} from 'types/chat-agent';
 import { ipcMain } from 'electron';
 import { chatAgentDelegationService } from './service.mjs';
 
@@ -27,15 +34,12 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * 判断字符串是否含 ASCII 控制字符。
+ * 判断字符串是否含 Unicode Cc 控制字符。
  * @param value - 待校验字符串
  * @returns 是否含控制字符
  */
 function hasControlCharacters(value: string): boolean {
-  return [...value].some((character): boolean => {
-    const codePoint = character.codePointAt(0);
-    return codePoint !== undefined && (codePoint <= 31 || codePoint === 127);
-  });
+  return /\p{Cc}/u.test(value);
 }
 
 /**
@@ -91,6 +95,59 @@ function parseCancelInput(input: unknown): ChatAgentCancelCheckpointInput {
   assertExactKeys(input, ['checkpointId']);
   return {
     checkpointId: requireIdentity(input.checkpointId, 'checkpointId')
+  };
+}
+
+/**
+ * 校验 Task 列表的可选游标与页大小。
+ * @param input - 未可信 IPC payload
+ * @returns 规范化列表输入
+ */
+function parseTaskListInput(input: unknown): ChatAgentListTasksInput {
+  if (!isPlainObject(input)) throw createInputError('listTasks input must be a plain object');
+  const expectedKeys = ['sessionId'];
+  if (Object.hasOwn(input, 'cursor')) expectedKeys.push('cursor');
+  if (Object.hasOwn(input, 'limit')) expectedKeys.push('limit');
+  assertExactKeys(input, expectedKeys);
+  const sessionId = requireIdentity(input.sessionId, 'sessionId');
+  let cursor: string | undefined;
+  if (Object.hasOwn(input, 'cursor')) {
+    if (
+      typeof input.cursor !== 'string' ||
+      input.cursor.length === 0 ||
+      input.cursor.length > 4096 ||
+      input.cursor.trim() !== input.cursor ||
+      hasControlCharacters(input.cursor)
+    ) {
+      throw createInputError('cursor is invalid');
+    }
+    cursor = input.cursor;
+  }
+  let limit = 50;
+  if (Object.hasOwn(input, 'limit')) {
+    if (!Number.isSafeInteger(input.limit) || (input.limit as number) < 1 || (input.limit as number) > 100) {
+      throw createInputError('limit must be a safe integer from 1 through 100');
+    }
+    limit = input.limit as number;
+  }
+  return {
+    sessionId,
+    ...(cursor ? { cursor } : {}),
+    limit
+  };
+}
+
+/**
+ * 校验单 Task 定向查询输入。
+ * @param input - 未可信 IPC payload
+ * @returns 精确 Session/Task 身份
+ */
+function parseTaskGetInput(input: unknown): ChatAgentGetTaskInput {
+  if (!isPlainObject(input)) throw createInputError('getTask input must be a plain object');
+  assertExactKeys(input, ['sessionId', 'taskId']);
+  return {
+    sessionId: requireIdentity(input.sessionId, 'sessionId'),
+    taskId: requireIdentity(input.taskId, 'taskId')
   };
 }
 
@@ -156,6 +213,20 @@ export function registerChatAgentHandlers(): void {
     wrapAgentHandler((_event, ...inputs) => {
       if (inputs.length !== 0) throw createInputError('listActive does not accept input');
       return chatAgentDelegationService.listActive();
+    })
+  );
+  ipcMain.handle(
+    'chat:agent:list-tasks',
+    wrapAgentHandler((_event, ...inputs) => {
+      if (inputs.length !== 1) throw createInputError('listTasks accepts exactly one input');
+      return chatAgentDelegationService.listTasks(parseTaskListInput(inputs[0]));
+    })
+  );
+  ipcMain.handle(
+    'chat:agent:get-task',
+    wrapAgentHandler((_event, ...inputs) => {
+      if (inputs.length !== 1) throw createInputError('getTask accepts exactly one input');
+      return chatAgentDelegationService.getTask(parseTaskGetInput(inputs[0]));
     })
   );
   ipcMain.handle(

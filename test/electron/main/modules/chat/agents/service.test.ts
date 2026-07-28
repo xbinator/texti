@@ -197,6 +197,8 @@ function createDependencies(): {
   reserveTask: ReturnType<typeof vi.fn>;
   releaseBudget: ReturnType<typeof vi.fn>;
   releaseCheckpoint: ReturnType<typeof vi.fn>;
+  projectTasks: ReturnType<typeof vi.fn>;
+  projectDetail: ReturnType<typeof vi.fn>;
 } {
   const prepareDelegation = vi.fn((_input, persistAssistant: () => undefined): void => {
     persistAssistant();
@@ -234,6 +236,8 @@ function createDependencies(): {
   const reserveTask = vi.fn();
   const releaseBudget = vi.fn();
   const releaseCheckpoint = vi.fn();
+  const projectTasks = vi.fn(() => ({ tasks: [] }));
+  const projectDetail = vi.fn(() => null);
   getCheckpoint.mockImplementation((checkpointId: string): AgentCheckpointRecord | null => {
     const preparedInput = prepareDelegation.mock.calls.at(-1)?.[0];
     if (!preparedInput || preparedInput.checkpoint.checkpointId !== checkpointId) return null;
@@ -277,6 +281,11 @@ function createDependencies(): {
         cancelCheckpoint,
         listEvents,
         listPendingOutbox
+      },
+      taskProjector: {
+        projectSummary: vi.fn(() => null),
+        listTasks: projectTasks,
+        projectDetail
       },
       locks: createRuntimeLockRegistry(),
       persistAssistant,
@@ -341,7 +350,9 @@ function createDependencies(): {
     compileReadPlan,
     reserveTask,
     releaseBudget,
-    releaseCheckpoint
+    releaseCheckpoint,
+    projectTasks,
+    projectDetail
   };
 }
 
@@ -415,6 +426,32 @@ function createWritePlan(task: AgentTaskRecord, checkpoint: AgentCheckpointRecor
 }
 
 describe('chat agent delegation service', (): void => {
+  it('forwards Task list and Session-bound detail queries through the required projector', (): void => {
+    const fixture = createDependencies();
+    const tombstone = {
+      recordState: 'tombstoned' as const,
+      taskId: 'task-1',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      checkpointId: 'checkpoint-1',
+      assistantMessageId: 'assistant-1',
+      toolCallId: 'tool-call-1',
+      projectionSchemaVersion: 1 as const,
+      taskSequence: 9,
+      updatedAt: '2026-07-28T00:00:00.000Z'
+    };
+    fixture.projectTasks.mockReturnValue({ tasks: [], nextCursor: 'cursor-2' });
+    fixture.projectDetail.mockImplementation((sessionId: string): typeof tombstone | null => (sessionId === 'session-1' ? tombstone : null));
+    const service = createChatAgentDelegationService(fixture.dependencies);
+
+    expect(service.listTasks({ sessionId: 'session-1', cursor: 'cursor-1', limit: 25 })).toEqual({ tasks: [], nextCursor: 'cursor-2' });
+    expect(fixture.projectTasks).toHaveBeenCalledWith({ sessionId: 'session-1', cursor: 'cursor-1', limit: 25 });
+    expect(service.getTask({ sessionId: 'session-1', taskId: 'task-1' })).toEqual(tombstone);
+    expect(service.getTask({ sessionId: 'session-wrong', taskId: 'task-1' })).toBeNull();
+    expect(fixture.projectDetail).toHaveBeenNthCalledWith(1, 'session-1', 'task-1');
+    expect(fixture.projectDetail).toHaveBeenNthCalledWith(2, 'session-wrong', 'task-1');
+  });
+
   it('commits immutable facts before acquiring the fence and publishing the outbox', async (): Promise<void> => {
     const fixture = createDependencies();
     const service = createChatAgentDelegationService(fixture.dependencies);

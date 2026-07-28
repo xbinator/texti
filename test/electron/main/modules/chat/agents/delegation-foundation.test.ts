@@ -11,7 +11,11 @@ import type { ChatRuntimeEventMap } from 'types/chat-runtime';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { hashExecutionPlanSnapshot, validateFoundationContract } from '../../../../../../electron/main/modules/chat/agents/contracts.mjs';
-import { createChatAgentDelegationService, type ChatAgentDelegationIdKind } from '../../../../../../electron/main/modules/chat/agents/service.mjs';
+import {
+  createAgentTaskProjector,
+  createChatAgentDelegationService,
+  type ChatAgentDelegationIdKind
+} from '../../../../../../electron/main/modules/chat/agents/service.mjs';
 import { createAgentDelegationStore, type AgentDelegationStore, type AgentStoreDatabase } from '../../../../../../electron/main/modules/chat/agents/store.mjs';
 import { createRuntimeLockRegistry } from '../../../../../../electron/main/modules/chat/runtime/infrastructure/locks.mjs';
 import { createChatRuntimeService } from '../../../../../../electron/main/modules/chat/runtime/service.mjs';
@@ -23,6 +27,19 @@ const describeWithSqlite = 'electron' in process.versions ? describe : describe.
 
 /** 固定基础时间。 */
 const occurredAt = '2026-07-23T08:00:00.000Z';
+
+/**
+ * 为真实 Store 创建 fail-closed Task 公开投影器。
+ * @param store - 测试共享事实 Store
+ * @returns 不扩张资源或 artifact 能力的投影器
+ */
+function createTaskProjector(store: AgentDelegationStore): ReturnType<typeof createAgentTaskProjector> {
+  return createAgentTaskProjector({
+    store,
+    resolveResource: (): null => null,
+    resolveArtifact: (): null => null
+  });
+}
 
 /** 共享 registry 中的权威内部委派定义。 */
 const delegateDefinition = getToolRegistryEntry('delegate_task')?.definition;
@@ -315,6 +332,7 @@ describeWithSqlite('delegation foundation end to end', (): void => {
 
     const agentService = createChatAgentDelegationService({
       store,
+      taskProjector: createTaskProjector(store),
       locks,
       persistAssistant(message: ChatMessageRecord): undefined {
         messageRecords.set(message.id, structuredClone(message));
@@ -469,6 +487,7 @@ describeWithSqlite('delegation foundation end to end', (): void => {
     const locks = createRuntimeLockRegistry();
     const agentService = createChatAgentDelegationService({
       store,
+      taskProjector: createTaskProjector(store),
       locks,
       persistAssistant(message: ChatMessageRecord): undefined {
         failingAdapter.execute('INSERT INTO test_assistant (message_id) VALUES (?)', [message.id]);
@@ -545,6 +564,7 @@ describeWithSqlite('delegation foundation end to end', (): void => {
     let startCount = 0;
     const service = createChatAgentDelegationService({
       store,
+      taskProjector: createTaskProjector(store),
       locks,
       persistAssistant: (): undefined => undefined,
       readMessages: (): ChatMessageRecord[] => [structuredClone(messages.user), structuredClone(messages.assistant)],
@@ -604,6 +624,7 @@ describeWithSqlite('delegation foundation end to end', (): void => {
     const restartedStart = vi.fn(async () => ({ outcome: 'completed' as const }));
     const restartedService = createChatAgentDelegationService({
       store,
+      taskProjector: createTaskProjector(store),
       locks: createRuntimeLockRegistry(),
       persistAssistant: (): undefined => undefined,
       readMessages: (): ChatMessageRecord[] => [structuredClone(messages.user), structuredClone(messages.assistant)],

@@ -260,6 +260,11 @@ function createDependencies(
   return {
     dependencies: {
       store,
+      taskProjector: {
+        projectSummary: (): null => null,
+        listTasks: (): { tasks: [] } => ({ tasks: [] }),
+        projectDetail: (): null => null
+      },
       locks: createRuntimeLockRegistry(),
       persistAssistant: (): undefined => undefined,
       readMessages: (): ChatMessageRecord[] => [],

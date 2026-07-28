@@ -33,6 +33,7 @@ import type {
   ChatAgentCancelCheckpointInput,
   ChatAgentCheckpointSnapshot,
   ChatAgentConfirmationSnapshot,
+  ChatAgentGetTaskInput,
   ChatAgentListTasksInput,
   ChatAgentListTasksResult,
   ChatAgentGetTaskResult,
@@ -43,6 +44,7 @@ import type {
   ChatAgentTaskTimelineSnapshot,
   ChatAgentTaskSummarySnapshot,
   ChatAgentTaskTombstoneSnapshot,
+  ChatAgentTaskUpdatedEvent,
   AgentModelSnapshot,
   AgentOrderedToolCallSnapshot,
   PrimaryDelegationFeatureConfig,
@@ -1002,6 +1004,98 @@ export function createAgentTaskProjector(dependencies: AgentTaskProjectorDepende
   return new DefaultAgentTaskProjector(dependencies);
 }
 
+/** 已提交 Task 投影的异步合并发布边界。 */
+export interface AgentTaskProjectionPump {
+  /**
+   * 排队一个待重新投影的 Task。
+   * @param taskId - 已提交 Task 身份
+   */
+  enqueue(taskId: string): void;
+}
+
+/**
+ * 创建不影响持久化返回值的 Task 投影 Pump。
+ * @param input - 投影、发布、报告和调度依赖
+ * @returns no-throw 排队边界
+ */
+export function createTaskProjectionPump(input: {
+  /** 按身份重读 committed Summary/Tombstone。 */
+  readonly projectSummary: (taskId: string) => ChatAgentTaskEventSnapshot | null;
+  /** 发布到既有 Agent application channel。 */
+  readonly publish: (event: ChatAgentTaskUpdatedEvent) => void;
+  /** 上报稳定错误码。 */
+  readonly reportError: (code: string) => void;
+  /** 可替换的 event-loop 调度器。 */
+  readonly schedule?: (flush: () => void) => void;
+}): AgentTaskProjectionPump {
+  const pending = new Set<string>();
+  const lastPublished = new Map<string, number>();
+  const schedule = input.schedule ?? queueMicrotask;
+  let scheduled = false;
+
+  /**
+   * 吞掉错误报告器自身异常。
+   * @param code - 稳定机器码
+   */
+  function report(code: string): void {
+    try {
+      input.reportError(code);
+    } catch {
+      // 报告器不能反向破坏 post-commit 边界。
+    }
+  }
+
+  /** 重读并发布本轮去重后的 Task。 */
+  function flush(): void {
+    scheduled = false;
+    const taskIds = [...pending];
+    pending.clear();
+    taskIds.forEach((taskId): void => {
+      try {
+        const task = input.projectSummary(taskId);
+        if (!task || task.taskSequence <= (lastPublished.get(taskId) ?? 0)) return;
+        input.publish({
+          schemaVersion: 1,
+          type: 'task.updated',
+          task,
+          taskSequence: task.taskSequence
+        });
+        lastPublished.set(taskId, task.taskSequence);
+      } catch {
+        pending.add(taskId);
+        report('agent_task_projection_publish_failed');
+      }
+    });
+  }
+
+  /** 安排一次合并 flush；调度失败保留 pending 供后续通知恢复。 */
+  function requestFlush(): void {
+    if (scheduled) return;
+    scheduled = true;
+    try {
+      schedule(flush);
+    } catch {
+      scheduled = false;
+      report('agent_task_projection_schedule_failed');
+    }
+  }
+
+  return Object.freeze({
+    enqueue(taskId: string): void {
+      try {
+        if (normalizeAgentIdentity(taskId) !== taskId) {
+          report('agent_task_projection_identity_invalid');
+          return;
+        }
+        pending.add(taskId);
+        requestFlush();
+      } catch {
+        report('agent_task_projection_enqueue_failed');
+      }
+    }
+  });
+}
+
 /** 主进程授权器为一个只读 Task 分配的当前上限。 */
 export interface ChatAgentReadPlanLimits {
   /** 主进程此刻实际可用的工具名称。 */
@@ -1044,6 +1138,8 @@ export type ChatAgentPrimaryContinuationResult =
 export interface ChatAgentDelegationServiceDependencies {
   /** 同步持久化事实 Store。 */
   store: ChatAgentDelegationStore;
+  /** Renderer Task 查询使用的只读公开投影器。 */
+  taskProjector: AgentTaskProjector;
   /** Chat 与 Runtime 共享锁注册表。 */
   locks: RuntimeLockRegistry;
   /**
@@ -1179,6 +1275,18 @@ export interface ChatAgentDelegationService {
   resumePrimary(input: ChatAgentResumePrimaryInput): Promise<ChatAgentResumeResult>;
   /** @returns 所有公开非终态 Checkpoint 投影。 */
   listActive(): ChatAgentCheckpointSnapshot[];
+  /**
+   * 按 Session 查询 Task 轻量投影。
+   * @param input - Session、游标和页大小
+   * @returns 活动与终态 Task 页
+   */
+  listTasks(input: ChatAgentListTasksInput): ChatAgentListTasksResult;
+  /**
+   * 定向查询单 Task 详情。
+   * @param input - Session 与 Task 身份
+   * @returns Detail/Tombstone 或 null
+   */
+  getTask(input: ChatAgentGetTaskInput): ChatAgentGetTaskResult;
   /** @returns 所有公开 pending confirmation 投影。 */
   listConfirmations(): ChatAgentConfirmationSnapshot[];
   /**
@@ -1884,6 +1992,24 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
   }
 
   /**
+   * 使用 Main-owned Projector 查询当前 Session Task 页。
+   * @param input - Session、游标和页大小
+   * @returns 公开轻量 Task 页
+   */
+  function listTasks(input: ChatAgentListTasksInput): ChatAgentListTasksResult {
+    return dependencies.taskProjector.listTasks(input);
+  }
+
+  /**
+   * 使用 Main-owned Projector 定向查询 Task。
+   * @param input - Session 与 Task 身份
+   * @returns 公开 Detail/Tombstone 或 null
+   */
+  function getTask(input: ChatAgentGetTaskInput): ChatAgentGetTaskResult {
+    return dependencies.taskProjector.projectDetail(input.sessionId, input.taskId);
+  }
+
+  /**
    * 返回所有公开 pending confirmation 投影。
    * @returns Main 持久化事实的 allowlist 快照
    */
@@ -2188,6 +2314,10 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
 
     listActive,
 
+    listTasks,
+
+    getTask,
+
     listConfirmations,
 
     resolveConfirmation,
@@ -2286,6 +2416,27 @@ function publishAssistant(message: ChatMessageRecord, checkpoint: AgentCheckpoin
 
 /** 主进程默认 Agent Store，供 Service 与 Coordinator 共享同一事实源。 */
 const defaultAgentStore = createAgentDelegationStore(agentStoreDatabase);
+
+/** 主进程默认 Task 公开投影器；未注册安全 resolver 时只保留可证明的本地文件展示。 */
+const defaultTaskProjector = createAgentTaskProjector({
+  store: defaultAgentStore,
+  resolveResource: (): null => null,
+  resolveArtifact: (): null => null
+});
+
+/** 主进程默认 post-commit Task application event Pump。 */
+const defaultTaskPump = createTaskProjectionPump({
+  projectSummary: (taskId): ChatAgentTaskEventSnapshot | null => defaultTaskProjector.projectSummary(taskId),
+  publish: publishCheckpoint,
+  reportError: (code): void => {
+    console.error(code);
+  }
+});
+
+/** Store 只把 committed Task 身份交给异步公开投影边界。 */
+defaultAgentStore.subscribeTaskCommits((taskId): void => {
+  defaultTaskPump.enqueue(taskId);
+});
 
 /** 主进程默认持久化 confirmation queue。 */
 export const chatAgentConfirmationQueue = createAgentConfirmationQueue({
@@ -2386,6 +2537,7 @@ function listChildTools(): string[] {
 /** 主进程默认 Child Agent 委派服务。 */
 export const chatAgentDelegationService = createChatAgentDelegationService({
   store: defaultAgentStore,
+  taskProjector: defaultTaskProjector,
   locks: chatRuntimeLocks,
   persistAssistant(message: ChatMessageRecord, ownerCheckpointId?: string): undefined {
     chatSessionManager.updateMessage(message, ownerCheckpointId);
@@ -2449,6 +2601,12 @@ const defaultChildExecutor = createChildRuntimeExecutor({
     estimated: 'unknown',
     actual: 'unknown'
   }),
+  recordToolStarted: (input): void => {
+    defaultAgentStore.recordToolStarted(input);
+  },
+  recordToolCompleted: (input): void => {
+    defaultAgentStore.recordToolCompleted(input);
+  },
   now: (): number => Date.now()
 });
 

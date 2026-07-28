@@ -315,14 +315,21 @@ git commit -m "feat(chat): 建立 Child Task 公开投影"
 - Modify: `electron/main/modules/chat/agents/executor.mts`
 - Modify: `electron/main/modules/chat/agents/service.mts`
 - Modify: `electron/main/modules/chat/agents/ipc.mts`
+- Modify: `electron/main/modules/chat/runtime/stream/index.mts`
+- Modify: `electron/main/modules/chat/runtime/stream/types.mts`
 - Modify: `electron/preload/index.mts`
 - Modify: `types/electron-api.d.ts`
+- Modify: `test/electron/main/modules/chat/agents/delegation-foundation.test.ts`
 - Modify: `test/electron/main/modules/chat/agents/store.test.ts`
 - Modify: `test/electron/main/modules/chat/agents/executor.test.ts`
 - Modify: `test/electron/main/modules/chat/agents/task-projection.test.ts`
 - Modify: `test/electron/main/modules/chat/agents/service.test.ts`
 - Modify: `test/electron/main/modules/chat/agents/ipc.test.ts`
+- Modify: `test/electron/main/modules/chat/agents/read-runtime.test.ts`
+- Modify: `test/electron/main/modules/chat/agents/startup-recovery.test.ts`
+- Modify: `test/electron/main/modules/chat/agents/write-runtime.test.ts`
 - Modify: `test/electron/main/modules/chat/runtime/main-boundary.test.ts`
+- Modify: `test/electron/main/modules/chat/runtime/stream/executor.test.ts`
 - Modify: `changelog/2026-07-28.md`
 
 **Interfaces:**
@@ -332,7 +339,7 @@ git commit -m "feat(chat): 建立 Child Task 公开投影"
 - Produces `AgentTaskProjectionPump`.
 - Produces `chatAgentListTasks` and `chatAgentGetTask` preload/API methods; `chatAgentCancelTask` is added atomically with its coordinator behavior in Task 6.
 
-- [ ] **Step 1: Write failing post-commit, Tool Event and IPC tests**
+- [x] **Step 1: Write failing post-commit, Tool Event and IPC tests**
 
 Assert:
 
@@ -362,7 +369,7 @@ Also cover:
 - wrong Session cannot list or get another Session Task;
 - preload boundary exposes exactly the two query methods added by this Task and still uses the single Agent Event channel.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run:
 
@@ -378,7 +385,7 @@ pnpm exec cross-env ELECTRON_RUN_AS_NODE=1 HOST=127.0.0.1 electron node_modules/
 
 Expected: FAIL because Store commit listeners, Pump, Tool Event writes and the new IPC surface do not exist.
 
-- [ ] **Step 3: Add one Store-owned post-commit boundary**
+- [x] **Step 3: Add one Store-owned post-commit boundary**
 
 Add:
 
@@ -396,7 +403,7 @@ private runTaskTransaction<T>(operation: () => T): T;
 
 Every public Store mutation that changes a Task or appends a Task Event must use this boundary. `appendEvent()` records the Task ID in the current transaction frame when `aggregateKind === 'task'`. Only the outermost successful transaction notifies listeners; rollback discards the frame. Notify each listener independently and swallow/report stable listener errors after commit.
 
-- [ ] **Step 4: Persist cropped Child Tool Events**
+- [x] **Step 4: Persist cropped Child Tool Events**
 
 Reuse the existing `tool.started` and `tool.completed` event protocol. Add Store methods:
 
@@ -421,7 +428,7 @@ recordToolCompleted(input: RecordAgentToolCompletedInput): ChatAgentEvent;
 
 Add the same two callbacks to `ChildExecutorDependencies`. Wrap only the Child Runtime tool executor. Record `started` before execution and `completed` after normalizing the `AIToolExecutionResult`; hash the normalized result with `hashAgentPayload()`. Do not persist arguments, result data, model text or raw error messages.
 
-- [ ] **Step 5: Implement the coalescing no-throw Pump**
+- [x] **Step 5: Implement the coalescing no-throw Pump**
 
 Export:
 
@@ -442,7 +449,7 @@ export function createTaskProjectionPump(input: {
 
 Use a `Set<string>` to coalesce one event-loop turn and a `Map<string, number>` for last-published sequence. A flush re-reads committed facts, skips non-new sequences, publishes Summary/Tombstone, and catches each task independently. `enqueue()` itself must never throw.
 
-- [ ] **Step 6: Add strict IPC, preload and API methods**
+- [x] **Step 6: Add strict IPC, preload and API methods**
 
 Register:
 
@@ -464,13 +471,13 @@ chatAgentGetTask(
 
 Use exact-key plain-object validation. `limit` must be a safe integer from 1 through 100; omit means 50. Keep not-found and Session mismatch indistinguishable. Add `ChatAgentTaskUpdatedEvent` to the existing union and reuse `chat:agent:event`.
 
-- [ ] **Step 7: Run focused tests and verify GREEN**
+- [x] **Step 7: Run focused tests and verify GREEN**
 
 Run the two commands from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 8: Update changelog and commit**
+- [x] **Step 8: Update changelog and commit**
 
 Add under `## Added`:
 
@@ -481,7 +488,7 @@ Add under `## Added`:
 Commit:
 
 ```bash
-git add types/chat-agent.d.ts electron/main/modules/chat/agents/types.mts electron/main/modules/chat/agents/store.mts electron/main/modules/chat/agents/executor.mts electron/main/modules/chat/agents/service.mts electron/main/modules/chat/agents/ipc.mts electron/preload/index.mts types/electron-api.d.ts test/electron/main/modules/chat/agents/store.test.ts test/electron/main/modules/chat/agents/executor.test.ts test/electron/main/modules/chat/agents/task-projection.test.ts test/electron/main/modules/chat/agents/service.test.ts test/electron/main/modules/chat/agents/ipc.test.ts test/electron/main/modules/chat/runtime/main-boundary.test.ts changelog/2026-07-28.md
+git add types/chat-agent.d.ts electron/main/modules/chat/agents/types.mts electron/main/modules/chat/agents/store.mts electron/main/modules/chat/agents/executor.mts electron/main/modules/chat/agents/service.mts electron/main/modules/chat/agents/ipc.mts electron/main/modules/chat/runtime/stream/index.mts electron/main/modules/chat/runtime/stream/types.mts electron/preload/index.mts types/electron-api.d.ts test/electron/main/modules/chat/agents/delegation-foundation.test.ts test/electron/main/modules/chat/agents/store.test.ts test/electron/main/modules/chat/agents/executor.test.ts test/electron/main/modules/chat/agents/task-projection.test.ts test/electron/main/modules/chat/agents/service.test.ts test/electron/main/modules/chat/agents/ipc.test.ts test/electron/main/modules/chat/agents/read-runtime.test.ts test/electron/main/modules/chat/agents/startup-recovery.test.ts test/electron/main/modules/chat/agents/write-runtime.test.ts test/electron/main/modules/chat/runtime/main-boundary.test.ts test/electron/main/modules/chat/runtime/stream/executor.test.ts changelog/2026-07-28.md docs/superpowers/plans/2026-07-28-child-agent-task-card.md
 git commit -m "feat(chat): 发布 Child Task 实时投影"
 ```
 

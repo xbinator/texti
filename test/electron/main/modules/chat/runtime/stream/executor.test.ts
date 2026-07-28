@@ -1870,6 +1870,7 @@ describe('runtime stream executor', (): void => {
       status: 'failure',
       error: { code: 'EXECUTION_FAILED', message: 'renderer should not run' }
     });
+    const observeMainTool = vi.fn();
     const resolve = vi.fn().mockResolvedValue({
       createOptions: {
         providerId: 'openai',
@@ -1881,7 +1882,7 @@ describe('runtime stream executor', (): void => {
       modelId: 'gpt-test'
     });
     const streamText = vi.fn().mockResolvedValue([undefined, { stream: createMainBridgeToolStream() }]);
-    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeRendererTool, executeMainTool });
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeRendererTool, executeMainTool, observeMainTool });
 
     const result = await executor(
       {
@@ -1904,6 +1905,17 @@ describe('runtime stream executor', (): void => {
       input: {}
     });
     expect(executeRendererTool).not.toHaveBeenCalled();
+    expect(observeMainTool).toHaveBeenCalledOnce();
+    expect(observeMainTool).toHaveBeenCalledWith({
+      runtime: expect.objectContaining({ runtimeId: 'runtime-1' }),
+      toolCallId: 'tool-call-1',
+      toolName: 'read_current_document',
+      result: {
+        toolName: 'read_current_document',
+        status: 'success',
+        data: { id: 'doc-1', title: 'index.md', path: '/tmp/index.md', content: '# Hello' }
+      }
+    });
     expect(result).toEqual({ totalUsage: { inputTokens: 6, outputTokens: 4, totalTokens: 10 }, shouldContinue: true });
     expect(updates.at(-1)).toMatchObject({
       parts: [
@@ -3499,10 +3511,12 @@ describe('runtime stream executor', (): void => {
     try {
       const assistantMessage = createAssistantMessage();
       const updates: ChatMessageRecord[] = [];
+      const observeMainTool = vi.fn();
+      let resolveLate: ((result: AIToolExecutionResult) => void) | undefined;
       const executeMainTool = vi.fn(
         () =>
-          new Promise<never>(() => {
-            // 保持 pending，用于验证主进程工具超时兜底。
+          new Promise<AIToolExecutionResult>((resolveTool) => {
+            resolveLate = resolveTool;
           })
       );
       const resolve = vi.fn().mockResolvedValue({
@@ -3516,7 +3530,7 @@ describe('runtime stream executor', (): void => {
         modelId: 'gpt-test'
       });
       const streamText = vi.fn().mockResolvedValue([undefined, { stream: createMainReadFileToolCallStream() }]);
-      const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool, rendererToolTimeoutMs: 5 });
+      const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool, observeMainTool, rendererToolTimeoutMs: 5 });
 
       const task = executor({ runtime: { ...runtime }, userMessage, assistantMessage }, async (message) => {
         updates.push({ ...message, parts: [...message.parts] });
@@ -3542,9 +3556,50 @@ describe('runtime stream executor', (): void => {
           }
         ]
       });
+      expect(observeMainTool).toHaveBeenCalledOnce();
+      expect(observeMainTool).toHaveBeenCalledWith({
+        runtime: expect.objectContaining({ runtimeId: runtime.runtimeId }),
+        toolCallId: 'tool-call-1',
+        toolName: 'read_file',
+        result: {
+          toolName: 'read_file',
+          status: 'failure',
+          error: { code: 'TOOL_TIMEOUT', message: '主进程工具 read_file 执行超时，已等待 5ms' }
+        }
+      });
+
+      resolveLate?.({ toolName: 'read_file', status: 'success', data: { content: 'late private result' } });
+      await Promise.resolve();
+      expect(observeMainTool).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('observes one normalized failure when a main-process tool throws', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const executeMainTool = vi.fn().mockRejectedValue(new Error('private tool failure'));
+    const observeMainTool = vi.fn();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createMainReadFileToolCallStream() }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool, observeMainTool });
+
+    await executor({ runtime: { ...runtime }, userMessage, assistantMessage }, async (): Promise<void> => undefined);
+
+    expect(observeMainTool).toHaveBeenCalledOnce();
+    expect(observeMainTool).toHaveBeenCalledWith({
+      runtime: expect.objectContaining({ runtimeId: runtime.runtimeId }),
+      toolCallId: 'tool-call-1',
+      toolName: 'read_file',
+      result: {
+        toolName: 'read_file',
+        status: 'failure',
+        error: { code: 'EXECUTION_FAILED', message: 'private tool failure' }
+      }
+    });
   });
 
   it('pauses main-process tool timeout while waiting for user confirmation', async (): Promise<void> => {

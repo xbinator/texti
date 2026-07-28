@@ -101,21 +101,25 @@ describe('chat runtime main boundary', (): void => {
     expect(violations).toEqual([]);
   });
 
-  it('keeps the Agent preload surface on the exact checkpoint and confirmation allowlist with no Child transcript API', async (): Promise<void> => {
+  it('keeps the Agent preload surface on the exact Task, checkpoint and confirmation allowlist with no Child transcript API', async (): Promise<void> => {
     const [preloadSource, apiTypes] = await Promise.all([readSource('electron/preload/index.mts'), readSource('types/electron-api.d.ts')]);
     const agentMethods = [...preloadSource.matchAll(/\b(chatAgent[A-Za-z0-9]+):/g)].map((match): string => match[1] ?? '');
 
     expect([...new Set(agentMethods)].sort()).toEqual(
       [
         'chatAgentCancelCheckpoint',
+        'chatAgentGetTask',
         'chatAgentListActive',
         'chatAgentListConfirmations',
+        'chatAgentListTasks',
         'chatAgentOnEvent',
         'chatAgentResolveConfirmation',
         'chatAgentResumePrimary'
       ].sort()
     );
     expect(`${preloadSource}\n${apiTypes}`).not.toMatch(/chatAgent(?:Transcript|Send|Continue|Message)/);
+    expect(preloadSource.match(/ipcRenderer\.on\('chat:agent:event'/g)).toHaveLength(1);
+    expect(preloadSource).not.toContain("ipcRenderer.on('chat:agent:task");
   });
 
   it('initializes the database and recovers Agent delegations before opening IPC', async (): Promise<void> => {

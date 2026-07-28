@@ -46,6 +46,21 @@ export interface RuntimeToolGuardInput {
  */
 export type RuntimeToolGuard = (input: RuntimeToolGuardInput) => Promise<AIToolExecutionResult | null>;
 
+/** 主进程工具安全执行后的规范化观察输入。 */
+export interface RuntimeMainToolObservation {
+  /** 执行工具的当前 Runtime。 */
+  readonly runtime: ActiveChatRuntime;
+  /** Provider 工具调用 ID。 */
+  readonly toolCallId: string;
+  /** 主进程工具名称。 */
+  readonly toolName: string;
+  /** 已完成异常与超时归一化的最终结果。 */
+  readonly result: AIToolExecutionResult;
+}
+
+/** 主进程工具最终结果观察器。 */
+export type RuntimeMainToolObserver = (input: RuntimeMainToolObservation) => Promise<void> | void;
+
 /** Runtime 流式执行器依赖。 */
 export interface RuntimeStreamExecutorDependencies {
   /** 聊天模型解析器。 */
@@ -56,6 +71,8 @@ export interface RuntimeStreamExecutorDependencies {
   executeRendererTool?: ChatRuntimeRendererToolExecutor;
   /** 主进程工具执行函数。 */
   executeMainTool?: ChatRuntimeMainToolExecutor;
+  /** 主进程工具安全执行完成后的可选观察器。 */
+  observeMainTool?: RuntimeMainToolObserver;
   /** Provider 结果或本地 executor 之前的强制授权钩子。 */
   guardToolCall?: RuntimeToolGuard;
   /** Renderer 本地工具超时时间。 */

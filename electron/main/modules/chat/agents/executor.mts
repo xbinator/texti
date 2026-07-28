@@ -3,11 +3,11 @@
  * @description 在无聊天消息持久化、无 Session 锁和无 Renderer Bridge 的边界内执行只读或受控写入 Child Attempt。
  */
 import * as fs from 'node:fs/promises';
-import type { AgentAttemptRecord, AgentCheckpointRecord, AgentTaskRecord } from './types.mjs';
+import type { AgentAttemptRecord, AgentCheckpointRecord, AgentTaskRecord, RecordAgentToolCompletedInput, RecordAgentToolStartedInput } from './types.mjs';
 import type { ChatModelResolver } from '../runtime/model/resolver.mjs';
 import type { RuntimeStreamText } from '../runtime/stream/index.mjs';
 import type { ActiveChatRuntime } from '../runtime/types.mjs';
-import type { AIUsage } from 'types/ai';
+import type { AIToolExecutionResult, AIUsage } from 'types/ai';
 import type { ChatMessageRecord, ChatMessageToolPart } from 'types/chat';
 import type {
   AgentChangesetSnapshot,
@@ -19,6 +19,7 @@ import type {
 } from 'types/chat-agent';
 import { addRuntimeUsage } from '../runtime/context/usage.mjs';
 import { createRuntimeStreamExecutor } from '../runtime/stream/index.mjs';
+import { hashAgentPayload } from './contracts.mjs';
 import { createChildReadTools } from './read-tools.mjs';
 import { createChildWriteTools, type ChildWriteTools } from './write-tools.mjs';
 
@@ -118,6 +119,16 @@ export interface ChildExecutorDependencies {
    * @returns 可信成本或显式 unknown
    */
   readonly calculateCost: (pricingVersion: string, model: AgentExecutionPlanSnapshot['modelSnapshot'], usage: AIUsage) => AgentUsageAccounting['monetaryCost'];
+  /**
+   * 在工具副作用前持久化裁剪后的开始 Event。
+   * @param input - Task、Attempt、Runtime 与工具身份
+   */
+  readonly recordToolStarted: (input: RecordAgentToolStartedInput) => void;
+  /**
+   * 在规范化结果后持久化裁剪后的完成 Event。
+   * @param input - 工具身份与 canonical 结果 hash
+   */
+  readonly recordToolCompleted: (input: RecordAgentToolCompletedInput) => void;
   /**
    * 读取单调执行时钟。
    * @returns 毫秒时间戳
@@ -612,7 +623,31 @@ async function executeRuntime(
   const streamExecutor = createRuntimeStreamExecutor({
     resolver: dependencies.resolver,
     streamText: dependencies.streamText,
-    executeMainTool: runtimeTools.executeMainTool,
+    executeMainTool: async (toolInput): Promise<AIToolExecutionResult> => {
+      const eventIdentity = {
+        taskId: input.task.taskId,
+        attemptId: input.attempt.attemptId,
+        runtimeId: runtime.runtimeId,
+        toolCallId: toolInput.toolCallId,
+        toolName: toolInput.toolName
+      };
+      dependencies.recordToolStarted({
+        ...eventIdentity,
+        occurredAt: new Date(dependencies.now()).toISOString()
+      });
+      return runtimeTools.executeMainTool(toolInput);
+    },
+    observeMainTool: (observation): void => {
+      dependencies.recordToolCompleted({
+        taskId: input.task.taskId,
+        attemptId: input.attempt.attemptId,
+        runtimeId: observation.runtime.runtimeId,
+        toolCallId: observation.toolCallId,
+        toolName: observation.toolName,
+        resultHash: hashAgentPayload(observation.result),
+        occurredAt: new Date(dependencies.now()).toISOString()
+      });
+    },
     guardToolCall: runtimeTools.guardToolCall
   });
   const userMessage = createUserMessage(input);

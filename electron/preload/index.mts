@@ -660,6 +660,12 @@ const electronAPI: ElectronAPI = {
   /** 查询公开的活跃 Checkpoint 投影。 */
   chatAgentListActive: () => ipcRenderer.invoke('chat:agent:list-active'),
 
+  /** 按 Session 查询公开 Task 轻量投影。 */
+  chatAgentListTasks: (input) => ipcRenderer.invoke('chat:agent:list-tasks', input),
+
+  /** 定向查询公开 Task 详情或 tombstone。 */
+  chatAgentGetTask: (input) => ipcRenderer.invoke('chat:agent:get-task', input),
+
   /** 查询公开的 pending confirmation 投影。 */
   chatAgentListConfirmations: () => ipcRenderer.invoke('chat:agent:list-confirmations'),
 
@@ -672,7 +678,7 @@ const electronAPI: ElectronAPI = {
   /** 请求 Checkpoint cooperative cancellation。 */
   chatAgentCancelCheckpoint: (input) => ipcRenderer.invoke('chat:agent:cancel-checkpoint', input),
 
-  /** 监听持久化 Checkpoint application event。 */
+  /** 监听持久化 Agent application event。 */
   chatAgentOnEvent: (callback) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: ChatAgentApplicationEvent): void => callback(payload);
     ipcRenderer.on('chat:agent:event', handler);

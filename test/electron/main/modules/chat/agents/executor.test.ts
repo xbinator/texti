@@ -204,13 +204,29 @@ function createStreamResult(chunks: readonly unknown[]): [undefined, AIStreamRes
 }
 
 /**
+ * Child 工具审计测试回调。
+ */
+interface ToolEventCallbacks {
+  /** 观察裁剪后的 started 写入。 */
+  readonly started?: (input: unknown) => void;
+  /** 观察裁剪后的 completed 写入。 */
+  readonly completed?: (input: unknown) => void;
+}
+
+/**
  * 创建 Child executor 的共享依赖。
  * @param workspaceRoot - 冻结 Checkpoint 关联的工作区
  * @param streamText - 测试模型流
  * @param resolver - 可观察模型 resolver
+ * @param toolEvents - 可选工具审计观察回调
  * @returns Child executor
  */
-function createExecutor(workspaceRoot: string, streamText: RuntimeStreamText, resolver: ChatModelResolver = createResolver()): ChildTaskRuntimeExecutor {
+function createExecutor(
+  workspaceRoot: string,
+  streamText: RuntimeStreamText,
+  resolver: ChatModelResolver = createResolver(),
+  toolEvents: ToolEventCallbacks = {}
+): ChildTaskRuntimeExecutor {
   const overlayRoot = path.resolve(workspaceRoot, '..', 'overlays');
   return createChildRuntimeExecutor({
     resolver,
@@ -226,6 +242,8 @@ function createExecutor(workspaceRoot: string, streamText: RuntimeStreamText, re
         actual: 'unknown'
       };
     },
+    recordToolStarted: (input): void => toolEvents.started?.(input),
+    recordToolCompleted: (input): void => toolEvents.completed?.(input),
     now: (): number => Date.parse('2026-07-27T00:00:02.000Z')
   });
 }
@@ -246,6 +264,47 @@ afterEach(async (): Promise<void> => {
 });
 
 describe('child task runtime executor', (): void => {
+  it('records only Child tool identities and the normalized result hash', async (): Promise<void> => {
+    const { workspaceRoot, filePath } = await createWorkspace();
+    const started = vi.fn();
+    const completed = vi.fn();
+    const streamText = vi.fn<RuntimeStreamText>().mockResolvedValue(
+      createStreamResult([
+        { type: 'tool-call', toolCallId: 'read-audit', toolName: 'read_file', input: { path: 'CONTEXT.md' } },
+        { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } }
+      ])
+    );
+    const executor = createExecutor(workspaceRoot, streamText, createResolver(), { started, completed });
+
+    await executor.execute({
+      task: createTask(filePath),
+      attempt: createAttempt(),
+      checkpoint: createCheckpoint(),
+      signal: new AbortController().signal
+    });
+
+    expect(started).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      attemptId: 'attempt-1',
+      runtimeId: 'runtime-child-1',
+      toolCallId: 'read-audit',
+      toolName: 'read_file',
+      occurredAt: '2026-07-27T00:00:02.000Z'
+    });
+    expect(started).toHaveBeenCalledOnce();
+    expect(completed).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      attemptId: 'attempt-1',
+      runtimeId: 'runtime-child-1',
+      toolCallId: 'read-audit',
+      toolName: 'read_file',
+      resultHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      occurredAt: '2026-07-27T00:00:02.000Z'
+    });
+    expect(completed).toHaveBeenCalledOnce();
+    expect(JSON.stringify([...started.mock.calls, ...completed.mock.calls])).not.toContain('CONTEXT.md');
+  });
+
   it('executes a frozen local read in memory and returns an unverified result', async (): Promise<void> => {
     const { workspaceRoot, filePath } = await createWorkspace();
     const resolver = createResolver();

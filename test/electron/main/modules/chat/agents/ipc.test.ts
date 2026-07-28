@@ -2,7 +2,13 @@
  * @file ipc.test.ts
  * @description Chat Agent application IPC 的窄输入、allowlist 输出与结构化错误测试。
  */
-import type { ChatAgentCheckpointSnapshot, ChatAgentConfirmationSnapshot, ChatAgentHandlerResult, ChatAgentResumeResult } from 'types/chat-agent';
+import type {
+  ChatAgentCheckpointSnapshot,
+  ChatAgentConfirmationSnapshot,
+  ChatAgentHandlerResult,
+  ChatAgentResumeResult,
+  ChatAgentTaskSummarySnapshot
+} from 'types/chat-agent';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerChatAgentHandlers } from '../../../../../../electron/main/modules/chat/agents/ipc.mjs';
 
@@ -12,7 +18,9 @@ const mocks = vi.hoisted(() => ({
   listConfirmations: vi.fn(),
   resolveConfirmation: vi.fn(),
   resumePrimary: vi.fn(),
-  cancelCheckpoint: vi.fn()
+  cancelCheckpoint: vi.fn(),
+  listTasks: vi.fn(),
+  getTask: vi.fn()
 }));
 
 vi.mock('electron', () => ({
@@ -29,7 +37,9 @@ vi.mock('../../../../../../electron/main/modules/chat/agents/service.mjs', () =>
     listConfirmations: mocks.listConfirmations,
     resolveConfirmation: mocks.resolveConfirmation,
     resumePrimary: mocks.resumePrimary,
-    cancelCheckpoint: mocks.cancelCheckpoint
+    cancelCheckpoint: mocks.cancelCheckpoint,
+    listTasks: mocks.listTasks,
+    getTask: mocks.getTask
   }
 }));
 
@@ -88,6 +98,73 @@ describe('chat agent IPC', (): void => {
     mocks.resolveConfirmation.mockReset();
     mocks.resumePrimary.mockReset();
     mocks.cancelCheckpoint.mockReset();
+    mocks.listTasks.mockReset();
+    mocks.getTask.mockReset();
+  });
+
+  it('registers strict Session-bound Task list and get queries', async (): Promise<void> => {
+    const task = {
+      recordState: 'active',
+      taskId: 'task-1',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      checkpointId: 'checkpoint-1',
+      assistantMessageId: 'assistant-1',
+      toolCallId: 'tool-call-1',
+      agentId: 'child-1',
+      projectionSchemaVersion: 1,
+      taskSequence: 1,
+      task: 'Inspect context',
+      mode: 'read',
+      required: true,
+      priority: 'normal',
+      status: 'running',
+      queuePhase: 'start',
+      createdAt: '2026-07-28T00:00:00.000Z',
+      updatedAt: '2026-07-28T00:00:01.000Z'
+    } satisfies ChatAgentTaskSummarySnapshot;
+    mocks.listTasks.mockReturnValue({ tasks: [task] });
+    mocks.getTask.mockReturnValue(task);
+    registerChatAgentHandlers();
+
+    const listHandler = mocks.handlers.get('chat:agent:list-tasks');
+    const getHandler = mocks.handlers.get('chat:agent:get-task');
+    if (!listHandler || !getHandler) throw new Error('Task query handlers were not registered');
+
+    expect(await listHandler({}, { sessionId: 'session-1' })).toEqual({ ok: true, data: { tasks: [task] } });
+    expect(mocks.listTasks).toHaveBeenCalledWith({ sessionId: 'session-1', limit: 50 });
+    expect(await getHandler({}, { sessionId: 'session-1', taskId: 'task-1' })).toEqual({ ok: true, data: task });
+    expect(mocks.getTask).toHaveBeenCalledWith({ sessionId: 'session-1', taskId: 'task-1' });
+    mocks.getTask.mockReturnValue(null);
+    expect(await getHandler({}, { sessionId: 'session-1', taskId: 'task-missing' })).toEqual({ ok: true, data: null });
+
+    await Promise.all(
+      [
+        { sessionId: 'session-1', unknown: true },
+        { sessionId: 'session-\n1' },
+        { sessionId: 'session-\u00851' },
+        { sessionId: 'x'.repeat(161) },
+        { sessionId: 'session-1', limit: 0 },
+        { sessionId: 'session-1', limit: Number.MAX_SAFE_INTEGER + 1 },
+        { sessionId: 'session-1', cursor: 'x'.repeat(4097) }
+      ].map(async (input): Promise<void> => {
+        expect(await listHandler({}, input)).toMatchObject({ ok: false, code: 'INVALID_INPUT' });
+      })
+    );
+
+    const nonEnumerable = { sessionId: 'session-1', taskId: 'task-1' };
+    Object.defineProperty(nonEnumerable, 'hidden', { value: true, enumerable: false });
+    mocks.getTask.mockClear();
+    expect(await getHandler({}, { sessionId: 'session-1', taskId: 'task-1', unknown: true })).toMatchObject({ ok: false, code: 'INVALID_INPUT' });
+    expect(await getHandler({}, { sessionId: 'session-1', taskId: 'task-\u00851' })).toMatchObject({ ok: false, code: 'INVALID_INPUT' });
+    expect(await getHandler({}, { sessionId: 'session-1', taskId: 'x'.repeat(161) })).toMatchObject({ ok: false, code: 'INVALID_INPUT' });
+    expect(await getHandler({}, { sessionId: 'session-1', taskId: 'task-1' }, 'extra')).toMatchObject({ ok: false, code: 'INVALID_INPUT' });
+    expect(await getHandler({}, nonEnumerable)).toMatchObject({ ok: false, code: 'INVALID_INPUT' });
+    expect(await getHandler({}, { sessionId: 'session-1', taskId: 'task-1', [Symbol('hidden')]: true })).toMatchObject({
+      ok: false,
+      code: 'INVALID_INPUT'
+    });
+    expect(mocks.getTask).not.toHaveBeenCalled();
   });
 
   it('registers narrow confirmation list and CAS resolution handlers', async (): Promise<void> => {

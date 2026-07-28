@@ -23,11 +23,12 @@ import type {
   ChatAgentTaskListSnapshot,
   ChatAgentTaskSnapshot,
   ChatAgentTaskSummarySnapshot,
-  ChatAgentTaskTombstoneSnapshot
+  ChatAgentTaskTombstoneSnapshot,
+  ChatAgentTaskUpdatedEvent
 } from 'types/chat-agent';
 import { describe, expect, it, vi } from 'vitest';
 import { AGENT_CANONICAL_PAYLOAD_MAX_BYTES } from '../../../../../../electron/main/modules/chat/agents/contracts.mts';
-import { createAgentTaskProjector, type AgentTaskProjector } from '../../../../../../electron/main/modules/chat/agents/service.mts';
+import { createAgentTaskProjector, createTaskProjectionPump, type AgentTaskProjector } from '../../../../../../electron/main/modules/chat/agents/service.mts';
 
 /** 公开投影中禁止出现的常见秘密形态。 */
 const PUBLIC_SECRET_PATTERN = new RegExp(
@@ -456,6 +457,104 @@ function expectPublicSafe(value: unknown, location = '$'): void {
 }
 
 describe('public Agent Task projection protocol', (): void => {
+  it('coalesces committed Task updates and recovers after one publish failure', (): void => {
+    const scheduled: Array<() => void> = [];
+    const published: ChatAgentTaskUpdatedEvent[] = [];
+    const errors: string[] = [];
+    let taskSequence = 4;
+    let failPublish = true;
+    const pump = createTaskProjectionPump({
+      projectSummary: (): ChatAgentTaskEventSnapshot => ({ ...summaryFixture, taskSequence }),
+      publish: (event): void => {
+        if (failPublish) throw new Error('transport unavailable');
+        published.push(event);
+      },
+      reportError: (code): void => {
+        errors.push(code);
+      },
+      schedule: (flush): void => {
+        scheduled.push(flush);
+      }
+    });
+
+    expect((): void => {
+      pump.enqueue('task-1');
+      pump.enqueue('task-1');
+    }).not.toThrow();
+    scheduled.shift()?.();
+    expect(errors).toEqual(['agent_task_projection_publish_failed']);
+    expect(published).toEqual([]);
+
+    failPublish = false;
+    taskSequence = 5;
+    pump.enqueue('task-1');
+    scheduled.shift()?.();
+    expect(published).toEqual([
+      {
+        schemaVersion: 1,
+        type: 'task.updated',
+        task: expect.objectContaining({ taskId: 'task-1', taskSequence: 5 }),
+        taskSequence: 5
+      }
+    ]);
+  });
+
+  it('keeps enqueue no-throw when scheduling and error reporting fail', (): void => {
+    const scheduled: Array<() => void> = [];
+    const published: ChatAgentTaskUpdatedEvent[] = [];
+    let schedulingFails = true;
+    const pump = createTaskProjectionPump({
+      projectSummary: (): ChatAgentTaskEventSnapshot => ({ ...summaryFixture, taskSequence: 7 }),
+      publish: (event): void => {
+        published.push(event);
+      },
+      reportError: (): never => {
+        throw new Error('reporter unavailable');
+      },
+      schedule: (flush): void => {
+        if (schedulingFails) throw new Error('scheduler unavailable');
+        scheduled.push(flush);
+      }
+    });
+
+    expect((): void => pump.enqueue('task-1')).not.toThrow();
+    schedulingFails = false;
+    expect((): void => pump.enqueue('task-1')).not.toThrow();
+    scheduled.shift()?.();
+    expect(published).toEqual([expect.objectContaining({ taskSequence: 7 })]);
+  });
+
+  it('continues the same flush after one Task fails and recovers it on the next notification', (): void => {
+    const scheduled: Array<() => void> = [];
+    const published: ChatAgentTaskUpdatedEvent[] = [];
+    let taskAFails = true;
+    const pump = createTaskProjectionPump({
+      projectSummary: (taskId): ChatAgentTaskEventSnapshot => ({
+        ...summaryFixture,
+        taskId,
+        taskSequence: taskId === 'task-a' ? 8 : 3
+      }),
+      publish: (event): void => {
+        if (event.task.taskId === 'task-a' && taskAFails) throw new Error('task A unavailable');
+        published.push(event);
+      },
+      reportError: (): void => undefined,
+      schedule: (flush): void => {
+        scheduled.push(flush);
+      }
+    });
+
+    pump.enqueue('task-a');
+    pump.enqueue('task-b');
+    scheduled.shift()?.();
+    expect(published.map((event): string => event.task.taskId)).toEqual(['task-b']);
+
+    taskAFails = false;
+    pump.enqueue('task-a');
+    scheduled.shift()?.();
+    expect(published.map((event): string => event.task.taskId)).toEqual(['task-b', 'task-a']);
+  });
+
   it('keeps Summary, Detail, and Tombstone as strict record-state branches', (): void => {
     const listSnapshot: ChatAgentTaskListSnapshot = summaryFixture;
     const eventSnapshots: readonly ChatAgentTaskEventSnapshot[] = [summaryFixture, tombstoneFixture];

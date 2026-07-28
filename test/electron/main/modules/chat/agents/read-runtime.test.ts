@@ -29,7 +29,7 @@ import { createChildActorRegistry } from '../../../../../../electron/main/module
 import { createAgentCoordinator } from '../../../../../../electron/main/modules/chat/agents/coordinator.mjs';
 import { createChildRuntimeExecutor } from '../../../../../../electron/main/modules/chat/agents/executor.mjs';
 import { createAgentResourceScheduler } from '../../../../../../electron/main/modules/chat/agents/scheduler.mjs';
-import { createChatAgentDelegationService } from '../../../../../../electron/main/modules/chat/agents/service.mjs';
+import { createAgentTaskProjector, createChatAgentDelegationService } from '../../../../../../electron/main/modules/chat/agents/service.mjs';
 import { createAgentDelegationStore } from '../../../../../../electron/main/modules/chat/agents/store.mjs';
 import { createRuntimeLockRegistry } from '../../../../../../electron/main/modules/chat/runtime/infrastructure/locks.mjs';
 import { createChatRuntimeService } from '../../../../../../electron/main/modules/chat/runtime/service.mjs';
@@ -471,6 +471,8 @@ describeWithSqlite('real read child delegation runtime', (): void => {
         estimated: 'unknown',
         actual: 'unknown'
       }),
+      recordToolStarted: (): void => undefined,
+      recordToolCompleted: (): void => undefined,
       now: (): number => Date.now()
     });
     const contracts = createContracts();
@@ -509,6 +511,11 @@ describeWithSqlite('real read child delegation runtime', (): void => {
     let resumeRequests: Promise<ChatAgentResumeResult[]> | undefined;
     const agentService: ChatAgentDelegationService = createChatAgentDelegationService({
       store,
+      taskProjector: createAgentTaskProjector({
+        store,
+        resolveResource: (): null => null,
+        resolveArtifact: (): null => null
+      }),
       locks,
       persistAssistant(message: ChatMessageRecord): undefined {
         writeMessage(database, message);

@@ -354,6 +354,14 @@ export function createRuntimeStreamExecutor(dependencies: RuntimeStreamExecutorD
         } else if (!toolResult && dependencies.executeMainTool && isMainProcessTool(call.toolName)) {
           // eslint-disable-next-line no-await-in-loop
           toolResult = await executeMainToolSafely(dependencies.executeMainTool, toolExecutionInput, runtimeToolTimeoutMs);
+          // Child 审计必须观察超时与异常均已归一化的唯一最终结果。
+          // eslint-disable-next-line no-await-in-loop
+          await dependencies.observeMainTool?.({
+            runtime,
+            toolCallId: call.toolCallId,
+            toolName: call.toolName,
+            result: toolResult
+          });
         } else if (!toolResult && dependencies.executeRendererTool && isRendererManagedTool(runtime, call.toolName)) {
           // eslint-disable-next-line no-await-in-loop
           toolResult = await executeRendererToolSafely(dependencies.executeRendererTool, toolExecutionInput, runtimeToolTimeoutMs);

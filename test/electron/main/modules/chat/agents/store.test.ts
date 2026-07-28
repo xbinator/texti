@@ -4,7 +4,7 @@
  */
 import type { AgentDelegationContinuationSnapshot, AgentExecutionPlanSnapshot, ChatAgentResult, DelegateTaskInput } from 'types/chat-agent';
 import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { hashAgentPayload, hashExecutionPlanSnapshot, validateFoundationContract } from '../../../../../../electron/main/modules/chat/agents/contracts.mts';
 import {
   createAgentDelegationStore,
@@ -645,6 +645,120 @@ describeWithSqlite('agent delegation store', (): void => {
 
   afterEach((): void => {
     database.close();
+  });
+
+  it('publishes one post-commit Task notification and isolates listener failures from committed writes', (): void => {
+    const notifications: string[] = [];
+    const throwingListener = vi.fn((): void => {
+      throw new Error('listener failed');
+    });
+    store.subscribeTaskCommits(throwingListener);
+    store.subscribeTaskCommits((taskId): void => {
+      notifications.push(taskId);
+    });
+
+    const result = store.prepareDelegation(createPreparedInput('commit'), (): undefined => undefined);
+
+    expect(result).toBeUndefined();
+    expect(throwingListener).toHaveBeenCalledOnce();
+    expect(notifications).toEqual(['task-commit']);
+    expect(store.getTask('task-commit')?.status).toBe('created');
+
+    notifications.length = 0;
+    const prepared = createPreparedInput('commit');
+    const plan = createExecutionPlan(prepared);
+    store.authorizeTask({
+      taskId: 'task-commit',
+      executionPlanSnapshot: plan,
+      executionPlanSnapshotHash: plan.planHash,
+      occurredAt,
+      source: 'coordinator'
+    });
+    expect(notifications).toEqual(['task-commit']);
+  });
+
+  it('discards Task notifications when the surrounding transaction rolls back', (): void => {
+    const notifications: string[] = [];
+    store.subscribeTaskCommits((taskId): void => {
+      notifications.push(taskId);
+    });
+
+    expect((): void => {
+      store.prepareDelegation(createPreparedInput('rollback'), (): undefined => {
+        throw new Error('assistant write failed');
+      });
+    }).toThrow('assistant write failed');
+    expect(notifications).toEqual([]);
+    expect(store.getTask('task-rollback')).toBeNull();
+  });
+
+  it('persists cropped Tool Events without arguments, output or raw error text', (): void => {
+    const input = createPreparedInput('tool');
+    store.prepareDelegation(input, (): undefined => undefined);
+    startTask(store, input);
+    const startedInput = {
+      taskId: 'task-tool',
+      attemptId: 'attempt-task-tool',
+      runtimeId: 'runtime-attempt-task-tool',
+      toolCallId: 'tool-call-read',
+      toolName: 'read_file',
+      occurredAt
+    } as const;
+    const completedInput = {
+      taskId: 'task-tool',
+      attemptId: 'attempt-task-tool',
+      runtimeId: 'runtime-attempt-task-tool',
+      toolCallId: 'tool-call-read',
+      toolName: 'read_file',
+      resultHash: 'a'.repeat(64),
+      occurredAt
+    } as const;
+    const started = store.recordToolStarted(startedInput);
+    const completed = store.recordToolCompleted(completedInput);
+    expect(store.recordToolStarted(startedInput)).toEqual(started);
+    expect(store.recordToolCompleted(completedInput)).toEqual(completed);
+    expect((): void => {
+      store.recordToolCompleted({ ...completedInput, resultHash: 'b'.repeat(64) });
+    }).toThrow('Tool call identity is already bound');
+
+    const events = store.listEvents('task', 'task-tool').slice(-2);
+    expect(events.map((event): unknown => event.payload)).toEqual([
+      {
+        toolCallId: 'tool-call-read',
+        toolName: 'read_file'
+      },
+      {
+        toolCallId: 'tool-call-read',
+        toolName: 'read_file',
+        resultHash: 'a'.repeat(64)
+      }
+    ]);
+    expect(events.map((event): unknown => ({ attemptId: event.attemptId, runtimeId: event.runtimeId }))).toEqual([
+      { attemptId: 'attempt-task-tool', runtimeId: 'runtime-attempt-task-tool' },
+      { attemptId: 'attempt-task-tool', runtimeId: 'runtime-attempt-task-tool' }
+    ]);
+    expect(JSON.stringify(events)).not.toMatch(/arguments|output|raw error/i);
+
+    const result = createTaskResult('task-tool');
+    store.recordTaskResult({
+      taskId: 'task-tool',
+      checkpointId: 'checkpoint-tool',
+      toolCallId: 'tool-call-tool',
+      result,
+      resultHash: hashAgentPayload(result),
+      occurredAt
+    });
+    expect(store.recordToolStarted(startedInput)).toEqual(started);
+    expect(store.recordToolCompleted(completedInput)).toEqual(completed);
+    expect((): void => {
+      store.recordToolStarted({ ...startedInput, toolName: 'read_directory' });
+    }).toThrow('Tool call identity is already bound');
+    expect((): void => {
+      store.recordToolCompleted({ ...completedInput, resultHash: 'b'.repeat(64) });
+    }).toThrow('Tool call identity is already bound');
+    expect((): void => {
+      store.recordToolCompleted({ ...completedInput, toolCallId: 'tool-call-late' });
+    }).toThrow('Tool Event does not match the current running Runtime');
   });
 
   it('pages active and terminal Tasks without duplicate timestamp gaps', (): void => {

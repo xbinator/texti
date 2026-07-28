@@ -33,7 +33,7 @@ import { createAgentCoordinator } from '../../../../../../electron/main/modules/
 import { createChildRuntimeExecutor } from '../../../../../../electron/main/modules/chat/agents/executor.mjs';
 import { createAgentFileCommitter } from '../../../../../../electron/main/modules/chat/agents/file-commit.mjs';
 import { createAgentResourceScheduler } from '../../../../../../electron/main/modules/chat/agents/scheduler.mjs';
-import { createChatAgentDelegationService } from '../../../../../../electron/main/modules/chat/agents/service.mjs';
+import { createAgentTaskProjector, createChatAgentDelegationService } from '../../../../../../electron/main/modules/chat/agents/service.mjs';
 import { createAgentDelegationStore } from '../../../../../../electron/main/modules/chat/agents/store.mjs';
 import { createRuntimeLockRegistry } from '../../../../../../electron/main/modules/chat/runtime/infrastructure/locks.mjs';
 import { createAgentTables } from '../../../../../../electron/main/modules/database/service.mjs';
@@ -385,6 +385,8 @@ async function createFixture(controlledWriteEnabled = true): Promise<WriteRuntim
       estimated: 0.001,
       actual: 'unknown'
     }),
+    recordToolStarted: (): void => undefined,
+    recordToolCompleted: (): void => undefined,
     now: (): number => Date.now()
   });
   const fileCommitter = createAgentFileCommitter({
@@ -398,6 +400,11 @@ async function createFixture(controlledWriteEnabled = true): Promise<WriteRuntim
   let coordinator: AgentCoordinator | null = null;
   const service = createChatAgentDelegationService({
     store,
+    taskProjector: createAgentTaskProjector({
+      store,
+      resolveResource: (): null => null,
+      resolveArtifact: (): null => null
+    }),
     locks,
     persistAssistant(message: ChatMessageRecord): undefined {
       writeMessage(database, message);

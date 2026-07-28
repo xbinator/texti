@@ -29,7 +29,11 @@ import type {
   ChatAgentCancelCheckpointInput,
   ChatAgentCheckpointSnapshot,
   ChatAgentConfirmationSnapshot,
+  ChatAgentGetTaskInput,
+  ChatAgentGetTaskResult,
   ChatAgentHandlerResult,
+  ChatAgentListTasksInput,
+  ChatAgentListTasksResult,
   ChatAgentResolveConfirmationInput,
   ChatAgentResumePrimaryInput,
   ChatAgentResumeResult
@@ -630,6 +634,8 @@ export interface ElectronAPI {
 
   // Chat Agent 委派操作
   chatAgentListActive: () => Promise<ChatAgentHandlerResult<ChatAgentCheckpointSnapshot[]>>;
+  chatAgentListTasks: (input: ChatAgentListTasksInput) => Promise<ChatAgentHandlerResult<ChatAgentListTasksResult>>;
+  chatAgentGetTask: (input: ChatAgentGetTaskInput) => Promise<ChatAgentHandlerResult<ChatAgentGetTaskResult>>;
   chatAgentListConfirmations: () => Promise<ChatAgentHandlerResult<ChatAgentConfirmationSnapshot[]>>;
   chatAgentResolveConfirmation: (input: ChatAgentResolveConfirmationInput) => Promise<ChatAgentHandlerResult<ChatAgentConfirmationSnapshot>>;
   chatAgentResumePrimary: (input: ChatAgentResumePrimaryInput) => Promise<ChatAgentHandlerResult<ChatAgentResumeResult>>;

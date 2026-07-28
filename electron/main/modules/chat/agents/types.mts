@@ -659,8 +659,39 @@ export interface AgentTaskListPage {
   readonly hasMoreTerminal: boolean;
 }
 
+/** Task 事务提交后接收最小聚合身份的监听器。 */
+export type AgentTaskCommitListener = (taskId: string) => void;
+
+/** 记录 Child 工具开始执行所需的可信身份。 */
+export interface RecordAgentToolStartedInput {
+  /** 所属 Task。 */
+  readonly taskId: string;
+  /** 所属 Attempt。 */
+  readonly attemptId: string;
+  /** 当前 Child Runtime。 */
+  readonly runtimeId: string;
+  /** 当前模型工具调用。 */
+  readonly toolCallId: string;
+  /** 执行的 Main 工具名。 */
+  readonly toolName: string;
+  /** Event 时间。 */
+  readonly occurredAt: string;
+}
+
+/** 记录 Child 工具完成执行所需的可信事实。 */
+export interface RecordAgentToolCompletedInput extends RecordAgentToolStartedInput {
+  /** 规范化工具结果的 canonical hash。 */
+  readonly resultHash: string;
+}
+
 /** Agent Store 对外同步能力。 */
 export interface AgentDelegationStore {
+  /**
+   * 订阅 Task 聚合成功提交。
+   * @param listener - 只接收 Task ID 的提交监听器
+   * @returns 取消订阅函数
+   */
+  subscribeTaskCommits(listener: AgentTaskCommitListener): () => void;
   /**
    * 原子写入 assistant 消息、Tasks、Checkpoint、Events 和 Outbox。
    * @param input - 不可变委派事实
@@ -691,6 +722,18 @@ export interface AgentDelegationStore {
    * @returns 同事务更新后的 Task 与 Attempt
    */
   markAttemptRunning(input: MarkAgentAttemptInput): AgentAttemptProjection;
+  /**
+   * 记录裁剪后的 Child 工具开始 Event。
+   * @param input - 已由 Runtime 冻结的工具身份
+   * @returns 持久化 Event
+   */
+  recordToolStarted(input: RecordAgentToolStartedInput): ChatAgentEvent;
+  /**
+   * 记录裁剪后的 Child 工具完成 Event。
+   * @param input - 工具身份与规范化结果 hash
+   * @returns 持久化 Event
+   */
+  recordToolCompleted(input: RecordAgentToolCompletedInput): ChatAgentEvent;
   /**
    * 原子持久化 running write Attempt 的不可变 changeset。
    * @param input - changeset snapshot 与 hash

@@ -50,6 +50,7 @@ import {
   type AgentCheckpointRecord,
   type AgentDelegationStore,
   type AgentDelegationRecoverySnapshot,
+  type AgentTaskCommitListener,
   type AgentOutboxRecord,
   type AgentStoreDatabase,
   type AgentTaskListPage,
@@ -76,6 +77,8 @@ import {
   type PrepareDelegationInput,
   type QueueAgentCommitInput,
   type RecordPreAttemptFailureInput,
+  type RecordAgentToolCompletedInput,
+  type RecordAgentToolStartedInput,
   type RecordTaskResultInput,
   type ResolveAgentConfirmationInput,
   type TombstoneAgentTaskInput,
@@ -1119,12 +1122,65 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
   /** 同步 SQLite 事务边界。 */
   private readonly database: AgentStoreDatabase;
 
+  /** 成功提交后接收 Task 身份的监听器。 */
+  private readonly taskCommitListeners = new Set<AgentTaskCommitListener>();
+
+  /** 嵌套事务逐层收集的 Task 聚合身份。 */
+  private readonly taskTransactionFrames: Array<Set<string>> = [];
+
   /**
    * 创建 Store。
    * @param database - 同步 SQLite 边界
    */
   constructor(database: AgentStoreDatabase) {
     this.database = database;
+  }
+
+  /** @inheritdoc */
+  subscribeTaskCommits(listener: AgentTaskCommitListener): () => void {
+    this.taskCommitListeners.add(listener);
+    return (): void => {
+      this.taskCommitListeners.delete(listener);
+    };
+  }
+
+  /**
+   * 运行一个可嵌套的 Task 聚合事务并只在最外层提交后通知。
+   * @param operation - 同步数据库操作
+   * @returns 操作返回值
+   */
+  private runTaskTransaction<T>(operation: () => T): T {
+    const frame = new Set<string>();
+    this.taskTransactionFrames.push(frame);
+    let result: T;
+    try {
+      result = this.database.transaction(operation);
+    } catch (error: unknown) {
+      this.taskTransactionFrames.pop();
+      throw error;
+    }
+    this.taskTransactionFrames.pop();
+    const parentFrame = this.taskTransactionFrames.at(-1);
+    if (parentFrame) {
+      frame.forEach((taskId): void => {
+        parentFrame.add(taskId);
+      });
+      return result;
+    }
+    frame.forEach((taskId): void => {
+      this.taskCommitListeners.forEach((listener): void => {
+        try {
+          listener(taskId);
+        } catch {
+          try {
+            console.error('agent_task_commit_listener_failed');
+          } catch {
+            // 错误报告器本身也不得改变已经提交的 mutation 返回值。
+          }
+        }
+      });
+    });
+    return result;
   }
 
   /**
@@ -1134,7 +1190,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
    */
   prepareDelegation(input: PrepareDelegationInput, persistAssistant: () => undefined): void {
     validatePrepareInput(input);
-    this.database.transaction((): void => {
+    this.runTaskTransaction((): void => {
       input.tasks.forEach((task): void => {
         this.database.execute(
           `INSERT INTO chat_agent_tasks (
@@ -1270,6 +1326,11 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
     source: ChatAgentEventSource,
     links: AgentEventLinks = {}
   ): ChatAgentEvent {
+    if (aggregateKind === 'task') {
+      const frame = this.taskTransactionFrames.at(-1);
+      if (!frame) throw new AgentStoreProtocolError('task_transaction_missing', 'Task Event requires the Store post-commit boundary');
+      frame.add(aggregateId);
+    }
     const maxRow = this.database.select<{ max_sequence: unknown }>(
       `SELECT MAX(sequence) AS max_sequence
        FROM chat_agent_events
@@ -1729,7 +1790,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
 
   /** @inheritdoc */
   transitionTask(input: TransitionAgentTaskInput): AgentTaskRecord {
-    return this.database.transaction((): AgentTaskRecord => {
+    return this.runTaskTransaction((): AgentTaskRecord => {
       const task = this.getTask(input.taskId);
       if (!task) throw new AgentStoreProtocolError('task_not_found', 'Task does not exist');
       if (task.recordState !== 'active') throw new AgentStoreProtocolError('task_tombstoned', 'Task is tombstoned');
@@ -1839,7 +1900,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
 
   /** @inheritdoc */
   authorizeTask(input: AuthorizeAgentTaskInput): AgentTaskRecord {
-    return this.database.transaction((): AgentTaskRecord => {
+    return this.runTaskTransaction((): AgentTaskRecord => {
       const task = this.getTask(input.taskId);
       if (!task) throw new AgentStoreProtocolError('task_not_found', 'Task does not exist');
       if (task.recordState !== 'active') throw new AgentStoreProtocolError('task_tombstoned', 'Task is tombstoned');
@@ -1965,7 +2026,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
 
   /** @inheritdoc */
   beginAttempt(input: BeginAgentAttemptInput): AgentAttemptProjection {
-    return this.database.transaction((): AgentAttemptProjection => {
+    return this.runTaskTransaction((): AgentAttemptProjection => {
       const task = this.getTask(input.taskId);
       if (!task) throw new AgentStoreProtocolError('task_not_found', 'Task does not exist');
       if (task.recordState !== 'active') throw new AgentStoreProtocolError('task_tombstoned', 'Task is tombstoned');
@@ -2052,7 +2113,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
 
   /** @inheritdoc */
   markAttemptRunning(input: MarkAgentAttemptInput): AgentAttemptProjection {
-    return this.database.transaction((): AgentAttemptProjection => {
+    return this.runTaskTransaction((): AgentAttemptProjection => {
       const task = this.getTask(input.taskId);
       const attempt = this.getAttempt(input.attemptId);
       if (!task || !attempt) {
@@ -2119,6 +2180,104 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
     });
   }
 
+  /**
+   * 校验工具 Event 的当前 Task、Attempt 与 Runtime 谱系。
+   * @param input - 工具执行身份
+   * @returns 当前 Task 与 Attempt
+   */
+  private validateToolContext(input: RecordAgentToolStartedInput): { task: AgentTaskRecord; attempt: AgentAttemptRecord } {
+    const task = this.getTask(input.taskId);
+    const attempt = this.getAttempt(input.attemptId);
+    if (
+      !task ||
+      !attempt ||
+      task.recordState !== 'active' ||
+      task.status !== 'running' ||
+      task.currentAttemptId !== attempt.attemptId ||
+      attempt.taskId !== task.taskId ||
+      attempt.status !== 'running' ||
+      attempt.currentRuntimeId !== input.runtimeId ||
+      normalizeAgentIdentity(input.toolCallId) !== input.toolCallId ||
+      normalizeAgentIdentity(input.toolName) !== input.toolName ||
+      !Number.isFinite(Date.parse(input.occurredAt))
+    ) {
+      throw new AgentStoreProtocolError('tool_event_context_invalid', 'Tool Event does not match the current running Runtime');
+    }
+    return { task, attempt };
+  }
+
+  /** @inheritdoc */
+  recordToolStarted(input: RecordAgentToolStartedInput): ChatAgentEvent {
+    return this.runTaskTransaction((): ChatAgentEvent => {
+      const matching = this.listEvents('task', input.taskId).filter(
+        (event): boolean =>
+          event.type === 'tool.started' &&
+          event.attemptId === input.attemptId &&
+          event.runtimeId === input.runtimeId &&
+          event.payload.toolCallId === input.toolCallId
+      );
+      const existing = matching[0];
+      if (existing) {
+        const payload = existing.payload as ChatAgentEventPayloadMap['tool.started'];
+        if (matching.length !== 1 || payload.toolName !== input.toolName) {
+          throw new AgentStoreProtocolError('tool_event_identity_conflict', 'Tool call identity is already bound to another start Event');
+        }
+        return existing;
+      }
+      const { task, attempt } = this.validateToolContext(input);
+      return this.appendEvent('task', task.taskId, 'tool.started', { toolCallId: input.toolCallId, toolName: input.toolName }, input.occurredAt, 'runtime', {
+        attemptId: attempt.attemptId,
+        runtimeId: input.runtimeId
+      });
+    });
+  }
+
+  /** @inheritdoc */
+  recordToolCompleted(input: RecordAgentToolCompletedInput): ChatAgentEvent {
+    return this.runTaskTransaction((): ChatAgentEvent => {
+      if (!/^[a-f0-9]{64}$/.test(input.resultHash)) {
+        throw new AgentStoreProtocolError('tool_result_hash_invalid', 'Tool completion result hash is invalid');
+      }
+      const events = this.listEvents('task', input.taskId);
+      const matching = events.filter(
+        (event): boolean =>
+          event.type === 'tool.completed' &&
+          event.attemptId === input.attemptId &&
+          event.runtimeId === input.runtimeId &&
+          event.payload.toolCallId === input.toolCallId
+      );
+      const existing = matching[0];
+      if (existing) {
+        const payload = existing.payload as ChatAgentEventPayloadMap['tool.completed'];
+        if (matching.length !== 1 || payload.toolName !== input.toolName || payload.resultHash !== input.resultHash) {
+          throw new AgentStoreProtocolError('tool_event_identity_conflict', 'Tool call identity is already bound to another completion Event');
+        }
+        return existing;
+      }
+      const { task, attempt } = this.validateToolContext(input);
+      const started = events.find(
+        (event): boolean =>
+          event.type === 'tool.started' &&
+          event.attemptId === attempt.attemptId &&
+          event.runtimeId === input.runtimeId &&
+          event.payload.toolCallId === input.toolCallId
+      );
+      const startedPayload = started?.payload as ChatAgentEventPayloadMap['tool.started'] | undefined;
+      if (!started || startedPayload?.toolName !== input.toolName) {
+        throw new AgentStoreProtocolError('tool_start_missing', 'Tool completion requires one matching start Event');
+      }
+      return this.appendEvent(
+        'task',
+        task.taskId,
+        'tool.completed',
+        { toolCallId: input.toolCallId, toolName: input.toolName, resultHash: input.resultHash },
+        input.occurredAt,
+        'runtime',
+        { attemptId: attempt.attemptId, runtimeId: input.runtimeId }
+      );
+    });
+  }
+
   /** @inheritdoc */
   prepareChangeset(input: PrepareAgentChangesetInput): AgentChangesetRecord {
     const validation = validateChangesetSnapshot(input.snapshot, input.snapshotHash);
@@ -2130,7 +2289,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       );
     }
     const { snapshot } = validation;
-    return this.database.transaction((): AgentChangesetRecord => {
+    return this.runTaskTransaction((): AgentChangesetRecord => {
       const existingByAttempt = this.getAttemptChangeset(snapshot.attemptId);
       const existingById = this.getChangeset(snapshot.changesetId);
       const existing = existingByAttempt ?? existingById;
@@ -2231,7 +2390,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       );
     }
     const request = validation.snapshot;
-    return this.database.transaction((): AgentConfirmationRecord => {
+    return this.runTaskTransaction((): AgentConfirmationRecord => {
       const existingRow = this.database.select<ConfirmationRow>('SELECT * FROM chat_agent_confirmations WHERE changeset_id = ?', [request.changesetId])[0];
       if (existingRow) {
         const existing = parseConfirmation(existingRow);
@@ -2329,7 +2488,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
 
   /** @inheritdoc */
   resolveConfirmation(input: ResolveAgentConfirmationInput): AgentConfirmationRecord {
-    return this.database.transaction((): AgentConfirmationRecord => {
+    return this.runTaskTransaction((): AgentConfirmationRecord => {
       if (
         (input.decision !== 'approved' && input.decision !== 'rejected') ||
         !Number.isInteger(input.expectedVersion) ||
@@ -2403,7 +2562,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
 
   /** @inheritdoc */
   revokeConfirmation(confirmationId: string, reason: string, occurredAt: string): AgentConfirmationRecord {
-    return this.database.transaction((): AgentConfirmationRecord => {
+    return this.runTaskTransaction((): AgentConfirmationRecord => {
       if (!reason.trim() || !Number.isFinite(Date.parse(occurredAt))) {
         throw new AgentStoreProtocolError('confirmation_revoke_invalid', 'Confirmation revocation envelope is invalid', 'confirmation');
       }
@@ -2458,7 +2617,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
 
   /** @inheritdoc */
   queueCommit(input: QueueAgentCommitInput): AgentTaskRecord {
-    return this.database.transaction((): AgentTaskRecord => {
+    return this.runTaskTransaction((): AgentTaskRecord => {
       if (!Number.isInteger(input.confirmationVersion) || input.confirmationVersion <= 0 || !Number.isFinite(Date.parse(input.occurredAt))) {
         throw new AgentStoreProtocolError('commit_queue_input_invalid', 'Commit queue envelope is invalid', 'commit_validation');
       }
@@ -2526,7 +2685,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       );
     }
     const intent = validation.snapshot;
-    return this.database.transaction((): AgentCommitJournalRecord => {
+    return this.runTaskTransaction((): AgentCommitJournalRecord => {
       const existingById = this.getCommitJournal(input.journalId);
       const existingRow = this.database.select<CommitJournalRow>('SELECT * FROM chat_agent_commit_journals WHERE changeset_id = ?', [input.changesetId])[0];
       const existing = existingById ?? (existingRow ? parseCommitJournal(existingRow) : null);
@@ -2676,7 +2835,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
 
   /** @inheritdoc */
   markJournalOperation(input: MarkAgentJournalOperationInput): AgentCommitJournalRecord {
-    return this.database.transaction((): AgentCommitJournalRecord => {
+    return this.runTaskTransaction((): AgentCommitJournalRecord => {
       if (!Number.isFinite(Date.parse(input.occurredAt))) {
         throw new AgentStoreProtocolError('commit_operation_input_invalid', 'Commit operation timestamp is invalid', 'commit');
       }
@@ -2756,7 +2915,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
 
   /** @inheritdoc */
   cancelCommitJournal(input: CancelAgentCommitJournalInput): AgentCheckpointRecord {
-    return this.database.transaction((): AgentCheckpointRecord => {
+    return this.runTaskTransaction((): AgentCheckpointRecord => {
       if (!Number.isFinite(Date.parse(input.occurredAt))) {
         throw new AgentStoreProtocolError('commit_journal_input_invalid', 'Commit journal timestamp is invalid', 'recovery');
       }
@@ -2863,7 +3022,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
 
   /** @inheritdoc */
   finalizeCommit(input: FinalizeAgentCommitInput): AgentCheckpointRecord {
-    return this.database.transaction((): AgentCheckpointRecord => {
+    return this.runTaskTransaction((): AgentCheckpointRecord => {
       if (!/^[a-f0-9]{64}$/.test(input.finalHash) || !Number.isFinite(Date.parse(input.occurredAt))) {
         throw new AgentStoreProtocolError('commit_finalize_input_invalid', 'Commit finalization envelope is invalid', 'commit_validation');
       }
@@ -2995,7 +3154,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
 
   /** @inheritdoc */
   markManualRecovery(input: MarkAgentJournalFailureInput): AgentCheckpointRecord {
-    return this.database.transaction((): AgentCheckpointRecord => {
+    return this.runTaskTransaction((): AgentCheckpointRecord => {
       const error = validateAgentTaskError(input.error);
       if (
         !error ||
@@ -3265,7 +3424,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
   /** @inheritdoc */
   recordTaskResult(input: RecordTaskResultInput): AgentCheckpointRecord {
     let replayConflict: AgentStoreProtocolError | undefined;
-    const recordedCheckpoint = this.database.transaction((): AgentCheckpointRecord => {
+    const recordedCheckpoint = this.runTaskTransaction((): AgentCheckpointRecord => {
       const task = this.getTask(input.taskId);
       const checkpoint = this.getCheckpoint(input.checkpointId);
       if (!task || !checkpoint) throw new AgentStoreProtocolError('result_target_missing', 'Task or Checkpoint does not exist');
@@ -3462,7 +3621,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
   /** @inheritdoc */
   recordPreAttemptFailure(input: RecordPreAttemptFailureInput): AgentCheckpointRecord {
     let replayConflict: AgentStoreProtocolError | undefined;
-    const recordedCheckpoint = this.database.transaction((): AgentCheckpointRecord => {
+    const recordedCheckpoint = this.runTaskTransaction((): AgentCheckpointRecord => {
       const task = this.getTask(input.taskId);
       const checkpoint = this.getCheckpoint(input.checkpointId);
       const error = validateAgentTaskError(input.error);
@@ -3645,7 +3804,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
 
   /** @inheritdoc */
   cancelCheckpoint(input: CancelCheckpointInput): AgentCheckpointRecord {
-    return this.database.transaction((): AgentCheckpointRecord => {
+    return this.runTaskTransaction((): AgentCheckpointRecord => {
       if (!input.reason.trim() || !Number.isFinite(Date.parse(input.occurredAt))) {
         throw new AgentStoreProtocolError('checkpoint_cancel_input_invalid', 'Cancellation input is invalid');
       }
@@ -3769,7 +3928,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
 
   /** @inheritdoc */
   tombstoneTask(input: TombstoneAgentTaskInput): AgentTaskRecord {
-    return this.database.transaction((): AgentTaskRecord => {
+    return this.runTaskTransaction((): AgentTaskRecord => {
       if (!input.reason.trim() || !Number.isFinite(Date.parse(input.occurredAt))) {
         throw new AgentStoreProtocolError('task_tombstone_input_invalid', 'Task tombstone envelope is invalid');
       }
@@ -4118,7 +4277,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
     if (!Number.isFinite(Date.parse(input.occurredAt))) {
       throw new AgentStoreProtocolError('interrupt_time_invalid', 'Checkpoint interruption time is invalid');
     }
-    return this.database.transaction((): AgentCheckpointRecord => {
+    return this.runTaskTransaction((): AgentCheckpointRecord => {
       const aggregate = this.loadValidatedAggregate(input.checkpointId);
       if (!aggregate) {
         throw new AgentStoreProtocolError('checkpoint_not_found', 'Checkpoint does not exist');
@@ -4206,7 +4365,7 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
     if (!validatedReason || validatedReason.phase !== 'recovery') {
       throw new AgentStoreProtocolError('interrupt_reason_invalid', 'Recovery interruption requires a recovery error');
     }
-    return this.database.transaction((): number => {
+    return this.runTaskTransaction((): number => {
       const rows = this.database.select<CheckpointRow>(
         `SELECT * FROM chat_agent_delegation_checkpoints
          WHERE record_state = ?

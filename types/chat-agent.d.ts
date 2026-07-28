@@ -1388,8 +1388,20 @@ export interface ChatAgentConfirmationApplicationEvent {
   readonly confirmation: ChatAgentConfirmationSnapshot;
 }
 
+/** 应用级已提交 Task 轻量投影事件。 */
+export interface ChatAgentTaskUpdatedEvent {
+  /** Application event schema 版本。 */
+  readonly schemaVersion: 1;
+  /** 权威 Task 更新。 */
+  readonly type: 'task.updated';
+  /** 不含敏感详情的 Summary 或 Tombstone。 */
+  readonly task: ChatAgentTaskEventSnapshot;
+  /** 与 Task 投影一致的单调 cursor。 */
+  readonly taskSequence: number;
+}
+
 /** 由事件类型判别的应用级 Agent 投影事件。 */
-export type ChatAgentApplicationEvent = ChatAgentCheckpointApplicationEvent | ChatAgentConfirmationApplicationEvent;
+export type ChatAgentApplicationEvent = ChatAgentCheckpointApplicationEvent | ChatAgentConfirmationApplicationEvent | ChatAgentTaskUpdatedEvent;
 
 /** Chat Agent IPC 统一结果。 */
 export type ChatAgentHandlerResult<T> = { ok: true; data: T } | { ok: false; error: string; code: string };
