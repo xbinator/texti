@@ -514,7 +514,7 @@ git commit -m "feat(chat): 发布 Child Task 实时投影"
 - Produces one application-root `task.updated` listener.
 - BChat activates Session snapshots with `activeSessionId`, not a stale prop.
 
-- [ ] **Step 1: Write failing Store and lifecycle tests**
+- [x] **Step 1: Write failing Store and lifecycle tests**
 
 Assert the exact apply outcomes:
 
@@ -543,7 +543,7 @@ Cover:
 - only the latest generation can update loaded/stale/next cursor;
 - application root registers one listener, BChat unmount does not dispose it, and fallback actor system does not register it.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run:
 
@@ -553,7 +553,7 @@ pnpm exec vitest run test/stores/chat/agent-task.test.ts test/hooks/use-agent-ta
 
 Expected: FAIL because the Store and hook do not exist.
 
-- [ ] **Step 3: Implement the collision-safe Store**
+- [x] **Step 3: Implement the collision-safe Store**
 
 Export:
 
@@ -597,7 +597,7 @@ markSessionStale(sessionId: string): void;
 
 Use `asyncTo()` for IPC calls. Keep in-flight Promise and generation maps outside serializable Pinia state. Never delete based on list absence.
 
-- [ ] **Step 4: Register one application-root listener**
+- [x] **Step 4: Register one application-root listener**
 
 Implement:
 
@@ -609,13 +609,13 @@ Subscribe first, validate `event.taskSequence === event.task.taskSequence`, then
 
 In `BChat/index.vue`, watch the authoritative `activeSessionId` and call `ensureSession()` when it becomes non-null. Component disposal must not stop the global listener or clear Store state.
 
-- [ ] **Step 5: Run focused tests and verify GREEN**
+- [x] **Step 5: Run focused tests and verify GREEN**
 
 Run the command from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 6: Update changelog and commit**
+- [x] **Step 6: Update changelog and commit**
 
 Add under `## Added`:
 

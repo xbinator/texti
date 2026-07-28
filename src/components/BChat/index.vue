@@ -89,6 +89,7 @@ import { getElectronAPI } from '@/shared/platform/electron-api';
 import { useProviderStore } from '@/stores/ai/provider';
 import type { SelectedModel } from '@/stores/ai/serviceModel';
 import { useSkillStore } from '@/stores/ai/skill';
+import { useChatAgentTaskStore } from '@/stores/chat/agentTask';
 import { useChatConfirmationQueueStore } from '@/stores/chat/confirmationQueue';
 import { useChatSessionStore } from '@/stores/chat/session';
 import { useCommandPanelStore } from '@/stores/ui/commandPanel';
@@ -217,10 +218,21 @@ const {
   captureAutoNameSnapshot,
   scheduleAutoName
 } = sessionRuntime;
+/** 应用级 Child Task Renderer 投影。 */
+const agentTaskStore = useChatAgentTaskStore();
 watch(
   activeSessionId,
   (sessionId: string | null): void => {
     modelSessionId.value = sessionId;
+  },
+  { immediate: true }
+);
+watch(
+  activeSessionId,
+  (sessionId: string | null): void => {
+    if (!sessionId) return;
+    // 只使用运行时权威 activeSessionId，覆盖内部首轮创建但宿主尚未回写的窗口。
+    agentTaskStore.ensureSession(sessionId);
   },
   { immediate: true }
 );

@@ -13,6 +13,7 @@ import type {
   ChatMessageWidgetResultPart,
   ChatSession
 } from 'types/chat';
+import type { ChatAgentApplicationEvent } from 'types/chat-agent';
 import type {
   ChatRuntimeCompactInput,
   ChatRuntimeContinueInput,
@@ -23,7 +24,7 @@ import type {
 } from 'types/chat-runtime';
 import { defineComponent, h, type PropType } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
-import { flushPromises, shallowMount } from '@vue/test-utils';
+import { flushPromises, mount, shallowMount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BuildMemoryContextOptions } from '@/ai/memory/types';
 import type { ToastItem } from '@/components/BChat/components/InteractionContainer/types';
@@ -31,6 +32,7 @@ import BChat from '@/components/BChat/index.vue';
 import { type AdaptedUserMessageInput, type SubmitAction, createUserChoice } from '@/components/BChat/utils/submitAction';
 import type { Message } from '@/components/BChat/utils/types';
 import type { FileMentionOption } from '@/components/BSmart/types';
+import { useProvideActorSystem } from '@/hooks/useChat/useActorSystem';
 import { emitChatFileReferenceInsert } from '@/shared/chat/fileReference';
 import { native } from '@/shared/platform';
 import type { StoredFile } from '@/shared/storage';
@@ -63,7 +65,17 @@ const promptEditorMockState = vi.hoisted(() => ({
 const getPathForFileMock = vi.hoisted(() => vi.fn<(_file: File) => string | null>().mockReturnValue('/workspace/My Notes/note.md'));
 const getModelToolSupportMock = vi.hoisted(() => vi.fn());
 const runtimeListeners = vi.hoisted<RuntimeEventListeners>(() => ({}));
+const agentTaskEventMockState = vi.hoisted(() => ({
+  listener: undefined as ((event: ChatAgentApplicationEvent) => void) | undefined,
+  dispose: vi.fn()
+}));
 const electronAPIMock = vi.hoisted(() => ({
+  chatAgentOnEvent: vi.fn((listener: (event: ChatAgentApplicationEvent) => void): (() => void) => {
+    agentTaskEventMockState.listener = listener;
+    return agentTaskEventMockState.dispose;
+  }),
+  chatAgentListTasks: vi.fn(),
+  chatAgentGetTask: vi.fn(),
   chatRuntimeEstimateContext: vi.fn(),
   chatRuntimeSend: vi.fn(),
   chatRuntimeContinue: vi.fn(),
@@ -221,6 +233,9 @@ function createDeferred<T>(): DeferredPromise<T> {
 }
 
 vi.mock('vue-router', () => ({
+  useRoute: vi.fn(() => ({
+    fullPath: '/chat'
+  })),
   useRouter: vi.fn(() => ({
     push: vi.fn()
   }))
@@ -674,6 +689,9 @@ describe('BChat sessionId runtime', (): void => {
     chatStoreMock.ensureSessionModel.mockReset();
     chatStoreMock.getSessions.mockReset();
     electronAPIMock.chatRuntimeSend.mockReset();
+    electronAPIMock.chatAgentOnEvent.mockClear();
+    electronAPIMock.chatAgentListTasks.mockReset();
+    electronAPIMock.chatAgentGetTask.mockReset();
     electronAPIMock.chatRuntimeEstimateContext.mockReset();
     electronAPIMock.chatRuntimeContinue.mockReset();
     electronAPIMock.chatRuntimeCompact.mockReset();
@@ -741,6 +759,8 @@ describe('BChat sessionId runtime', (): void => {
     resetRuntimeEventListeners(runtimeListeners);
     conversationViewMockState.scrollToBottom.mockReset();
     actorSystemMockState.registerRuntime.mockReset();
+    agentTaskEventMockState.listener = undefined;
+    agentTaskEventMockState.dispose.mockReset();
     chatStoreMock.getSessionMessages.mockResolvedValue([]);
     chatStoreMock.loadSessionById.mockResolvedValue(undefined);
     chatStoreMock.findSession.mockReturnValue(undefined);
@@ -776,6 +796,14 @@ describe('BChat sessionId runtime', (): void => {
         usedTokens: 12_300,
         contextWindow: 200_000
       }
+    });
+    electronAPIMock.chatAgentListTasks.mockResolvedValue({
+      ok: true,
+      data: { tasks: [] }
+    });
+    electronAPIMock.chatAgentGetTask.mockResolvedValue({
+      ok: true,
+      data: null
     });
     getModelToolSupportMock.mockResolvedValue({ supported: true });
     useSettingStore().setSidebarVisible(true);
@@ -862,6 +890,95 @@ describe('BChat sessionId runtime', (): void => {
     expect(wrapper.emitted('session-created')?.[0]).toEqual([createdSession]);
     expect(electronAPIMock.chatRuntimeSend).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'session-created', content: 'hello' }));
     expect(wrapper.emitted('loading-change')).toContainEqual([true]);
+  });
+
+  it('recovers Child Tasks with the authoritative internally-created activeSessionId', async (): Promise<void> => {
+    chatStoreMock.createSession.mockResolvedValue(createSession('session-created', 'hello'));
+    const wrapper = mountBChat(null);
+    await flushPromises();
+
+    wrapper.findComponent(BSmartEditorStub).vm.$emit('update:value', 'hello');
+    wrapper.findComponent(InputToolbarStub).vm.$emit('submit');
+    await flushPromises();
+
+    expect(electronAPIMock.chatAgentListTasks).toHaveBeenCalledWith({
+      sessionId: 'session-created',
+      limit: 50
+    });
+    wrapper.unmount();
+  });
+
+  it('recovers Child Tasks for the initial and externally switched authoritative Session IDs', async (): Promise<void> => {
+    const wrapper = mountBChat('session-initial');
+    await flushPromises();
+    expect(electronAPIMock.chatAgentListTasks).toHaveBeenCalledWith({
+      sessionId: 'session-initial',
+      limit: 50
+    });
+    electronAPIMock.chatAgentListTasks.mockClear();
+
+    await wrapper.setProps({ sessionId: 'session-switched' });
+    await flushPromises();
+
+    expect(electronAPIMock.chatAgentListTasks).toHaveBeenCalledWith({
+      sessionId: 'session-switched',
+      limit: 50
+    });
+    wrapper.unmount();
+  });
+
+  it('keeps the real root Task listener alive when the actual BChat unmounts', async (): Promise<void> => {
+    const callOrder: string[] = [];
+    electronAPIMock.chatAgentOnEvent.mockImplementation((listener: (event: ChatAgentApplicationEvent) => void): (() => void) => {
+      callOrder.push('subscribe');
+      agentTaskEventMockState.listener = listener;
+      return agentTaskEventMockState.dispose;
+    });
+    electronAPIMock.chatAgentListTasks.mockImplementation(async (): Promise<{ ok: true; data: { tasks: [] } }> => {
+      callOrder.push('list');
+      return { ok: true, data: { tasks: [] } };
+    });
+    const RootTaskHarness = defineComponent({
+      name: 'RootTaskHarness',
+      props: {
+        show: {
+          type: Boolean,
+          required: true
+        }
+      },
+      setup(rootProps): () => ReturnType<typeof h> {
+        useProvideActorSystem();
+        return (): ReturnType<typeof h> => (rootProps.show ? h(BChat, { sessionId: 'session-root' }) : h('div'));
+      }
+    });
+
+    const root = mount(RootTaskHarness, {
+      props: { show: true },
+      global: {
+        stubs: {
+          BIcon: true,
+          BCommandPanel: CommandPanelStub,
+          BPanelSplitter: {
+            template: '<div><slot /></div>'
+          },
+          BSmartEditor: BSmartEditorStub,
+          ConfirmationSheet: true,
+          ConversationView: ConversationViewStub,
+          ImagePreview: true,
+          InputToolbar: InputToolbarStub,
+          InteractionContainer: true,
+          SessionHistory: true,
+          TodoPanel: true,
+          UsagePanel: true
+        }
+      }
+    });
+    await vi.waitFor((): void => expect(callOrder.slice(0, 2)).toEqual(['subscribe', 'list']));
+
+    await root.setProps({ show: false });
+    expect(agentTaskEventMockState.dispose).not.toHaveBeenCalled();
+    root.unmount();
+    expect(agentTaskEventMockState.dispose).toHaveBeenCalledOnce();
   });
 
   it('registers a complete runtime address before sending the request', async (): Promise<void> => {
