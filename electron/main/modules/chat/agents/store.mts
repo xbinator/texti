@@ -52,6 +52,8 @@ import {
   type AgentDelegationRecoverySnapshot,
   type AgentOutboxRecord,
   type AgentStoreDatabase,
+  type AgentTaskListPage,
+  type AgentTaskProjectionRecord,
   type AgentTaskRecord,
   type AgentTerminalResultEnvelope,
   type AuthorizeAgentTaskInput,
@@ -65,6 +67,7 @@ import {
   type FinalizeAgentCommitInput,
   type FinalizeCheckpointInput,
   type InterruptAgentCheckpointInput,
+  type ListAgentTasksInput,
   type MarkAgentAttemptInput,
   type MarkAgentJournalFailureInput,
   type MarkAgentJournalInput,
@@ -3816,6 +3819,188 @@ class SqliteAgentDelegationStore implements AgentDelegationStore {
       const updated = this.getTask(task.taskId);
       if (!updated) throw new AgentStoreProtocolError('task_projection_missing', 'Tombstoned Task is missing');
       return updated;
+    });
+  }
+
+  /** @inheritdoc */
+  listTasksBySession(input: ListAgentTasksInput): AgentTaskListPage {
+    if (
+      normalizeAgentIdentity(input.sessionId) !== input.sessionId ||
+      !Number.isInteger(input.terminalLimit) ||
+      input.terminalLimit < 0 ||
+      (input.terminalBefore !== undefined &&
+        (normalizeAgentIdentity(input.terminalBefore.taskId) !== input.terminalBefore.taskId || !Number.isFinite(Date.parse(input.terminalBefore.updatedAt))))
+    ) {
+      throw new AgentStoreProtocolError('task_list_input_invalid', 'Task list query input is invalid');
+    }
+
+    return this.database.transaction((): AgentTaskListPage => {
+      const terminalStatuses: readonly AgentTaskStatus[] = ['completed', 'failed', 'cancelled', 'deadline_exceeded', 'commit_failed'];
+      const activeRows = input.includeActive
+        ? this.database.select<TaskRow>(
+            `SELECT * FROM chat_agent_tasks
+             WHERE session_id = ?
+               AND record_state = ?
+               AND status NOT IN (?, ?, ?, ?, ?)
+             ORDER BY updated_at DESC, task_id DESC`,
+            [input.sessionId, 'active', ...terminalStatuses]
+          )
+        : [];
+      const terminalParams: unknown[] = [input.sessionId, 'active', ...terminalStatuses];
+      const cursorClause = input.terminalBefore
+        ? `AND (
+             updated_at < ?
+             OR (updated_at = ? AND task_id < ?)
+           )`
+        : '';
+      if (input.terminalBefore) {
+        terminalParams.push(input.terminalBefore.updatedAt, input.terminalBefore.updatedAt, input.terminalBefore.taskId);
+      }
+      terminalParams.push(input.terminalLimit + 1);
+      const terminalRows = this.database.select<TaskRow>(
+        `SELECT * FROM chat_agent_tasks
+         WHERE session_id = ?
+           AND record_state = ?
+           AND status IN (?, ?, ?, ?, ?)
+           ${cursorClause}
+         ORDER BY updated_at DESC, task_id DESC
+         LIMIT ?`,
+        terminalParams
+      );
+      const hasMoreTerminal = terminalRows.length > input.terminalLimit;
+      /**
+       * 在当前列表事务内把排序行加载为完整投影。
+       * @param row - 已按页面顺序选中的 Task 行
+       * @returns 与排序事实处于同一快照的 Task 投影
+       */
+      const loadRow = (row: TaskRow): AgentTaskProjectionRecord => {
+        const projection = this.loadTaskProjection(requireString(row.task_id, 'list task id'));
+        if (!projection) {
+          throw new AgentStoreProtocolError('task_list_projection_missing', 'Listed Task projection is missing');
+        }
+        return projection;
+      };
+
+      return Object.freeze({
+        active: Object.freeze(activeRows.map(loadRow)),
+        terminal: Object.freeze(terminalRows.slice(0, input.terminalLimit).map(loadRow)),
+        hasMoreTerminal
+      });
+    });
+  }
+
+  /** @inheritdoc */
+  getTaskProjection(taskId: string): AgentTaskProjectionRecord | null {
+    if (normalizeAgentIdentity(taskId) !== taskId) {
+      throw new AgentStoreProtocolError('projection_task_id_invalid', 'Task projection identity is invalid');
+    }
+
+    return this.database.transaction((): AgentTaskProjectionRecord | null => this.loadTaskProjection(taskId));
+  }
+
+  /**
+   * 在调用方已经建立的读取事务中加载完整 Task 投影事实。
+   * @param taskId - Task ID
+   * @returns 完整投影记录，不存在时为 null
+   */
+  private loadTaskProjection(taskId: string): AgentTaskProjectionRecord | null {
+    const task = this.getTask(taskId);
+    if (!task) return null;
+    const checkpoint = this.getCheckpoint(task.checkpointId);
+    const toolCall = checkpoint?.continuationSnapshot.orderedToolCalls.find((entry): boolean => entry.taskId === task.taskId);
+    if (
+      !checkpoint ||
+      checkpoint.sessionId !== task.sessionId ||
+      checkpoint.turnId !== task.turnId ||
+      checkpoint.rootRuntimeId !== task.rootRuntimeId ||
+      checkpoint.primaryAgentId !== task.parentAgentId ||
+      toolCall?.toolCallId !== task.toolCallId
+    ) {
+      throw new AgentStoreProtocolError('projection_checkpoint_mismatch', 'Task projection Checkpoint identity is inconsistent');
+    }
+
+    let currentAttempt: AgentAttemptRecord | undefined;
+    if (task.currentAttemptId) {
+      const attempt = this.getAttempt(task.currentAttemptId);
+      if (!attempt || attempt.taskId !== task.taskId || attempt.planHash !== task.executionPlanSnapshotHash) {
+        throw new AgentStoreProtocolError('projection_attempt_mismatch', 'Task projection Attempt identity is inconsistent');
+      }
+      currentAttempt = attempt;
+    }
+
+    const eventRows = this.database.select<EventRow>(
+      `SELECT * FROM chat_agent_events
+       WHERE aggregate_kind = ? AND aggregate_id = ?
+       ORDER BY sequence DESC
+       LIMIT 50`,
+      ['task', task.taskId]
+    );
+    if (eventRows.length === 0) {
+      throw new AgentStoreProtocolError('projection_event_missing', 'Task projection Event history is missing');
+    }
+    const taskSequence = requireInteger(eventRows[0].sequence, 'projection task sequence');
+    const events = eventRows.map(parseEvent).reverse();
+    if (events.at(-1)?.sequence !== taskSequence || events.some((event, index): boolean => index > 0 && event.sequence !== events[index - 1].sequence + 1)) {
+      throw new AgentStoreProtocolError('projection_event_sequence_invalid', 'Task projection Event window is not continuous');
+    }
+
+    const changeset = currentAttempt ? this.getAttemptChangeset(currentAttempt.attemptId) : null;
+    if (
+      changeset &&
+      (changeset.snapshot.taskId !== task.taskId ||
+        changeset.snapshot.attemptId !== currentAttempt?.attemptId ||
+        changeset.snapshot.agentId !== task.agentId ||
+        changeset.snapshot.runtimeId !== currentAttempt.currentRuntimeId ||
+        changeset.snapshot.planHash !== currentAttempt.planHash)
+    ) {
+      throw new AgentStoreProtocolError('projection_changeset_mismatch', 'Task projection changeset identity is inconsistent');
+    }
+
+    const confirmation = changeset?.confirmationId ? this.getConfirmation(changeset.confirmationId) : null;
+    if (
+      changeset?.confirmationId &&
+      (!confirmation ||
+        confirmation.changesetId !== changeset.snapshot.changesetId ||
+        confirmation.request.taskId !== task.taskId ||
+        confirmation.request.attemptId !== currentAttempt?.attemptId ||
+        confirmation.request.agentId !== task.agentId ||
+        confirmation.request.runtimeId !== currentAttempt?.currentRuntimeId ||
+        confirmation.request.toolCallId !== task.toolCallId ||
+        confirmation.request.sessionId !== task.sessionId ||
+        confirmation.request.turnId !== task.turnId ||
+        confirmation.request.planHash !== changeset.snapshot.planHash ||
+        confirmation.request.baseRevision !== changeset.snapshot.baseRevision ||
+        confirmation.request.diffHash !== changeset.snapshot.diffHash ||
+        confirmation.request.operationSetHash !== changeset.snapshot.operationSetHash)
+    ) {
+      throw new AgentStoreProtocolError('projection_confirmation_mismatch', 'Task projection confirmation identity is inconsistent');
+    }
+
+    const journalRow = changeset
+      ? this.database.select<CommitJournalRow>('SELECT * FROM chat_agent_commit_journals WHERE changeset_id = ?', [changeset.snapshot.changesetId])[0]
+      : undefined;
+    const journal = journalRow ? parseCommitJournal(journalRow) : null;
+    if (
+      journal &&
+      (!confirmation ||
+        journal.taskId !== task.taskId ||
+        journal.attemptId !== currentAttempt?.attemptId ||
+        journal.changesetId !== changeset?.snapshot.changesetId ||
+        journal.confirmationId !== confirmation.confirmationId ||
+        journal.planHash !== currentAttempt?.planHash)
+    ) {
+      throw new AgentStoreProtocolError('projection_journal_mismatch', 'Task projection commit journal identity is inconsistent');
+    }
+
+    return Object.freeze({
+      task,
+      checkpoint,
+      ...(currentAttempt ? { currentAttempt } : {}),
+      taskSequence,
+      events: Object.freeze(events),
+      ...(changeset ? { changeset } : {}),
+      ...(confirmation ? { confirmation } : {}),
+      ...(journal ? { journal } : {})
     });
   }
 

@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { closeDatabase, dbExecute, dbSelect, initDatabase } from '../../../../../electron/main/modules/database/service.mts';
+import { closeDatabase, createAgentTables, dbExecute, dbSelect, initDatabase } from '../../../../../electron/main/modules/database/service.mts';
 
 const testState = vi.hoisted(() => ({
   userDataPath: ''
@@ -21,6 +21,55 @@ vi.mock('electron', () => ({
 
 /** 仅在 ABI 与 better-sqlite3 一致的 Electron Node 进程中执行真实数据库测试。 */
 const describeWithSqlite = 'electron' in process.versions ? describe : describe.skip;
+
+/**
+ * 创建含重复 Assistant Message 身份的旧版 Checkpoint 表。
+ * @returns 可用于执行 Agent 表迁移的内存数据库
+ */
+function createDuplicateDatabase(): InstanceType<typeof Database> {
+  const database = new Database(':memory:');
+  database.exec(`
+    CREATE TABLE chat_agent_delegation_checkpoints (
+      checkpoint_id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      turn_id TEXT NOT NULL,
+      primary_agent_id TEXT NOT NULL,
+      root_runtime_id TEXT NOT NULL,
+      source_runtime_id TEXT NOT NULL,
+      assistant_message_id TEXT NOT NULL,
+      continuation_snapshot_json TEXT NOT NULL,
+      continuation_snapshot_hash TEXT NOT NULL,
+      status TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 0,
+      terminal_results_json TEXT NOT NULL DEFAULT '{}',
+      resume_runtime_id TEXT,
+      error_json TEXT,
+      record_state TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    INSERT INTO chat_agent_delegation_checkpoints (
+      checkpoint_id, session_id, turn_id, primary_agent_id, root_runtime_id,
+      source_runtime_id, assistant_message_id, continuation_snapshot_json,
+      continuation_snapshot_hash, status, created_at, updated_at
+    ) VALUES
+      (
+        'checkpoint-duplicate-a', 'session-a', 'turn-a', 'primary',
+        'runtime-root-a', 'runtime-source-a', 'assistant-duplicate', '{}',
+        '${'a'.repeat(64)}', 'waiting_children',
+        '2026-07-28T08:00:00.000Z', '2026-07-28T08:00:00.000Z'
+      ),
+      (
+        'checkpoint-duplicate-b', 'session-b', 'turn-b', 'primary',
+        'runtime-root-b', 'runtime-source-b', 'assistant-duplicate', '{}',
+        '${'b'.repeat(64)}', 'waiting_children',
+        '2026-07-28T08:01:00.000Z', '2026-07-28T08:01:00.000Z'
+      );
+  `);
+
+  return database;
+}
 
 /**
  * 创建覆盖 Task、Attempt、Checkpoint、Event、Outbox 与预算预留的最小事实集合。
@@ -185,6 +234,8 @@ describeWithSqlite('agent task additive migration', (): void => {
     expect(indexNames).toEqual(
       expect.arrayContaining([
         'idx_chat_agent_tasks_checkpoint_tool_call',
+        'idx_chat_agent_tasks_session_record_updated',
+        'idx_chat_agent_checkpoints_assistant_message',
         'idx_chat_agent_events_aggregate_sequence',
         'idx_chat_agent_outbox_delivery',
         'idx_chat_agent_budget_turn_status',
@@ -192,6 +243,101 @@ describeWithSqlite('agent task additive migration', (): void => {
       ])
     );
     expect(dbSelect<{ title: string }>('SELECT title FROM chat_sessions WHERE id = ?', ['legacy-session'])).toEqual([{ title: 'Legacy' }]);
+  });
+
+  it('rejects duplicate Assistant Message identities without rewriting legacy Checkpoints', (): void => {
+    const database = createDuplicateDatabase();
+
+    expect((): void => createAgentTables(database)).toThrow('agent_checkpoint_assistant_message_duplicate');
+    expect(
+      database
+        .prepare(
+          `SELECT checkpoint_id, assistant_message_id
+           FROM chat_agent_delegation_checkpoints
+           ORDER BY checkpoint_id ASC`
+        )
+        .all()
+    ).toEqual([
+      {
+        checkpoint_id: 'checkpoint-duplicate-a',
+        assistant_message_id: 'assistant-duplicate'
+      },
+      {
+        checkpoint_id: 'checkpoint-duplicate-b',
+        assistant_message_id: 'assistant-duplicate'
+      }
+    ]);
+
+    database.close();
+  });
+
+  it('enforces unique Assistant Message identities after a successful migration', async (): Promise<void> => {
+    await initDatabase();
+
+    dbExecute(
+      `INSERT INTO chat_agent_delegation_checkpoints (
+        checkpoint_id, session_id, turn_id, primary_agent_id, root_runtime_id,
+        source_runtime_id, assistant_message_id, continuation_snapshot_json,
+        continuation_snapshot_hash, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        'checkpoint-unique-a',
+        'session-unique',
+        'turn-unique-a',
+        'primary',
+        'runtime-root',
+        'runtime-source-a',
+        'assistant-unique',
+        '{}',
+        'a'.repeat(64),
+        'waiting_children',
+        '2026-07-28T08:00:00.000Z',
+        '2026-07-28T08:00:00.000Z'
+      ]
+    );
+
+    expect((): void => {
+      dbExecute(
+        `INSERT INTO chat_agent_delegation_checkpoints (
+          checkpoint_id, session_id, turn_id, primary_agent_id, root_runtime_id,
+          source_runtime_id, assistant_message_id, continuation_snapshot_json,
+          continuation_snapshot_hash, status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          'checkpoint-unique-b',
+          'session-unique',
+          'turn-unique-b',
+          'primary',
+          'runtime-root',
+          'runtime-source-b',
+          'assistant-unique',
+          '{}',
+          'b'.repeat(64),
+          'waiting_children',
+          '2026-07-28T08:01:00.000Z',
+          '2026-07-28T08:01:00.000Z'
+        ]
+      );
+    }).toThrowError(/unique/i);
+  });
+
+  it('keeps the Agent table migration idempotent', async (): Promise<void> => {
+    await initDatabase();
+    closeDatabase();
+
+    await expect(initDatabase()).resolves.toBeUndefined();
+    expect(
+      dbSelect<{ name: string }>(
+        `SELECT name
+         FROM sqlite_master
+         WHERE type = 'index'
+           AND name IN (
+             'idx_chat_agent_checkpoints_assistant_message',
+             'idx_chat_agent_tasks_session_record_updated'
+           )
+         ORDER BY name ASC`
+      )
+    ).toEqual([{ name: 'idx_chat_agent_checkpoints_assistant_message' }, { name: 'idx_chat_agent_tasks_session_record_updated' }]);
   });
 
   it('protects immutable write facts while allowing only their mutable projections', async (): Promise<void> => {

@@ -609,6 +609,56 @@ export interface AgentDelegationRecoverySnapshot {
   eventSequence: number;
 }
 
+/** 终态 Task 历史分页的稳定排序游标。 */
+export interface AgentTaskTerminalCursor {
+  /** 游标 Task 的更新时间。 */
+  readonly updatedAt: string;
+  /** 同更新时间下的 Task tie-break 身份。 */
+  readonly taskId: string;
+}
+
+/** 按 Session 读取 Task 列表的内部查询输入。 */
+export interface ListAgentTasksInput {
+  /** 目标 Session。 */
+  readonly sessionId: string;
+  /** 是否读取全部非终态活动 Task。 */
+  readonly includeActive: boolean;
+  /** 只读取该排序键之前的终态 Task。 */
+  readonly terminalBefore?: AgentTaskTerminalCursor;
+  /** 本页最多返回的终态 Task 数量。 */
+  readonly terminalLimit: number;
+}
+
+/** 构建单个公开 Task 投影所需的持久化事实。 */
+export interface AgentTaskProjectionRecord {
+  /** Task 权威记录。 */
+  readonly task: AgentTaskRecord;
+  /** Task 所属 Checkpoint。 */
+  readonly checkpoint: AgentCheckpointRecord;
+  /** Task 当前可选 Attempt。 */
+  readonly currentAttempt?: AgentAttemptRecord;
+  /** Task 聚合最新 Event sequence。 */
+  readonly taskSequence: number;
+  /** 最新五十条 Task Event，按 sequence 升序。 */
+  readonly events: readonly ChatAgentEvent[];
+  /** 当前 Attempt 可选 changeset。 */
+  readonly changeset?: AgentChangesetRecord;
+  /** changeset 可选 confirmation。 */
+  readonly confirmation?: AgentConfirmationRecord;
+  /** changeset 可选 commit journal。 */
+  readonly journal?: AgentCommitJournalRecord;
+}
+
+/** 一页稳定的 Session Task 记录。 */
+export interface AgentTaskListPage {
+  /** 不受 terminalLimit 限制的全部活动 Task 投影事实。 */
+  readonly active: readonly AgentTaskProjectionRecord[];
+  /** 按更新时间和 Task 身份降序排列的终态 Task 投影事实。 */
+  readonly terminal: readonly AgentTaskProjectionRecord[];
+  /** 是否仍存在更早的终态 Task。 */
+  readonly hasMoreTerminal: boolean;
+}
+
 /** Agent Store 对外同步能力。 */
 export interface AgentDelegationStore {
   /**
@@ -775,6 +825,18 @@ export interface AgentDelegationStore {
    * @returns 保留不可变事实的 Task
    */
   tombstoneTask(input: TombstoneAgentTaskInput): AgentTaskRecord;
+  /**
+   * 按 Session 分别读取活动 Task 和稳定分页的终态历史。
+   * @param input - Session、游标和终态页大小
+   * @returns 活动 Task 与终态历史页
+   */
+  listTasksBySession(input: ListAgentTasksInput): AgentTaskListPage;
+  /**
+   * 在一个读取事务内加载公开投影需要的全部持久化事实。
+   * @param taskId - Task ID
+   * @returns 完整投影记录，不存在时为 null
+   */
+  getTaskProjection(taskId: string): AgentTaskProjectionRecord | null;
   /**
    * 读取单个 Task。
    * @param taskId - Task ID

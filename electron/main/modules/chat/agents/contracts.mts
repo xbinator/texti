@@ -508,10 +508,26 @@ function redactSecretValues(value: string): string {
   return value
     .replace(/(^|[\s,;?&])(?:[A-Z][A-Z0-9]*_)+(?:KEY|TOKEN|SECRET|PASSWORD)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s,;&]+)/g, redactMatch)
     .replace(/(^|[\s,;])(?:Set-Cookie|Cookie)\s*:\s*[^\r\n]+/gi, redactMatch)
-    .replace(/(^|[\s,;])(?:Proxy-)?Authorization\s*:\s*(?:Bearer|Basic)\s+(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, redactMatch)
+    .replace(/(^|[\s,;])(?:Proxy-)?Authorization\s*:\s*[!#$%&'*+\-.^_`|~0-9A-Z]+\s+[^\r\n]+/gi, redactMatch)
     .replace(/(^|[\s,;?&{[(:_-])(?:"|')?(?:api[_-]?key|access[_-]?token|refresh[_-]?token)(?:"|')?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;&}\]]+)/gi, redactMatch)
     .replace(/(^|[\s,;?&{[(:_-])(?:"|')?(?:client[_-]?secret|password|cookie)(?:"|')?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;&}\]]+)/gi, redactMatch)
     .replace(/\b(?:sk|rk)-[A-Za-z0-9_-]{16,}\b/g, '[REDACTED]');
+}
+
+/**
+ * 裁剪进入公开 Agent 投影的用户可见文本。
+ * @param value - 未可信展示值
+ * @param maxLength - 允许返回的最大字符数
+ * @returns 移除控制字符、裁剪秘密并限制长度后的文本，不可展示时返回 null
+ */
+export function sanitizeAgentDisplayText(value: unknown, maxLength: number): string | null {
+  if (typeof value !== 'string' || !Number.isInteger(maxLength) || maxLength <= 0) return null;
+
+  const withoutControl = value.replace(/\p{Cc}/gu, '');
+  const redacted = redactSecretValues(withoutControl);
+  const limited = redacted.slice(0, maxLength);
+
+  return limited.length > 0 ? limited : null;
 }
 
 /**

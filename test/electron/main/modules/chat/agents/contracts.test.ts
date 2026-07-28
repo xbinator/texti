@@ -14,6 +14,7 @@ import {
   hashContinuationSnapshot,
   hashExecutionPlanSnapshot,
   normalizeAgentIdentity,
+  sanitizeAgentDisplayText,
   validateAgentTaskError,
   validateChatAgentEvent,
   validateChatAgentResult,
@@ -281,8 +282,11 @@ describe('foundation delegation contract', (): void => {
   it.each([
     ['task', { task: 'Inspect Authorization: Bearer contract-bearer-secret' }],
     ['task Basic header', { task: 'Inspect Authorization: Basic contract-basic-secret' }],
+    ['task Token header', { task: 'Inspect Authorization: Token contract-token-secret' }],
+    ['task Digest header', { task: 'Inspect Authorization: Digest contract-digest-secret' }],
     ['acceptance criterion', { acceptanceCriteria: ['Report api_key=contract-api-secret'] }],
     ['acceptance Proxy header', { acceptanceCriteria: ['Report Proxy-Authorization: Bearer contract-proxy-secret'] }],
+    ['acceptance custom Proxy header', { acceptanceCriteria: ['Report Proxy-Authorization: Custom contract-proxy-custom-secret'] }],
     ['resource reference', { resources: [{ kind: 'file', reference: 'CONTEXT.md?access_token=resource-secret' }] }],
     ['resource Cookie header', { resources: [{ kind: 'resource', reference: 'Cookie: session=resource-cookie-secret' }] }],
     ['resource revision', { resources: [{ kind: 'file', reference: 'CONTEXT.md', revision: 'DB_PASSWORD=revision-secret' }] }],
@@ -309,6 +313,31 @@ describe('foundation delegation contract', (): void => {
     expect(normalizeAgentIdentity('  runtime-1  ')).toBe('runtime-1');
     expect(normalizeAgentIdentity('x'.repeat(4001))).toBeNull();
     expect(normalizeAgentIdentity('Authorization: Basic exported-secret')).toBeNull();
+    expect(normalizeAgentIdentity('Authorization: Token exported-secret')).toBeNull();
+    expect(normalizeAgentIdentity('Proxy-Authorization: Digest exported-secret')).toBeNull();
+  });
+
+  it('sanitizes display text before enforcing the requested length', (): void => {
+    expect(sanitizeAgentDisplayText('ab\u0000cd', 4)).toBe('abcd');
+    expect(sanitizeAgentDisplayText('Authorization: Bearer display-secret', 6)).toBe('[REDAC');
+  });
+
+  it('redacts secrets reconstructed by control-character removal', (): void => {
+    const sanitized = sanitizeAgentDisplayText('api\u0000_key=display-secret', 1000);
+
+    expect(sanitized).toBe('[REDACTED]');
+    expect(sanitized).not.toContain('display-secret');
+  });
+
+  it('redacts the complete credential value for multi-field authorization schemes', (): void => {
+    const sanitized = sanitizeAgentDisplayText('Proxy-Authorization: Digest username="digest-user", realm="private-realm", response="digest-response"', 1000);
+
+    expect(sanitized).toBe('[REDACTED]');
+    expect(sanitized).not.toMatch(/digest-user|private-realm|digest-response/);
+  });
+
+  it.each([null, undefined, 42, {}, []])('returns null for non-string display input %#', (value: unknown): void => {
+    expect(sanitizeAgentDisplayText(value, 1000)).toBeNull();
   });
 
   it('creates stable hashes for equivalent structured-clone-safe payloads', (): void => {
@@ -930,6 +959,9 @@ describe('foundation delegation contract', (): void => {
     ['Basic authorization', 'Authorization: Basic basic-display-secret', 'basic-display-secret'],
     ['Bearer proxy authorization', 'Proxy-Authorization: Bearer proxy-bearer-display-secret', 'proxy-bearer-display-secret'],
     ['Basic proxy authorization', 'Proxy-Authorization: Basic proxy-basic-display-secret', 'proxy-basic-display-secret'],
+    ['Token authorization', 'Authorization: Token token-display-secret', 'token-display-secret'],
+    ['Digest authorization', 'Authorization: Digest digest-display-secret', 'digest-display-secret'],
+    ['Custom proxy authorization', 'Proxy-Authorization: Custom custom-proxy-display-secret', 'custom-proxy-display-secret'],
     ['Cookie header', 'Cookie: session=cookie-header-display-secret', 'cookie-header-display-secret'],
     ['Set-Cookie header', 'Set-Cookie: session=set-cookie-header-display-secret; HttpOnly', 'set-cookie-header-display-secret'],
     ['snake-case API key', 'api_key=snake-api-secret', 'snake-api-secret'],

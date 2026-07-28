@@ -871,6 +871,367 @@ export type ChatAgentEvent<TType extends ChatAgentEventType = ChatAgentEventType
   ? ChatAgentCheckpointEvent<TType>
   : never;
 
+/** Renderer 可安全展示的资源引用。 */
+export interface ChatAgentTaskResourceSnapshot {
+  /** 资源类型。 */
+  readonly kind: AgentResourceReference['kind'];
+  /** 仓库相对路径或稳定资源域标识。 */
+  readonly displayReference: string;
+  /** 调用方观察到的可选修订。 */
+  readonly revision?: string;
+}
+
+/** 当前 Attempt 与可替换 Runtime 的展示状态。 */
+export interface ChatAgentTaskAttemptSnapshot {
+  /** Attempt 稳定身份。 */
+  readonly attemptId: string;
+  /** 从一开始的 Attempt 序号。 */
+  readonly attemptNumber: number;
+  /** Child Actor 稳定身份。 */
+  readonly agentId: string;
+  /** Attempt 自身的持久化执行状态。 */
+  readonly attemptState: 'starting' | 'running' | 'completed' | 'failed' | 'cancelled' | 'deadline_exceeded' | 'interrupted';
+  /** 当前可替换 Runtime 身份。 */
+  readonly runtimeId: string;
+  /** Attempt 创建时间。 */
+  readonly createdAt: string;
+  /** Runtime 开始时间。 */
+  readonly startedAt?: string;
+  /** Attempt 结束时间。 */
+  readonly endedAt?: string;
+}
+
+/** 经过 allowlist 转换的单条 Task 时间线。 */
+export interface ChatAgentTaskTimelineEntry {
+  /** Task 聚合内单调 Event sequence。 */
+  readonly sequence: number;
+  /** 可展示事件类别，不透传内部 Event payload。 */
+  readonly type: 'status' | 'runtime' | 'tool' | 'confirmation' | 'commit' | 'warning';
+  /** 稳定机器标签，由 Main 映射表生成。 */
+  readonly code: string;
+  /** 可选用户可读短说明。 */
+  readonly summary?: string;
+  /** 事件发生时间。 */
+  readonly occurredAt: string;
+}
+
+/** 被截断的最近 Task 时间线窗口。 */
+export interface ChatAgentTaskTimelineSnapshot {
+  /** 最多最近五十条已裁剪事件。 */
+  readonly entries: readonly ChatAgentTaskTimelineEntry[];
+  /** entries 第一条的 sequence；空数组时省略。 */
+  readonly firstSequence?: number;
+  /** entries 最后一条的 sequence；空数组时省略。 */
+  readonly lastSequence?: number;
+  /** 更早事件是否被截断。 */
+  readonly truncated: boolean;
+}
+
+/** 用户可见的单条验收结果。 */
+export interface ChatAgentTaskCriterionSnapshot {
+  /** 对应 Contract acceptanceCriteria 的稳定索引。 */
+  readonly criterionIndex: number;
+  /** Child 声明状态。 */
+  readonly claimStatus: AgentCriteriaResult['claim']['status'];
+  /** 独立验证状态。 */
+  readonly verificationStatus: AgentCriteriaResult['verification']['status'];
+  /** 来自 Child claim、但已经 Main 裁剪的摘要。 */
+  readonly claimSummary: string;
+}
+
+/** 任务完成程度与摘要；和执行状态分开表达。 */
+export interface ChatAgentTaskCompletionSnapshot {
+  /** full、partial 或 none 的完成程度。 */
+  readonly level: 'full' | 'partial' | 'none';
+  /** 面向用户的紧凑摘要。 */
+  readonly summary: string;
+  /** 按 Contract 顺序排列的验收结果。 */
+  readonly criteria: readonly ChatAgentTaskCriterionSnapshot[];
+}
+
+/** Renderer 可安全展示的深只读货币成本。 */
+export interface ChatAgentMonetaryCostSnapshot {
+  /** ISO-4217 货币代码；不可用时为 unknown。 */
+  readonly currency: string | 'unknown';
+  /** 定价版本；不可用时为 unknown。 */
+  readonly pricingVersion: string | 'unknown';
+  /** 估算成本；不可用时为 unknown。 */
+  readonly estimated: number | 'unknown';
+  /** Provider 实际成本；不可用时为 unknown。 */
+  readonly actual: number | 'unknown';
+}
+
+/** Renderer 可展示的成本核算。 */
+export interface ChatAgentTaskUsageSnapshot {
+  /** Provider 输入 token。 */
+  readonly inputTokens: number;
+  /** Provider 输出 token。 */
+  readonly outputTokens: number;
+  /** 输入和输出 token 合计。 */
+  readonly totalTokens: number;
+  /** Provider 模型调用次数。 */
+  readonly modelCalls: number;
+  /** Agent 工具轮次。 */
+  readonly toolRounds: number;
+  /** 排队耗时。 */
+  readonly queueDurationMs: number;
+  /** 执行耗时。 */
+  readonly executionDurationMs: number;
+  /** 外部请求次数。 */
+  readonly externalRequests: number;
+  /** 没有可靠价格时保留 unknown。 */
+  readonly monetaryCost: ChatAgentMonetaryCostSnapshot;
+}
+
+/** Task 卡片允许展示的错误 details 键。 */
+export type ChatAgentTaskErrorDetailKey =
+  | 'reason'
+  | 'toolName'
+  | 'expectedHash'
+  | 'actualHash'
+  | 'expectedVersion'
+  | 'actualVersion'
+  | 'status'
+  | 'limit'
+  | 'observed'
+  | 'deadlineAt';
+
+/** 公开的深只读结构化错误。 */
+export interface ChatAgentTaskErrorSnapshot {
+  /** 稳定机器错误码。 */
+  readonly code: AgentTaskErrorCode;
+  /** 失败协议阶段。 */
+  readonly phase: AgentTaskErrorPhase;
+  /** 稳定错误类别。 */
+  readonly category: 'policy' | 'resource' | 'runtime' | 'protocol' | 'user' | 'integrity';
+  /** 同一不可变 Contract 是否允许重试。 */
+  readonly retryable: boolean;
+  /** 经二次裁剪的辅助展示文本。 */
+  readonly message?: string;
+  /** 默认不包含资源引用、scope 或内部身份。 */
+  readonly details?: Readonly<Partial<Record<ChatAgentTaskErrorDetailKey, string | number | boolean | null>>>;
+}
+
+/** 公开的深只读非终止性警告。 */
+export interface ChatAgentTaskWarningSnapshot {
+  /** 稳定警告码。 */
+  readonly code: string;
+  /** 经长度和秘密模式裁剪的展示文本。 */
+  readonly message: string;
+}
+
+/** 写入 Task 的公开 changeset 阶段。 */
+export type ChatAgentTaskChangesetPhase =
+  | 'prepared'
+  | 'awaiting_confirmation'
+  | 'approved'
+  | 'commit_queued'
+  | 'journal_created'
+  | 'mutation_applied'
+  | 'finalized'
+  | 'discarded'
+  | 'recovery_required';
+
+/** 写入 Task 的公开 changeset 摘要。 */
+export interface ChatAgentTaskChangesetSnapshot {
+  /** changeset 稳定身份。 */
+  readonly changesetId: string;
+  /** 用户确认和提交共同绑定的基础修订。 */
+  readonly baseRevision: string;
+  /** 用户确认和提交共同绑定的 diff hash。 */
+  readonly diffHash: string;
+  /** 规范化操作集合 hash。 */
+  readonly operationSetHash: string;
+  /** 仅包含工作区相对展示路径。 */
+  readonly displayPaths: readonly string[];
+  /** 提交协议公开阶段。 */
+  readonly phase: ChatAgentTaskChangesetPhase;
+}
+
+/** 公开 artifact 的深只读 ownership。 */
+export interface ChatAgentArtifactOwnerSnapshot {
+  /** 来源 Task。 */
+  readonly taskId: string;
+  /** 来源 Child Actor。 */
+  readonly agentId: string;
+  /** 来源 Attempt。 */
+  readonly attemptId: string;
+}
+
+/** 只允许 visibility=user 的 artifact 进入此类型。 */
+export interface ChatAgentTaskArtifactSnapshot {
+  /** artifact 稳定身份。 */
+  readonly artifactId: string;
+  /** artifact 种类。 */
+  readonly kind: string;
+  /** 用户可打开的稳定引用。 */
+  readonly reference: string;
+  /** 可选内容 hash。 */
+  readonly contentHash?: string;
+  /** 来源 ownership，不能由 Renderer 改写。 */
+  readonly owner: ChatAgentArtifactOwnerSnapshot;
+  /** 公开投影固定为 user。 */
+  readonly visibility: 'user';
+  /** artifact 创建时间。 */
+  readonly createdAt: string;
+}
+
+/** 已持久化的 cooperative cancellation 请求摘要。 */
+export interface ChatAgentTaskCancellationSnapshot {
+  /** 区分单卡片取消和 Checkpoint 级联。 */
+  readonly requestKind: 'single_task' | 'checkpoint_cascade';
+  /** 取消请求写入 Task 聚合的时间。 */
+  readonly requestedAt: string;
+}
+
+/** 列表、事件和卡片收起态使用的轻量 Task 摘要。 */
+export interface ChatAgentTaskSummarySnapshot {
+  /** 判别字段。 */
+  readonly recordState: 'active';
+  /** Task 稳定身份。 */
+  readonly taskId: string;
+  /** Session 稳定身份。 */
+  readonly sessionId: string;
+  /** Turn 稳定身份。 */
+  readonly turnId: string;
+  /** Checkpoint 稳定身份。 */
+  readonly checkpointId: string;
+  /** Assistant 消息稳定身份。 */
+  readonly assistantMessageId: string;
+  /** 原 Tool Part 稳定身份。 */
+  readonly toolCallId: string;
+  /** 当前 Child Actor。 */
+  readonly agentId: string;
+  /** 公开投影 Schema 版本。 */
+  readonly projectionSchemaVersion: 1;
+  /** Task 聚合最新已提交 Event sequence。 */
+  readonly taskSequence: number;
+  /** 收起态使用的任务描述。 */
+  readonly task: string;
+  /** Task 执行模式。 */
+  readonly mode: AgentTaskMode;
+  /** Task 是否阻塞 Primary 正常完成。 */
+  readonly required: boolean;
+  /** Task 调度优先级。 */
+  readonly priority: AgentTaskPriority;
+  /** Task 可选绝对截止时间。 */
+  readonly deadlineAt?: string;
+  /** 当前执行状态。 */
+  readonly status: AgentTaskStatus;
+  /** 当前可选排队阶段。 */
+  readonly queuePhase?: AgentTaskQueuePhase;
+  /** 当前可选 Attempt 投影。 */
+  readonly currentAttempt?: ChatAgentTaskAttemptSnapshot;
+  /** 已记录的取消请求；没有请求时省略。 */
+  readonly cancellation?: ChatAgentTaskCancellationSnapshot;
+  /** 经 Main 生成或裁剪的一句进度或终态摘要。 */
+  readonly summary?: string;
+  /** Task 不可变创建时间。 */
+  readonly createdAt: string;
+  /** 投影更新时间。 */
+  readonly updatedAt: string;
+}
+
+/** 展开卡片通过定向查询取得的完整公开投影。 */
+export interface ChatAgentTaskDetailSnapshot extends ChatAgentTaskSummarySnapshot {
+  /** Contract 的用户可见验收标准。 */
+  readonly acceptanceCriteria: readonly string[];
+  /** Contract 的用户可见资源。 */
+  readonly resources: readonly ChatAgentTaskResourceSnapshot[];
+  /** 最近五十条连续已裁剪 Task Event。 */
+  readonly timeline: ChatAgentTaskTimelineSnapshot;
+  /** 可选终态或进度完成信息。 */
+  readonly completion?: ChatAgentTaskCompletionSnapshot;
+  /** 非终止性公开警告。 */
+  readonly warnings: readonly ChatAgentTaskWarningSnapshot[];
+  /** 可选公开结构化错误。 */
+  readonly error?: ChatAgentTaskErrorSnapshot;
+  /** 可选公开成本核算。 */
+  readonly usage?: ChatAgentTaskUsageSnapshot;
+  /** 可选公开 changeset 摘要。 */
+  readonly changeset?: ChatAgentTaskChangesetSnapshot;
+  /** visibility=user 的公开 artifacts。 */
+  readonly artifacts: readonly ChatAgentTaskArtifactSnapshot[];
+}
+
+/** 显式查询 tombstone 时返回的最小标记。 */
+export interface ChatAgentTaskTombstoneSnapshot {
+  /** 判别字段。 */
+  readonly recordState: 'tombstoned';
+  /** Task 稳定身份。 */
+  readonly taskId: string;
+  /** Session 稳定身份。 */
+  readonly sessionId: string;
+  /** Turn 稳定身份。 */
+  readonly turnId: string;
+  /** Checkpoint 稳定身份。 */
+  readonly checkpointId: string;
+  /** Assistant 消息稳定身份。 */
+  readonly assistantMessageId: string;
+  /** 原 Tool Part 稳定身份。 */
+  readonly toolCallId: string;
+  /** 公开投影 Schema 版本。 */
+  readonly projectionSchemaVersion: 1;
+  /** tombstone Event sequence。 */
+  readonly taskSequence: number;
+  /** 记录移除时间。 */
+  readonly updatedAt: string;
+}
+
+/** 列表分页返回的非 tombstone 摘要。 */
+export type ChatAgentTaskListSnapshot = ChatAgentTaskSummarySnapshot;
+
+/** Application Event 可携带的轻量更新。 */
+export type ChatAgentTaskEventSnapshot = ChatAgentTaskSummarySnapshot | ChatAgentTaskTombstoneSnapshot;
+
+/** 定向查询可返回的详情或 tombstone。 */
+export type ChatAgentTaskSnapshot = ChatAgentTaskDetailSnapshot | ChatAgentTaskTombstoneSnapshot;
+
+/** 按 Session 恢复 Task 投影。 */
+export interface ChatAgentListTasksInput {
+  /** 当前聊天 Session。 */
+  readonly sessionId: string;
+  /** Main 生成的可选历史分页游标。 */
+  readonly cursor?: string;
+  /** 请求页大小，默认五十、最大一百。 */
+  readonly limit?: number;
+}
+
+/** 定向恢复单个 Task，包括 tombstone。 */
+export interface ChatAgentGetTaskInput {
+  /** Task 所属 Session，用于防止跨 Session 枚举。 */
+  readonly sessionId: string;
+  /** 目标 Task。 */
+  readonly taskId: string;
+}
+
+/** 请求协作取消单个 Task。 */
+export interface ChatAgentCancelTaskInput {
+  /** Task 所属 Session。 */
+  readonly sessionId: string;
+  /** 目标 Task。 */
+  readonly taskId: string;
+}
+
+/** 默认 Session 查询的一页轻量摘要。 */
+export interface ChatAgentListTasksResult {
+  /** 第一页先包含全部活动 Task，再包含一页最近终态 Task。 */
+  readonly tasks: readonly ChatAgentTaskListSnapshot[];
+  /** 仍有更早终态 Task 时由 Main 生成。 */
+  readonly nextCursor?: string;
+}
+
+/** 定向查询允许返回最小 tombstone；不存在或 Session 不匹配时返回 null。 */
+export type ChatAgentGetTaskResult = ChatAgentTaskSnapshot | null;
+
+/** 单 Task 取消命令的权威处理结果。 */
+export interface ChatAgentCancelTaskResult {
+  /** 取消请求已记录、提交正在收敛，或 Task 原本已终态。 */
+  readonly disposition: 'cancel_requested' | 'commit_in_progress' | 'already_settled';
+  /** 命令处理完成时重新投影的 Task。 */
+  readonly task: ChatAgentTaskSummarySnapshot;
+}
+
 /**
  * Renderer 可见的 Checkpoint allowlist 投影。
  * 不包含 continuation、模型、工具结果、artifact、错误消息或其他内部执行事实。

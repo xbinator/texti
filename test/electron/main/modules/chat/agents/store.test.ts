@@ -172,6 +172,79 @@ function createTwoTaskInput(suffix: string): PrepareDelegationInput {
 }
 
 /**
+ * 创建绑定到指定 Session 的单 Task 委派输入。
+ * @param suffix - Task 与 Checkpoint 身份后缀
+ * @param sessionId - 所有公开查询使用的 Session
+ * @returns Session 身份和 Outbox hash 一致的委派事实
+ */
+function createSessionInput(suffix: string, sessionId: string): PrepareDelegationInput {
+  const input = createPreparedInput(suffix);
+  const payload = {
+    ...input.outbox.payload,
+    sessionId
+  };
+
+  return {
+    ...input,
+    tasks: input.tasks.map((task) => ({
+      ...task,
+      sessionId
+    })),
+    checkpoint: {
+      ...input.checkpoint,
+      sessionId
+    },
+    outbox: {
+      ...input.outbox,
+      payload,
+      payloadHash: hashAgentPayload(payload)
+    }
+  };
+}
+
+/**
+ * 让一个合法委派输入复用指定 Provider tool-call ID，并重算 continuation hash。
+ * @param input - 已构建的合法委派输入
+ * @param toolCallId - 需要复用的 Provider tool-call ID
+ * @returns 保持 Task 与 continuation 链接一致的新输入
+ */
+function reuseToolCall(input: PrepareDelegationInput, toolCallId: string): PrepareDelegationInput {
+  const tasks = input.tasks.map((task) => ({ ...task, toolCallId }));
+  const continuationSnapshot: AgentDelegationContinuationSnapshot = {
+    ...input.checkpoint.continuationSnapshot,
+    orderedToolCalls: input.checkpoint.continuationSnapshot.orderedToolCalls.map((toolCall) => ({ ...toolCall, toolCallId }))
+  };
+  return {
+    ...input,
+    tasks,
+    checkpoint: {
+      ...input.checkpoint,
+      continuationSnapshot,
+      continuationSnapshotHash: hashAgentPayload({
+        schemaVersion: continuationSnapshot.checkpointSchemaVersion,
+        continuation: continuationSnapshot
+      })
+    }
+  };
+}
+
+/**
+ * 把测试 Task 直接投影为指定终态和更新时间。
+ * @param databaseAdapter - 测试 SQLite 边界
+ * @param taskId - 目标 Task
+ * @param updatedAt - 用于历史排序的时间
+ * @param recordState - 可选逻辑记录状态
+ */
+function settleTask(databaseAdapter: AgentStoreDatabase, taskId: string, updatedAt: string, recordState: 'active' | 'tombstoned' = 'active'): void {
+  databaseAdapter.execute(
+    `UPDATE chat_agent_tasks
+     SET status = ?, record_state = ?, updated_at = ?
+     WHERE task_id = ?`,
+    ['cancelled', recordState, updatedAt, taskId]
+  );
+}
+
+/**
  * 断言四类委派事实均未落库。
  * @param databaseAdapter - 测试 SQLite 边界
  */
@@ -572,6 +645,236 @@ describeWithSqlite('agent delegation store', (): void => {
 
   afterEach((): void => {
     database.close();
+  });
+
+  it('pages active and terminal Tasks without duplicate timestamp gaps', (): void => {
+    const sessionId = 'session-history';
+    const activeOlder = createSessionInput('history-active-older', sessionId);
+    const activeNewer = createSessionInput('history-active-newer', sessionId);
+    const terminalNewest = createSessionInput('history-terminal-newest', sessionId);
+    const terminalTieZ = createSessionInput('history-terminal-z', sessionId);
+    const terminalTieA = createSessionInput('history-terminal-a', sessionId);
+    const terminalOldest = createSessionInput('history-terminal-oldest', sessionId);
+    const tombstone = createSessionInput('history-tombstone', sessionId);
+    const otherSession = createPreparedInput('history-other-session');
+
+    [activeOlder, activeNewer, terminalNewest, terminalTieZ, terminalTieA, terminalOldest, tombstone, otherSession].forEach((input): void => {
+      store.prepareDelegation(input, (): undefined => undefined);
+    });
+    adapter.execute('UPDATE chat_agent_tasks SET updated_at = ? WHERE task_id = ?', ['2026-07-28T09:00:00.000Z', activeOlder.tasks[0].taskId]);
+    adapter.execute('UPDATE chat_agent_tasks SET updated_at = ? WHERE task_id = ?', ['2026-07-28T10:00:00.000Z', activeNewer.tasks[0].taskId]);
+    settleTask(adapter, terminalNewest.tasks[0].taskId, '2026-07-28T14:00:00.000Z');
+    settleTask(adapter, terminalTieZ.tasks[0].taskId, '2026-07-28T13:00:00.000Z');
+    settleTask(adapter, terminalTieA.tasks[0].taskId, '2026-07-28T13:00:00.000Z');
+    settleTask(adapter, terminalOldest.tasks[0].taskId, '2026-07-28T12:00:00.000Z');
+    settleTask(adapter, tombstone.tasks[0].taskId, '2026-07-28T15:00:00.000Z', 'tombstoned');
+
+    let transactionCount = 0;
+    const { transaction } = adapter;
+    adapter.transaction = <T>(operation: () => T): T => {
+      transactionCount += 1;
+      return transaction(operation);
+    };
+
+    const firstPage = store.listTasksBySession({
+      sessionId,
+      includeActive: true,
+      terminalLimit: 2
+    });
+    expect(transactionCount).toBe(1);
+    expect(firstPage.active.map((projection): string => projection.task.taskId)).toEqual([activeNewer.tasks[0].taskId, activeOlder.tasks[0].taskId]);
+    expect(firstPage.terminal.map((projection): string => projection.task.taskId)).toEqual([terminalNewest.tasks[0].taskId, terminalTieZ.tasks[0].taskId]);
+    expect(firstPage.active[0]).toMatchObject({
+      task: { taskId: activeNewer.tasks[0].taskId },
+      checkpoint: { checkpointId: activeNewer.checkpoint.checkpointId },
+      taskSequence: 1,
+      events: [{ sequence: 1, type: 'task.created' }]
+    });
+    expect(firstPage.hasMoreTerminal).toBe(true);
+
+    const secondPage = store.listTasksBySession({
+      sessionId,
+      includeActive: false,
+      terminalBefore: {
+        updatedAt: firstPage.terminal.at(-1)?.task.updatedAt ?? '',
+        taskId: firstPage.terminal.at(-1)?.task.taskId ?? ''
+      },
+      terminalLimit: 2
+    });
+    expect(transactionCount).toBe(2);
+    expect(secondPage.active).toEqual([]);
+    expect(secondPage.terminal.map((projection): string => projection.task.taskId)).toEqual([terminalTieA.tasks[0].taskId, terminalOldest.tasks[0].taskId]);
+    expect(secondPage.hasMoreTerminal).toBe(false);
+    expect([...firstPage.terminal, ...secondPage.terminal].map((projection): string => projection.task.taskId)).toEqual([
+      terminalNewest.tasks[0].taskId,
+      terminalTieZ.tasks[0].taskId,
+      terminalTieA.tasks[0].taskId,
+      terminalOldest.tasks[0].taskId
+    ]);
+  });
+
+  it('isolates reused tool-call IDs by checkpoint, assistant message, and Session', (): void => {
+    const sharedToolCallId = 'tool-call-provider-reused';
+    const first = reuseToolCall(createSessionInput('tool-reuse-first', 'session-tool-reuse'), sharedToolCallId);
+    const second = reuseToolCall(createSessionInput('tool-reuse-second', 'session-tool-reuse'), sharedToolCallId);
+    const otherSession = reuseToolCall(createSessionInput('tool-reuse-other', 'session-tool-other'), sharedToolCallId);
+    [first, second, otherSession].forEach((input): void => {
+      store.prepareDelegation(input, (): undefined => undefined);
+    });
+
+    [first, second, otherSession].forEach((input): void => {
+      expect(store.getTaskProjection(input.tasks[0].taskId)).toMatchObject({
+        task: {
+          taskId: input.tasks[0].taskId,
+          sessionId: input.tasks[0].sessionId,
+          checkpointId: input.checkpoint.checkpointId,
+          toolCallId: sharedToolCallId
+        },
+        checkpoint: {
+          checkpointId: input.checkpoint.checkpointId,
+          sessionId: input.checkpoint.sessionId,
+          assistantMessageId: input.checkpoint.assistantMessageId
+        }
+      });
+    });
+
+    const sharedPage = store.listTasksBySession({
+      sessionId: 'session-tool-reuse',
+      includeActive: true,
+      terminalLimit: 50
+    });
+    expect(sharedPage.active.map((projection): string => projection.task.taskId).sort()).toEqual([first.tasks[0].taskId, second.tasks[0].taskId].sort());
+    expect(
+      sharedPage.active.map((projection) => ({
+        taskId: projection.task.taskId,
+        checkpointId: projection.checkpoint.checkpointId,
+        assistantMessageId: projection.checkpoint.assistantMessageId
+      }))
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          taskId: first.tasks[0].taskId,
+          checkpointId: first.checkpoint.checkpointId,
+          assistantMessageId: first.checkpoint.assistantMessageId
+        },
+        {
+          taskId: second.tasks[0].taskId,
+          checkpointId: second.checkpoint.checkpointId,
+          assistantMessageId: second.checkpoint.assistantMessageId
+        }
+      ])
+    );
+    const otherPage = store.listTasksBySession({
+      sessionId: 'session-tool-other',
+      includeActive: true,
+      terminalLimit: 50
+    });
+    expect(otherPage.active.map((projection): string => projection.task.taskId)).toEqual([otherSession.tasks[0].taskId]);
+  });
+
+  it('reads the complete current Task projection in one transaction', (): void => {
+    const { task } = startWriteTask(store, 'projection-complete');
+    const changeset = createChangeset(task);
+    store.prepareChangeset({
+      snapshot: changeset,
+      snapshotHash: hashChangeset(changeset),
+      occurredAt: changeset.createdAt
+    });
+    const request = createConfirmationRequest(task, changeset);
+    const confirmation = store.createConfirmation({
+      request,
+      requestHash: hashConfirmation(request),
+      occurredAt: request.createdAt
+    });
+    const approved = store.resolveConfirmation({
+      confirmationId: confirmation.confirmationId,
+      expectedVersion: confirmation.version,
+      decision: 'approved',
+      occurredAt: '2026-07-28T08:03:00.000Z'
+    });
+    store.queueCommit({
+      taskId: task.taskId,
+      confirmationId: approved.confirmationId,
+      confirmationVersion: approved.version,
+      occurredAt: '2026-07-28T08:04:00.000Z'
+    });
+    const intent = createCommitIntent(task, changeset, approved.version);
+    store.createCommitJournal({
+      journalId: `journal-${task.taskId}`,
+      changesetId: changeset.changesetId,
+      confirmationId: approved.confirmationId,
+      confirmationVersion: approved.version,
+      intent,
+      intentHash: hashAgentPayload({ schemaVersion: intent.journalSchemaVersion, intent }),
+      occurredAt: intent.createdAt
+    });
+
+    const latestSequence =
+      adapter.select<{ sequence: number }>('SELECT MAX(sequence) AS sequence FROM chat_agent_events WHERE task_id = ?', [task.taskId])[0]?.sequence ?? 0;
+    Array.from({ length: 55 }, (_value, index): number => latestSequence + index + 1).forEach((sequence): void => {
+      adapter.execute(
+        `INSERT INTO chat_agent_events (
+          event_id, aggregate_kind, aggregate_id, task_id, checkpoint_id,
+          sequence, attempt_id, runtime_id, event_type, occurred_at,
+          source, schema_version, payload_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          `task:${task.taskId}:${sequence}:tool.started`,
+          'task',
+          task.taskId,
+          task.taskId,
+          task.checkpointId,
+          sequence,
+          task.currentAttemptId,
+          `runtime-${task.currentAttemptId}`,
+          'tool.started',
+          occurredAt,
+          'runtime',
+          1,
+          JSON.stringify({ toolCallId: `child-tool-${sequence}`, toolName: 'read_file' })
+        ]
+      );
+    });
+
+    let transactionCount = 0;
+    const { transaction } = adapter;
+    adapter.transaction = <T>(operation: () => T): T => {
+      transactionCount += 1;
+      return transaction(operation);
+    };
+
+    const projection = store.getTaskProjection(task.taskId);
+
+    expect(transactionCount).toBe(1);
+    expect(projection).toMatchObject({
+      task: { taskId: task.taskId, status: 'committing' },
+      checkpoint: { checkpointId: task.checkpointId },
+      currentAttempt: { attemptId: task.currentAttemptId, taskId: task.taskId },
+      changeset: { snapshot: { changesetId: changeset.changesetId, taskId: task.taskId } },
+      confirmation: { confirmationId: confirmation.confirmationId, changesetId: changeset.changesetId },
+      journal: {
+        journalId: `journal-${task.taskId}`,
+        taskId: task.taskId,
+        attemptId: task.currentAttemptId,
+        changesetId: changeset.changesetId
+      }
+    });
+    expect(projection?.events).toHaveLength(50);
+    expect(projection?.events[0]?.sequence).toBe(latestSequence + 6);
+    expect(projection?.taskSequence).toBe(latestSequence + 55);
+    expect(projection?.events.at(-1)?.sequence).toBe(projection?.taskSequence);
+  });
+
+  it('fails closed when the current Attempt points to another Task', (): void => {
+    const input = createPreparedInput('projection-attempt-mismatch');
+    store.prepareDelegation(input, (): undefined => undefined);
+    startTask(store, input);
+    adapter.execute('DROP TRIGGER trg_chat_agent_attempts_immutable');
+    adapter.execute('UPDATE chat_agent_attempts SET task_id = ? WHERE attempt_id = ?', ['task-forged', `attempt-${input.tasks[0].taskId}`]);
+
+    expect((): void => {
+      store.getTaskProjection(input.tasks[0].taskId);
+    }).toThrowError(expect.objectContaining({ reason: 'projection_attempt_mismatch' }));
   });
 
   it('persists the approved changeset and finalizes its commit journal atomically', (): void => {

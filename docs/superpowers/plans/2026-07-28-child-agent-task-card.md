@@ -93,7 +93,7 @@
 - Produces `AgentTaskTerminalCursor`、`ListAgentTasksInput`、`AgentTaskListPage`、`AgentTaskProjectionRecord`、`AgentTaskProjector`.
 - Consumes persisted Task、Checkpoint、current Attempt、latest 50 Task Events、Changeset、Confirmation、Journal and Result without consulting Child Registry.
 
-- [ ] **Step 1: Write failing database, Store and Projector tests**
+- [x] **Step 1: Write failing database, Store and Projector tests**
 
 Add tests with these exact behavioral assertions:
 
@@ -130,7 +130,7 @@ Also assert:
 - recursive key/value scanning rejects forbidden keys, absolute paths and secret-looking values;
 - changeset public phase follows the design’s journal-first priority table.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run:
 
@@ -146,7 +146,7 @@ pnpm exec cross-env ELECTRON_RUN_AS_NODE=1 HOST=127.0.0.1 electron node_modules/
 
 Expected: FAIL because the public types, unique index, paginated Store query and Projector do not exist.
 
-- [ ] **Step 3: Add the public protocol without reusing internal records**
+- [x] **Step 3: Add the public protocol without reusing internal records**
 
 Add the complete types specified in design section 6.1, including:
 
@@ -177,7 +177,7 @@ export function sanitizeAgentDisplayText(
 
 It must remove control characters, redact secret patterns, enforce the requested maximum and return `null` for non-displayable input.
 
-- [ ] **Step 4: Audit and enforce Assistant Message uniqueness**
+- [x] **Step 4: Audit and enforce Assistant Message uniqueness**
 
 Change `createAgentTables()` to accept:
 
@@ -207,7 +207,7 @@ ON chat_agent_tasks(session_id, record_state, updated_at DESC, task_id DESC);
 
 Keep the audit immediately before the index statement during schema initialization so an existing duplicate always produces the stable protocol error instead of SQLite’s raw unique-index error.
 
-- [ ] **Step 5: Add stable Store projection reads**
+- [x] **Step 5: Add stable Store projection reads**
 
 Add these internal contracts:
 
@@ -251,7 +251,7 @@ getTaskProjection(taskId: string): AgentTaskProjectionRecord | null;
 
 `getTaskProjection()` must read every field in one SQLite read transaction. Query `limit + 1` terminal rows to decide `hasMoreTerminal`. Never infer tombstone from a missing list row.
 
-- [ ] **Step 6: Implement the explicit allowlist Projector**
+- [x] **Step 6: Implement the explicit allowlist Projector**
 
 Export:
 
@@ -282,13 +282,13 @@ export function createAgentTaskProjector(
 
 Build every output object field-by-field. Encode/decode the opaque cursor in Service and bind it to `sessionId + updatedAt + taskId`; reject malformed, oversized or cross-Session cursors. Apply the complete resource, error, artifact, cost, text, collection and serialized-byte limits from the design.
 
-- [ ] **Step 7: Run focused tests and verify GREEN**
+- [x] **Step 7: Run focused tests and verify GREEN**
 
 Run the two commands from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 8: Update changelog and commit**
+- [x] **Step 8: Update changelog and commit**
 
 Add under `## Added`:
 

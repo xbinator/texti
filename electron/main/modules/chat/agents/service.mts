@@ -2,6 +2,8 @@
  * @file service.mts
  * @description Child Agent 委派契约校验、原子 prepare、continuation fence 与启动恢复服务。
  */
+/* eslint-disable max-classes-per-file -- Task Projector 与委派服务共享同一公开工厂模块。 */
+import { Buffer } from 'node:buffer';
 import { readFileSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
@@ -11,6 +13,7 @@ import type {
   AgentDelegationStore,
   AgentOutboxRecord,
   AgentStoreDatabase,
+  AgentTaskProjectionRecord,
   AgentTaskRecord,
   BeginAgentAttemptInput,
   MarkAgentAttemptInput,
@@ -21,6 +24,8 @@ import type { ChatRuntimeDelegationPrepareAck, ChatRuntimeDelegationPrepareInput
 import type { ChatMessageRecord } from 'types/chat';
 import type {
   AgentBudgetSnapshot,
+  AgentArtifactReference,
+  AgentResourceReference,
   AgentDelegationContinuationSnapshot,
   AgentDelegationCreatedPayload,
   AgentDelegationReadyPayload,
@@ -28,12 +33,22 @@ import type {
   ChatAgentCancelCheckpointInput,
   ChatAgentCheckpointSnapshot,
   ChatAgentConfirmationSnapshot,
+  ChatAgentListTasksInput,
+  ChatAgentListTasksResult,
+  ChatAgentGetTaskResult,
   ChatAgentResolveConfirmationInput,
+  ChatAgentTaskEventSnapshot,
+  ChatAgentTaskDetailSnapshot,
+  ChatAgentTaskTimelineEntry,
+  ChatAgentTaskTimelineSnapshot,
+  ChatAgentTaskSummarySnapshot,
+  ChatAgentTaskTombstoneSnapshot,
   AgentModelSnapshot,
   AgentOrderedToolCallSnapshot,
   PrimaryDelegationFeatureConfig,
   AgentTaskError,
   AgentUsageAccounting,
+  ChatAgentTaskEventType,
   ChatAgentResult,
   ChatAgentResumePrimaryInput,
   ChatAgentResumeResult,
@@ -55,9 +70,12 @@ import { createChildActorRegistry } from './child-registry.mjs';
 import { createAgentConfirmationQueue, type AgentConfirmationQueue } from './confirmation-store.mjs';
 import {
   AGENT_CHECKPOINT_SCHEMA_VERSION,
+  AGENT_CANONICAL_PAYLOAD_MAX_BYTES,
   AGENT_FOUNDATION_POLICY_VERSION,
   hashAgentPayload,
   hashContinuationSnapshot,
+  normalizeAgentIdentity,
+  sanitizeAgentDisplayText,
   validateAgentTaskError,
   validateContinuationSnapshot,
   validateFoundationContract
@@ -94,6 +112,895 @@ export type ChatAgentDelegationStore = Pick<
   | 'listPendingOutbox'
   | 'markOutboxDelivered'
 >;
+
+/** Task Projector 只读取同事务 Store 投影页和定向投影。 */
+export type AgentTaskProjectorStore = Pick<AgentDelegationStore, 'getTaskProjection' | 'listTasksBySession'>;
+
+/** 资源 resolver 只能返回安全展示引用，不能构造完整公开资源对象。 */
+export interface AgentTaskResourceResolution {
+  /** 已验证可展示的相对路径或稳定资源域标识。 */
+  readonly displayReference: string;
+  /** 可选安全修订标识。 */
+  readonly revision?: string;
+}
+
+/** Artifact resolver 只能返回用户可打开的安全引用。 */
+export interface AgentTaskArtifactResolution {
+  /** 经 Main 校验的公开引用候选。 */
+  readonly reference: string;
+}
+
+/** Task Projector 的窄依赖。 */
+export interface AgentTaskProjectorDependencies {
+  /** Main-owned 持久化事实 Store。 */
+  readonly store: AgentTaskProjectorStore;
+  /**
+   * 把内部资源解析为安全展示引用。
+   * @param resource - 内部不可变资源引用
+   * @returns 安全展示引用，不可安全展示时返回 null
+   */
+  readonly resolveResource: (resource: AgentResourceReference) => AgentTaskResourceResolution | null;
+  /**
+   * 把内部 Artifact 解析为用户可打开的安全引用。
+   * @param artifact - 内部 Artifact 事实
+   * @returns 安全公开引用，不可展示时返回 null
+   */
+  readonly resolveArtifact: (artifact: AgentArtifactReference) => AgentTaskArtifactResolution | null;
+}
+
+/** Task Projector 的公开能力。 */
+export interface AgentTaskProjector {
+  /**
+   * 构建轻量 Summary 或最小 Tombstone。
+   * @param taskId - Task 身份
+   * @returns 当前公开投影，不存在时返回 null
+   */
+  projectSummary(taskId: string): ChatAgentTaskEventSnapshot | null;
+  /**
+   * 按 Session 构建一页轻量 Task Summary。
+   * @param input - Session、cursor 和可选终态页大小
+   * @returns 受 payload 上限约束的公开列表
+   */
+  listTasks(input: ChatAgentListTasksInput): ChatAgentListTasksResult;
+  /**
+   * 构建指定 Session 下的完整 Task 详情。
+   * @param sessionId - Task 必须归属的 Session
+   * @param taskId - Task 身份
+   * @returns 完整详情、最小 Tombstone 或 null
+   */
+  projectDetail(sessionId: string, taskId: string): ChatAgentGetTaskResult;
+}
+
+/** Main 生成的 Task 历史 cursor payload。 */
+interface AgentTaskCursorPayload {
+  /** Cursor Schema 版本。 */
+  readonly cursorSchemaVersion: 1;
+  /** Cursor 绑定的 Session。 */
+  readonly sessionId: string;
+  /** 最后实际返回终态 Task 的更新时间。 */
+  readonly updatedAt: string;
+  /** 同更新时间下的 Task tie-break 身份。 */
+  readonly taskId: string;
+}
+
+/** Cursor 允许的最大编码长度。 */
+const AGENT_TASK_CURSOR_MAX_LENGTH = 4096;
+
+/** 列表默认终态历史数量。 */
+const AGENT_TASK_LIST_DEFAULT_LIMIT = 50;
+
+/** 列表最大终态历史数量。 */
+const AGENT_TASK_LIST_MAX_LIMIT = 100;
+
+/** Detail 中资源、Artifact 和 changeset 路径的集合上限。 */
+const AGENT_TASK_DETAIL_COLLECTION_LIMIT = 32;
+
+/** Detail 中时间线的最近窗口上限。 */
+const AGENT_TASK_TIMELINE_LIMIT = 50;
+
+/** 公开引用的最大长度。 */
+const AGENT_TASK_REFERENCE_MAX_LENGTH = 1024;
+
+/** 用户可见验收标准上限。 */
+const AGENT_TASK_CRITERIA_LIMIT = 16;
+
+/** 用户可见警告上限。 */
+const AGENT_TASK_WARNING_LIMIT = 16;
+
+/**
+ * 创建稳定 Projector 错误。
+ * @param reason - 机器可判断的错误原因
+ * @returns 不包含内部事实的错误
+ */
+function createProjectorError(reason: string): Error {
+  return new Error(reason);
+}
+
+/**
+ * 判断未知值是否为普通记录。
+ * @param value - 待判断 cursor JSON
+ * @returns 是否可按字符串键读取
+ */
+function isCursorRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+/**
+ * 判断时间是否为规范 UTC ISO-8601 表示。
+ * @param value - 未可信时间文本
+ * @returns 是否可无损往返 ISO 字符串
+ */
+function isCanonicalTime(value: unknown): value is string {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
+}
+
+/**
+ * 编码 Main-owned 版本化历史 cursor。
+ * @param payload - 已校验排序键
+ * @returns base64url JSON cursor
+ */
+function encodeTaskCursor(payload: AgentTaskCursorPayload): string {
+  return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+}
+
+/**
+ * 解码并校验 Session-bound 历史 cursor。
+ * @param cursor - Renderer 返回的 opaque cursor
+ * @param sessionId - 当前查询 Session
+ * @returns Store 使用的稳定排序键
+ */
+function decodeTaskCursor(cursor: string, sessionId: string): { readonly updatedAt: string; readonly taskId: string } {
+  if (cursor.length === 0 || cursor.length > AGENT_TASK_CURSOR_MAX_LENGTH || !/^[A-Za-z0-9_-]+$/.test(cursor)) {
+    throw createProjectorError('agent_task_cursor_invalid');
+  }
+
+  let parsed: unknown;
+  try {
+    const bytes = Buffer.from(cursor, 'base64url');
+    if (bytes.toString('base64url') !== cursor) throw createProjectorError('agent_task_cursor_invalid');
+    parsed = JSON.parse(bytes.toString('utf8')) as unknown;
+  } catch {
+    throw createProjectorError('agent_task_cursor_invalid');
+  }
+  if (
+    !isCursorRecord(parsed) ||
+    Object.keys(parsed).length !== 4 ||
+    parsed.cursorSchemaVersion !== 1 ||
+    parsed.sessionId !== sessionId ||
+    typeof parsed.taskId !== 'string' ||
+    normalizeAgentIdentity(parsed.sessionId) !== parsed.sessionId ||
+    normalizeAgentIdentity(parsed.taskId) !== parsed.taskId ||
+    !isCanonicalTime(parsed.updatedAt)
+  ) {
+    throw createProjectorError('agent_task_cursor_invalid');
+  }
+
+  return {
+    updatedAt: parsed.updatedAt,
+    taskId: parsed.taskId
+  };
+}
+
+/**
+ * 计算公开 payload 的 UTF-8 序列化字节数。
+ * @param value - 待发送公开对象
+ * @returns JSON UTF-8 字节数
+ */
+function getPayloadBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+/**
+ * 确保单个公开投影不超过 canonical payload 上限。
+ * @param snapshot - Summary 或 Tombstone
+ */
+function enforceSnapshotSize(snapshot: ChatAgentTaskEventSnapshot): void {
+  if (getPayloadBytes(snapshot) > AGENT_CANONICAL_PAYLOAD_MAX_BYTES) {
+    throw createProjectorError('agent_task_projection_oversized');
+  }
+}
+
+/**
+ * 校验公开引用没有秘密、控制字符、绝对路径或遍历片段。
+ * @param value - resolver 或持久化事实提供的引用
+ * @returns 是否可安全展示
+ */
+function isSafeReference(value: string): boolean {
+  if (value.length === 0 || value.length > AGENT_TASK_REFERENCE_MAX_LENGTH || sanitizeAgentDisplayText(value, AGENT_TASK_REFERENCE_MAX_LENGTH) !== value) {
+    return false;
+  }
+  const hasControl = [...value].some((character): boolean => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 31 || codePoint === 127;
+  });
+  if (hasControl || path.posix.isAbsolute(value) || path.win32.isAbsolute(value)) return false;
+  const segments = value.replaceAll('\\', '/').split('/');
+  return !segments.some((segment): boolean => segment === '' || segment === '.' || segment === '..');
+}
+
+/**
+ * 校验文件资源为规范仓库相对路径。
+ * @param value - 文件或目录引用
+ * @returns 是否为安全路径
+ */
+function isSafeRepoPath(value: string): boolean {
+  return isSafeReference(value) && !value.includes('\\') && path.posix.normalize(value) === value;
+}
+
+/**
+ * 把内部 Task Event 类型映射为稳定公开类别。
+ * @param type - 当前完整 Task Event union
+ * @returns 公开时间线类别
+ */
+function mapEventCategory(type: ChatAgentTaskEventType): ChatAgentTaskTimelineEntry['type'] {
+  switch (type) {
+    case 'task.created':
+    case 'task.status_changed':
+    case 'plan.authorized':
+    case 'task.queued':
+    case 'task.completed':
+    case 'task.failed':
+    case 'task.cancelled':
+    case 'task.tombstoned':
+      return 'status';
+    case 'runtime.starting':
+    case 'runtime.started':
+    case 'runtime.replaced':
+      return 'runtime';
+    case 'confirmation.requested':
+    case 'confirmation.resolved':
+    case 'confirmation.invalidated':
+      return 'confirmation';
+    case 'tool.started':
+    case 'tool.completed':
+      return 'tool';
+    case 'changeset.prepared':
+    case 'commit.journal_created':
+    case 'commit.mutation_applied':
+    case 'commit.finalized':
+      return 'commit';
+    case 'protocol.error':
+      return 'warning';
+    default: {
+      const exhaustive: never = type;
+      return exhaustive;
+    }
+  }
+}
+
+/**
+ * 判断运行时 Event type 是否属于当前 Task union。
+ * @param value - 持久化 Event type
+ * @returns 是否为已知 Task Event type
+ */
+function isTaskEventType(value: string): value is ChatAgentTaskEventType {
+  return [
+    'task.created',
+    'task.status_changed',
+    'plan.authorized',
+    'task.queued',
+    'runtime.starting',
+    'runtime.started',
+    'runtime.replaced',
+    'confirmation.requested',
+    'confirmation.resolved',
+    'confirmation.invalidated',
+    'tool.started',
+    'tool.completed',
+    'changeset.prepared',
+    'commit.journal_created',
+    'commit.mutation_applied',
+    'commit.finalized',
+    'protocol.error',
+    'task.completed',
+    'task.failed',
+    'task.cancelled',
+    'task.tombstoned'
+  ].includes(value);
+}
+
+/** Task Projector 的显式 allowlist 实现。 */
+class DefaultAgentTaskProjector implements AgentTaskProjector {
+  /** Main-owned 持久化 Store。 */
+  private readonly store: AgentTaskProjectorStore;
+
+  /** 内部资源到安全公开引用的解析器。 */
+  private readonly resolveResource: AgentTaskProjectorDependencies['resolveResource'];
+
+  /** 内部 Artifact 到安全公开引用的解析器。 */
+  private readonly resolveArtifact: AgentTaskProjectorDependencies['resolveArtifact'];
+
+  /**
+   * 创建阶段一 Task Projector。
+   * @param dependencies - Store 与窄资源 resolver
+   */
+  constructor(dependencies: AgentTaskProjectorDependencies) {
+    this.store = dependencies.store;
+    this.resolveResource = dependencies.resolveResource;
+    this.resolveArtifact = dependencies.resolveArtifact;
+  }
+
+  /** @inheritdoc */
+  projectSummary(taskId: string): ChatAgentTaskEventSnapshot | null {
+    const projection = this.store.getTaskProjection(taskId);
+    return projection ? this.projectRecord(projection) : null;
+  }
+
+  /** @inheritdoc */
+  projectDetail(sessionId: string, taskId: string): ChatAgentGetTaskResult {
+    const projection = this.store.getTaskProjection(taskId);
+    if (!projection || projection.task.sessionId !== sessionId) return null;
+    const summary = this.projectRecord(projection);
+    if (summary.recordState === 'tombstoned') return summary;
+
+    const warningCodes: string[] = [];
+    const { result } = projection.task;
+    const completion = result ? this.projectCompletion(projection, result, warningCodes) : undefined;
+    const sourceError = result?.error ?? projection.task.error;
+    const error = sourceError ? this.projectError(sourceError) : undefined;
+    const usage = result ? this.projectUsage(result.usage) : undefined;
+    const changeset = this.projectChangeset(projection, warningCodes);
+    const artifacts = this.projectArtifacts(projection, warningCodes);
+    const detail: ChatAgentTaskDetailSnapshot = {
+      ...summary,
+      acceptanceCriteria: Object.freeze(this.projectCriteria(projection, warningCodes)),
+      resources: Object.freeze(this.projectResources(projection, warningCodes)),
+      timeline: this.projectTimeline(projection),
+      ...(completion ? { completion } : {}),
+      warnings: Object.freeze(this.projectWarnings(result, warningCodes)),
+      ...(error ? { error } : {}),
+      ...(usage ? { usage } : {}),
+      ...(changeset ? { changeset } : {}),
+      artifacts: Object.freeze(artifacts)
+    };
+    if (getPayloadBytes(detail) > AGENT_CANONICAL_PAYLOAD_MAX_BYTES) {
+      throw createProjectorError('agent_task_projection_oversized');
+    }
+    return Object.freeze(detail);
+  }
+
+  /** @inheritdoc */
+  listTasks(input: ChatAgentListTasksInput): ChatAgentListTasksResult {
+    if (
+      normalizeAgentIdentity(input.sessionId) !== input.sessionId ||
+      (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > AGENT_TASK_LIST_MAX_LIMIT))
+    ) {
+      throw createProjectorError('agent_task_list_input_invalid');
+    }
+    const terminalBefore = input.cursor ? decodeTaskCursor(input.cursor, input.sessionId) : undefined;
+    const page = this.store.listTasksBySession({
+      sessionId: input.sessionId,
+      includeActive: terminalBefore === undefined,
+      ...(terminalBefore ? { terminalBefore } : {}),
+      terminalLimit: input.limit ?? AGENT_TASK_LIST_DEFAULT_LIMIT
+    });
+    const active = page.active.map((projection): ChatAgentTaskSummarySnapshot => this.projectListRecord(projection, input.sessionId));
+    const terminal: ChatAgentTaskSummarySnapshot[] = [];
+    if (getPayloadBytes({ tasks: active }) > AGENT_CANONICAL_PAYLOAD_MAX_BYTES) {
+      throw createProjectorError('agent_task_projection_oversized');
+    }
+
+    let byteTruncated = false;
+    for (const projection of page.terminal) {
+      const summary = this.projectListRecord(projection, input.sessionId);
+      const candidate = { tasks: [...active, ...terminal, summary] };
+      if (getPayloadBytes(candidate) > AGENT_CANONICAL_PAYLOAD_MAX_BYTES) {
+        byteTruncated = true;
+        break;
+      }
+      terminal.push(summary);
+    }
+
+    const needsCursor = page.hasMoreTerminal || byteTruncated;
+    if (!needsCursor) {
+      return Object.freeze({
+        tasks: Object.freeze([...active, ...terminal])
+      });
+    }
+    if (terminal.length === 0) {
+      throw createProjectorError('agent_task_projection_oversized');
+    }
+
+    let nextCursor = this.createCursor(input.sessionId, terminal.at(-1)!);
+    while (terminal.length > 0 && getPayloadBytes({ tasks: [...active, ...terminal], nextCursor }) > AGENT_CANONICAL_PAYLOAD_MAX_BYTES) {
+      terminal.pop();
+      if (terminal.length > 0) nextCursor = this.createCursor(input.sessionId, terminal.at(-1)!);
+    }
+    if (terminal.length === 0) {
+      throw createProjectorError('agent_task_projection_oversized');
+    }
+
+    return Object.freeze({
+      tasks: Object.freeze([...active, ...terminal]),
+      nextCursor
+    });
+  }
+
+  /**
+   * 构建与最后实际返回终态 Summary 绑定的 cursor。
+   * @param sessionId - 当前 Session
+   * @param summary - 最后实际返回的终态 Summary
+   * @returns Main-owned opaque cursor
+   */
+  private createCursor(sessionId: string, summary: ChatAgentTaskSummarySnapshot): string {
+    return encodeTaskCursor({
+      cursorSchemaVersion: 1,
+      sessionId,
+      updatedAt: summary.updatedAt,
+      taskId: summary.taskId
+    });
+  }
+
+  /**
+   * 裁剪用户可见验收标准。
+   * @param projection - Store 投影事实
+   * @returns 最多十六条安全文本
+   */
+  private projectCriteria(projection: AgentTaskProjectionRecord, warningCodes: string[]): string[] {
+    if (projection.task.contractSnapshot.acceptanceCriteria.length > AGENT_TASK_CRITERIA_LIMIT) {
+      warningCodes.push('acceptance_criteria_truncated');
+    }
+    return projection.task.contractSnapshot.acceptanceCriteria
+      .slice(0, AGENT_TASK_CRITERIA_LIMIT)
+      .map((criterion): string => sanitizeAgentDisplayText(criterion, 4000) || '[REDACTED]');
+  }
+
+  /**
+   * 从 Contract 重建公开资源，不透传内部字段。
+   * @param projection - Store 投影事实
+   * @returns 最多三十二个安全资源
+   */
+  private projectResources(projection: AgentTaskProjectionRecord, warningCodes: string[]): ChatAgentTaskDetailSnapshot['resources'][number][] {
+    const resources: ChatAgentTaskDetailSnapshot['resources'][number][] = [];
+    let omitted = false;
+    for (const resource of projection.task.contractSnapshot.resources) {
+      if (resources.length >= AGENT_TASK_DETAIL_COLLECTION_LIMIT) {
+        omitted = true;
+        break;
+      }
+      let resolved: AgentTaskResourceResolution | null;
+      if (resource.kind === 'file' || resource.kind === 'directory') {
+        resolved = isSafeRepoPath(resource.reference)
+          ? { displayReference: resource.reference, ...(resource.revision ? { revision: resource.revision } : {}) }
+          : null;
+      } else {
+        resolved = this.resolveResource(resource);
+      }
+      if (!resolved || !isSafeReference(resolved.displayReference) || (resolved.revision !== undefined && !isSafeReference(resolved.revision))) {
+        omitted = true;
+        continue;
+      }
+      resources.push(
+        Object.freeze({
+          kind: resource.kind,
+          displayReference: resolved.displayReference,
+          ...(resolved.revision ? { revision: resolved.revision } : {})
+        })
+      );
+    }
+    if (omitted) warningCodes.push('resources_truncated');
+    return resources;
+  }
+
+  /**
+   * 构建结果完成度并检测验证矛盾。
+   * @param result - Attempt 或授权前失败结果
+   * @param warningCodes - 系统警告收集器
+   * @returns 用户可见完成度
+   */
+  private projectCompletion(
+    projection: AgentTaskProjectionRecord,
+    result: NonNullable<AgentTaskRecord['result']>,
+    warningCodes: string[]
+  ): NonNullable<ChatAgentTaskDetailSnapshot['completion']> {
+    if (
+      result.completion.criteria.length !== projection.task.contractSnapshot.acceptanceCriteria.length ||
+      result.completion.criteria.some((criterion, index): boolean => criterion.criterionIndex !== index)
+    ) {
+      throw createProjectorError('agent_task_projection_invalid');
+    }
+    if (result.completion.criteria.length > AGENT_TASK_CRITERIA_LIMIT) {
+      warningCodes.push('criteria_results_truncated');
+    }
+    const criteria = result.completion.criteria.slice(0, AGENT_TASK_CRITERIA_LIMIT).map((criterion) => {
+      if (criterion.verification.status === 'contradicted') warningCodes.push('criterion_contradicted');
+      return Object.freeze({
+        criterionIndex: criterion.criterionIndex,
+        claimStatus: criterion.claim.status,
+        verificationStatus: criterion.verification.status,
+        claimSummary: sanitizeAgentDisplayText(criterion.claim.summary, 1000) || '[REDACTED]'
+      });
+    });
+    return Object.freeze({
+      level: result.completion.level,
+      summary: sanitizeAgentDisplayText(result.summary, 1000) || '[REDACTED]',
+      criteria: Object.freeze(criteria)
+    });
+  }
+
+  /**
+   * 深复制公开 usage，避免暴露 Store 对象引用。
+   * @param usage - 持久化成本事实
+   * @returns 深只读公开成本
+   */
+  private projectUsage(usage: AgentUsageAccounting): NonNullable<ChatAgentTaskDetailSnapshot['usage']> {
+    return Object.freeze({
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      totalTokens: usage.totalTokens,
+      modelCalls: usage.modelCalls,
+      toolRounds: usage.toolRounds,
+      queueDurationMs: usage.queueDurationMs,
+      executionDurationMs: usage.executionDurationMs,
+      externalRequests: usage.externalRequests,
+      monetaryCost: Object.freeze({
+        currency: usage.monetaryCost.currency,
+        pricingVersion: usage.monetaryCost.pricingVersion,
+        estimated: usage.monetaryCost.estimated,
+        actual: usage.monetaryCost.actual
+      })
+    });
+  }
+
+  /**
+   * 仅复制公开错误字段与细节键。
+   * @param error - 持久化结构化错误
+   * @returns 二次裁剪后的错误
+   */
+  private projectError(error: AgentTaskError): NonNullable<ChatAgentTaskDetailSnapshot['error']> {
+    const allowedKeys = [
+      'reason',
+      'toolName',
+      'expectedHash',
+      'actualHash',
+      'expectedVersion',
+      'actualVersion',
+      'status',
+      'limit',
+      'observed',
+      'deadlineAt'
+    ] as const;
+    const details: Partial<Record<(typeof allowedKeys)[number], string | number | boolean | null>> = {};
+    for (const key of allowedKeys) {
+      const value = error.details?.[key];
+      if (value === undefined) continue;
+      details[key] = typeof value === 'string' ? sanitizeAgentDisplayText(value, 1000) || '[REDACTED]' : value;
+    }
+    const message = error.message === undefined ? null : sanitizeAgentDisplayText(error.message, 1000);
+    return Object.freeze({
+      code: error.code,
+      phase: error.phase,
+      category: error.category,
+      retryable: error.retryable,
+      ...(message ? { message } : {}),
+      ...(Object.keys(details).length > 0 ? { details: Object.freeze(details) } : {})
+    });
+  }
+
+  /**
+   * 合并系统警告与结果警告并稳定截断。
+   * @param result - 可选终态结果
+   * @param warningCodes - 已发现的系统警告
+   * @returns 最多十六条公开警告
+   */
+  private projectWarnings(result: AgentTaskRecord['result'], warningCodes: string[]): ChatAgentTaskDetailSnapshot['warnings'][number][] {
+    const messages: Readonly<Record<string, string>> = {
+      acceptance_criteria_truncated: 'Additional acceptance criteria were omitted.',
+      criteria_results_truncated: 'Additional criterion results were omitted.',
+      criterion_contradicted: 'One or more Child claims were contradicted by verification.',
+      resources_truncated: 'Some resources were omitted from the public projection.',
+      artifacts_truncated: 'Some artifacts were omitted from the public projection.',
+      changeset_paths_truncated: 'Some changeset paths were omitted from the public projection.',
+      warnings_truncated: 'Additional warnings were omitted.'
+    };
+    const uniqueCodes = [...new Set(warningCodes)];
+    const warnings = uniqueCodes.map((code) => Object.freeze({ code, message: messages[code] ?? 'Projection data was omitted.' }));
+    for (const warning of result?.warnings ?? []) {
+      if (warnings.length >= AGENT_TASK_WARNING_LIMIT) break;
+      const code = sanitizeAgentDisplayText(warning.code, 100) || 'warning';
+      const message = sanitizeAgentDisplayText(warning.message, 1000) || '[REDACTED]';
+      warnings.push(Object.freeze({ code, message }));
+    }
+    if ((result?.warnings.length ?? 0) + uniqueCodes.length > AGENT_TASK_WARNING_LIMIT) {
+      warnings.splice(
+        AGENT_TASK_WARNING_LIMIT - 1,
+        1,
+        Object.freeze({
+          code: 'warnings_truncated',
+          message: messages.warnings_truncated
+        })
+      );
+    }
+    return warnings;
+  }
+
+  /**
+   * 仅投影当前 Attempt 拥有的 user Artifact。
+   * @param projection - Store 投影事实
+   * @param warningCodes - 系统警告收集器
+   * @returns 最多三十二个公开 Artifact
+   */
+  private projectArtifacts(projection: AgentTaskProjectionRecord, warningCodes: string[]): ChatAgentTaskDetailSnapshot['artifacts'][number][] {
+    const { result } = projection.task;
+    const attempt = projection.currentAttempt;
+    if (!result || !attempt || 'resultKind' in result) return [];
+    const artifacts: ChatAgentTaskDetailSnapshot['artifacts'][number][] = [];
+    let candidateCount = 0;
+    for (const artifact of result.artifacts) {
+      if (
+        artifact.visibility !== 'user' ||
+        artifact.owner.taskId !== projection.task.taskId ||
+        artifact.owner.agentId !== projection.task.agentId ||
+        artifact.owner.attemptId !== attempt.attemptId
+      ) {
+        continue;
+      }
+      const resolved = this.resolveArtifact(artifact);
+      if (!resolved || !isSafeReference(resolved.reference) || !isSafeReference(artifact.artifactId) || !isSafeReference(artifact.kind)) {
+        continue;
+      }
+      candidateCount += 1;
+      if (artifacts.length >= AGENT_TASK_DETAIL_COLLECTION_LIMIT) continue;
+      artifacts.push(
+        Object.freeze({
+          artifactId: artifact.artifactId,
+          kind: artifact.kind,
+          reference: resolved.reference,
+          ...(artifact.contentHash ? { contentHash: artifact.contentHash } : {}),
+          owner: Object.freeze({
+            taskId: artifact.owner.taskId,
+            agentId: artifact.owner.agentId,
+            attemptId: artifact.owner.attemptId
+          }),
+          visibility: 'user',
+          createdAt: artifact.createdAt
+        })
+      );
+    }
+    if (candidateCount > AGENT_TASK_DETAIL_COLLECTION_LIMIT) warningCodes.push('artifacts_truncated');
+    return artifacts;
+  }
+
+  /**
+   * 从 changeset 和 journal 事实计算公开摘要。
+   * @param projection - Store 投影事实
+   * @param warningCodes - 系统警告收集器
+   * @returns 可选公开 changeset
+   */
+  private projectChangeset(projection: AgentTaskProjectionRecord, warningCodes: string[]): ChatAgentTaskDetailSnapshot['changeset'] {
+    const { changeset } = projection;
+    if (!changeset) return undefined;
+    const displayPaths: string[] = [];
+    let omitted = false;
+    for (const operation of changeset.snapshot.operations) {
+      if (displayPaths.length >= AGENT_TASK_DETAIL_COLLECTION_LIMIT) {
+        omitted = true;
+        break;
+      }
+      if (!isSafeRepoPath(operation.displayPath)) {
+        omitted = true;
+        continue;
+      }
+      displayPaths.push(operation.displayPath);
+    }
+    if (omitted) warningCodes.push('changeset_paths_truncated');
+    return Object.freeze({
+      changesetId: changeset.snapshot.changesetId,
+      baseRevision: changeset.snapshot.baseRevision,
+      diffHash: changeset.snapshot.diffHash,
+      operationSetHash: changeset.snapshot.operationSetHash,
+      displayPaths: Object.freeze(displayPaths),
+      phase: this.projectPhase(projection)
+    });
+  }
+
+  /**
+   * 按 journal 优先级计算公开 changeset 阶段。
+   * @param projection - Store 投影事实
+   * @returns 稳定公开阶段
+   */
+  private projectPhase(projection: AgentTaskProjectionRecord): NonNullable<ChatAgentTaskDetailSnapshot['changeset']>['phase'] {
+    const journalStatus = projection.journal?.status;
+    switch (journalStatus) {
+      case 'manual_recovery':
+        return 'recovery_required';
+      case 'finalized':
+        return 'finalized';
+      case 'applied':
+        return 'mutation_applied';
+      case 'created':
+      case 'applying':
+        return 'journal_created';
+      case 'cancelled':
+        return 'discarded';
+      case undefined:
+        break;
+      default: {
+        const exhaustive: never = journalStatus;
+        return exhaustive;
+      }
+    }
+    if (projection.task.status === 'queued' && projection.task.queuePhase === 'commit' && projection.changeset?.status === 'approved') {
+      return 'commit_queued';
+    }
+    switch (projection.changeset?.status) {
+      case 'approved':
+        return 'approved';
+      case 'awaiting_confirmation':
+        return 'awaiting_confirmation';
+      case 'rejected':
+      case 'revoked':
+      case 'discarded':
+        return 'discarded';
+      default:
+        return 'prepared';
+    }
+  }
+
+  /**
+   * 校验连续性并映射最近 Task 时间线。
+   * @param projection - Store 投影事实
+   * @returns 不含 Event payload 的公开时间线
+   */
+  private projectTimeline(projection: AgentTaskProjectionRecord): ChatAgentTaskTimelineSnapshot {
+    const events = projection.events.slice(-AGENT_TASK_TIMELINE_LIMIT);
+    if (
+      (events.length === 0 && projection.taskSequence !== 0) ||
+      (events.length > 0 && events.at(-1)?.sequence !== projection.taskSequence) ||
+      events.some(
+        (event, index): boolean =>
+          event.aggregate.kind !== 'task' ||
+          event.aggregate.id !== projection.task.taskId ||
+          event.taskId !== projection.task.taskId ||
+          (event.checkpointId !== undefined && event.checkpointId !== projection.task.checkpointId) ||
+          !isTaskEventType(event.type) ||
+          !Number.isInteger(event.sequence) ||
+          event.sequence < 1 ||
+          !isCanonicalTime(event.occurredAt) ||
+          (index > 0 && event.sequence !== events[index - 1].sequence + 1)
+      )
+    ) {
+      throw createProjectorError('agent_task_timeline_invalid');
+    }
+    const entries = events.map((event): ChatAgentTaskTimelineEntry => {
+      if (!isTaskEventType(event.type)) throw createProjectorError('agent_task_timeline_invalid');
+      return Object.freeze({
+        sequence: event.sequence,
+        type: mapEventCategory(event.type),
+        code: event.type,
+        occurredAt: event.occurredAt
+      });
+    });
+    const firstSequence = entries[0]?.sequence;
+    const lastSequence = entries.at(-1)?.sequence;
+    return Object.freeze({
+      entries: Object.freeze(entries),
+      ...(firstSequence === undefined ? {} : { firstSequence }),
+      ...(lastSequence === undefined ? {} : { lastSequence }),
+      truncated: firstSequence !== undefined && firstSequence > 1
+    });
+  }
+
+  /**
+   * 构建列表要求的活动 Summary，并拒绝 tombstone 或跨 Session 记录。
+   * @param projection - Store 同事务返回的完整事实
+   * @param sessionId - 当前列表 Session
+   * @returns 轻量活动 Summary
+   */
+  private projectListRecord(projection: AgentTaskProjectionRecord, sessionId: string): ChatAgentTaskSummarySnapshot {
+    const snapshot = this.projectRecord(projection);
+    if (snapshot.recordState !== 'active' || snapshot.sessionId !== sessionId) {
+      throw createProjectorError('agent_task_list_record_invalid');
+    }
+    return snapshot;
+  }
+
+  /**
+   * 从同事务持久化事实构建 Summary 或 Tombstone。
+   * @param projection - Store 投影记录
+   * @returns 显式 allowlist 公开对象
+   */
+  private projectRecord(projection: AgentTaskProjectionRecord): ChatAgentTaskEventSnapshot {
+    const { task, checkpoint, currentAttempt } = projection;
+    const toolCalls = checkpoint.continuationSnapshot.orderedToolCalls.filter((entry): boolean => entry.taskId === task.taskId);
+    const toolCall = toolCalls[0];
+    if (
+      checkpoint.checkpointId !== task.checkpointId ||
+      checkpoint.sessionId !== task.sessionId ||
+      checkpoint.turnId !== task.turnId ||
+      checkpoint.rootRuntimeId !== task.rootRuntimeId ||
+      checkpoint.primaryAgentId !== task.parentAgentId ||
+      toolCalls.length !== 1 ||
+      toolCall.toolCallId !== task.toolCallId ||
+      (task.currentAttemptId === undefined) !== (currentAttempt === undefined) ||
+      (currentAttempt !== undefined &&
+        (currentAttempt.attemptId !== task.currentAttemptId ||
+          currentAttempt.taskId !== task.taskId ||
+          currentAttempt.planHash !== task.executionPlanSnapshotHash)) ||
+      !isCanonicalTime(task.createdAt) ||
+      !isCanonicalTime(task.updatedAt) ||
+      (task.deadlineAt !== undefined && !isCanonicalTime(task.deadlineAt)) ||
+      (currentAttempt !== undefined &&
+        (!isCanonicalTime(currentAttempt.createdAt) ||
+          (currentAttempt.startedAt !== undefined && !isCanonicalTime(currentAttempt.startedAt)) ||
+          (currentAttempt.finishedAt !== undefined && !isCanonicalTime(currentAttempt.finishedAt))))
+    ) {
+      throw createProjectorError('agent_task_projection_invalid');
+    }
+    if (task.recordState === 'tombstoned') {
+      const tombstone: ChatAgentTaskTombstoneSnapshot = {
+        recordState: 'tombstoned',
+        taskId: task.taskId,
+        sessionId: task.sessionId,
+        turnId: task.turnId,
+        checkpointId: task.checkpointId,
+        assistantMessageId: checkpoint.assistantMessageId,
+        toolCallId: task.toolCallId,
+        projectionSchemaVersion: 1,
+        taskSequence: projection.taskSequence,
+        updatedAt: task.updatedAt
+      };
+      enforceSnapshotSize(tombstone);
+      return Object.freeze(tombstone);
+    }
+    if (task.cancelRequestedAt !== undefined) {
+      throw createProjectorError('agent_task_cancellation_unsupported');
+    }
+
+    const taskText = sanitizeAgentDisplayText(task.contractSnapshot.task, 4000);
+    if (!taskText) throw createProjectorError('agent_task_projection_invalid');
+    const resultSummary = task.result?.summary === undefined ? null : sanitizeAgentDisplayText(task.result.summary, 1000);
+    const summary: ChatAgentTaskSummarySnapshot = {
+      recordState: 'active',
+      taskId: task.taskId,
+      sessionId: task.sessionId,
+      turnId: task.turnId,
+      checkpointId: task.checkpointId,
+      assistantMessageId: checkpoint.assistantMessageId,
+      toolCallId: task.toolCallId,
+      agentId: task.agentId,
+      projectionSchemaVersion: 1,
+      taskSequence: projection.taskSequence,
+      task: taskText,
+      mode: task.contractSnapshot.mode,
+      required: toolCall.required,
+      priority: task.priority,
+      ...(task.deadlineAt ? { deadlineAt: task.deadlineAt } : {}),
+      status: task.status,
+      ...(task.queuePhase ? { queuePhase: task.queuePhase } : {}),
+      ...(currentAttempt
+        ? {
+            currentAttempt: Object.freeze({
+              attemptId: currentAttempt.attemptId,
+              attemptNumber: currentAttempt.attemptNumber,
+              agentId: task.agentId,
+              attemptState: currentAttempt.status,
+              runtimeId: currentAttempt.currentRuntimeId,
+              createdAt: currentAttempt.createdAt,
+              ...(currentAttempt.startedAt ? { startedAt: currentAttempt.startedAt } : {}),
+              ...(currentAttempt.finishedAt ? { endedAt: currentAttempt.finishedAt } : {})
+            })
+          }
+        : {}),
+      ...(resultSummary ? { summary: resultSummary } : {}),
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt
+    };
+    enforceSnapshotSize(summary);
+    return Object.freeze(summary);
+  }
+}
+
+/**
+ * 创建 Main-owned Task allowlist Projector。
+ * @param dependencies - 窄 Store 与资源 resolver
+ * @returns Summary/Tombstone/List Projector
+ */
+export function createAgentTaskProjector(dependencies: AgentTaskProjectorDependencies): AgentTaskProjector {
+  return new DefaultAgentTaskProjector(dependencies);
+}
 
 /** 主进程授权器为一个只读 Task 分配的当前上限。 */
 export interface ChatAgentReadPlanLimits {

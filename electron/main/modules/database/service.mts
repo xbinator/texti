@@ -25,6 +25,14 @@ interface DatabaseTableInfoRow {
   name: string;
 }
 
+/**
+ * Assistant Message 唯一性审计返回的重复记录。
+ */
+interface AssistantMessageDuplicateRow {
+  /** 发生重复的 Assistant Message 身份。 */
+  assistant_message_id: string;
+}
+
 let db: DatabaseInstance | null = null;
 
 /**
@@ -73,7 +81,7 @@ function migrateDatabase(): void {
  * 增量创建 Child Agent 委派事实表和查询索引。
  * @param database - 已打开且与聊天表共享事务域的 SQLite 实例
  */
-export function createAgentTables(database: Pick<DatabaseInstance, 'exec'>): void {
+export function createAgentTables(database: Pick<DatabaseInstance, 'exec' | 'prepare'>): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS chat_agent_tasks (
       task_id TEXT PRIMARY KEY,
@@ -565,6 +573,28 @@ export function createAgentTables(database: Pick<DatabaseInstance, 'exec'>): voi
 
     CREATE INDEX IF NOT EXISTS idx_chat_agent_commit_journals_status
     ON chat_agent_commit_journals(status, updated_at ASC);
+  `);
+
+  // 唯一索引创建前只读审计，避免 SQLite 原始错误掩盖稳定迁移错误。
+  const duplicateMessage = database
+    .prepare<[], AssistantMessageDuplicateRow>(
+      `SELECT assistant_message_id
+       FROM chat_agent_delegation_checkpoints
+       GROUP BY assistant_message_id
+       HAVING COUNT(*) > 1
+       LIMIT 1`
+    )
+    .get();
+  if (duplicateMessage) {
+    throw new Error('agent_checkpoint_assistant_message_duplicate');
+  }
+
+  database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_agent_checkpoints_assistant_message
+    ON chat_agent_delegation_checkpoints(assistant_message_id);
+
+    CREATE INDEX IF NOT EXISTS idx_chat_agent_tasks_session_record_updated
+    ON chat_agent_tasks(session_id, record_state, updated_at DESC, task_id DESC);
   `);
 }
 
