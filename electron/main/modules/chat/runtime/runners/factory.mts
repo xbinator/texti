@@ -2,19 +2,46 @@
  * @file factory.mts
  * @description ChatRuntime 活跃 runtime 状态创建工厂。
  */
-import type { ActiveChatRuntime } from '../types.mjs';
+import type { ActiveChatRuntime, ChatRuntimePrimaryContinuationContext } from '../types.mjs';
 import type { ChatRuntimeCompactInput, ChatRuntimeContinueInput, ChatRuntimeSendInput, ChatRuntimeSubmitUserChoiceInput } from 'types/chat-runtime';
 
 /** 支持创建 ActiveChatRuntime 的请求输入。 */
 type RuntimeFactoryInput = ChatRuntimeSendInput | ChatRuntimeContinueInput | ChatRuntimeCompactInput | ChatRuntimeSubmitUserChoiceInput;
+
+/** 内部 Primary Runtime B 工厂输入；Renderer 不能提供模型、消息或工具覆盖。 */
+export interface PrimaryContinuationFactoryInput {
+  /** continuation fence owner。 */
+  checkpointId: string;
+  /** 新 Runtime B 身份。 */
+  runtimeId: string;
+  /** 原 Session。 */
+  sessionId: string;
+  /** 原 Turn。 */
+  turnId: string;
+  /** Primary Actor。 */
+  primaryAgentId: string;
+  /** Turn 根 Runtime。 */
+  rootRuntimeId: string;
+  /** 挂起的 Runtime A。 */
+  sourceRuntimeId: string;
+  /** 经 Agent service 完整性校验的易失上下文。 */
+  context: ChatRuntimePrimaryContinuationContext;
+  /** Main 根据冻结 required 与取消结果生成的续接策略。 */
+  cancellationPolicy?: string;
+}
 
 /** ActiveChatRuntime 中由全部创建路径共享的基础状态。 */
 type RuntimeBaseState = Pick<
   ActiveChatRuntime,
   | 'runtimeId'
   | 'sessionId'
+  | 'turnId'
   | 'clientId'
   | 'agentId'
+  | 'parentAgentId'
+  | 'parentRuntimeId'
+  | 'rootRuntimeId'
+  | 'continuationOfRuntimeId'
   | 'model'
   | 'capabilities'
   | 'contextWindow'
@@ -39,8 +66,13 @@ function createRuntimeBase(input: RuntimeFactoryInput, runtimeId: string, sessio
   return {
     runtimeId,
     sessionId,
+    turnId: input.turnId,
     clientId: input.clientId,
     agentId: input.agentId,
+    parentAgentId: input.parentAgentId,
+    parentRuntimeId: input.parentRuntimeId,
+    rootRuntimeId: input.rootRuntimeId,
+    continuationOfRuntimeId: input.continuationOfRuntimeId,
     model: input.model,
     capabilities: input.capabilities,
     contextWindow: input.contextWindow,
@@ -65,7 +97,6 @@ function createRuntimeBase(input: RuntimeFactoryInput, runtimeId: string, sessio
 export function createSendRuntime(input: ChatRuntimeSendInput, runtimeId: string, sessionId: string): ActiveChatRuntime {
   return {
     ...createRuntimeBase(input, runtimeId, sessionId),
-    parentRuntimeId: input.parentRuntimeId,
     tavily: input.tavily,
     mcp: input.mcp,
     phase: 'streaming'
@@ -81,10 +112,56 @@ export function createSendRuntime(input: ChatRuntimeSendInput, runtimeId: string
 export function createContinuationRuntime(input: ChatRuntimeContinueInput, runtimeId: string): ActiveChatRuntime {
   return {
     ...createRuntimeBase(input, runtimeId, input.sessionId),
-    parentRuntimeId: input.parentRuntimeId,
     tavily: input.tavily,
     mcp: input.mcp,
     phase: 'streaming'
+  };
+}
+
+/**
+ * 把 Main-owned 续接策略追加到原系统提示。
+ * @param system - Runtime A 原系统提示
+ * @param policy - Main 生成的取消策略
+ * @returns Runtime B 使用的合并提示
+ */
+function mergeSystemPrompt(system?: string, policy?: string): string | undefined {
+  if (!policy) return system;
+  if (!system) return policy;
+  return `${system}\n\n${policy}`;
+}
+
+/**
+ * 从 Checkpoint 与冻结易失上下文创建内部 Primary Runtime B。
+ * 工厂固定 `tools=[]` 与 `forceFinal=true`，不存在 Renderer 覆盖入口。
+ * @param input - 已 claim 的 Checkpoint lineage 与上下文
+ * @returns 仅允许 fence owner 写入的 Active Runtime
+ */
+export function createPrimaryContinuationRuntime(input: PrimaryContinuationFactoryInput): ActiveChatRuntime {
+  const { context } = input;
+  const system = mergeSystemPrompt(context.system, input.cancellationPolicy);
+  return {
+    runtimeId: input.runtimeId,
+    sessionId: input.sessionId,
+    turnId: input.turnId,
+    clientId: context.clientId,
+    agentId: input.primaryAgentId,
+    parentRuntimeId: input.sourceRuntimeId,
+    rootRuntimeId: input.rootRuntimeId,
+    continuationOfRuntimeId: input.sourceRuntimeId,
+    model: structuredClone(context.modelSnapshot),
+    ...(context.capabilities ? { capabilities: structuredClone(context.capabilities) } : {}),
+    ...(context.contextWindow ? { contextWindow: context.contextWindow } : {}),
+    ...(system ? { system } : {}),
+    ...(context.workspaceRoot ? { workspaceRoot: context.workspaceRoot } : {}),
+    tools: [],
+    ...(context.skillContentHashes ? { skillContentHashes: structuredClone(context.skillContentHashes) } : {}),
+    ...(context.runtimeContext ? { runtimeContext: structuredClone(context.runtimeContext) } : {}),
+    ownerCheckpointId: input.checkpointId,
+    forceFinal: true,
+    status: 'running',
+    phase: 'streaming',
+    abortController: new AbortController(),
+    createdAt: Date.now()
   };
 }
 
@@ -111,7 +188,6 @@ export function createCompactRuntime(input: ChatRuntimeCompactInput, runtimeId: 
 export function createUserChoiceRuntime(input: ChatRuntimeSubmitUserChoiceInput, runtimeId: string): ActiveChatRuntime {
   return {
     ...createRuntimeBase(input, runtimeId, input.sessionId),
-    parentRuntimeId: input.parentRuntimeId,
     tavily: input.tavily,
     mcp: input.mcp,
     phase: 'streaming'

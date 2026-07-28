@@ -13,6 +13,7 @@ import type {
   ChatMessageWidgetResultPart,
   ChatSession
 } from 'types/chat';
+import type { ChatAgentApplicationEvent, ChatAgentConfirmationSnapshot } from 'types/chat-agent';
 import type {
   ChatRuntimeCompactInput,
   ChatRuntimeContinueInput,
@@ -23,7 +24,7 @@ import type {
 } from 'types/chat-runtime';
 import { defineComponent, h, type PropType } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
-import { flushPromises, shallowMount } from '@vue/test-utils';
+import { flushPromises, mount, shallowMount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BuildMemoryContextOptions } from '@/ai/memory/types';
 import type { ToastItem } from '@/components/BChat/components/InteractionContainer/types';
@@ -31,9 +32,11 @@ import BChat from '@/components/BChat/index.vue';
 import { type AdaptedUserMessageInput, type SubmitAction, createUserChoice } from '@/components/BChat/utils/submitAction';
 import type { Message } from '@/components/BChat/utils/types';
 import type { FileMentionOption } from '@/components/BSmart/types';
+import { useProvideActorSystem } from '@/hooks/useChat/useActorSystem';
 import { emitChatFileReferenceInsert } from '@/shared/chat/fileReference';
 import { native } from '@/shared/platform';
 import type { StoredFile } from '@/shared/storage';
+import { useChatConfirmationQueueStore } from '@/stores/chat/confirmationQueue';
 import { useChatPermissionStore } from '@/stores/chat/permission';
 import type { TodoItem } from '@/stores/chat/todo';
 import { useSettingStore } from '@/stores/ui/setting';
@@ -63,7 +66,18 @@ const promptEditorMockState = vi.hoisted(() => ({
 const getPathForFileMock = vi.hoisted(() => vi.fn<(_file: File) => string | null>().mockReturnValue('/workspace/My Notes/note.md'));
 const getModelToolSupportMock = vi.hoisted(() => vi.fn());
 const runtimeListeners = vi.hoisted<RuntimeEventListeners>(() => ({}));
+const agentTaskEventMockState = vi.hoisted(() => ({
+  listener: undefined as ((event: ChatAgentApplicationEvent) => void) | undefined,
+  dispose: vi.fn()
+}));
 const electronAPIMock = vi.hoisted(() => ({
+  chatAgentOnEvent: vi.fn((listener: (event: ChatAgentApplicationEvent) => void): (() => void) => {
+    agentTaskEventMockState.listener = listener;
+    return agentTaskEventMockState.dispose;
+  }),
+  chatAgentListTasks: vi.fn(),
+  chatAgentGetTask: vi.fn(),
+  chatAgentResolveConfirmation: vi.fn(),
   chatRuntimeEstimateContext: vi.fn(),
   chatRuntimeSend: vi.fn(),
   chatRuntimeContinue: vi.fn(),
@@ -105,6 +119,9 @@ const electronAPIMock = vi.hoisted(() => ({
     runtimeListeners.complete = callback;
     return vi.fn();
   })
+}));
+const actorSystemMockState = vi.hoisted(() => ({
+  registerRuntime: vi.fn()
 }));
 
 const autoNameMockState = vi.hoisted(() => ({
@@ -218,10 +235,36 @@ function createDeferred<T>(): DeferredPromise<T> {
 }
 
 vi.mock('vue-router', () => ({
+  useRoute: vi.fn(() => ({
+    fullPath: '/chat'
+  })),
   useRouter: vi.fn(() => ({
     push: vi.fn()
   }))
 }));
+
+vi.mock('@/router', () => ({
+  default: {
+    push: vi.fn()
+  }
+}));
+
+vi.mock('@/hooks/useChat/useActorSystem', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/useChat/useActorSystem')>();
+
+  return {
+    ...actual,
+    useActorSystem: () => {
+      const actorSystem = actual.useActorSystem();
+      const registerRuntime = actorSystem.registerRuntime.bind(actorSystem);
+      actorSystem.registerRuntime = (address, capabilities): void => {
+        actorSystemMockState.registerRuntime(address, capabilities);
+        registerRuntime(address, capabilities);
+      };
+      return actorSystem;
+    }
+  };
+});
 
 vi.mock('@/components/BButton/index.vue', () => ({
   default: {
@@ -420,6 +463,10 @@ const InputToolbarStub = defineComponent({
 const ConversationViewStub = defineComponent({
   name: 'ConversationView',
   props: {
+    sessionId: {
+      type: String,
+      default: null
+    },
     messages: {
       type: Array,
       default: () => []
@@ -484,6 +531,38 @@ function createSession(id: string, title: string): ChatSession {
     createdAt: '2026-06-15T00:00:00.000Z',
     updatedAt: '2026-06-15T00:00:00.000Z',
     lastMessageAt: '2026-06-15T00:00:00.000Z'
+  };
+}
+
+/**
+ * 创建 BChat confirmation 竞态测试快照。
+ * @param confirmationId - confirmation 身份
+ * @param riskLevel - 风险等级
+ * @returns 完整公开快照
+ */
+function createAgentConfirmation(confirmationId: string, riskLevel: 'write' | 'dangerous'): ChatAgentConfirmationSnapshot {
+  return {
+    confirmationId,
+    sessionId: 'session-active',
+    turnId: 'turn-1',
+    taskId: `task-${confirmationId}`,
+    attemptId: `attempt-${confirmationId}`,
+    agentId: `agent-${confirmationId}`,
+    runtimeId: `runtime-${confirmationId}`,
+    toolCallId: `tool-call-${confirmationId}`,
+    changesetId: `changeset-${confirmationId}`,
+    status: 'pending',
+    version: 1,
+    riskLevel,
+    displayPaths: [`${confirmationId}.md`],
+    resourceScopes: [`file:/workspace/${confirmationId}.md`],
+    unifiedDiff: `--- a/${confirmationId}.md\n+++ b/${confirmationId}.md`,
+    baseRevision: 'a'.repeat(64),
+    diffHash: 'b'.repeat(64),
+    operationSetHash: 'c'.repeat(64),
+    planHash: 'd'.repeat(64),
+    createdAt: '2026-07-28T00:00:00.000Z',
+    updatedAt: '2026-07-28T00:00:00.000Z'
   };
 }
 
@@ -654,6 +733,10 @@ describe('BChat sessionId runtime', (): void => {
     chatStoreMock.ensureSessionModel.mockReset();
     chatStoreMock.getSessions.mockReset();
     electronAPIMock.chatRuntimeSend.mockReset();
+    electronAPIMock.chatAgentOnEvent.mockClear();
+    electronAPIMock.chatAgentListTasks.mockReset();
+    electronAPIMock.chatAgentGetTask.mockReset();
+    electronAPIMock.chatAgentResolveConfirmation.mockReset();
     electronAPIMock.chatRuntimeEstimateContext.mockReset();
     electronAPIMock.chatRuntimeContinue.mockReset();
     electronAPIMock.chatRuntimeCompact.mockReset();
@@ -720,6 +803,9 @@ describe('BChat sessionId runtime', (): void => {
     recentStoreMock.getFileByPath.mockReset();
     resetRuntimeEventListeners(runtimeListeners);
     conversationViewMockState.scrollToBottom.mockReset();
+    actorSystemMockState.registerRuntime.mockReset();
+    agentTaskEventMockState.listener = undefined;
+    agentTaskEventMockState.dispose.mockReset();
     chatStoreMock.getSessionMessages.mockResolvedValue([]);
     chatStoreMock.loadSessionById.mockResolvedValue(undefined);
     chatStoreMock.findSession.mockReturnValue(undefined);
@@ -755,6 +841,19 @@ describe('BChat sessionId runtime', (): void => {
         usedTokens: 12_300,
         contextWindow: 200_000
       }
+    });
+    electronAPIMock.chatAgentListTasks.mockResolvedValue({
+      ok: true,
+      data: { tasks: [] }
+    });
+    electronAPIMock.chatAgentGetTask.mockResolvedValue({
+      ok: true,
+      data: null
+    });
+    electronAPIMock.chatAgentResolveConfirmation.mockResolvedValue({
+      ok: false,
+      code: 'UNEXPECTED_CALL',
+      error: 'unexpected confirmation resolution'
     });
     getModelToolSupportMock.mockResolvedValue({ supported: true });
     useSettingStore().setSidebarVisible(true);
@@ -840,7 +939,126 @@ describe('BChat sessionId runtime', (): void => {
     });
     expect(wrapper.emitted('session-created')?.[0]).toEqual([createdSession]);
     expect(electronAPIMock.chatRuntimeSend).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'session-created', content: 'hello' }));
+    expect(wrapper.findComponent(ConversationViewStub).props('sessionId')).toBe('session-created');
     expect(wrapper.emitted('loading-change')).toContainEqual([true]);
+  });
+
+  it('recovers Child Tasks with the authoritative internally-created activeSessionId', async (): Promise<void> => {
+    chatStoreMock.createSession.mockResolvedValue(createSession('session-created', 'hello'));
+    const wrapper = mountBChat(null);
+    await flushPromises();
+
+    wrapper.findComponent(BSmartEditorStub).vm.$emit('update:value', 'hello');
+    wrapper.findComponent(InputToolbarStub).vm.$emit('submit');
+    await flushPromises();
+
+    expect(electronAPIMock.chatAgentListTasks).toHaveBeenCalledWith({
+      sessionId: 'session-created',
+      limit: 50
+    });
+    wrapper.unmount();
+  });
+
+  it('recovers Child Tasks for the initial and externally switched authoritative Session IDs', async (): Promise<void> => {
+    const wrapper = mountBChat('session-initial');
+    await flushPromises();
+    expect(wrapper.findComponent(ConversationViewStub).props('sessionId')).toBe('session-initial');
+    expect(electronAPIMock.chatAgentListTasks).toHaveBeenCalledWith({
+      sessionId: 'session-initial',
+      limit: 50
+    });
+    electronAPIMock.chatAgentListTasks.mockClear();
+
+    await wrapper.setProps({ sessionId: 'session-switched' });
+    await flushPromises();
+
+    expect(wrapper.findComponent(ConversationViewStub).props('sessionId')).toBe('session-switched');
+    expect(electronAPIMock.chatAgentListTasks).toHaveBeenCalledWith({
+      sessionId: 'session-switched',
+      limit: 50
+    });
+    wrapper.unmount();
+  });
+
+  it('keeps the real root Task listener alive when the actual BChat unmounts', async (): Promise<void> => {
+    const callOrder: string[] = [];
+    electronAPIMock.chatAgentOnEvent.mockImplementation((listener: (event: ChatAgentApplicationEvent) => void): (() => void) => {
+      callOrder.push('subscribe');
+      agentTaskEventMockState.listener = listener;
+      return agentTaskEventMockState.dispose;
+    });
+    electronAPIMock.chatAgentListTasks.mockImplementation(async (): Promise<{ ok: true; data: { tasks: [] } }> => {
+      callOrder.push('list');
+      return { ok: true, data: { tasks: [] } };
+    });
+    const RootTaskHarness = defineComponent({
+      name: 'RootTaskHarness',
+      props: {
+        show: {
+          type: Boolean,
+          required: true
+        }
+      },
+      setup(rootProps): () => ReturnType<typeof h> {
+        useProvideActorSystem();
+        return (): ReturnType<typeof h> => (rootProps.show ? h(BChat, { sessionId: 'session-root' }) : h('div'));
+      }
+    });
+
+    const root = mount(RootTaskHarness, {
+      props: { show: true },
+      global: {
+        stubs: {
+          BIcon: true,
+          BCommandPanel: CommandPanelStub,
+          BPanelSplitter: {
+            template: '<div><slot /></div>'
+          },
+          BSmartEditor: BSmartEditorStub,
+          ConfirmationSheet: true,
+          ConversationView: ConversationViewStub,
+          ImagePreview: true,
+          InputToolbar: InputToolbarStub,
+          InteractionContainer: true,
+          SessionHistory: true,
+          TodoPanel: true,
+          UsagePanel: true
+        }
+      }
+    });
+    await vi.waitFor((): void => expect(callOrder.slice(0, 2)).toEqual(['subscribe', 'list']));
+
+    await root.setProps({ show: false });
+    expect(agentTaskEventMockState.dispose).not.toHaveBeenCalled();
+    root.unmount();
+    expect(agentTaskEventMockState.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('registers a complete runtime address before sending the request', async (): Promise<void> => {
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+
+    await submitTextAndReadRuntimeId(wrapper, 'addressed request');
+
+    expect(actorSystemMockState.registerRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'session-active',
+        turnId: expect.any(String),
+        agentId: 'primary',
+        runtimeId: expect.any(String),
+        rootRuntimeId: expect.any(String)
+      }),
+      expect.any(Object)
+    );
+    expect(actorSystemMockState.registerRuntime.mock.invocationCallOrder[0]).toBeLessThan(electronAPIMock.chatRuntimeSend.mock.invocationCallOrder[0]);
+    expect(electronAPIMock.chatRuntimeSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        turnId: expect.any(String),
+        rootRuntimeId: expect.any(String)
+      })
+    );
+
+    wrapper.unmount();
   });
 
   it('publishes runtime status and completion through one event from the existing workflow', async (): Promise<void> => {
@@ -854,8 +1072,10 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'messageCreated', {
       runtimeId,
       sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: runtimeId,
       message: {
         id: 'assistant-complete',
         sessionId: 'session-active',
@@ -871,8 +1091,10 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'complete', {
       runtimeId,
       sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: runtimeId,
       reason: 'completed'
     });
     await flushPromises();
@@ -890,8 +1112,10 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'confirmationRequest', {
       runtimeId,
       sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: runtimeId,
       confirmationId: 'confirmation-status',
       request: {
         toolName: 'write_file',
@@ -906,8 +1130,10 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'error', {
       runtimeId,
       sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: runtimeId,
       error: { code: 'REQUEST_FAILED', message: 'failed' }
     });
     await flushPromises();
@@ -949,6 +1175,119 @@ describe('BChat sessionId runtime', (): void => {
     await flushPromises();
 
     expect(promptEditorMockState.focus).not.toHaveBeenCalled();
+  });
+
+  it('does not abort Runtime A or announce local cancellation while waiting for Child checkpoint persistence', async (): Promise<void> => {
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+    const runtimeId = await submitTextAndReadRuntimeId(wrapper, 'delegate work');
+
+    emitRuntimeEvent(runtimeListeners, 'complete', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      reason: 'waiting_children',
+      checkpointId: 'checkpoint-1'
+    });
+    await flushPromises();
+    electronAPIMock.chatRuntimeAbort.mockClear();
+
+    wrapper.findComponent(InputToolbarStub).vm.$emit('abort');
+    await flushPromises();
+
+    expect(electronAPIMock.chatRuntimeAbort).not.toHaveBeenCalled();
+    expect(wrapper.findComponent(InputToolbarStub).props('loading')).toBe(true);
+    expect(wrapper.emitted('runtime-status-change')?.at(-1)).not.toEqual([{ status: 'idle' }]);
+    wrapper.unmount();
+  });
+
+  it('applies the trusted Main cancellation update after Runtime A route is removed', async (): Promise<void> => {
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+    const runtimeId = await submitTextAndReadRuntimeId(wrapper, 'delegate then cancel');
+    const pendingToolPart: ChatMessageToolPart = {
+      id: 'delegate-part',
+      type: 'tool',
+      toolCallId: 'delegate-call',
+      toolName: 'delegate_task',
+      status: 'executing',
+      input: { task: 'read files' }
+    };
+    const pendingAssistant = {
+      ...createAssistantMessage({
+        id: 'assistant-delegated',
+        content: '',
+        parts: [pendingToolPart],
+        runtimeId,
+        loading: true,
+        finished: false
+      }),
+      sessionId: 'session-active'
+    } satisfies ChatMessageRecord;
+    emitRuntimeEvent(runtimeListeners, 'messageCreated', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      message: pendingAssistant
+    });
+    emitRuntimeEvent(runtimeListeners, 'complete', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      reason: 'waiting_children',
+      checkpointId: 'checkpoint-1'
+    });
+    const cancelledAssistant = {
+      ...pendingAssistant,
+      loading: false,
+      finished: true,
+      parts: [
+        {
+          ...pendingToolPart,
+          status: 'done' as const,
+          result: {
+            toolName: 'delegate_task',
+            status: 'cancelled' as const,
+            error: { code: 'USER_CANCELLED' as const, message: '任务已取消' }
+          }
+        }
+      ]
+    } satisfies ChatMessageRecord;
+
+    emitRuntimeEvent(runtimeListeners, 'messageUpdated', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'agent-continuation',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      message: cancelledAssistant
+    });
+    await flushPromises();
+
+    const visibleMessages = wrapper.findComponent(ConversationViewStub).props('messages') as Message[];
+    expect(visibleMessages.find((message: Message): boolean => message.id === 'assistant-delegated')).toMatchObject({
+      loading: false,
+      finished: true,
+      parts: [
+        expect.objectContaining({
+          type: 'tool',
+          status: 'done',
+          result: expect.objectContaining({ status: 'cancelled' })
+        })
+      ]
+    });
+    expect(wrapper.findComponent(InputToolbarStub).props('loading')).toBe(true);
+    wrapper.unmount();
   });
 
   it('requests a new session from the host without clearing persisted messages', async (): Promise<void> => {
@@ -1100,8 +1439,10 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'contextUsage', {
       runtimeId,
       sessionId: 'session-1',
+      turnId: 'session-1:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: runtimeId,
       snapshot: {
         usedTokens: 54_700,
         contextWindow: 200_000
@@ -1121,12 +1462,17 @@ describe('BChat sessionId runtime', (): void => {
     electronAPIMock.chatRuntimeSend.mockImplementation((input: ChatRuntimeSendInput): Promise<ChatRuntimeHandlerResult<ChatRuntimeStartResult>> => {
       runtimeListeners.messageCreated?.({
         runtimeId: input.runtimeId,
-        sessionId: input.sessionId ?? 'session-active',
+        sessionId: input.sessionId,
+        turnId: input.turnId,
         clientId: input.clientId,
         agentId: input.agentId,
+        parentAgentId: input.parentAgentId,
+        parentRuntimeId: input.parentRuntimeId,
+        rootRuntimeId: input.rootRuntimeId,
+        continuationOfRuntimeId: input.continuationOfRuntimeId,
         message: {
           id: input.userMessageId ?? 'user-early',
-          sessionId: input.sessionId ?? 'session-active',
+          sessionId: input.sessionId,
           role: 'user',
           content: input.content,
           parts: [{ id: 'part-early', type: 'text', text: input.content }],
@@ -1160,8 +1506,10 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'confirmationRequest', {
       runtimeId,
       sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: runtimeId,
       confirmationId: 'confirmation-1',
       request: {
         toolName: 'write_file',
@@ -1173,7 +1521,13 @@ describe('BChat sessionId runtime', (): void => {
       }
     });
     await flushPromises();
-    wrapper.findComponent({ name: 'ConfirmationSheet' }).vm.$emit('action', 'approve-session');
+    const sheet = wrapper.findComponent({ name: 'ConfirmationSheet' });
+    const displayed = sheet.props('confirmation') as { confirmationId: string };
+    sheet.vm.$emit('action', {
+      action: 'approve-session',
+      confirmationId: displayed.confirmationId,
+      source: 'runtime'
+    });
     await flushPromises();
 
     expect(useChatPermissionStore().sessionToolPermissionGrants.write_file).toBe(true);
@@ -1182,6 +1536,110 @@ describe('BChat sessionId runtime', (): void => {
       confirmationId: 'confirmation-1',
       decision: { approved: true, grantScope: 'session' }
     });
+    wrapper.unmount();
+  });
+
+  it('does not resolve a new current item from a stale displayed Agent action', async (): Promise<void> => {
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+    const queue = useChatConfirmationQueueStore();
+    const displayed = createAgentConfirmation('agent-a', 'dangerous');
+    const next = createAgentConfirmation('agent-b', 'write');
+    queue.applyAgent(displayed);
+    queue.applyAgent(next);
+    await flushPromises();
+
+    queue.applyAgent({
+      ...displayed,
+      status: 'rejected',
+      version: 2,
+      updatedAt: '2026-07-28T00:00:01.000Z'
+    });
+    expect(queue.current?.confirmationId).toBe('agent-b');
+    wrapper.findComponent({ name: 'ConfirmationSheet' }).vm.$emit('action', {
+      action: 'approve',
+      confirmationId: 'agent-a',
+      source: 'agent',
+      expectedVersion: 1
+    });
+    await flushPromises();
+
+    expect(electronAPIMock.chatAgentResolveConfirmation).not.toHaveBeenCalled();
+    expect(queue.current?.confirmationId).toBe('agent-b');
+    wrapper.unmount();
+  });
+
+  it('does not resolve an Agent item that is no longer the selected current confirmation', async (): Promise<void> => {
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+    const queue = useChatConfirmationQueueStore();
+    const displayed = createAgentConfirmation('agent-selected-a', 'dangerous');
+    const selected = createAgentConfirmation('agent-selected-b', 'write');
+    queue.applyAgent(displayed);
+    queue.applyAgent(selected);
+    queue.select(selected.confirmationId);
+    await flushPromises();
+
+    wrapper.findComponent({ name: 'ConfirmationSheet' }).vm.$emit('action', {
+      action: 'approve',
+      confirmationId: displayed.confirmationId,
+      source: 'agent',
+      expectedVersion: displayed.version
+    });
+    await flushPromises();
+
+    expect(electronAPIMock.chatAgentResolveConfirmation).not.toHaveBeenCalled();
+    expect(queue.current?.confirmationId).toBe(selected.confirmationId);
+    wrapper.unmount();
+  });
+
+  it('does not settle a Runtime item that is no longer the selected current confirmation', async (): Promise<void> => {
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+    const runtimeId = await submitTextAndReadRuntimeId(wrapper, 'write stale runtime');
+    emitRuntimeEvent(runtimeListeners, 'confirmationRequest', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      confirmationId: 'runtime-source-a',
+      request: {
+        toolName: 'write_file',
+        title: '写入文件',
+        description: '是否写入？',
+        riskLevel: 'write'
+      }
+    });
+    await flushPromises();
+    const sheet = wrapper.findComponent({ name: 'ConfirmationSheet' });
+    const displayed = sheet.props('confirmation') as { confirmationId: string };
+    const queue = useChatConfirmationQueueStore();
+    queue.addRuntime({
+      source: 'runtime',
+      confirmationId: 'runtime-selected-b',
+      ownerId: 'other-owner',
+      request: {
+        toolName: 'write_file',
+        title: '另一个写入',
+        description: '另一个请求',
+        riskLevel: 'dangerous'
+      },
+      createdAt: '2026-07-28T00:00:01.000Z'
+    });
+    queue.select('runtime-selected-b');
+    await flushPromises();
+
+    sheet.vm.$emit('action', {
+      action: 'approve',
+      confirmationId: displayed.confirmationId,
+      source: 'runtime'
+    });
+    await flushPromises();
+
+    expect(electronAPIMock.chatRuntimeSubmitConfirmation).not.toHaveBeenCalled();
+    expect(queue.current?.confirmationId).toBe('runtime-selected-b');
     wrapper.unmount();
   });
 
@@ -1447,8 +1905,10 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'error', {
       runtimeId,
       sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: runtimeId,
       error: { code: 'REQUEST_FAILED', message: '模型调用失败' }
     });
     await flushPromises();
@@ -1497,8 +1957,10 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'error', {
       runtimeId: 'runtime-1',
       sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: 'runtime-1',
       error: { code: 'REQUEST_FAILED', message: '模型调用失败' }
     });
     await flushPromises();
@@ -1565,8 +2027,10 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'messageCreated', {
       runtimeId,
       sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: runtimeId,
       message: emptyAssistantMessage
     });
     electronAPIMock.chatRuntimeAbort.mockResolvedValueOnce({
@@ -1614,16 +2078,20 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'messageUpdated', {
       runtimeId,
       sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: runtimeId,
       message: partialMessage
     });
     electronAPIMock.chatRuntimeAbort.mockImplementationOnce(async () => {
       emitRuntimeEvent(runtimeListeners, 'messageCreated', {
         runtimeId,
         sessionId: 'session-active',
+        turnId: 'session-active:turn:1',
         clientId: 'bchat',
         agentId: 'primary',
+        rootRuntimeId: runtimeId,
         message: interruptMessage
       });
       return { ok: true, data: { assistantMessage: finishedMessage, interruptMessage } };
@@ -1742,8 +2210,10 @@ describe('BChat sessionId runtime', (): void => {
     emitRuntimeEvent(runtimeListeners, 'messageUpdated', {
       runtimeId: 'runtime-1',
       sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
       clientId: 'bchat',
       agentId: 'primary',
+      rootRuntimeId: 'runtime-1',
       message: {
         ...createAssistantMessage({
           id: 'assistant-streaming',

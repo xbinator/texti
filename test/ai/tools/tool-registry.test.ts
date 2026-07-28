@@ -7,6 +7,7 @@ import type { AIToolExecutor } from 'types/ai';
 import { describe, expect, it } from 'vitest';
 import * as runtimeTools from '@/ai/tools/catalog/runtimeTools';
 import { GLOB_TOOL_NAME, GREP_TOOL_NAME, READ_FILE_TOOL_NAME, createGlobTool, createGrepTool, createReadFileTool } from '@/ai/tools/catalog/runtimeTools';
+import { stageFileEditToolRegistryEntry, stageFileWriteToolRegistryEntry } from '../../../shared/ai/tools/AgentStagedFileTool/index.js';
 import { createDocumentToolRegistryEntry, readCurrentDocumentToolRegistryEntry } from '../../../shared/ai/tools/DocumentTool/index.js';
 import { getCurrentTimeToolRegistryEntry } from '../../../shared/ai/tools/EnvironmentTool/index.js';
 import { editFileToolRegistryEntry } from '../../../shared/ai/tools/FileEditTool/index.js';
@@ -18,6 +19,7 @@ import {
 } from '../../../shared/ai/tools/FileReadTool/index.js';
 import { writeFileToolRegistryEntry } from '../../../shared/ai/tools/FileWriteTool/index.js';
 import {
+  DELEGATE_TASK_TOOL_NAME,
   EDIT_FILE_TOOL_NAME,
   OPERATE_WEBPAGE_TOOL_NAME,
   OPEN_RESOURCE_TOOL_NAME,
@@ -25,6 +27,7 @@ import {
   TOOL_REGISTRY,
   WRITE_FILE_TOOL_NAME,
   getToolDefinitionByName,
+  getToolRegistryEntry,
   getToolNamesByExposure,
   getToolNamesByRuntimeGroup
 } from '../../../shared/ai/tools/index.js';
@@ -63,6 +66,8 @@ describe('toolRegistry', (): void => {
       readDirectoryToolRegistryEntry,
       globToolRegistryEntry,
       grepToolRegistryEntry,
+      stageFileWriteToolRegistryEntry,
+      stageFileEditToolRegistryEntry,
       writeFileToolRegistryEntry,
       editFileToolRegistryEntry,
       queryLogsToolRegistryEntry,
@@ -75,7 +80,8 @@ describe('toolRegistry', (): void => {
       refreshMcpDiscoveryToolRegistryEntry,
       openResourceToolRegistryEntry,
       readCurrentWebpageToolRegistryEntry,
-      operateWebpageToolRegistryEntry
+      operateWebpageToolRegistryEntry,
+      getToolRegistryEntry(DELEGATE_TASK_TOOL_NAME)
     ]);
   });
 
@@ -168,6 +174,88 @@ describe('toolRegistry', (): void => {
     expect(getToolNamesByExposure('conditional-writable')).toEqual(
       expect.arrayContaining(['add_mcp_server', 'update_mcp_server', 'remove_mcp_server', 'refresh_mcp_discovery', 'operate_webpage'])
     );
+    expect(getToolNamesByExposure('chat-default').sort()).toEqual(
+      [...getToolNamesByExposure('default-readonly'), ...getToolNamesByExposure('default-writable')].sort()
+    );
+    expect(getToolNamesByExposure('chat-default')).not.toEqual(expect.arrayContaining(getToolNamesByExposure('conditional-readonly')));
+    expect(getToolNamesByExposure('chat-default')).not.toEqual(expect.arrayContaining(getToolNamesByExposure('conditional-writable')));
+    expect(getToolNamesByExposure('chat-default')).not.toContain(DELEGATE_TASK_TOOL_NAME);
+  });
+
+  it('registers delegate_task as internal deferred coordination', (): void => {
+    expect(getToolRegistryEntry(DELEGATE_TASK_TOOL_NAME)).toMatchObject({
+      runtime: 'coordinator',
+      group: 'agent',
+      exposure: 'internal',
+      executionClass: 'deferred-coordination',
+      effect: {
+        effect: 'pure_read',
+        resourceScopeResolver: 'delegate-contract',
+        reversible: true
+      }
+    });
+    expect(TOOL_REGISTRY.every((entry) => Boolean(entry.executionClass) && Boolean(entry.effect))).toBe(true);
+  });
+
+  it('registers staged file mutations as internal reversible capabilities', (): void => {
+    expect(getToolRegistryEntry('stage_file_write')).toMatchObject({
+      runtime: 'main',
+      group: 'file',
+      exposure: 'internal',
+      executionClass: 'direct',
+      effect: {
+        effect: 'staged_file_write',
+        resourceScopeResolver: 'file-path',
+        commitAdapter: 'atomic-file-v1',
+        reversible: true
+      }
+    });
+    expect(getToolRegistryEntry('stage_file_edit')).toMatchObject({
+      runtime: 'main',
+      group: 'file',
+      exposure: 'internal',
+      executionClass: 'direct',
+      effect: {
+        effect: 'staged_file_write',
+        resourceScopeResolver: 'file-path',
+        commitAdapter: 'atomic-file-v1',
+        reversible: true
+      }
+    });
+    expect(getToolNamesByExposure('chat-default')).not.toEqual(expect.arrayContaining(['stage_file_write', 'stage_file_edit']));
+  });
+
+  it('classifies direct file mutations as immediate side effects until an overlay exists', (): void => {
+    expect(writeFileToolRegistryEntry.effect).toMatchObject({
+      effect: 'immediate_side_effect',
+      resourceScopeResolver: 'file-path',
+      reversible: false
+    });
+    expect(editFileToolRegistryEntry.effect).toMatchObject({
+      effect: 'immediate_side_effect',
+      resourceScopeResolver: 'file-path',
+      reversible: false
+    });
+  });
+
+  it('publishes the bounded delegate task contract schema', (): void => {
+    const definition = getToolDefinitionByName(DELEGATE_TASK_TOOL_NAME);
+
+    expect(definition?.parameters).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: ['task', 'acceptanceCriteria', 'mode', 'resources', 'requestedTools', 'required', 'priority']
+    });
+    expect(definition?.parameters.properties).toMatchObject({
+      task: { type: 'string', minLength: 1 },
+      acceptanceCriteria: { type: 'array', minItems: 1 },
+      mode: { type: 'string', enum: ['read', 'write'] },
+      resources: { type: 'array', minItems: 1 },
+      requestedTools: { type: 'array', uniqueItems: true },
+      required: { type: 'boolean' },
+      priority: { type: 'string', enum: ['low', 'normal', 'high'] },
+      deadlineAt: { type: 'string', format: 'date-time' }
+    });
   });
 
   it('describes theme presets as complete color moods instead of a bland theme color', (): void => {

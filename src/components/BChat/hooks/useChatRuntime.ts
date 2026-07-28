@@ -6,6 +6,7 @@ import type { Message } from '../utils/types';
 import type { ChatMessageRecord } from 'types/chat';
 import type {
   ChatRuntimeAbortResult,
+  ChatRuntimeAddress,
   ChatRuntimeCompactInput,
   ChatRuntimeContinueInput,
   ChatRuntimeHandlerResult,
@@ -28,67 +29,45 @@ interface UseChatRuntimeOptions {
 }
 
 /** ChatRuntime 发送输入。 */
-export type BChatRuntimeSendInput = Pick<
-  ChatRuntimeSendInput,
-  | 'runtimeId'
-  | 'sessionId'
-  | 'content'
-  | 'parts'
-  | 'files'
-  | 'userMessageId'
-  | 'userMessageCreatedAt'
-  | 'model'
-  | 'contextWindow'
-  | 'system'
-  | 'workspaceRoot'
-  | 'tools'
-  | 'skillContentHashes'
-  | 'runtimeContext'
-  | 'tavily'
-  | 'mcp'
-  | 'capabilities'
->;
+export type BChatRuntimeSendInput = Omit<ChatRuntimeAddress, 'agentId'> &
+  Pick<
+    ChatRuntimeSendInput,
+    | 'content'
+    | 'parts'
+    | 'files'
+    | 'userMessageId'
+    | 'userMessageCreatedAt'
+    | 'model'
+    | 'contextWindow'
+    | 'system'
+    | 'workspaceRoot'
+    | 'tools'
+    | 'skillContentHashes'
+    | 'runtimeContext'
+    | 'tavily'
+    | 'mcp'
+    | 'capabilities'
+  >;
 
 /** ChatRuntime 续轮输入。 */
-export type BChatRuntimeContinueInput = Pick<
-  ChatRuntimeContinueInput,
-  | 'runtimeId'
-  | 'sessionId'
-  | 'model'
-  | 'contextWindow'
-  | 'system'
-  | 'workspaceRoot'
-  | 'tools'
-  | 'skillContentHashes'
-  | 'runtimeContext'
-  | 'tavily'
-  | 'mcp'
-  | 'capabilities'
-> & {
-  /** renderer 消息列表，发送到主进程前转换为纯快照。 */
-  messages: Message[];
-};
+export type BChatRuntimeContinueInput = Omit<ChatRuntimeAddress, 'agentId'> &
+  Pick<
+    ChatRuntimeContinueInput,
+    'model' | 'contextWindow' | 'system' | 'workspaceRoot' | 'tools' | 'skillContentHashes' | 'runtimeContext' | 'tavily' | 'mcp' | 'capabilities'
+  > & {
+    /** renderer 消息列表，发送到主进程前转换为纯快照。 */
+    messages: Message[];
+  };
 
 /** ChatRuntime 手动压缩输入。 */
 export type BChatRuntimeCompactInput = Omit<ChatRuntimeCompactInput, 'clientId' | 'agentId'>;
 
 /** ChatRuntime 用户选择提交输入。 */
-export type BChatRuntimeSubmitUserChoiceInput = Pick<
-  ChatRuntimeSubmitUserChoiceInput,
-  | 'runtimeId'
-  | 'sessionId'
-  | 'model'
-  | 'contextWindow'
-  | 'system'
-  | 'workspaceRoot'
-  | 'tools'
-  | 'skillContentHashes'
-  | 'runtimeContext'
-  | 'tavily'
-  | 'mcp'
-  | 'capabilities'
-  | 'answer'
->;
+export type BChatRuntimeSubmitUserChoiceInput = Omit<ChatRuntimeAddress, 'agentId'> &
+  Pick<
+    ChatRuntimeSubmitUserChoiceInput,
+    'model' | 'contextWindow' | 'system' | 'workspaceRoot' | 'tools' | 'skillContentHashes' | 'runtimeContext' | 'tavily' | 'mcp' | 'capabilities' | 'answer'
+  >;
 
 /** ChatRuntime renderer 消息片段提交输入。 */
 export type BChatRuntimeSubmitMessagePartInput = ChatRuntimeSubmitMessagePartInput;

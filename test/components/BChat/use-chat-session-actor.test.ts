@@ -65,8 +65,10 @@ describe('useChatSessionActor', (): void => {
       event: {
         runtimeId: 'runtime-a',
         sessionId: 'session-a',
+        turnId: 'turn-a',
         clientId: 'bchat',
         agentId: 'primary',
+        rootRuntimeId: 'runtime-a',
         messageId: 'message-a'
       }
     });

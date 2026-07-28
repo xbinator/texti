@@ -87,6 +87,31 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
     return isManagedRuntime(actorSystem, event.runtimeId);
   }
 
+  /**
+   * 校验 Main 在 Checkpoint fence 下广播的 source assistant 终态更新。
+   * Runtime A route 已注销时只允许固定 marker 与当前三层 Actor lineage 完全匹配的消息更新绕过。
+   * @param event - Runtime 消息更新
+   * @returns 是否为可信 continuation assistant 更新
+   */
+  function isContinuationUpdate(event: ChatRuntimeMessageEvent): boolean {
+    if (event.clientId !== 'agent-continuation' || event.agentId !== 'primary') return false;
+    const sessionSnapshot = actorSystem.getSession(event.sessionId)?.getSnapshot();
+    const turnSnapshot = sessionSnapshot?.context.turnRef?.getSnapshot();
+    const agentSnapshot = turnSnapshot?.context.primaryAgentRef?.getSnapshot();
+    return Boolean(
+      sessionSnapshot?.context.checkpointId &&
+        sessionSnapshot.context.checkpointId === turnSnapshot?.context.checkpointId &&
+        sessionSnapshot.context.checkpointId === agentSnapshot?.context.checkpointId &&
+        sessionSnapshot.context.sourceRuntimeId === event.runtimeId &&
+        turnSnapshot?.context.sourceRuntimeId === event.runtimeId &&
+        agentSnapshot?.context.sourceRuntimeId === event.runtimeId &&
+        turnSnapshot.context.turnId === event.turnId &&
+        agentSnapshot.context.address.agentId === event.agentId &&
+        event.message.runtimeId === event.runtimeId &&
+        (!event.message.sessionId || event.message.sessionId === event.sessionId)
+    );
+  }
+
   /** 发布 Runtime 消息新增事件。 */
   function handleMessageCreated(event: ChatRuntimeMessageEvent): void {
     if (!shouldHandle(event)) return;
@@ -95,7 +120,7 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
 
   /** 发布 Runtime 消息更新事件。 */
   function handleMessageUpdated(event: ChatRuntimeMessageEvent): void {
-    if (!shouldHandle(event)) return;
+    if (!shouldHandle(event) && !isContinuationUpdate(event)) return;
     actorSystem.emitSessionEvent(event.sessionId, { type: 'messageUpdated', event });
   }
 
@@ -120,6 +145,25 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
         event: { type: 'runtime.userChoiceRequired', runtimeId: event.runtimeId, interaction: 'userChoice' }
       });
       actorSystem.sendToSession(event.sessionId, { type: 'session.userChoiceRequired', interaction: event.interaction });
+      actorSystem.unregisterRuntime(event.runtimeId);
+      return;
+    }
+    if (event.reason === 'waiting_children') {
+      runtimeStore.setStatus(resolveRuntimeTabId(event.sessionId), 'waiting');
+      actorSystem.send({
+        type: 'runtime.event',
+        runtimeId: event.runtimeId,
+        event: {
+          type: 'runtime.suspended',
+          runtimeId: event.runtimeId,
+          checkpointId: event.checkpointId
+        }
+      });
+      actorSystem.sendToSession(event.sessionId, {
+        type: 'session.waitingChildren',
+        runtimeId: event.runtimeId,
+        checkpointId: event.checkpointId
+      });
       actorSystem.unregisterRuntime(event.runtimeId);
       return;
     }

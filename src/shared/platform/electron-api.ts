@@ -17,6 +17,7 @@ export type {
   ElectronSaveFileOptions,
   ElectronUpdateCheckResult
 } from 'types/electron-api';
+export type { ChatAgentConfirmationSnapshot, ChatAgentResolveConfirmationInput } from 'types/chat-agent';
 
 /**
  * 带稳定错误码的 Electron API 错误。

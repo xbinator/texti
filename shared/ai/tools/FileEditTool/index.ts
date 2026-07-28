@@ -12,6 +12,12 @@ export const editFileToolRegistryEntry = {
   runtime: 'main',
   group: 'file',
   exposure: 'default-writable',
+  executionClass: 'direct',
+  effect: {
+    effect: 'immediate_side_effect',
+    resourceScopeResolver: 'file-path',
+    reversible: false
+  },
   definition: {
     name: EDIT_FILE_TOOL_NAME,
     description:

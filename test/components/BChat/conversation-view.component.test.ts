@@ -17,6 +17,10 @@ vi.mock('@/components/BChat/components/MessageBubble.vue', () => ({
   default: {
     name: 'MessageBubble',
     props: {
+      sessionId: {
+        type: String,
+        default: null
+      },
       message: {
         type: Object,
         required: true
@@ -54,6 +58,8 @@ vi.mock('@/components/BChat/components/MessageBubble.vue', () => ({
 
 /** ConversationView 测试所需 props。 */
 interface ConversationViewTestProps {
+  /** 当前权威 Session。 */
+  sessionId: string | null;
   /** 消息列表 */
   messages: Message[];
   /** 是否处于聊天任务中 */
@@ -183,6 +189,7 @@ describe('ConversationView', (): void => {
   it('hides the back bottom button while loading at the bottom', (): void => {
     const wrapper = mount(ConversationViewForTest, {
       props: {
+        sessionId: 'session-1',
         messages: [],
         loading: true,
         disabled: false
@@ -200,6 +207,7 @@ describe('ConversationView', (): void => {
   it('updates a tool part when status changes without message finished changing', async (): Promise<void> => {
     const wrapper = mount(ConversationViewForTest, {
       props: {
+        sessionId: 'session-1',
         messages: [createAssistantMessage(createQuestionToolPart('inputting'))],
         loading: true,
         disabled: false
@@ -227,6 +235,7 @@ describe('ConversationView', (): void => {
     const messages = [createAssistantMessage(createQuestionToolPart('done', 'awaiting_user_input'))];
     const wrapper = mount(ConversationViewForTest, {
       props: {
+        sessionId: 'session-1',
         messages,
         loading: true,
         disabled: false
@@ -254,6 +263,7 @@ describe('ConversationView', (): void => {
     const message = createAssistantMessage(createQuestionToolPart('done'));
     const wrapper = mount(ConversationViewForTest, {
       props: {
+        sessionId: 'session-1',
         messages: [message],
         loading: true,
         disabled: false
@@ -280,6 +290,7 @@ describe('ConversationView', (): void => {
   it('updates open_widget display when result data changes without status changes', async (): Promise<void> => {
     const wrapper = mount(ConversationViewForTest, {
       props: {
+        sessionId: 'session-1',
         messages: [createAssistantMessage(createOpenWidgetToolPart('上海'))],
         loading: true,
         disabled: false
@@ -306,6 +317,7 @@ describe('ConversationView', (): void => {
   it('updates widget display when render context data changes without status changes', async (): Promise<void> => {
     const wrapper = mount(ConversationViewForTest, {
       props: {
+        sessionId: 'session-1',
         messages: [createAssistantMessage(createOpenWidgetToolPart('上海', 28))],
         loading: false,
         disabled: false
@@ -336,6 +348,7 @@ describe('ConversationView', (): void => {
     const submitActionHandler = vi.fn<(_action: SubmitAction) => Promise<void>>(async (): Promise<void> => undefined);
     const wrapper = mount(ConversationViewForTest, {
       props: {
+        sessionId: 'session-1',
         messages: [createAssistantMessage(createQuestionToolPart('done', 'awaiting_user_input'))],
         loading: false,
         disabled: false,
@@ -358,6 +371,7 @@ describe('ConversationView', (): void => {
     const message = createAssistantMessage(createQuestionToolPart('done'));
     const wrapper = mount(ConversationViewForTest, {
       props: {
+        sessionId: 'session-1',
         messages: [message],
         loading: false,
         disabled: false
@@ -386,6 +400,7 @@ describe('ConversationView', (): void => {
     };
     const wrapper = mount(ConversationViewForTest, {
       props: {
+        sessionId: 'session-1',
         messages,
         loading: true,
         disabled: false,
@@ -410,5 +425,33 @@ describe('ConversationView', (): void => {
     await nextTick();
 
     expect(wrapper.findAll('.message-bubble')[0].text()).toBe('user::enabled:rollback');
+  });
+
+  it('passes the authoritative Session identity to every message bubble', async (): Promise<void> => {
+    const message = createAssistantMessage(createQuestionToolPart('done'));
+    const wrapper = mount(ConversationViewForTest, {
+      props: {
+        sessionId: 'session-initial',
+        messages: [message],
+        loading: false,
+        disabled: false
+      },
+      global: {
+        stubs: {
+          BIcon: true
+        }
+      }
+    });
+
+    expect(wrapper.findComponent({ name: 'MessageBubble' }).props('sessionId')).toBe('session-initial');
+
+    await wrapper.setProps({
+      sessionId: 'session-switched',
+      messages: [message],
+      loading: false,
+      disabled: false
+    });
+
+    expect(wrapper.findComponent({ name: 'MessageBubble' }).props('sessionId')).toBe('session-switched');
   });
 });

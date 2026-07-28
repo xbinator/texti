@@ -13,6 +13,8 @@ import {
   initStore,
   initLogger,
   initMainErrorCollector,
+  chatAgentDelegationService,
+  recoverChatAgentDelegations,
   cleanOldLogs,
   startLogMaintenanceTimer,
   setupAppMenu,
@@ -134,6 +136,9 @@ async function bootstrap(): Promise<void> {
   await initStore();
   // 初始化数据库
   await initDatabase();
+  // durable journal、orphan write 与 Coordinator 必须在 IPC 开放前按固定顺序恢复。
+  await recoverChatAgentDelegations();
+  await chatAgentDelegationService.drainOutbox();
   registerAllIpcHandlers();
   ipcMain.handle('app:consume-open-files', () => pendingOpenFileQueue.consume());
 

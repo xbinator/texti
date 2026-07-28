@@ -42,13 +42,31 @@ export interface SharedToolDefinition {
 }
 
 /** 工具运行时归属。 */
-export type ToolRuntimeOwner = 'main' | 'renderer' | 'sdk';
+export type ToolRuntimeOwner = 'main' | 'renderer' | 'sdk' | 'coordinator';
 
 /** 主进程工具分组。 */
-export type ToolRuntimeGroup = 'read' | 'file' | 'settings' | 'resource' | 'webview';
+export type ToolRuntimeGroup = 'read' | 'file' | 'settings' | 'resource' | 'webview' | 'agent';
 
 /** 工具暴露策略。 */
-export type ToolExposure = 'default-readonly' | 'default-writable' | 'conditional-readonly' | 'conditional-writable';
+export type ToolExposure = 'default-readonly' | 'default-writable' | 'conditional-readonly' | 'conditional-writable' | 'internal';
+
+/** 工具暴露策略查询，包含默认聊天工具聚合视图。 */
+export type ToolExposureQuery = ToolExposure | 'chat-default';
+
+/** 工具调度执行方式。 */
+export type ToolExecutionClass = 'direct' | 'deferred-coordination';
+
+/** 主进程用于冻结 Child 计划的工具副作用事实。 */
+export interface AgentToolEffectMetadata {
+  /** 可观察副作用类别。 */
+  effect: 'pure_read' | 'external_read' | 'staged_file_write' | 'transactional_write' | 'immediate_side_effect' | 'unknown';
+  /** 已注册的资源范围解析器名称。 */
+  resourceScopeResolver: string;
+  /** 事务域提交适配器。 */
+  commitAdapter?: string;
+  /** 完成后的操作是否具有已定义逆操作。 */
+  reversible: boolean;
+}
 
 /** 工具 registry 条目。 */
 export interface ToolRegistryEntry {
@@ -58,6 +76,10 @@ export interface ToolRegistryEntry {
   group: ToolRuntimeGroup;
   /** 工具暴露策略。 */
   exposure: ToolExposure;
+  /** 工具调度执行方式。 */
+  executionClass: ToolExecutionClass;
+  /** 工具副作用与资源范围事实。 */
+  effect: AgentToolEffectMetadata;
   /** AI 工具定义。 */
   definition: SharedToolDefinition;
 }

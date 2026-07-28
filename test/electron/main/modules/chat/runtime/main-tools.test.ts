@@ -18,8 +18,10 @@ import { createMainToolExecutor } from '../../../../../../electron/main/modules/
 const runtime: ActiveChatRuntime = {
   runtimeId: 'runtime-1',
   sessionId: 'session-1',
+  turnId: 'turn-1',
   clientId: 'client-1',
   agentId: 'agent-1',
+  rootRuntimeId: 'runtime-1',
   status: 'running',
   phase: 'streaming',
   abortController: new AbortController(),

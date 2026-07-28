@@ -3,21 +3,13 @@
  * @description Chat Actor 系统与纯策略共享领域类型。
  */
 import type { AIUserChoiceAnswerData, ChatMessageFile, ChatMessageRole } from 'types/chat';
-import type { ChatRuntimeUserInputPart } from 'types/chat-runtime';
+import type { ChatRuntimeAddress, ChatRuntimeUserInputPart } from 'types/chat-runtime';
 
-/**
- * Chat Actor 的完整运行地址。
- */
-export interface ChatActorAddress {
-  /** 会话 ID */
-  sessionId: string;
-  /** 用户轮次 ID */
-  turnId: string;
-  /** Agent ID */
-  agentId: string;
-  /** 主进程 Runtime ID */
-  runtimeId: string;
-}
+/** Renderer 路由地址，与共享 Runtime 地址保持同一契约。 */
+export type ChatActorAddress = ChatRuntimeAddress;
+
+/** 不依赖具体 Runtime 实例的稳定 Agent 地址。 */
+export type ChatAgentAddress = Pick<ChatRuntimeAddress, 'sessionId' | 'turnId' | 'agentId'>;
 
 /**
  * 纯聊天策略所需的最小消息形状。

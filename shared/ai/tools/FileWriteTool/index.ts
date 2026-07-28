@@ -12,6 +12,12 @@ export const writeFileToolRegistryEntry = {
   runtime: 'main',
   group: 'file',
   exposure: 'default-writable',
+  executionClass: 'direct',
+  effect: {
+    effect: 'immediate_side_effect',
+    resourceScopeResolver: 'file-path',
+    reversible: false
+  },
   definition: {
     name: WRITE_FILE_TOOL_NAME,
     description:

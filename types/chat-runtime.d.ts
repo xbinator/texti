@@ -127,18 +127,30 @@ export interface ChatRuntimeModelSelection {
   readonly modelId: string;
 }
 
-/** Send command input. */
-export interface ChatRuntimeSendInput {
-  /** Runtime id allocated by renderer before the command starts. */
+/** Immutable lineage and routing address of one concrete Runtime instance. */
+export interface ChatRuntimeAddress {
+  /** Owning chat session. */
+  sessionId: string;
+  /** Stable turn shared by Runtime continuations. */
+  turnId: string;
+  /** Stable actor identity. */
+  agentId: string;
+  /** Concrete replaceable Runtime identity. */
   runtimeId: string;
-  /** Existing session id; omitted for draft sessions. */
-  sessionId?: string;
+  /** Stable parent actor when this Runtime belongs to a Child. */
+  parentAgentId?: string;
+  /** Runtime that created this delegated execution. */
+  parentRuntimeId?: string;
+  /** Root Runtime of the Turn tree. */
+  rootRuntimeId: string;
+  /** Previous Runtime of the same actor when this is a continuation. */
+  continuationOfRuntimeId?: string;
+}
+
+/** Send command input. */
+export interface ChatRuntimeSendInput extends ChatRuntimeAddress {
   /** Renderer chat panel id. */
   clientId: string;
-  /** Agent id for this turn. */
-  agentId: string;
-  /** Parent runtime id for future multi-agent flows. */
-  parentRuntimeId?: string;
   /** Model selected for this Runtime; falls back to the global chat model when omitted. */
   model?: ChatRuntimeModelSelection;
   /** User message text. */
@@ -174,17 +186,9 @@ export interface ChatRuntimeSendInput {
 }
 
 /** Continue command input for resuming a paused assistant turn. */
-export interface ChatRuntimeContinueInput {
-  /** Runtime id allocated by renderer before the command starts. */
-  runtimeId: string;
-  /** Existing session id. */
-  sessionId: string;
+export interface ChatRuntimeContinueInput extends ChatRuntimeAddress {
   /** Renderer chat panel id. */
   clientId: string;
-  /** Agent id for this turn. */
-  agentId: string;
-  /** Parent runtime id for future multi-agent flows. */
-  parentRuntimeId?: string;
   /** Model selected for this Runtime; falls back to the global chat model when omitted. */
   model?: ChatRuntimeModelSelection;
   /** Current model context window for usage estimation. */
@@ -210,15 +214,9 @@ export interface ChatRuntimeContinueInput {
 }
 
 /** Manual context compaction command input. */
-export interface ChatRuntimeCompactInput {
-  /** Runtime id allocated by renderer before the command starts. */
-  runtimeId: string;
-  /** Existing session id. */
-  sessionId: string;
+export interface ChatRuntimeCompactInput extends ChatRuntimeAddress {
   /** Renderer chat panel id. */
   clientId: string;
-  /** Agent id for this operation. */
-  agentId: string;
   /** Model selected for this Runtime; falls back to the global chat model when omitted. */
   model?: ChatRuntimeModelSelection;
   /** Current model context window used for budgeting. */
@@ -238,17 +236,9 @@ export interface ChatRuntimeCompactInput {
 }
 
 /** Submit-user-choice command input for resuming an awaiting assistant turn from persisted runtime messages. */
-export interface ChatRuntimeSubmitUserChoiceInput {
-  /** Runtime id allocated by renderer before the command starts. */
-  runtimeId: string;
-  /** Existing session id. */
-  sessionId: string;
+export interface ChatRuntimeSubmitUserChoiceInput extends ChatRuntimeAddress {
   /** Renderer chat panel id. */
   clientId: string;
-  /** Agent id for this turn. */
-  agentId: string;
-  /** Parent runtime id for future multi-agent flows. */
-  parentRuntimeId?: string;
   /** Model selected for this Runtime; falls back to the global chat model when omitted. */
   model?: ChatRuntimeModelSelection;
   /** Current model context window for usage estimation. */
@@ -428,17 +418,9 @@ export interface ChatRuntimeEstimateContextInput {
 }
 
 /** Common event envelope fields. */
-export interface ChatRuntimeEventBase {
-  /** Runtime id. */
-  runtimeId: string;
-  /** Session id. */
-  sessionId: string;
+export interface ChatRuntimeEventBase extends ChatRuntimeAddress {
   /** Renderer client id. */
   clientId: string;
-  /** Agent id. */
-  agentId: string;
-  /** Parent runtime id for future multi-agent flows. */
-  parentRuntimeId?: string;
 }
 
 /** Message event emitted when a message is created or updated. */
@@ -530,7 +512,7 @@ export interface ChatRuntimeErrorEvent extends ChatRuntimeEventBase {
 }
 
 /** Runtime 完成原因。 */
-export type ChatRuntimeCompletionReason = 'completed' | 'awaiting_user_input';
+export type ChatRuntimeCompletionReason = 'completed' | 'awaiting_user_input' | 'waiting_children';
 
 /** Runtime complete event. */
 export type ChatRuntimeCompleteEvent = ChatRuntimeEventBase &
@@ -548,6 +530,16 @@ export type ChatRuntimeCompleteEvent = ChatRuntimeEventBase &
         reason: Extract<ChatRuntimeCompletionReason, 'awaiting_user_input'>;
         /** 等待中的持久化交互。 */
         interaction: ChatPendingInteraction;
+        /** Optional usage reported by provider. */
+        usage?: AIUsage;
+      }
+    | {
+        /** Runtime A 已持久化委派并释放普通写锁。 */
+        reason: Extract<ChatRuntimeCompletionReason, 'waiting_children'>;
+        /** 持有逻辑 Turn fence 的 Checkpoint。 */
+        checkpointId: string;
+        /** Child 等待态不携带用户交互。 */
+        interaction?: never;
         /** Optional usage reported by provider. */
         usage?: AIUsage;
       }

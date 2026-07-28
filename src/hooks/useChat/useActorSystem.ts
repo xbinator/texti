@@ -5,6 +5,8 @@
 import type { InjectionKey } from 'vue';
 import { inject, onScopeDispose, provide } from 'vue';
 import { createChatActorSystem, type ChatActorSystem } from '@/ai/chat/actorSystem';
+import { useAgentDelegationEvents } from '@/hooks/useChat/useAgentDelegationEvents';
+import { useAgentTaskEvents } from '@/hooks/useChat/useAgentTaskEvents';
 import { useRuntimeEvents } from '@/hooks/useChat/useRuntimeEvents';
 import { useRuntimeRecovery } from '@/hooks/useChat/useRuntimeRecovery';
 
@@ -34,6 +36,8 @@ export function useProvideActorSystem(): ChatActorSystem {
   const actorSystem = getApplicationChatActorSystem();
   provide(CHAT_ACTOR_SYSTEM_KEY, actorSystem);
   useRuntimeEvents(actorSystem);
+  useAgentDelegationEvents(actorSystem);
+  useAgentTaskEvents();
   useRuntimeRecovery(actorSystem);
 
   onScopeDispose((): void => {
@@ -60,6 +64,7 @@ export function useActorSystem(): ChatActorSystem {
   const localActorSystem = createChatActorSystem();
   localActorSystem.start();
   useRuntimeEvents(localActorSystem);
+  useAgentDelegationEvents(localActorSystem);
   onScopeDispose((): void => localActorSystem.stop());
   return localActorSystem;
 }

@@ -5,9 +5,11 @@
 <template>
   <div ref="containerRef" :class="bem('container')">
     <div :class="bem('conversation-container')">
+      <AgentTaskProjectionNotice :session-id="activeSessionId" />
       <ConversationView
         ref="conversationRef"
         v-model:messages="messages"
+        :session-id="activeSessionId"
         :loading="loading"
         :disabled="messageInteractionDisabled"
         :on-load-history="handleLoadHistory"
@@ -19,7 +21,7 @@
         @rollback="handleRollback"
       >
         <template #footer>
-          <ConfirmationSheet :request="confirmationController.currentConfirmationRequest.value" @action="handleConfirmationSheetAction" />
+          <ConfirmationSheet :confirmation="confirmationController.currentConfirmation.value" @action="handleConfirmationSheetAction" />
         </template>
       </ConversationView>
 
@@ -73,8 +75,9 @@
 </template>
 
 <script setup lang="ts">
+import type { ConfirmationSheetActionPayload } from './components/ConfirmationSheet.vue';
 import type { BChatProps, BChatResetDraftOptions, BChatRuntimeSourceStatus, BChatRuntimeStatusChange, Message } from './utils/types';
-import type { ChatMessageConfirmationAction, ChatSession } from 'types/chat';
+import type { ChatSession } from 'types/chat';
 import type { ChatRuntimeContextUsageSnapshot } from 'types/chat-runtime';
 import { computed, h, onUnmounted, provide, ref, toRef, watch } from 'vue';
 import { useRouter } from 'vue-router';
@@ -83,15 +86,19 @@ import type { ChatSessionUIEvent } from '@/ai/chat/sessionEvents';
 import type BSmartEditor from '@/components/BSmart/Editor.vue';
 import type { BSmartEditorExpose, SlashCommandOption } from '@/components/BSmart/types';
 import { useActorSystem } from '@/hooks/useChat/useActorSystem';
+import { useAgentConfirmationEvents } from '@/hooks/useChat/useAgentConfirmationEvents';
 import { useNavigate } from '@/hooks/useNavigate';
 import { getElectronAPI } from '@/shared/platform/electron-api';
 import { useProviderStore } from '@/stores/ai/provider';
 import type { SelectedModel } from '@/stores/ai/serviceModel';
 import { useSkillStore } from '@/stores/ai/skill';
+import { useChatAgentTaskStore } from '@/stores/chat/agentTask';
+import { useChatConfirmationQueueStore } from '@/stores/chat/confirmationQueue';
 import { useChatSessionStore } from '@/stores/chat/session';
 import { useCommandPanelStore } from '@/stores/ui/commandPanel';
 import { asyncTo } from '@/utils/asyncTo';
 import { createNamespace } from '@/utils/namespace';
+import AgentTaskProjectionNotice from './components/AgentTaskProjectionNotice.vue';
 import ConfirmationSheet from './components/ConfirmationSheet.vue';
 import ConversationView from './components/ConversationView.vue';
 import ImagePreview from './components/ImagePreview.vue';
@@ -189,6 +196,10 @@ const conversationRef = ref<InstanceType<typeof ConversationView>>();
 const branchingMessageId = ref<string>();
 /** 确认控制器，管理工具调用的用户确认流程 */
 const confirmationController = createChatConfirmationController();
+/** 应用级 Runtime/Agent confirmation queue。 */
+const confirmationQueue = useChatConfirmationQueueStore();
+/** 订阅 Main 持久化 confirmation 事实并恢复 Renderer 队列。 */
+useAgentConfirmationEvents();
 /** 提供给早期初始化回调的工作流忙碌镜像。 */
 const workflowLoading = ref<boolean>(false);
 /** 会话 ID、历史消息与自动命名运行时态。 */
@@ -211,10 +222,21 @@ const {
   captureAutoNameSnapshot,
   scheduleAutoName
 } = sessionRuntime;
+/** 应用级 Child Task Renderer 投影。 */
+const agentTaskStore = useChatAgentTaskStore();
 watch(
   activeSessionId,
   (sessionId: string | null): void => {
     modelSessionId.value = sessionId;
+  },
+  { immediate: true }
+);
+watch(
+  activeSessionId,
+  (sessionId: string | null): void => {
+    if (!sessionId) return;
+    // 只使用运行时权威 activeSessionId，覆盖内部首轮创建但宿主尚未回写的窗口。
+    agentTaskStore.ensureSession(sessionId);
   },
   { immediate: true }
 );
@@ -250,11 +272,52 @@ const { workspaceRoot, getActiveTools, syncAIResources, getSkillContentHashes, r
 
 /**
  * 处理底部确认弹窗操作。
- * @param action - 用户操作（approve/approve-session/approve-always/cancel）
+ * @param payload - 绑定点击时实际展示项的用户操作
  */
-function handleConfirmationSheetAction(action: ChatMessageConfirmationAction): void {
-  const confirmationId = confirmationController.currentConfirmationId.value;
-  if (!confirmationId) return;
+async function handleConfirmationSheetAction(payload: ConfirmationSheetActionPayload): Promise<void> {
+  const confirmation = confirmationQueue.items[payload.confirmationId];
+  const currentConfirmation = confirmationQueue.current;
+  if (
+    !confirmation ||
+    !currentConfirmation ||
+    currentConfirmation.confirmationId !== payload.confirmationId ||
+    currentConfirmation.source !== payload.source ||
+    confirmation.source !== payload.source ||
+    confirmation.confirmationId !== payload.confirmationId
+  ) {
+    return;
+  }
+  const { action } = payload;
+
+  if (confirmation.source === 'agent') {
+    if (
+      payload.expectedVersion === undefined ||
+      confirmation.snapshot.confirmationId !== payload.confirmationId ||
+      confirmation.snapshot.status !== 'pending' ||
+      confirmation.snapshot.version !== payload.expectedVersion
+    ) {
+      return;
+    }
+    const [requestError, response] = await asyncTo(
+      getElectronAPI().chatAgentResolveConfirmation({
+        confirmationId: confirmation.confirmationId,
+        expectedVersion: confirmation.snapshot.version,
+        decision: action === 'cancel' ? 'rejected' : 'approved'
+      })
+    );
+    if (requestError || !response?.ok) {
+      interactionAPI.showToast({
+        type: 'error',
+        content: requestError?.message ?? response?.error ?? '提交 Child Agent 确认失败'
+      });
+      return;
+    }
+    // IPC response 本身也是权威投影；event 丢失时仍可立即收敛当前窗口。
+    confirmationQueue.applyAgent(response.data);
+    return;
+  }
+
+  const { confirmationId } = confirmation;
 
   if (action === 'approve') {
     confirmationController.approveConfirmation(confirmationId);

@@ -47,4 +47,42 @@ describe('turnMachine', (): void => {
     expect(actor.getSnapshot().matches('cancelled')).toBe(true);
     expect(agentRef?.getSnapshot().status).not.toBe('active');
   });
+
+  it('projects waiting children and only resumes or cancels for the matching checkpoint', (): void => {
+    const actor = createActor(turnMachine, {
+      input: { sessionId: 'session-1', turnId: 'turn-1', intent: SUBMIT_INTENT }
+    });
+    actor.start();
+    actor.send({ type: 'turn.prepared', request: {} });
+    const agentRef = actor.getSnapshot().context.primaryAgentRef;
+    agentRef?.send({ type: 'runtime.started', runtimeId: 'runtime-a' });
+    actor.send({ type: 'turn.waitingChildren', runtimeId: 'runtime-a', checkpointId: 'checkpoint-1' });
+
+    expect(actor.getSnapshot().matches('waitingChildren')).toBe(true);
+    expect(actor.getSnapshot().hasTag('abortable')).toBe(true);
+    expect(actor.getSnapshot().hasTag('waitingForUser')).toBe(false);
+    expect(actor.getSnapshot().context.checkpointId).toBe('checkpoint-1');
+
+    actor.send({ type: 'turn.completed', runtimeId: 'runtime-a' });
+    actor.send({ type: 'turn.resumeStarted', checkpointId: 'checkpoint-other', runtimeId: 'runtime-b-other' });
+    expect(actor.getSnapshot().matches('waitingChildren')).toBe(true);
+    actor.send({ type: 'turn.resumeStarted', checkpointId: 'checkpoint-1', runtimeId: 'runtime-b' });
+    expect(actor.getSnapshot().matches('running')).toBe(true);
+    expect(agentRef?.getSnapshot().context.runtimeId).toBe('runtime-b');
+  });
+
+  it('accepts a persisted checkpoint terminal directly while waiting children', (): void => {
+    const actor = createActor(turnMachine, {
+      input: { sessionId: 'session-1', turnId: 'turn-1', intent: SUBMIT_INTENT }
+    });
+    actor.start();
+    actor.send({ type: 'turn.prepared', request: {} });
+    actor.getSnapshot().context.primaryAgentRef?.send({ type: 'runtime.started', runtimeId: 'runtime-a' });
+    actor.send({ type: 'turn.waitingChildren', runtimeId: 'runtime-a', checkpointId: 'checkpoint-1' });
+
+    actor.send({ type: 'turn.checkpointInterrupted', checkpointId: 'checkpoint-other' });
+    expect(actor.getSnapshot().matches('waitingChildren')).toBe(true);
+    actor.send({ type: 'turn.checkpointInterrupted', checkpointId: 'checkpoint-1' });
+    expect(actor.getSnapshot().matches('interrupted')).toBe(true);
+  });
 });

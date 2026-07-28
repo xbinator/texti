@@ -25,7 +25,14 @@ vi.mock('@/shared/platform/electron-api', () => ({
 
 /** 创建包含三类待处理请求的恢复快照。 */
 function createSnapshot(): ChatRuntimeRecoverySnapshot {
-  const base = { runtimeId: 'runtime-1', sessionId: 'session-1', clientId: 'bchat', agentId: 'primary' };
+  const base = {
+    runtimeId: 'runtime-1',
+    sessionId: 'session-1',
+    turnId: 'turn-1',
+    clientId: 'bchat',
+    agentId: 'primary',
+    rootRuntimeId: 'runtime-1'
+  };
   return {
     ...base,
     phase: 'streaming',
@@ -49,8 +56,11 @@ function createSnapshot(): ChatRuntimeRecoverySnapshot {
 describe('recoverRuntimes', (): void => {
   beforeEach((): void => {
     setActivePinia(createPinia());
+    electronAPIMock.chatRuntimeListActive.mockReset();
     electronAPIMock.chatRuntimeAbort.mockReset();
     electronAPIMock.chatRuntimeAbort.mockResolvedValue({ ok: true, data: {} });
+    electronAPIMock.chatRuntimeSubmitToolResult.mockReset();
+    electronAPIMock.chatRuntimeSubmitBridgeResponse.mockReset();
   });
 
   it('hydrates actors, replays confirmation, and resolves degraded renderer requests', async (): Promise<void> => {
@@ -177,6 +187,18 @@ describe('recoverRuntimes', (): void => {
     expect(runtimeStore.records['chat:session-1']).toBeUndefined();
     expect(runtimeStore.controllers.has('chat:session-1')).toBe(false);
     expect(system.getSession('session-1')?.getSnapshot().matches('waitingForUser')).toBe(true);
+    system.stop();
+  });
+
+  it('only rebuilds active runtimes and leaves delegation checkpoint recovery to the application hook', async (): Promise<void> => {
+    electronAPIMock.chatRuntimeListActive.mockResolvedValue({ ok: true, data: [] });
+    const system = createChatActorSystem();
+    system.start();
+
+    await recoverRuntimes(system);
+
+    expect(electronAPIMock.chatRuntimeListActive).toHaveBeenCalledTimes(2);
+    expect(system.actor.getSnapshot().context.runtimeRoutes.size).toBe(0);
     system.stop();
   });
 });

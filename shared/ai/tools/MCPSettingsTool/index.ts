@@ -24,6 +24,12 @@ export const getMcpSettingsToolRegistryEntry = {
   runtime: 'main',
   group: 'settings',
   exposure: 'conditional-readonly',
+  executionClass: 'direct',
+  effect: {
+    effect: 'pure_read',
+    resourceScopeResolver: 'mcp-settings',
+    reversible: true
+  },
   definition: {
     name: GET_MCP_SETTINGS_TOOL_NAME,
     description: '获取当前 MCP 配置，包括本地 stdio server、命令、参数、环境变量、allowlist 与超时设置。',
@@ -41,6 +47,12 @@ export const addMcpServerToolRegistryEntry = {
   runtime: 'main',
   group: 'settings',
   exposure: 'conditional-writable',
+  executionClass: 'direct',
+  effect: {
+    effect: 'immediate_side_effect',
+    resourceScopeResolver: 'mcp-server',
+    reversible: false
+  },
   definition: {
     name: ADD_MCP_SERVER_TOOL_NAME,
     description: '新增一个本地 stdio MCP server 配置。该工具只写入配置，不会立即执行 server。',
@@ -72,6 +84,12 @@ export const updateMcpServerToolRegistryEntry = {
   runtime: 'main',
   group: 'settings',
   exposure: 'conditional-writable',
+  executionClass: 'direct',
+  effect: {
+    effect: 'immediate_side_effect',
+    resourceScopeResolver: 'mcp-server',
+    reversible: false
+  },
   definition: {
     name: UPDATE_MCP_SERVER_TOOL_NAME,
     description: '更新一个本地 stdio MCP server 配置。',
@@ -110,6 +128,12 @@ export const removeMcpServerToolRegistryEntry = {
   runtime: 'main',
   group: 'settings',
   exposure: 'conditional-writable',
+  executionClass: 'direct',
+  effect: {
+    effect: 'immediate_side_effect',
+    resourceScopeResolver: 'mcp-server',
+    reversible: false
+  },
   definition: {
     name: REMOVE_MCP_SERVER_TOOL_NAME,
     description: '删除一个本地 MCP server 配置。',
@@ -134,6 +158,12 @@ export const refreshMcpDiscoveryToolRegistryEntry = {
   runtime: 'main',
   group: 'settings',
   exposure: 'conditional-writable',
+  executionClass: 'direct',
+  effect: {
+    effect: 'immediate_side_effect',
+    resourceScopeResolver: 'mcp-server',
+    reversible: false
+  },
   definition: {
     name: REFRESH_MCP_DISCOVERY_TOOL_NAME,
     description: '刷新指定 MCP server 的工具发现缓存。该操作会在本地启动配置的 stdio MCP server 并执行 tools/list。',

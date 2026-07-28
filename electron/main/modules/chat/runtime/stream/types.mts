@@ -3,7 +3,7 @@
  * @description ChatRuntime 流式执行器内部类型。
  */
 import type { ChatModelResolver } from '../model/resolver.mjs';
-import type { ChatRuntimeMainToolExecutor, ChatRuntimeRendererToolExecutor } from '../types.mjs';
+import type { ActiveChatRuntime, ChatRuntimeMainToolExecutor, ChatRuntimeRendererToolExecutor } from '../types.mjs';
 import type { AIRequestOptions, AIServiceError, AIStreamFinishReason, AIStreamResult, AIUsage, AIToolExecutionResult } from 'types/ai';
 
 /** ChatRuntime 传给 AI 服务的内部调用策略。 */
@@ -23,6 +23,44 @@ export type RuntimeStreamText = (
   callOptions: RuntimeStreamCallOptions
 ) => Promise<[AIServiceError] | [undefined, AIStreamResult]>;
 
+/** 工具结果或执行器的实际来源。 */
+export type RuntimeToolGuardSource = 'provider' | 'main' | 'renderer' | 'unknown';
+
+/** 强制工具授权钩子的最小输入。 */
+export interface RuntimeToolGuardInput {
+  /** 当前完整 Runtime 地址和易失状态。 */
+  runtime: ActiveChatRuntime;
+  /** Provider 工具调用 ID。 */
+  toolCallId: string;
+  /** Provider 工具名称。 */
+  toolName: string;
+  /** Provider 工具输入。 */
+  input: unknown;
+  /** 待接受结果或待调用 executor 的来源。 */
+  source: RuntimeToolGuardSource;
+}
+
+/**
+ * 强制工具授权函数。
+ * null 表示允许继续；返回工具结果表示在任何副作用前拒绝。
+ */
+export type RuntimeToolGuard = (input: RuntimeToolGuardInput) => Promise<AIToolExecutionResult | null>;
+
+/** 主进程工具安全执行后的规范化观察输入。 */
+export interface RuntimeMainToolObservation {
+  /** 执行工具的当前 Runtime。 */
+  readonly runtime: ActiveChatRuntime;
+  /** Provider 工具调用 ID。 */
+  readonly toolCallId: string;
+  /** 主进程工具名称。 */
+  readonly toolName: string;
+  /** 已完成异常与超时归一化的最终结果。 */
+  readonly result: AIToolExecutionResult;
+}
+
+/** 主进程工具最终结果观察器。 */
+export type RuntimeMainToolObserver = (input: RuntimeMainToolObservation) => Promise<void> | void;
+
 /** Runtime 流式执行器依赖。 */
 export interface RuntimeStreamExecutorDependencies {
   /** 聊天模型解析器。 */
@@ -33,6 +71,10 @@ export interface RuntimeStreamExecutorDependencies {
   executeRendererTool?: ChatRuntimeRendererToolExecutor;
   /** 主进程工具执行函数。 */
   executeMainTool?: ChatRuntimeMainToolExecutor;
+  /** 主进程工具安全执行完成后的可选观察器。 */
+  observeMainTool?: RuntimeMainToolObserver;
+  /** Provider 结果或本地 executor 之前的强制授权钩子。 */
+  guardToolCall?: RuntimeToolGuard;
   /** Renderer 本地工具超时时间。 */
   rendererToolTimeoutMs?: number;
 }
@@ -97,6 +139,8 @@ export interface RuntimeToolCallChunk {
   toolName: string;
   /** 工具输入。 */
   input: unknown;
+  /** Provider 返回的工具调用元数据。 */
+  providerMetadata?: unknown;
 }
 
 /** AI SDK 工具输入开始 chunk。 */
@@ -107,6 +151,8 @@ export interface RuntimeToolInputStartChunk {
   toolCallId: string;
   /** 工具名称。 */
   toolName: string;
+  /** Provider 返回的工具调用元数据。 */
+  providerMetadata?: unknown;
 }
 
 /** AI SDK 工具输入增量 chunk。 */

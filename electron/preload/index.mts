@@ -13,6 +13,7 @@ import type {
   AIStreamToolInputStartChunk,
   AIStreamToolResultChunk
 } from 'types/ai';
+import type { ChatAgentApplicationEvent } from 'types/chat-agent';
 import type {
   ChatRuntimeBridgeRequestEvent,
   ChatRuntimeConfirmationRequestEvent,
@@ -25,12 +26,7 @@ import type {
   ChatRuntimeToolCancelledEvent,
   ChatRuntimeToolRequestEvent
 } from 'types/chat-runtime';
-import type {
-  ElectronAPI,
-  ElectronShellCommandOutputChunk,
-  ElectronShellRunEventEnvelope,
-  FileChangeEvent
-} from 'types/electron-api';
+import type { ElectronAPI, ElectronShellCommandOutputChunk, ElectronShellRunEventEnvelope, FileChangeEvent } from 'types/electron-api';
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { getAutoDefaultCapability } from '../main/modules/shell/interaction/capability.mjs';
 import { formatPreloadErrorMessage, shouldIgnorePreloadError } from './error-collector.mjs';
@@ -656,6 +652,41 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.on('chat:runtime:complete', handler);
     return () => {
       ipcRenderer.removeListener('chat:runtime:complete', handler);
+    };
+  },
+
+  // ==================== Chat Agent 委派操作 ====================
+
+  /** 查询公开的活跃 Checkpoint 投影。 */
+  chatAgentListActive: () => ipcRenderer.invoke('chat:agent:list-active'),
+
+  /** 按 Session 查询公开 Task 轻量投影。 */
+  chatAgentListTasks: (input) => ipcRenderer.invoke('chat:agent:list-tasks', input),
+
+  /** 定向查询公开 Task 详情或 tombstone。 */
+  chatAgentGetTask: (input) => ipcRenderer.invoke('chat:agent:get-task', input),
+
+  /** 查询公开的 pending confirmation 投影。 */
+  chatAgentListConfirmations: () => ipcRenderer.invoke('chat:agent:list-confirmations'),
+
+  /** 请求 Main 使用 version CAS 决议 confirmation。 */
+  chatAgentResolveConfirmation: (input) => ipcRenderer.invoke('chat:agent:resolve-confirmation', input),
+
+  /** 请求 Main CAS 启动 Primary Runtime B。 */
+  chatAgentResumePrimary: (input) => ipcRenderer.invoke('chat:agent:resume-primary', input),
+
+  /** 请求 Checkpoint cooperative cancellation。 */
+  chatAgentCancelCheckpoint: (input) => ipcRenderer.invoke('chat:agent:cancel-checkpoint', input),
+
+  /** 请求单 Task cooperative cancellation。 */
+  chatAgentCancelTask: (input) => ipcRenderer.invoke('chat:agent:cancel-task', input),
+
+  /** 监听持久化 Agent application event。 */
+  chatAgentOnEvent: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: ChatAgentApplicationEvent): void => callback(payload);
+    ipcRenderer.on('chat:agent:event', handler);
+    return (): void => {
+      ipcRenderer.removeListener('chat:agent:event', handler);
     };
   },
 

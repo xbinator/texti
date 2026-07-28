@@ -80,8 +80,8 @@ flowchart TD
 | `src/components/BChat/hooks/useChatRuntimeLauncher.ts`  | 准备请求、分配 Runtime ID、在 IPC 前注册 Actor 地址和 capability、升级恢复 capability。 | 监听 Runtime 事件或执行 IPC 命令。        |
 | `src/components/BChat/hooks/useChatRuntime.ts`          | 把 `send`、`continue`、`abort` 等操作转换为无状态 IPC 命令。                            | 订阅事件、保存消息镜像或拥有 Actor 状态。 |
 | `src/hooks/useChatActorSystem.ts`                       | 在应用根级创建、provide 和销毁唯一 Chat Actor system，并挂载事件监听与恢复。            | 具体 Session UI。                         |
-| `src/hooks/useChatRuntimeEvents.ts`                     | 监听所有 Runtime 事件，按地址分发 Actor 事件，执行 renderer tool、确认和 bridge 请求。  | 消息持久化或组件本地状态。                |
-| `src/hooks/useChatRuntimeRecovery.ts`                   | 查询活动 Runtime，恢复路由与待处理 renderer 请求。                                      | 恢复完整消息历史或猜测原始 UI。           |
+| `src/hooks/useChat/useRuntimeEvents.ts`                 | 监听所有 Runtime 事件，按地址分发 Actor 事件，执行 renderer tool、确认和 bridge 请求。  | 消息持久化或组件本地状态。                |
+| `src/hooks/useChat/useRuntimeRecovery.ts`               | 查询活动 Runtime，恢复路由与待处理 renderer 请求。                                      | 恢复完整消息历史或猜测原始 UI。           |
 | `src/ai/chat/actorSystem.ts`                            | 提供 Supervisor、Runtime 路由、capability registry 和 Session UI event bus 外观。       | 执行模型流或持久化消息。                  |
 | `src/ai/chat/machine/supervisorMachine.ts`              | 持有 Session actor 与 Runtime 地址路由。                                                | Session 内工作流细节。                    |
 | `src/ai/chat/machine/sessionMachine.ts`                 | 管理当前 Turn、输入门禁、等待、取消和回滚状态。                                         | Runtime 工具执行。                        |

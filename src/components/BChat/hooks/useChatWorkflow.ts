@@ -303,11 +303,11 @@ export function useChatWorkflow(options: UseChatWorkflowOptions): UseChatWorkflo
     try {
       await ensurePreparedModel(options.activeSessionId.value, prepared);
       await handleBeforeRegenerate(sourceMessages);
-      const runtimeId = runtimeLauncher.start(prepared);
+      const runtimeAddress = runtimeLauncher.start(prepared);
+      const { runtimeId } = runtimeAddress;
       managedRuntimeId = runtimeId;
       const result = await chatRuntime.continueTurn({
-        runtimeId,
-        sessionId: options.activeSessionId.value,
+        ...runtimeAddress,
         messages: sourceMessages,
         ...prepared.config
       });
@@ -363,11 +363,11 @@ export function useChatWorkflow(options: UseChatWorkflowOptions): UseChatWorkflo
       }
 
       await ensurePreparedModel(sessionId, prepared);
-      const runtimeId = runtimeLauncher.start(prepared);
+      const runtimeAddress = runtimeLauncher.start(prepared);
+      const { runtimeId } = runtimeAddress;
       managedRuntimeId = runtimeId;
       const result = await chatRuntime.compact({
-        runtimeId,
-        sessionId,
+        ...runtimeAddress,
         ...prepared.config
       });
       if (!isCurrentOperation(operationId)) return;
@@ -417,11 +417,11 @@ export function useChatWorkflow(options: UseChatWorkflowOptions): UseChatWorkflo
       if (input.clearDraft === true) options.clearInput();
       options.scrollToBottom();
 
-      const runtimeId = runtimeLauncher.start(prepared);
+      const runtimeAddress = runtimeLauncher.start(prepared);
+      const { runtimeId } = runtimeAddress;
       managedRuntimeId = runtimeId;
       const result = await chatRuntime.send({
-        runtimeId,
-        sessionId,
+        ...runtimeAddress,
         content: input.userMessage.content,
         parts: input.parts,
         files: input.userMessage.files,
@@ -559,6 +559,9 @@ export function useChatWorkflow(options: UseChatWorkflowOptions): UseChatWorkflo
     const runtimeId = options.sessionActor.activeRuntimeId.value;
     const abortedSessionId = options.activeSessionId.value;
     options.sessionActor.cancel();
+    const sessionSnapshot = abortedSessionId ? options.actorSystem.getSession(abortedSessionId)?.getSnapshot() : undefined;
+    // waitingChildren 只能由持久化 Checkpoint 取消事件收敛；不得 abort 已释放的 Runtime A 或本地宣布成功。
+    if (sessionSnapshot?.matches('cancellingChildren')) return;
     try {
       if (!hasCurrentSessionCommandRuntime() && (await abortPendingUserChoiceIfNeeded())) {
         options.sessionActor.markRuntimeCancelled();

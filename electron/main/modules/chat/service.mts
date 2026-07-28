@@ -22,6 +22,7 @@ import { nanoid } from 'nanoid';
 import { dbExecute, dbSelect, transaction } from '../database/service.mjs';
 import { createSessionBranchData, type SessionBranchData } from './runtime/branch.mjs';
 import { removeInvalidCheckpoints } from './runtime/compaction/topology.mjs';
+import { assertSessionHistoryWritable } from './runtime/infrastructure/locks.mjs';
 
 // ==================== 常量 ====================
 
@@ -554,9 +555,11 @@ class ChatSessionManager {
    * 创建截至目标助手消息的独立会话分支。
    * @param sourceSessionId - 源会话 ID
    * @param targetMessageId - 目标助手消息 ID
+   * @param ownerCheckpointId - 内部 continuation owner；Renderer 不得传入
    * @returns 已原子写入的新会话
    */
-  branchSession(sourceSessionId: string, targetMessageId: string): ChatSession {
+  branchSession(sourceSessionId: string, targetMessageId: string, ownerCheckpointId?: string): ChatSession {
+    assertSessionHistoryWritable(sourceSessionId, ownerCheckpointId);
     return transaction((): ChatSession => {
       const sourceSession = this.getSessionById(sourceSessionId);
       if (!sourceSession) throw new Error('找不到源聊天会话');
@@ -644,7 +647,13 @@ class ChatSessionManager {
       );
   }
 
-  addMessage(message: ChatMessageRecord): void {
+  /**
+   * 新增聊天消息。
+   * @param message - 要新增的聊天消息
+   * @param ownerCheckpointId - 内部 continuation owner；Renderer 不得传入
+   */
+  addMessage(message: ChatMessageRecord, ownerCheckpointId?: string): void {
+    assertSessionHistoryWritable(message.sessionId, ownerCheckpointId);
     transaction(() => {
       dbExecute(UPSERT_MESSAGE_SQL, buildMessageUpsertParams(message));
       dbExecute(UPDATE_SESSION_LAST_MESSAGE_AT_SQL, [message.createdAt, message.sessionId]);
@@ -660,8 +669,10 @@ class ChatSessionManager {
    * 更新或创建单条消息，不更新会话用量汇总。
    * 用于流式 assistant 草稿和硬中断恢复回写。
    * @param message - 要更新的聊天消息。
+   * @param ownerCheckpointId - 内部 continuation owner；Renderer 不得传入
    */
-  updateMessage(message: ChatMessageRecord): void {
+  updateMessage(message: ChatMessageRecord, ownerCheckpointId?: string): void {
+    assertSessionHistoryWritable(message.sessionId, ownerCheckpointId);
     transaction(() => {
       // 查询当前消息已有的用量记录，用于后续计算用量差值
       let previousMessageUsage: AIUsage | undefined;
@@ -687,8 +698,10 @@ class ChatSessionManager {
    * 删除指定会话中的单条消息。
    * @param sessionId - 会话 ID。
    * @param messageId - 消息 ID。
+   * @param ownerCheckpointId - 内部 continuation owner；Renderer 不得传入
    */
-  deleteMessage(sessionId: string, messageId: string): void {
+  deleteMessage(sessionId: string, messageId: string, ownerCheckpointId?: string): void {
+    assertSessionHistoryWritable(sessionId, ownerCheckpointId);
     dbExecute(DELETE_MESSAGE_SQL, [sessionId, messageId]);
   }
 
@@ -696,8 +709,10 @@ class ChatSessionManager {
    * 原子替换会话消息，并在写入前清理截断后依赖不完整的 checkpoint 链。
    * @param sessionId - 会话 ID
    * @param messages - 完整消息级截断结果
+   * @param ownerCheckpointId - 内部 continuation owner；Renderer 不得传入
    */
-  setSessionMessages(sessionId: string, messages: ChatMessageRecord[]): void {
+  setSessionMessages(sessionId: string, messages: ChatMessageRecord[], ownerCheckpointId?: string): void {
+    assertSessionHistoryWritable(sessionId, ownerCheckpointId);
     const normalizedMessages = removeInvalidCheckpoints(messages);
     transaction(() => {
       dbExecute(DELETE_MESSAGES_BY_SESSION_SQL, [sessionId]);
@@ -714,7 +729,13 @@ class ChatSessionManager {
 
   // ======== Delete ========
 
-  deleteSession(sessionId: string): void {
+  /**
+   * 删除会话及其消息。
+   * @param sessionId - 会话 ID
+   * @param ownerCheckpointId - 内部 continuation owner；Renderer 不得传入
+   */
+  deleteSession(sessionId: string, ownerCheckpointId?: string): void {
+    assertSessionHistoryWritable(sessionId, ownerCheckpointId);
     transaction(() => {
       dbExecute(DELETE_MESSAGES_BY_SESSION_SQL, [sessionId]);
       dbExecute(DELETE_SESSION_SQL, [sessionId]);

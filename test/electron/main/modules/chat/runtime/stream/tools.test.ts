@@ -15,8 +15,10 @@ import {
 const runtime: ActiveChatRuntime = {
   runtimeId: 'runtime-timeout',
   sessionId: 'session-timeout',
+  turnId: 'turn-timeout',
   clientId: 'client-timeout',
   agentId: 'agent-timeout',
+  rootRuntimeId: 'runtime-timeout',
   status: 'running',
   phase: 'streaming',
   abortController: new AbortController(),

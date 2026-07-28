@@ -21,8 +21,10 @@ function createRecoverySnapshot(waiting = false): ChatRuntimeRecoverySnapshot {
   return {
     runtimeId: 'runtime-recovered',
     sessionId: 'session-1',
+    turnId: 'turn-recovered',
     clientId: 'bchat',
     agentId: 'primary',
+    rootRuntimeId: 'runtime-recovered',
     phase: 'streaming',
     createdAt: 1,
     pendingRequests: waiting
@@ -32,8 +34,10 @@ function createRecoverySnapshot(waiting = false): ChatRuntimeRecoverySnapshot {
             event: {
               runtimeId: 'runtime-recovered',
               sessionId: 'session-1',
+              turnId: 'turn-recovered',
               clientId: 'bchat',
               agentId: 'primary',
+              rootRuntimeId: 'runtime-recovered',
               confirmationId: 'confirmation-1',
               request: { toolName: 'write_file', title: '写入文件', description: '是否写入？', riskLevel: 'write' }
             }
@@ -208,5 +212,61 @@ describe('sessionMachine', (): void => {
     waitingActor.send({ type: 'session.recoverRuntime', snapshot: createRecoverySnapshot(true) });
     expect(waitingActor.getSnapshot().matches('waitingForUser')).toBe(true);
     expect(waitingActor.getSnapshot().context.turnRef?.getSnapshot().context.primaryAgentRef?.getSnapshot().matches('waiting')).toBe(true);
+  });
+
+  it('keeps waiting children busy without accepting input and confirms persisted cancellation', (): void => {
+    const actor = createActor(sessionMachine, { input: { sessionId: 'session-1' } });
+    actor.start();
+    actor.send({ type: 'session.submit', input: SUBMIT_INPUT });
+    actor.send({ type: 'session.prepared' });
+    const turn = actor.getSnapshot().context.turnRef;
+    const runtimeId = 'runtime-a';
+    turn?.getSnapshot().context.primaryAgentRef?.send({ type: 'runtime.started', runtimeId });
+    actor.send({ type: 'session.waitingChildren', runtimeId, checkpointId: 'checkpoint-1' });
+
+    expect(actor.getSnapshot().matches('waitingChildren')).toBe(true);
+    expect(actor.getSnapshot().hasTag('busy')).toBe(true);
+    expect(actor.getSnapshot().hasTag('abortable')).toBe(true);
+    expect(actor.getSnapshot().hasTag('acceptsInput')).toBe(false);
+    actor.send({ type: 'session.submit', input: { ...SUBMIT_INPUT, messageId: 'user-2' } });
+    expect(actor.getSnapshot().matches('waitingChildren')).toBe(true);
+
+    actor.send({ type: 'session.cancelRequested' });
+    expect(actor.getSnapshot().matches('cancellingChildren')).toBe(true);
+    actor.send({ type: 'session.checkpointCancelled', checkpointId: 'checkpoint-other' });
+    expect(actor.getSnapshot().matches('cancellingChildren')).toBe(true);
+    actor.send({ type: 'session.checkpointCancelled', checkpointId: 'checkpoint-1' });
+    expect(actor.getSnapshot().matches('idle')).toBe(true);
+  });
+
+  it('accepts a persisted cancellation directly from waiting children', (): void => {
+    const actor = createActor(sessionMachine, { input: { sessionId: 'session-1' } });
+    actor.start();
+    actor.send({ type: 'session.submit', input: SUBMIT_INPUT });
+    actor.send({ type: 'session.prepared' });
+    const runtimeId = 'runtime-a';
+    actor.getSnapshot().context.turnRef?.getSnapshot().context.primaryAgentRef?.send({ type: 'runtime.started', runtimeId });
+    actor.send({ type: 'session.waitingChildren', runtimeId, checkpointId: 'checkpoint-1' });
+
+    actor.send({ type: 'session.checkpointCancelled', checkpointId: 'checkpoint-other' });
+    expect(actor.getSnapshot().matches('waitingChildren')).toBe(true);
+    actor.send({ type: 'session.checkpointCancelled', checkpointId: 'checkpoint-1' });
+    expect(actor.getSnapshot().matches('idle')).toBe(true);
+  });
+
+  it('ignores a late Runtime A suspension after the matching Runtime B resumed', (): void => {
+    const actor = createActor(sessionMachine, { input: { sessionId: 'session-1' } });
+    actor.start();
+    actor.send({ type: 'session.submit', input: SUBMIT_INPUT });
+    actor.send({ type: 'session.prepared' });
+    const agent = actor.getSnapshot().context.turnRef?.getSnapshot().context.primaryAgentRef;
+    agent?.send({ type: 'runtime.started', runtimeId: 'runtime-a' });
+    actor.send({ type: 'session.waitingChildren', runtimeId: 'runtime-a', checkpointId: 'checkpoint-1' });
+    actor.send({ type: 'session.resumeStarted', runtimeId: 'runtime-b', checkpointId: 'checkpoint-1' });
+
+    actor.send({ type: 'session.waitingChildren', runtimeId: 'runtime-a', checkpointId: 'checkpoint-1' });
+
+    expect(actor.getSnapshot().matches('running')).toBe(true);
+    expect(agent?.getSnapshot().context.runtimeId).toBe('runtime-b');
   });
 });

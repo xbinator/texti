@@ -6,6 +6,7 @@ import type { AIToolDefinition, AIToolExecutor } from 'types/ai';
 import {
   ADD_MCP_SERVER_TOOL_NAME,
   CREATE_DOCUMENT_TOOL_NAME,
+  DELEGATE_TASK_TOOL_NAME,
   EDIT_FILE_TOOL_NAME,
   GLOB_TOOL_NAME,
   GREP_TOOL_NAME,
@@ -32,6 +33,7 @@ import { createToolFailureResult } from '../results';
 export {
   ADD_MCP_SERVER_TOOL_NAME,
   CREATE_DOCUMENT_TOOL_NAME,
+  DELEGATE_TASK_TOOL_NAME,
   EDIT_FILE_TOOL_NAME,
   GLOB_TOOL_NAME,
   GREP_TOOL_NAME,
@@ -210,3 +212,6 @@ export const createReadCurrentWebpageTool = getRuntimeToolFactory(READ_CURRENT_W
 
 /** 创建 operate_webpage schema-only 工具。 */
 export const createOperateWebpageTool = getRuntimeToolFactory(OPERATE_WEBPAGE_TOOL_NAME);
+
+/** 创建内部 delegate_task schema-only 工具。 */
+export const createDelegateTaskTool = getRuntimeToolFactory(DELEGATE_TASK_TOOL_NAME);

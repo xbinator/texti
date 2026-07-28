@@ -3,6 +3,7 @@
  * @description 模块入口，统一注册所有 IPC handler 并导出服务实例。
  */
 import { registerAIHandlers } from './ai/ipc.mjs';
+import { registerChatAgentHandlers } from './chat/agents/ipc.mjs';
 import { registerChatHandlers } from './chat/ipc.mjs';
 import { registerChatRuntimeHandlers } from './chat/runtime/ipc.mjs';
 import { registerDatabaseHandlers } from './database/ipc.mjs';
@@ -27,6 +28,7 @@ export function registerAllIpcHandlers() {
   registerUiHandlers();
   registerDatabaseHandlers();
   registerChatHandlers();
+  registerChatAgentHandlers();
   registerChatRuntimeHandlers();
   registerStoreHandlers();
   registerRequestHandlers();
@@ -48,6 +50,7 @@ export {
   registerUiHandlers,
   registerDatabaseHandlers,
   registerChatHandlers,
+  registerChatAgentHandlers,
   registerChatRuntimeHandlers,
   registerStoreHandlers,
   registerRequestHandlers,
@@ -63,6 +66,8 @@ export {
 };
 
 export { aiService } from './ai/service.mjs';
+
+export { chatAgentCoordinator, chatAgentDelegationService, recoverChatAgentDelegations } from './chat/agents/service.mjs';
 
 export { initLogger, initMainErrorCollector, log, cleanOldLogs, startLogMaintenanceTimer } from './logger/service.mjs';
 

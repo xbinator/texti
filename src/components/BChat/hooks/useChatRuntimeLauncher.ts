@@ -6,7 +6,13 @@ import type { UseChatSessionActorReturn } from './useChatSessionActor';
 import type { PreparedRuntimeRequest, useRuntimeRequestConfig } from './useRuntimeRequestConfig';
 import type { Message } from '../utils/types';
 import type { AIToolExecutor } from 'types/ai';
-import type { ChatRuntimeBridgeRequestEvent, ChatRuntimeCapabilityDescriptor, ChatRuntimeStartResult, ChatRuntimeUserInputPart } from 'types/chat-runtime';
+import type {
+  ChatRuntimeAddress,
+  ChatRuntimeBridgeRequestEvent,
+  ChatRuntimeCapabilityDescriptor,
+  ChatRuntimeStartResult,
+  ChatRuntimeUserInputPart
+} from 'types/chat-runtime';
 import type { Ref } from 'vue';
 import { nextTick, watch } from 'vue';
 import { nanoid } from 'nanoid';
@@ -97,7 +103,7 @@ export function useChatRuntimeLauncher(options: UseChatRuntimeLauncherOptions) {
   );
 
   /** 在 IPC 前注册 Actor 路由和 capability。 */
-  function start(prepared: PreparedRuntimeRequest): string {
+  function start(prepared: PreparedRuntimeRequest): ChatRuntimeAddress {
     const runtimeId = `runtime-${nanoid()}`;
     options.sessionActor.markPrepared();
     const sessionId = options.activeSessionId.value;
@@ -105,20 +111,24 @@ export function useChatRuntimeLauncher(options: UseChatRuntimeLauncherOptions) {
     const turnId = turnRef?.getSnapshot().context.turnId;
     if (!sessionId || !turnId) throw new Error('Chat Session Actor is missing the active Turn');
 
+    const address: ChatRuntimeAddress = {
+      sessionId,
+      turnId,
+      agentId: 'primary',
+      runtimeId,
+      rootRuntimeId: runtimeId
+    };
     const descriptor = prepared.config.capabilities ?? createCapabilityDescriptor(prepared);
     const { documentId } = descriptor;
-    options.actorSystem.registerRuntime(
-      { sessionId, turnId, agentId: 'primary', runtimeId },
-      {
-        tools: prepared.rendererTools,
-        descriptor,
-        documentId,
-        getToolContext: () => (documentId ? editorToolContextRegistry.getContext(documentId) : undefined),
-        handleBridgeRequest: options.handleBridgeRequest
-      }
-    );
+    options.actorSystem.registerRuntime(address, {
+      tools: prepared.rendererTools,
+      descriptor,
+      documentId,
+      getToolContext: () => (documentId ? editorToolContextRegistry.getContext(documentId) : undefined),
+      handleBridgeRequest: options.handleBridgeRequest
+    });
     options.actorSystem.send({ type: 'runtime.event', runtimeId, event: { type: 'runtime.started', runtimeId } });
-    return runtimeId;
+    return address;
   }
 
   /** 校验启动结果，并处理无需保持活跃的 Runtime。 */

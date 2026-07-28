@@ -8,6 +8,7 @@ import { createOpenWidgetTool, type OpenWidgetRuntimeState, type OpenWidgetToolO
 import type { WebviewToolContext } from '@/ai/tools/context/webview';
 import { useRuntimeTools } from '@/components/BChat/hooks/useRuntimeTools';
 import type { Message } from '@/components/BChat/utils/types';
+import { getToolNamesByExposure, getToolRegistryEntry } from '../../../shared/ai/tools/index.js';
 
 const builtinMockState = vi.hoisted(() => {
   /**
@@ -235,6 +236,16 @@ function readLatestOpenWidgetOptions(): OpenWidgetToolOptions {
 }
 
 describe('useRuntimeTools', () => {
+  it('derives the default disabled boundary from the real shared registry', (): void => {
+    const defaultToolNames = getToolNamesByExposure('chat-default');
+
+    expect(defaultToolNames).not.toContain('delegate_task');
+    expect(getToolRegistryEntry('delegate_task')).toMatchObject({
+      exposure: 'internal',
+      executionClass: 'deferred-coordination'
+    });
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     registryMockState.webviewToolContextRegistry.getCurrentContext.mockReturnValue(undefined);

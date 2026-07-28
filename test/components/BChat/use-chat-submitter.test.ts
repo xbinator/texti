@@ -63,9 +63,15 @@ describe('useChatSubmitter', (): void => {
       order.push('runtime-choice');
       return submission;
     });
-    const startRuntime = vi.fn((): string => {
+    const startRuntime = vi.fn(() => {
       order.push('start-runtime');
-      return 'runtime-choice';
+      return {
+        runtimeId: 'runtime-choice',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        agentId: 'primary',
+        rootRuntimeId: 'runtime-choice'
+      };
     });
     const ensureSessionModel = vi.fn(async (): Promise<void> => {
       order.push('persist-model');
@@ -115,7 +121,13 @@ describe('useChatSubmitter', (): void => {
   });
 
   it('does not start a user-choice runtime when model persistence fails', async (): Promise<void> => {
-    const startRuntime = vi.fn((): string => 'runtime-choice');
+    const startRuntime = vi.fn(() => ({
+      runtimeId: 'runtime-choice',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      agentId: 'primary',
+      rootRuntimeId: 'runtime-choice'
+    }));
     const submitUserChoice = vi.fn();
     const submitter = useChatSubmitter({
       isWorkflowBusy: () => true,

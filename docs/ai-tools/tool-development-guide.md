@@ -2,11 +2,13 @@
 
 日期：2026-06-25
 
+更新：2026-07-27
+
 本文档说明如何在当前工具架构下新增或修改 AI 工具。现在工具定义和执行拆成两层：
 
 - `shared/ai/tools/index.ts` 是已迁移 ChatRuntime 工具的统一聚合入口，导出工具名、`TOOL_REGISTRY` 和 registry 查询函数。
 - `shared/ai/tools/<PascalCaseTool>/index.ts` 是单个工具领域的元数据文件，维护该领域的工具名、schema、风险等级、运行时归属、分组和暴露策略。
-- `shared/ai/tools/types.ts` 只放 registry 共享类型，例如 `SharedToolDefinition`、`ToolRegistryEntry`、`ToolRuntimeGroup` 和 `ToolExposure`。
+- `shared/ai/tools/types.ts` 只放 registry 共享类型，例如 `SharedToolDefinition`、`ToolRegistryEntry`、`ToolRuntimeGroup`、`ToolExposure`、`ToolExecutionClass` 和 `AgentToolEffectMetadata`。
 - `electron/main/modules/chat/runtime/tools/**/index.mts` 是已迁移工具的主进程执行入口。
 - `src/ai/tools/catalog/runtimeTools.ts` 只为 renderer 暴露 schema-only 工具，执行时会提示该工具已迁移到主进程。
 - `src/ai/tools/builtin/**/index.ts` 只保留仍需 renderer 本地状态或本地交互的工具。
@@ -61,6 +63,7 @@
 shared/ai/tools/
   index.ts
   types.ts
+  DelegateTaskTool/index.ts
   DocumentTool/index.ts
   EnvironmentTool/index.ts
   FileEditTool/index.ts
@@ -76,6 +79,7 @@ shared/ai/tools/
 目录职责：
 
 - `DocumentTool`：当前文档读取、文档草稿创建等文档级工具。
+- `DelegateTaskTool`：Main Coordinator 拥有的内部延迟委派契约；不进入普通 main/renderer 工具执行器。
 - `EnvironmentTool`：当前时间等环境信息工具。
 - `FileReadTool`：文件、目录读取工具。
 - `FileWriteTool`：文件创建或覆盖工具。
@@ -127,6 +131,12 @@ export const exampleToolRegistryEntry = {
   runtime: 'main',
   group: 'read',
   exposure: 'default-readonly',
+  executionClass: 'direct',
+  effect: {
+    effect: 'pure_read',
+    resourceScopeResolver: 'example-query',
+    reversible: true
+  },
   definition: {
     name: EXAMPLE_TOOL_NAME,
     description: '读取示例信息并返回结构化结果。',
@@ -146,6 +156,29 @@ export const exampleToolRegistryEntry = {
 ```
 
 不要在 renderer 和 main 各写一份 schema。共享 Tool 目录是唯一 schema 来源。
+
+每个 registry entry 必须声明：
+
+- `executionClass`：普通工具使用 `direct`；只有拥有专用协调协议、原子 Checkpoint 持久化和恢复语义的内部工具才能使用 `deferred-coordination`。
+- `effect.effect`：在 `pure_read`、`external_read`、`staged_file_write`、`transactional_write`、`immediate_side_effect`、`unknown` 中选择事实分类。
+- `effect.resourceScopeResolver`：主进程注册的资源范围解析器名称，不能由 Renderer 自报。
+- `effect.commitAdapter`：仅事务写域需要，指向未来 commit boundary adapter。
+- `effect.reversible`：动作完成后是否存在定义明确的反向操作。
+
+`executionClass` 是调度与安全事实，不是 UI 标签。普通 `direct` 工具返回一个长期 pending 的 Promise，只会让当前 Runtime 继续持锁等待；延长 renderer-tool timeout 或把工具标为 `internal`，也不会获得持久化挂起能力。当前只有 `shared/ai/tools/DelegateTaskTool/index.ts` 定义的 `delegate_task` 通过 Runtime deferred stream 边界和 `electron/main/modules/chat/agents/service.mts` Coordinator 原子 prepare 接入 suspend/resume；它仍为 `internal`，普通 Renderer Runtime 输入会在写消息前被拒绝。
+
+### Coordinator-owned 工具
+
+`runtime: 'coordinator'` 表示工具由 Main Coordinator 拥有，不由普通 main executor、renderer bridge 或 AI SDK 直接执行。此类工具必须同时具备专用契约解析、原子持久化、Checkpoint/Outbox、恢复与续接协议；仅增加 registry entry 不会自动获得这些能力。当前唯一实例是 `shared/ai/tools/DelegateTaskTool/index.ts`。
+
+`delegate_task` 的首阶段执行边界固定为：
+
+- feature flag 默认关闭，只允许 Main 在公开 `send()` 完成 Renderer 输入校验后克隆注入 registry 定义。
+- 仅 Primary 可以委派；Child 的 capability 集合始终移除 `delegate_task`，不允许二层 Child。
+- Candidate Plan 依次与持久化契约、父 Runtime 工具、当前可用 Main 工具、权限、资源 scope 和只读策略求交集；恢复只能继续收缩。
+- Child 只允许 `glob`、`grep`、`read_directory`、`read_file` 中交集后的 `pure_read` 工具，`external_read`、写工具、Renderer bridge 与 provider-supplied 本地工具结果均 fail closed。
+- Coordinator 最多并行三个共享只读 lease；Child 使用冻结的 Primary 模型与最小任务包，不写 `chat_messages`。
+- 写入 Child、changeset、ConfirmationQueue 与 commit journal 尚未开放，不能通过新增 registry 元数据绕过。
 
 ### 3. 接入聚合入口
 
@@ -407,8 +440,9 @@ export async function executeExampleTool(input: ChatRuntimeMainToolExecutionInpu
 - 工具名是否只在 `shared/ai/tools/<PascalCaseTool>/index.ts` 定义一次？
 - 是否已从 `shared/ai/tools/index.ts` 导出工具名并加入 `TOOL_REGISTRY`？
 - registry 的 `runtime`、`group`、`exposure`、`riskLevel` 是否正确？
+- `executionClass` 与 runtime owner 是否有真实执行/协调协议支撑，而不是依赖 pending Promise？
 - schema 是否和输入归一化一致？
-- 主进程执行结果是否使用 `tools/results.mts` helper？
+- 主进程执行结果是否使用 `electron/main/modules/chat/runtime/tools/results.mts` helper？
 - 写操作、工作区外路径、危险读取是否有确认？
 - 真实文件写工具是否只在磁盘持久化完成后返回成功？
 - 真实文件写工具是否在确认后重新验证版本，并按真实目的地复核符号链接边界？
@@ -428,11 +462,12 @@ export async function executeExampleTool(input: ChatRuntimeMainToolExecutionInpu
 3. 目标工具元数据目录，例如 `shared/ai/tools/FileReadTool/index.ts`
 4. `src/ai/tools/catalog/runtimeTools.ts`
 5. `src/ai/tools/builtin/index.ts`
-6. `electron/main/modules/chat/runtime/README.md`
+6. `docs/development/chat-runtime-architecture-map.md`
 7. `electron/main/modules/chat/runtime/tools/index.mts`
 8. `electron/main/modules/chat/runtime/tools/constants.mts`
 9. `electron/main/modules/chat/runtime/tools/types.mts`
 10. 目标主进程执行分组，例如 `electron/main/modules/chat/runtime/tools/FileTool/index.mts`
-11. `src/components/BChat/utils/runtimeBridge.ts`
+11. Coordinator 工具额外阅读 `shared/ai/tools/DelegateTaskTool/index.ts`、`electron/main/modules/chat/agents/service.mts`、`coordinator.mts`、`plan-compiler.mts`、`executor.mts` 与 `read-tools.mts`
+12. `src/components/BChat/utils/runtimeBridge.ts`
 
 这样能先建立“Tool 目录定义 -> `shared/ai/tools/index.ts` 聚合 -> renderer schema-only 暴露 -> 主进程执行 -> 必要时 bridge 到 renderer”的完整链路。

@@ -11,6 +11,7 @@ import type {
 } from 'types/chat-runtime';
 import { nanoid } from 'nanoid';
 import { ChatRuntimeError } from '../errors.mjs';
+import { createRuntimeEventBase } from '../types.mjs';
 
 /** 活跃 runtime 读取函数。 */
 export type RuntimeLookup = (runtimeId: string) => ActiveChatRuntime | undefined;
@@ -114,11 +115,7 @@ export function createRuntimeBridgeRequests(dependencies: RuntimeBridgeRequestsD
       const requestId = input.requestId ?? `bridge-${nanoid()}`;
       const key = createBridgeRequestKey(input.runtimeId, requestId);
       const event: ChatRuntimeBridgeRequestEvent = {
-        runtimeId: runtime.runtimeId,
-        sessionId: runtime.sessionId,
-        clientId: runtime.clientId,
-        agentId: runtime.agentId,
-        parentRuntimeId: runtime.parentRuntimeId,
+        ...createRuntimeEventBase(runtime),
         requestId,
         toolCallId: input.toolCallId,
         kind: input.kind,
@@ -139,9 +136,7 @@ export function createRuntimeBridgeRequests(dependencies: RuntimeBridgeRequestsD
             error: { code: 'TOOL_TIMEOUT', message: 'Renderer bridge request timed out' }
           });
         }, dependencies.timeoutMs);
-        const removeAbortListener = input.signal
-          ? (): void => input.signal?.removeEventListener('abort', resolveAborted)
-          : undefined;
+        const removeAbortListener = input.signal ? (): void => input.signal?.removeEventListener('abort', resolveAborted) : undefined;
         input.signal?.addEventListener('abort', resolveAborted, { once: true });
         pendingBridgeRequests.set(key, { event, resolve, reject, timeoutId, removeAbortListener });
         dependencies.emit('chat:runtime:bridge-requested', event);

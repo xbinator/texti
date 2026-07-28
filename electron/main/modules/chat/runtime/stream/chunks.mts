@@ -114,9 +114,20 @@ export function toRuntimeStreamChunk(chunk: TextStreamPart<ToolSet>): RuntimeStr
         totalUsage: normalizeAIUsage(chunk.totalUsage)
       };
     case 'tool-call':
-      return { type: 'tool-call', toolCallId: chunk.toolCallId, toolName: chunk.toolName, input: chunk.input };
+      return {
+        type: 'tool-call',
+        toolCallId: chunk.toolCallId,
+        toolName: chunk.toolName,
+        input: chunk.input,
+        ...(chunk.providerMetadata !== undefined ? { providerMetadata: chunk.providerMetadata } : {})
+      };
     case 'tool-input-start':
-      return { type: 'tool-input-start', toolCallId: chunk.id, toolName: chunk.toolName };
+      return {
+        type: 'tool-input-start',
+        toolCallId: chunk.id,
+        toolName: chunk.toolName,
+        ...(chunk.providerMetadata !== undefined ? { providerMetadata: chunk.providerMetadata } : {})
+      };
     case 'tool-input-delta':
       return { type: 'tool-input-delta', toolCallId: chunk.id, inputTextDelta: chunk.delta };
     case 'tool-input-end':
