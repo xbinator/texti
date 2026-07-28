@@ -23,6 +23,9 @@
     <div :class="bem('header')">
       <span :class="bem('mode')">{{ MODE_LABELS[resolvedTask.mode] }}</span>
       <span :class="bem('task')">{{ resolvedTask.task }}</span>
+      <button :class="bem('toggle')" type="button" data-action="toggle-detail" :aria-controls="detailPanelId" :aria-expanded="expanded" @click="toggleDetail">
+        {{ expanded ? '收起详情' : '展开详情' }}
+      </button>
     </div>
     <div :class="bem('meta')">
       <span :class="bem('status')">
@@ -33,6 +36,213 @@
       <span :class="bem('priority')">{{ PRIORITY_LABELS[resolvedTask.priority] }}</span>
     </div>
     <p v-if="resolvedTask.summary" :class="bem('summary')">{{ resolvedTask.summary }}</p>
+
+    <div v-if="expanded" :id="detailPanelId" :class="bem('detail')">
+      <div v-if="detailLoading" :class="bem('detail-state')" role="status">正在加载任务详情…</div>
+      <div v-else-if="detailError" :class="bem('detail-state')" role="alert">
+        <code>{{ detailError }}</code>
+        <button type="button" data-action="retry-detail" @click="retryDetail">重试</button>
+      </div>
+
+      <template v-else-if="trustedDetail">
+        <section :class="bem('section')" data-section="contract">
+          <h4>任务契约</h4>
+          <dl>
+            <dt>模式</dt>
+            <dd>{{ MODE_LABELS[trustedDetail.mode] }}</dd>
+            <dt>优先级</dt>
+            <dd>{{ PRIORITY_LABELS[trustedDetail.priority] }}</dd>
+            <dt>必要性</dt>
+            <dd>{{ trustedDetail.required ? '必需任务' : '可选任务' }}</dd>
+            <dt>截止时间</dt>
+            <dd>{{ trustedDetail.deadlineAt ?? '未设置' }}</dd>
+          </dl>
+          <ol>
+            <li v-for="(criterion, index) in trustedDetail.acceptanceCriteria" :key="`${index}:${criterion}`">{{ criterion }}</li>
+          </ol>
+          <ul>
+            <li v-for="resource in trustedDetail.resources" :key="`${resource.kind}:${resource.displayReference}`">
+              <code>{{ resource.kind }}</code>
+              <span>{{ resource.displayReference }}</span>
+              <small v-if="resource.revision">revision {{ resource.revision }}</small>
+            </li>
+          </ul>
+        </section>
+
+        <section :class="bem('section')" data-section="execution">
+          <h4>执行</h4>
+          <template v-if="trustedDetail.currentAttempt">
+            <dl>
+              <dt>Attempt</dt>
+              <dd>{{ trustedDetail.currentAttempt.attemptNumber }}</dd>
+              <dt>状态</dt>
+              <dd>{{ trustedDetail.currentAttempt.attemptState }}</dd>
+              <dt>Agent</dt>
+              <dd>{{ trustedDetail.currentAttempt.agentId }}</dd>
+              <dt>Runtime</dt>
+              <dd>{{ trustedDetail.currentAttempt.runtimeId }}</dd>
+              <dt>创建</dt>
+              <dd>{{ trustedDetail.currentAttempt.createdAt }}</dd>
+              <dt>开始</dt>
+              <dd>{{ trustedDetail.currentAttempt.startedAt ?? '尚未开始' }}</dd>
+              <dt>结束</dt>
+              <dd>{{ trustedDetail.currentAttempt.endedAt ?? '尚未结束' }}</dd>
+            </dl>
+          </template>
+          <p v-else>尚无执行 Attempt</p>
+        </section>
+
+        <section :class="bem('section')" data-section="timeline">
+          <h4>时间线</h4>
+          <p v-if="trustedDetail.timeline.truncated" :class="bem('notice')">更早事件已截断</p>
+          <ol>
+            <li v-for="entry in trustedDetail.timeline.entries" :key="entry.sequence">
+              <time>{{ entry.occurredAt }}</time>
+              <code>{{ entry.type }}</code>
+              <code>{{ entry.code }}</code>
+              <span v-if="entry.summary">{{ entry.summary }}</span>
+            </li>
+          </ol>
+        </section>
+
+        <section :class="bem('section')" data-section="completion">
+          <h4>完成与诊断</h4>
+          <template v-if="trustedDetail.completion">
+            <p>
+              <code>{{ trustedDetail.completion.level }}</code>
+              {{ trustedDetail.completion.summary }}
+            </p>
+            <ol>
+              <li
+                v-for="criterion in trustedDetail.completion.criteria"
+                :key="criterion.criterionIndex"
+                :class="criterion.verificationStatus === 'contradicted' ? bem('criterion', { contradicted: true }) : bem('criterion')"
+              >
+                <span>#{{ criterion.criterionIndex + 1 }}</span>
+                <code>{{ criterion.claimStatus }}</code>
+                <code>{{ criterion.verificationStatus }}</code>
+                <span>{{ criterion.claimSummary }}</span>
+              </li>
+            </ol>
+          </template>
+          <p v-else>暂无完成信息</p>
+          <ul v-if="trustedDetail.warnings.length > 0">
+            <li v-for="warning in trustedDetail.warnings" :key="warning.code">
+              <code>{{ warning.code }}</code>
+              <span>{{ warning.message }}</span>
+            </li>
+          </ul>
+          <div v-if="trustedDetail.error" :class="bem('error')" role="alert">
+            <dl>
+              <dt>code</dt>
+              <dd>
+                <code>{{ trustedDetail.error.code }}</code>
+              </dd>
+              <dt>phase</dt>
+              <dd>
+                <code>{{ trustedDetail.error.phase }}</code>
+              </dd>
+              <dt>category</dt>
+              <dd>
+                <code>{{ trustedDetail.error.category }}</code>
+              </dd>
+              <dt>retryable</dt>
+              <dd>{{ trustedDetail.error.retryable ? '可重试' : '不可重试' }}</dd>
+            </dl>
+            <p v-if="trustedDetail.error.message">{{ trustedDetail.error.message }}</p>
+            <dl v-if="trustedDetail.error.details">
+              <template v-for="key in ERROR_DETAIL_KEYS" :key="key">
+                <template v-if="trustedDetail.error.details[key] !== undefined">
+                  <dt>{{ key }}</dt>
+                  <dd>{{ trustedDetail.error.details[key] }}</dd>
+                </template>
+              </template>
+            </dl>
+          </div>
+        </section>
+
+        <section :class="bem('section')" data-section="usage">
+          <h4>用量</h4>
+          <template v-if="trustedDetail.usage">
+            <dl>
+              <dt>输入 token</dt>
+              <dd>{{ trustedDetail.usage.inputTokens }}</dd>
+              <dt>输出 token</dt>
+              <dd>{{ trustedDetail.usage.outputTokens }}</dd>
+              <dt>总 token</dt>
+              <dd>{{ trustedDetail.usage.totalTokens }}</dd>
+              <dt>模型调用</dt>
+              <dd>{{ trustedDetail.usage.modelCalls }}</dd>
+              <dt>工具轮次</dt>
+              <dd>{{ trustedDetail.usage.toolRounds }}</dd>
+              <dt>外部请求</dt>
+              <dd>{{ trustedDetail.usage.externalRequests }}</dd>
+              <dt>排队耗时</dt>
+              <dd>{{ trustedDetail.usage.queueDurationMs }} ms</dd>
+              <dt>执行耗时</dt>
+              <dd>{{ trustedDetail.usage.executionDurationMs }} ms</dd>
+              <dt>定价版本</dt>
+              <dd>{{ trustedDetail.usage.monetaryCost.pricingVersion }}</dd>
+              <dt>估算成本</dt>
+              <dd>{{ formatCost(trustedDetail.usage.monetaryCost.estimated, trustedDetail.usage.monetaryCost.currency) }}</dd>
+              <dt>实际成本</dt>
+              <dd>{{ formatCost(trustedDetail.usage.monetaryCost.actual, trustedDetail.usage.monetaryCost.currency) }}</dd>
+            </dl>
+          </template>
+          <p v-else>用量未知</p>
+        </section>
+
+        <section :class="bem('section')" data-section="changeset">
+          <h4>变更集</h4>
+          <template v-if="trustedDetail.changeset">
+            <dl>
+              <dt>阶段</dt>
+              <dd>{{ trustedDetail.changeset.phase }}</dd>
+              <dt>基础修订</dt>
+              <dd>
+                <code>{{ trustedDetail.changeset.baseRevision }}</code>
+              </dd>
+              <dt>diff</dt>
+              <dd>
+                <code>{{ trustedDetail.changeset.diffHash }}</code>
+              </dd>
+              <dt>operations</dt>
+              <dd>
+                <code>{{ trustedDetail.changeset.operationSetHash }}</code>
+              </dd>
+            </dl>
+            <ul>
+              <li v-for="displayPath in trustedDetail.changeset.displayPaths" :key="displayPath">{{ displayPath }}</li>
+            </ul>
+            <button v-if="canLocateConfirmation" type="button" data-action="open-confirmation" :disabled="confirmationBusy" @click="locateConfirmation">
+              查看确认
+            </button>
+            <p v-if="confirmationError" :class="bem('notice')" role="alert">
+              <code>{{ confirmationError }}</code>
+            </p>
+          </template>
+          <p v-else>无变更集</p>
+          <p v-if="confirmationContextError" :class="bem('notice')" role="alert">
+            <code>{{ confirmationContextError }}</code>
+          </p>
+        </section>
+
+        <section :class="bem('section')" data-section="artifacts">
+          <h4>产物</h4>
+          <ul>
+            <li v-for="artifact in visibleArtifacts" :key="artifact.artifactId">
+              <code>{{ artifact.kind }}</code>
+              <span>{{ artifact.reference }}</span>
+              <button v-if="canOpenTaskArtifact(artifact)" type="button" data-action="open-artifact" @click="openArtifact(artifact)">打开</button>
+            </li>
+          </ul>
+          <p v-if="visibleArtifacts.length === 0">无公开产物</p>
+          <p v-if="artifactError" :class="bem('notice')" role="alert">
+            <code>{{ artifactError }}</code>
+          </p>
+        </section>
+      </template>
+    </div>
   </div>
 
   <BubblePartTool v-else :part="safeFallbackPart" />
@@ -44,10 +254,22 @@
  * @description 在原 delegate_task Tool Part 位置展示 Main-owned Child Task 轻量投影。
  */
 import type { ChatMessageToolPart } from 'types/chat';
-import type { AgentTaskMode, AgentTaskPriority, AgentTaskStatus, ChatAgentTaskEventSnapshot, ChatAgentTaskSnapshot } from 'types/chat-agent';
+import type {
+  AgentTaskMode,
+  AgentTaskPriority,
+  AgentTaskStatus,
+  ChatAgentTaskArtifactSnapshot,
+  ChatAgentTaskDetailSnapshot,
+  ChatAgentTaskErrorDetailKey,
+  ChatAgentTaskEventSnapshot,
+  ChatAgentTaskSnapshot,
+  ChatAgentTaskSummarySnapshot
+} from 'types/chat-agent';
 import { computed, onScopeDispose, ref, watch } from 'vue';
+import { canOpenArtifact, openAgentArtifact } from '@/components/BChat/utils/agentArtifact';
 import { readTaskResultId, readTaskResultStatus } from '@/components/BChat/utils/agentTaskPart';
 import { createTaskIndexKey, isTaskProjectionError, useChatAgentTaskStore } from '@/stores/chat/agentTask';
+import { useChatConfirmationQueueStore, type ChatAgentConfirmationItem } from '@/stores/chat/confirmationQueue';
 import { asyncTo } from '@/utils/asyncTo';
 import { createNamespace } from '@/utils/namespace';
 import BubblePartTool from './BubblePartTool/index.vue';
@@ -80,6 +302,7 @@ type LookupError = 'unavailable' | 'protocol' | null;
 const props = defineProps<Props>();
 const [name, bem] = createNamespace('agent-task-card');
 const agentTaskStore = useChatAgentTaskStore();
+const confirmationQueue = useChatConfirmationQueueStore();
 
 /** Task 模式展示文案。 */
 const MODE_LABELS: Record<AgentTaskMode, string> = {
@@ -112,6 +335,20 @@ const STATUS_VIEWS: Record<AgentTaskStatus, StatusView> = {
   commit_failed: { label: '提交失败', icon: 'lucide:git-commit-horizontal', terminal: true }
 };
 
+/** 错误 details 的固定展示顺序与闭集。 */
+const ERROR_DETAIL_KEYS: readonly ChatAgentTaskErrorDetailKey[] = [
+  'reason',
+  'toolName',
+  'expectedHash',
+  'actualHash',
+  'expectedVersion',
+  'actualVersion',
+  'status',
+  'limit',
+  'observed',
+  'deadlineAt'
+];
+
 /** Renderer 当前时钟，仅供已解析的活动 Task 近似计时。 */
 const nowMs = ref(Date.now());
 /** 当前定向恢复错误。 */
@@ -122,6 +359,24 @@ let requestedLookupKey: string | undefined;
 let requestEpoch = 0;
 /** 活动计时器。 */
 let elapsedTimer: ReturnType<typeof setInterval> | undefined;
+/** 详情区域是否展开。 */
+const expanded = ref(false);
+/** 详情请求是否进行中。 */
+const detailLoading = ref(false);
+/** 详情加载的稳定本地错误。 */
+const detailError = ref<string | null>(null);
+/** 确认定位是否进行中。 */
+const confirmationBusy = ref(false);
+/** 确认定位的稳定本地错误。 */
+const confirmationError = ref<string | null>(null);
+/** artifact 打开的稳定本地错误。 */
+const artifactError = ref<string | null>(null);
+/** 详情请求 epoch，阻止收起或身份切换后的迟到响应改写局部状态。 */
+let detailEpoch = 0;
+/** 确认定位 epoch，阻止身份或 Detail 更新后的迟到恢复定位。 */
+let confirmationEpoch = 0;
+/** artifact 导航 epoch，阻止收起或身份更新后的迟到失败污染当前卡片。 */
+let artifactEpoch = 0;
 
 /** Result 中仅用于交叉验证的 Task 身份。 */
 const resultTaskId = computed<string | undefined>(() => readTaskResultId(props.part));
@@ -142,6 +397,35 @@ const indexedTask = computed<ChatAgentTaskEventSnapshot | undefined>(() => {
   if (!props.sessionId) return undefined;
   return agentTaskStore.findTask(props.sessionId, props.assistantMessageId, props.part.toolCallId);
 });
+
+/**
+ * 校验 Detail 与当前轻量 Summary 的全部展示身份及 sequence。
+ * @param detail - Store 中的候选 Detail
+ * @param summary - 当前原位置 Summary
+ * @returns Detail 是否仍可信
+ */
+function matchesDetail(detail: ChatAgentTaskDetailSnapshot, summary: ChatAgentTaskSummarySnapshot): boolean {
+  return (
+    detail.taskId === summary.taskId &&
+    detail.sessionId === summary.sessionId &&
+    detail.turnId === summary.turnId &&
+    detail.checkpointId === summary.checkpointId &&
+    detail.assistantMessageId === summary.assistantMessageId &&
+    detail.toolCallId === summary.toolCallId &&
+    detail.agentId === summary.agentId &&
+    detail.taskSequence === summary.taskSequence
+  );
+}
+
+/**
+ * 判断完整性或定位字段是否为非空白字符串。
+ * @param value - 待校验公开字段
+ * @returns 是否可以参与精确身份比较
+ */
+function isNonBlank(value: string): boolean {
+  return value.trim().length > 0;
+}
+
 /** 卡片可展示的 Task；Result 只做一致性交叉验证，不能直接取 tasksById。 */
 const resolvedTask = computed<ChatAgentTaskEventSnapshot | undefined>(() => {
   if (identityConflict.value) return undefined;
@@ -149,6 +433,54 @@ const resolvedTask = computed<ChatAgentTaskEventSnapshot | undefined>(() => {
   if (!snapshot) return undefined;
   if (resultTaskId.value && resultTaskId.value !== snapshot.taskId) return undefined;
   return snapshot;
+});
+/** 当前 Summary 和 Store Detail 同 sequence、同原位置时的可信 Detail。 */
+const trustedDetail = computed<ChatAgentTaskDetailSnapshot | undefined>(() => {
+  const summary = resolvedTask.value;
+  if (summary?.recordState !== 'active') return undefined;
+  const detail = agentTaskStore.detailsById[summary.taskId];
+  return detail && matchesDetail(detail, summary) ? detail : undefined;
+});
+/** 当前卡片详情 DOM 身份。 */
+const detailPanelId = computed<string>(() => `agent-task-detail-${props.assistantMessageId}-${props.part.toolCallId}`);
+/** 当前 Task 不含 sequence 的渲染身份。 */
+const detailIdentityKey = computed<string>(() => {
+  const summary = resolvedTask.value;
+  if (summary?.recordState !== 'active') return '';
+  return createTaskIndexKey(summary.sessionId, summary.assistantMessageId, summary.toolCallId) + summary.taskId;
+});
+/** 当前 Task sequence。 */
+const detailSequence = computed<number | undefined>(() => {
+  const summary = resolvedTask.value;
+  return summary?.recordState === 'active' ? summary.taskSequence : undefined;
+});
+/** 当前可信 artifact；ownership 必须完整绑定当前 Task、Actor 和 Attempt。 */
+const visibleArtifacts = computed<ChatAgentTaskArtifactSnapshot[]>(() => {
+  const detail = trustedDetail.value;
+  const attempt = detail?.currentAttempt;
+  if (!detail || !attempt) return [];
+  return detail.artifacts.filter(
+    (artifact): boolean =>
+      artifact.visibility === 'user' &&
+      attempt.agentId === detail.agentId &&
+      artifact.owner.taskId === detail.taskId &&
+      artifact.owner.agentId === detail.agentId &&
+      artifact.owner.attemptId === attempt.attemptId
+  );
+});
+/** waiting_confirmation 缺失 Attempt、changeset 或定位身份时的稳定协议错误。 */
+const confirmationContextError = computed<string | null>(() => {
+  const detail = trustedDetail.value;
+  if (detail?.status !== 'waiting_confirmation') return null;
+  const attempt = detail.currentAttempt;
+  if (!attempt || !detail.changeset) return 'agent_confirmation_context_invalid';
+  const locatorIdentities = [detail.sessionId, detail.taskId, detail.agentId, detail.toolCallId, attempt.attemptId, attempt.agentId, attempt.runtimeId];
+  return locatorIdentities.every(isNonBlank) && attempt.agentId === detail.agentId ? null : 'agent_confirmation_context_invalid';
+});
+/** waiting_confirmation 只有携带当前 Attempt 与 changeset 时才允许定位。 */
+const canLocateConfirmation = computed<boolean>(() => {
+  const detail = trustedDetail.value;
+  return Boolean(detail?.status === 'waiting_confirmation' && !confirmationContextError.value);
 });
 /** 找不到投影时允许发起一次定向查询的 Task 身份。 */
 const lookupTaskId = computed<string | undefined>(() => {
@@ -243,6 +575,208 @@ function matchesPosition(snapshot: ChatAgentTaskSnapshot, taskId: string): boole
     snapshot.assistantMessageId === props.assistantMessageId &&
     snapshot.toolCallId === props.part.toolCallId
   );
+}
+
+/**
+ * 按需加载当前 Task Detail。
+ * sequence 在 flight 期间更新时只允许一次有界 follow-up。
+ * @param allowFollowup - 是否允许 sequence 变化后再查询一次
+ */
+async function loadTaskDetail(allowFollowup = true): Promise<void> {
+  const summary = resolvedTask.value;
+  if (!expanded.value || summary?.recordState !== 'active' || !props.sessionId || trustedDetail.value) return;
+  const epoch = detailEpoch;
+  const requestedSequence = summary.taskSequence;
+  detailLoading.value = true;
+  detailError.value = null;
+  const [requestError] = await asyncTo(
+    agentTaskStore.ensureTask(props.sessionId, summary.taskId, {
+      assistantMessageId: props.assistantMessageId,
+      toolCallId: props.part.toolCallId
+    })
+  );
+  if (epoch !== detailEpoch || !expanded.value) return;
+  detailLoading.value = false;
+  if (requestError) {
+    detailError.value = isTaskProjectionError(requestError) ? 'agent_task_projection_invalid' : 'agent_task_detail_unavailable';
+    return;
+  }
+  if (trustedDetail.value) return;
+  const current = resolvedTask.value;
+  if (allowFollowup && current?.recordState === 'active' && current.taskId === summary.taskId && current.taskSequence !== requestedSequence) {
+    await loadTaskDetail(false);
+    return;
+  }
+  detailError.value = 'agent_task_detail_unavailable';
+}
+
+/**
+ * 切换 Detail 展开状态。
+ */
+function toggleDetail(): void {
+  expanded.value = !expanded.value;
+  artifactEpoch += 1;
+  detailError.value = null;
+  confirmationError.value = null;
+  artifactError.value = null;
+  if (!expanded.value) {
+    detailEpoch += 1;
+    confirmationEpoch += 1;
+    detailLoading.value = false;
+    confirmationBusy.value = false;
+    return;
+  }
+  loadTaskDetail();
+}
+
+/**
+ * 重试当前 Detail 请求。
+ */
+function retryDetail(): void {
+  detailEpoch += 1;
+  loadTaskDetail();
+}
+
+/**
+ * 格式化 monetary cost，不把 unknown 伪装为零。
+ * @param amount - 成本数值或 unknown
+ * @param currency - 货币代码或 unknown
+ * @returns 用户可读成本
+ */
+function formatCost(amount: number | 'unknown', currency: string | 'unknown'): string {
+  if (amount === 'unknown' || currency === 'unknown') return '未知';
+  return `${currency} ${amount}`;
+}
+
+/**
+ * 判断 artifact 是否允许在当前终态 Task 上打开。
+ * @param artifact - 当前可信公开 artifact
+ * @returns Task 状态与闭集 opener 是否同时允许
+ */
+function canOpenTaskArtifact(artifact: ChatAgentTaskArtifactSnapshot): boolean {
+  return trustedDetail.value?.status === 'completed' && canOpenArtifact(artifact);
+}
+
+/**
+ * 校验 confirmation 与当前 Detail changeset 的身份和完整性绑定。
+ * @param confirmation - 精确 Task/Attempt 匹配的 confirmation
+ * @param detail - 当前可信 Detail
+ * @returns 是否可安全定位
+ */
+function hasChangeIntegrity(confirmation: ChatAgentConfirmationItem, detail: ChatAgentTaskDetailSnapshot): boolean {
+  const attempt = detail.currentAttempt;
+  const { changeset } = detail;
+  if (!attempt || !changeset) return false;
+  const requiredValues = [
+    detail.sessionId,
+    detail.taskId,
+    detail.agentId,
+    detail.toolCallId,
+    attempt.attemptId,
+    attempt.agentId,
+    attempt.runtimeId,
+    changeset.changesetId,
+    changeset.baseRevision,
+    changeset.diffHash,
+    changeset.operationSetHash,
+    confirmation.confirmationId,
+    confirmation.snapshot.confirmationId,
+    confirmation.snapshot.sessionId,
+    confirmation.snapshot.taskId,
+    confirmation.snapshot.attemptId,
+    confirmation.snapshot.agentId,
+    confirmation.snapshot.runtimeId,
+    confirmation.snapshot.toolCallId,
+    confirmation.snapshot.changesetId,
+    confirmation.snapshot.baseRevision,
+    confirmation.snapshot.diffHash,
+    confirmation.snapshot.operationSetHash
+  ];
+  return (
+    requiredValues.every(isNonBlank) &&
+    attempt.agentId === detail.agentId &&
+    confirmation.confirmationId === confirmation.snapshot.confirmationId &&
+    confirmation.snapshot.sessionId === detail.sessionId &&
+    confirmation.snapshot.taskId === detail.taskId &&
+    confirmation.snapshot.attemptId === attempt.attemptId &&
+    confirmation.snapshot.agentId === detail.agentId &&
+    confirmation.snapshot.runtimeId === attempt.runtimeId &&
+    confirmation.snapshot.toolCallId === detail.toolCallId &&
+    confirmation.snapshot.changesetId === changeset.changesetId &&
+    confirmation.snapshot.baseRevision === changeset.baseRevision &&
+    confirmation.snapshot.diffHash === changeset.diffHash &&
+    confirmation.snapshot.operationSetHash === changeset.operationSetHash
+  );
+}
+
+/**
+ * 定位当前 waiting_confirmation 对应的唯一持久化确认。
+ */
+async function locateConfirmation(): Promise<void> {
+  if (confirmationBusy.value) return;
+  const detail = trustedDetail.value;
+  const attempt = detail?.currentAttempt;
+  if (!detail || detail.status !== 'waiting_confirmation' || !attempt || !detail.changeset) return;
+  const epoch = ++confirmationEpoch;
+  const sequence = detail.taskSequence;
+  confirmationBusy.value = true;
+  confirmationError.value = null;
+  let matches = confirmationQueue.findAgent(detail.sessionId, detail.taskId, attempt.attemptId);
+  if (matches.length === 0) {
+    const [recoveryError] = await asyncTo(confirmationQueue.recoverAgent());
+    if (epoch !== confirmationEpoch) return;
+    if (recoveryError) {
+      confirmationBusy.value = false;
+      confirmationError.value = 'agent_confirmation_recovery_failed';
+      return;
+    }
+    const currentDetail = trustedDetail.value;
+    if (
+      !currentDetail ||
+      currentDetail.taskSequence !== sequence ||
+      currentDetail.status !== 'waiting_confirmation' ||
+      currentDetail.currentAttempt?.attemptId !== attempt.attemptId ||
+      currentDetail.changeset?.changesetId !== detail.changeset.changesetId
+    ) {
+      confirmationBusy.value = false;
+      confirmationError.value = 'agent_confirmation_stale';
+      return;
+    }
+    matches = confirmationQueue.findAgent(currentDetail.sessionId, currentDetail.taskId, currentDetail.currentAttempt.attemptId);
+  }
+  if (epoch !== confirmationEpoch) return;
+  confirmationBusy.value = false;
+  if (matches.length === 0) {
+    confirmationError.value = 'agent_confirmation_missing';
+    return;
+  }
+  if (matches.length > 1) {
+    confirmationError.value = 'agent_confirmation_ambiguous';
+    return;
+  }
+  const confirmation = matches[0];
+  const currentDetail = trustedDetail.value;
+  if (!confirmation || !currentDetail || !hasChangeIntegrity(confirmation, currentDetail)) {
+    confirmationError.value = 'agent_confirmation_integrity_invalid';
+    return;
+  }
+  confirmationQueue.select(confirmation.confirmationId);
+}
+
+/**
+ * 打开经过 ownership 和闭集 opener 双重约束的 artifact。
+ * @param artifact - 当前可信 Detail 的公开 artifact
+ */
+async function openArtifact(artifact: ChatAgentTaskArtifactSnapshot): Promise<void> {
+  const epoch = ++artifactEpoch;
+  const detail = trustedDetail.value;
+  if (!detail || detail.status !== 'completed' || !visibleArtifacts.value.some((candidate): boolean => candidate.artifactId === artifact.artifactId)) return;
+  artifactError.value = null;
+  const [openError] = await asyncTo(openAgentArtifact(artifact));
+  if (epoch !== artifactEpoch || !expanded.value || trustedDetail.value?.taskId !== detail.taskId || trustedDetail.value.taskSequence !== detail.taskSequence) {
+    return;
+  }
+  if (openError) artifactError.value = 'agent_artifact_open_failed';
 }
 
 /**
@@ -352,8 +886,32 @@ watch(
   { immediate: true }
 );
 
+watch(detailIdentityKey, (): void => {
+  detailEpoch += 1;
+  confirmationEpoch += 1;
+  artifactEpoch += 1;
+  expanded.value = false;
+  detailLoading.value = false;
+  detailError.value = null;
+  confirmationBusy.value = false;
+  confirmationError.value = null;
+  artifactError.value = null;
+});
+
+watch(detailSequence, (): void => {
+  confirmationEpoch += 1;
+  artifactEpoch += 1;
+  confirmationBusy.value = false;
+  confirmationError.value = null;
+  artifactError.value = null;
+  if (expanded.value && !detailLoading.value && !trustedDetail.value) loadTaskDetail();
+});
+
 onScopeDispose((): void => {
   requestEpoch += 1;
+  detailEpoch += 1;
+  confirmationEpoch += 1;
+  artifactEpoch += 1;
   stopElapsedTimer();
 });
 </script>
@@ -376,6 +934,17 @@ onScopeDispose((): void => {
   display: flex;
   gap: 6px;
   align-items: center;
+}
+
+.b-agent-task-card__toggle {
+  flex-shrink: 0;
+  padding: 0;
+  margin-left: auto;
+  font: inherit;
+  color: var(--color-primary);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
 }
 
 .b-agent-task-card__mode {
@@ -437,5 +1006,59 @@ onScopeDispose((): void => {
 .b-agent-task-card__protocol-error code {
   font-family: Monaco, 'SF Mono', Consolas, monospace;
   color: var(--text-tertiary);
+}
+
+.b-agent-task-card__detail {
+  padding-top: 8px;
+  margin-top: 8px;
+  border-top: 1px solid var(--border-primary);
+}
+
+.b-agent-task-card__detail-state,
+.b-agent-task-card__notice {
+  color: var(--text-tertiary);
+}
+
+.b-agent-task-card__section + .b-agent-task-card__section {
+  margin-top: 10px;
+}
+
+.b-agent-task-card__section h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.b-agent-task-card__section p,
+.b-agent-task-card__section ol,
+.b-agent-task-card__section ul,
+.b-agent-task-card__section dl {
+  margin: 4px 0 0;
+}
+
+.b-agent-task-card__section ol,
+.b-agent-task-card__section ul {
+  padding-left: 18px;
+}
+
+.b-agent-task-card__section li {
+  margin-top: 3px;
+}
+
+.b-agent-task-card__section dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 8px;
+}
+
+.b-agent-task-card__section dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.b-agent-task-card__criterion--contradicted,
+.b-agent-task-card__error {
+  color: var(--color-error);
 }
 </style>

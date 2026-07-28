@@ -2,9 +2,11 @@
  * @file confirmationQueue.ts
  * @description 合并 Runtime 临时确认与 Child Agent 持久化确认的应用级 Renderer 队列投影。
  */
-import type { ChatAgentConfirmationSnapshot } from 'types/chat-agent';
+import type { ChatAgentConfirmationSnapshot, ChatAgentHandlerResult } from 'types/chat-agent';
 import { defineStore } from 'pinia';
 import type { AIToolConfirmationRequest } from '@/ai/tools/confirmation';
+import { getElectronAPI } from '@/shared/platform/electron-api';
+import { asyncTo } from '@/utils/asyncTo';
 
 /** Renderer confirmation queue 的统一可序列化项。 */
 export type ChatConfirmationQueueItem =
@@ -33,12 +35,28 @@ export type ChatConfirmationQueueItem =
 
 /** Runtime confirmation queue 项。 */
 export type ChatRuntimeConfirmationItem = Extract<ChatConfirmationQueueItem, { source: 'runtime' }>;
+/** Agent confirmation queue 窄类型。 */
+export type ChatAgentConfirmationItem = Extract<ChatConfirmationQueueItem, { source: 'agent' }>;
 
 /** Agent confirmation 的单调 cursor。 */
 interface AgentConfirmationCursor {
   /** 最近权威 CAS 版本。 */
   version: number;
   /** 同版本的权威更新时间。 */
+  updatedAt: string;
+  /** 不含可变状态、版本和更新时间的冻结请求身份。 */
+  identityKey: string;
+  /** 一旦观察到终态，后续 pending 永远不得复活。 */
+  terminal: boolean;
+}
+
+/** recovery 请求开始时冻结的 Agent pending cursor。 */
+interface AgentRecoveryBaseline {
+  /** wrapper 与 snapshot 共同身份。 */
+  confirmationId: string;
+  /** 请求开始时的 CAS 版本。 */
+  version: number;
+  /** 请求开始时的权威更新时间。 */
   updatedAt: string;
 }
 
@@ -58,6 +76,23 @@ const RISK_PRIORITY = {
   write: 2,
   dangerous: 3
 } as const;
+
+/** 每个 Pinia Store 实例独享的不可序列化 recovery flight。 */
+const AGENT_RECOVERY_FLIGHTS = new WeakMap<object, Promise<void>>();
+
+/**
+ * 解包 confirmation IPC 信封。
+ * @param result - Main handler 结果
+ * @returns 公开 pending 快照
+ */
+function unwrapAgentResult(result: ChatAgentHandlerResult<ChatAgentConfirmationSnapshot[]>): ChatAgentConfirmationSnapshot[] {
+  if (!result.ok) {
+    const error = new Error('chat_agent_confirmation_recovery_failed');
+    Object.assign(error, { code: result.code });
+    throw error;
+  }
+  return result.data;
+}
 
 /**
  * 读取统一 queue item 的风险级别。
@@ -83,6 +118,34 @@ function compareConfirmations(left: ChatConfirmationQueueItem, right: ChatConfir
 }
 
 /**
+ * 创建 confirmation 不可变请求字段的有序身份键。
+ * @param snapshot - Main allowlist confirmation
+ * @returns 排除 status、version、updatedAt 后的稳定序列化身份
+ */
+function createIdentityKey(snapshot: ChatAgentConfirmationSnapshot): string {
+  return JSON.stringify([
+    snapshot.confirmationId,
+    snapshot.sessionId,
+    snapshot.turnId,
+    snapshot.taskId,
+    snapshot.attemptId,
+    snapshot.agentId,
+    snapshot.runtimeId,
+    snapshot.toolCallId,
+    snapshot.changesetId,
+    snapshot.riskLevel,
+    snapshot.displayPaths,
+    snapshot.resourceScopes,
+    snapshot.unifiedDiff,
+    snapshot.baseRevision,
+    snapshot.diffHash,
+    snapshot.operationSetHash,
+    snapshot.planHash,
+    snapshot.createdAt
+  ]);
+}
+
+/**
  * 判断 Agent 快照是否严格更新。
  * @param snapshot - 待应用快照
  * @param current - 当前 cursor
@@ -90,8 +153,19 @@ function compareConfirmations(left: ChatConfirmationQueueItem, right: ChatConfir
  */
 function isNewerSnapshot(snapshot: ChatAgentConfirmationSnapshot, current: AgentConfirmationCursor | undefined): boolean {
   if (!current) return true;
+  if (current.identityKey !== createIdentityKey(snapshot)) return false;
+  if (current.terminal && snapshot.status === 'pending') return false;
   if (snapshot.version !== current.version) return snapshot.version > current.version;
   return snapshot.updatedAt > current.updatedAt;
+}
+
+/**
+ * 判断 confirmation 是否已经进入不可逆终态。
+ * @param snapshot - Main allowlist confirmation
+ * @returns 是否为非 pending 状态
+ */
+function isTerminalSnapshot(snapshot: ChatAgentConfirmationSnapshot): boolean {
+  return snapshot.status !== 'pending';
 }
 
 /** 应用级 confirmation queue Store。 */
@@ -161,11 +235,16 @@ export const useChatConfirmationQueueStore = defineStore('chat-confirmation-queu
      * @param snapshot - Main allowlist 快照
      */
     applyAgent(snapshot: ChatAgentConfirmationSnapshot): void {
+      const currentItem = this.items[snapshot.confirmationId];
+      // Runtime 临时身份属于另一个 owner 域，Agent 快照不得覆盖。
+      if (currentItem?.source === 'runtime') return;
       const currentCursor = this.agentCursors[snapshot.confirmationId];
       if (!isNewerSnapshot(snapshot, currentCursor)) return;
       this.agentCursors[snapshot.confirmationId] = {
         version: snapshot.version,
-        updatedAt: snapshot.updatedAt
+        updatedAt: snapshot.updatedAt,
+        identityKey: createIdentityKey(snapshot),
+        terminal: currentCursor?.terminal === true || isTerminalSnapshot(snapshot)
       };
       if (snapshot.status !== 'pending') {
         const current = this.items[snapshot.confirmationId];
@@ -182,20 +261,96 @@ export const useChatConfirmationQueueStore = defineStore('chat-confirmation-queu
     },
 
     /**
-     * 合并一次 Main pending snapshot。
-     * 新事件可能先于 list response 到达，因此只移除不晚于 snapshot 水位的缺失旧项。
+     * 单调合并一组 Main pending snapshot。
+     * 此方法不表达删除；带请求前 baseline 的缺失清理由 applyRecovery 执行。
      * @param snapshots - Main 当前全部 pending confirmation
      */
     applySnapshot(snapshots: readonly ChatAgentConfirmationSnapshot[]): void {
-      const snapshotIds = new Set(snapshots.map((snapshot): string => snapshot.confirmationId));
-      const snapshotWatermark = snapshots.reduce((latest, snapshot): string => (snapshot.updatedAt > latest ? snapshot.updatedAt : latest), '');
       snapshots.forEach((snapshot): void => this.applyAgent(snapshot));
-      if (!snapshotWatermark) return;
-      Object.values(this.items).forEach((item): void => {
-        if (item.source !== 'agent' || snapshotIds.has(item.confirmationId) || item.snapshot.updatedAt > snapshotWatermark) return;
-        delete this.items[item.confirmationId];
-        if (this.selectedId === item.confirmationId) this.selectedId = null;
+    },
+
+    /**
+     * 以请求前 baseline 收敛一次恢复响应。
+     * 响应缺失只清理从请求开始后完全未变化的 Agent 项。
+     * @param snapshots - Main 当前全部 pending confirmation
+     * @param baseline - 请求发起前冻结的本地 pending cursor
+     */
+    applyRecovery(snapshots: readonly ChatAgentConfirmationSnapshot[], baseline: readonly AgentRecoveryBaseline[]): void {
+      const responseIds = new Set(snapshots.map((snapshot): string => snapshot.confirmationId));
+      snapshots.forEach((snapshot): void => this.applyAgent(snapshot));
+      baseline.forEach((entry): void => {
+        if (responseIds.has(entry.confirmationId)) return;
+        const current = this.items[entry.confirmationId];
+        const cursor = this.agentCursors[entry.confirmationId];
+        if (
+          current?.source !== 'agent' ||
+          current.confirmationId !== current.snapshot.confirmationId ||
+          current.snapshot.status !== 'pending' ||
+          current.snapshot.version !== entry.version ||
+          current.snapshot.updatedAt !== entry.updatedAt ||
+          cursor?.version !== entry.version ||
+          cursor.updatedAt !== entry.updatedAt
+        ) {
+          return;
+        }
+        delete this.items[entry.confirmationId];
+        if (this.selectedId === entry.confirmationId) this.selectedId = null;
       });
+    },
+
+    /**
+     * 精确查找同一 Session、Task 和 Attempt 的 pending Agent confirmation。
+     * @param sessionId - Session 身份
+     * @param taskId - Task 身份
+     * @param attemptId - Attempt 身份
+     * @returns 维持统一队列稳定排序的精确匹配
+     */
+    findAgent(sessionId: string, taskId: string, attemptId: string): ChatAgentConfirmationItem[] {
+      if (!sessionId.trim() || !taskId.trim() || !attemptId.trim()) return [];
+      return this.pending.filter(
+        (item): item is ChatAgentConfirmationItem =>
+          item.source === 'agent' &&
+          item.confirmationId === item.snapshot.confirmationId &&
+          item.snapshot.status === 'pending' &&
+          item.snapshot.sessionId === sessionId &&
+          item.snapshot.taskId === taskId &&
+          item.snapshot.attemptId === attemptId
+      );
+    },
+
+    /**
+     * 从 Main 事实源恢复全部 pending Agent confirmation。
+     * 同一个 Store 的 hook 与任务卡片共享一个 flight。
+     */
+    recoverAgent(): Promise<void> {
+      const storeKey = this as object;
+      const currentFlight = AGENT_RECOVERY_FLIGHTS.get(storeKey);
+      if (currentFlight) return currentFlight;
+      const baseline = Object.values(this.items)
+        .filter(
+          (item): item is ChatAgentConfirmationItem =>
+            item.source === 'agent' && item.confirmationId === item.snapshot.confirmationId && item.snapshot.status === 'pending'
+        )
+        .map(
+          (item): AgentRecoveryBaseline => ({
+            confirmationId: item.confirmationId,
+            version: item.snapshot.version,
+            updatedAt: item.snapshot.updatedAt
+          })
+        );
+      // 延迟到 microtask 才调用 IPC，使 WeakMap 能先同步登记 flight，并把同步 throw 转为 rejected Promise。
+      const request = Promise.resolve()
+        .then(() => getElectronAPI().chatAgentListConfirmations())
+        .then(unwrapAgentResult);
+      const flight = (async (): Promise<void> => {
+        const [requestError, snapshots] = await asyncTo(request);
+        if (requestError || !snapshots) throw requestError ?? new Error('chat_agent_confirmation_recovery_empty');
+        this.applyRecovery(snapshots, baseline);
+      })().finally((): void => {
+        if (AGENT_RECOVERY_FLIGHTS.get(storeKey) === flight) AGENT_RECOVERY_FLIGHTS.delete(storeKey);
+      });
+      AGENT_RECOVERY_FLIGHTS.set(storeKey, flight);
+      return flight;
     },
 
     /**

@@ -8,6 +8,7 @@ import type { ChatMessageToolPart } from 'types/chat';
 import type {
   AgentTaskQueuePhase,
   AgentTaskStatus,
+  ChatAgentConfirmationSnapshot,
   ChatAgentGetTaskResult,
   ChatAgentHandlerResult,
   ChatAgentTaskDetailSnapshot,
@@ -21,10 +22,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import BubblePartAgentTask from '@/components/BChat/components/MessageBubble/BubblePartAgentTask.vue';
 import { readTaskResultId, readTaskResultStatus } from '@/components/BChat/utils/agentTaskPart';
 import { createTaskIndexKey, useChatAgentTaskStore } from '@/stores/chat/agentTask';
+import { useChatConfirmationQueueStore } from '@/stores/chat/confirmationQueue';
 
 /** Agent Task IPC 测试边界。 */
 const agentAPI = vi.hoisted(() => ({
-  getTask: vi.fn()
+  getTask: vi.fn(),
+  listConfirmations: vi.fn()
+}));
+
+/** Artifact 导航测试边界。 */
+const routerAPI = vi.hoisted(() => ({
+  push: vi.fn()
 }));
 
 /** 日志测试边界。 */
@@ -34,8 +42,13 @@ const loggerAPI = vi.hoisted(() => ({
 
 vi.mock('@/shared/platform/electron-api', () => ({
   getElectronAPI: (): Record<string, unknown> => ({
-    chatAgentGetTask: agentAPI.getTask
+    chatAgentGetTask: agentAPI.getTask,
+    chatAgentListConfirmations: agentAPI.listConfirmations
   })
+}));
+
+vi.mock('@/router', () => ({
+  default: routerAPI
 }));
 
 vi.mock('@/shared/logger', () => ({
@@ -96,6 +109,8 @@ interface Deferred<T> {
   promise: Promise<T>;
   /** 完成 Promise。 */
   resolve: (value: T) => void;
+  /** 拒绝 Promise。 */
+  reject: (reason?: unknown) => void;
 }
 
 /** 卡片挂载结果。 */
@@ -112,10 +127,12 @@ interface CardHarness {
  */
 function createDeferred<T>(): Deferred<T> {
   let resolvePromise: (value: T) => void = (): void => undefined;
-  const promise = new Promise<T>((resolve): void => {
+  let rejectPromise: (reason?: unknown) => void = (): void => undefined;
+  const promise = new Promise<T>((resolve, reject): void => {
     resolvePromise = resolve;
+    rejectPromise = reject;
   });
-  return { promise, resolve: resolvePromise };
+  return { promise, resolve: resolvePromise, reject: rejectPromise };
 }
 
 /**
@@ -163,6 +180,157 @@ function createDetail(patch: Partial<ChatAgentTaskDetailSnapshot> = {}): ChatAge
     },
     warnings: [],
     artifacts: [],
+    ...patch
+  };
+}
+
+/**
+ * 创建覆盖全部公开 section 的 Task Detail。
+ * @param patch - 可覆盖字段
+ * @returns 完整公开 Detail
+ */
+function createFullDetail(patch: Partial<ChatAgentTaskDetailSnapshot> = {}): ChatAgentTaskDetailSnapshot {
+  return createDetail({
+    currentAttempt: {
+      attemptId: 'attempt-1',
+      attemptNumber: 1,
+      agentId: 'agent-1',
+      attemptState: 'running',
+      runtimeId: 'runtime-1',
+      createdAt: '2026-07-28T00:00:00.000Z',
+      startedAt: '2026-07-28T00:00:01.000Z'
+    },
+    resources: [
+      {
+        kind: 'file',
+        displayReference: 'src/example.ts',
+        revision: 'revision-1'
+      }
+    ],
+    timeline: {
+      entries: [
+        {
+          sequence: 1,
+          type: 'runtime',
+          code: 'runtime.started',
+          summary: '已启动公开 Runtime',
+          occurredAt: '2026-07-28T00:00:01.000Z',
+          payload: 'SECRET_RAW_PAYLOAD',
+          input: 'SECRET_RAW_INPUT',
+          output: 'SECRET_RAW_OUTPUT'
+        }
+      ],
+      firstSequence: 1,
+      lastSequence: 1,
+      truncated: true
+    },
+    completion: {
+      level: 'full',
+      summary: 'Child 声明完成',
+      criteria: [
+        {
+          criterionIndex: 0,
+          claimStatus: 'satisfied',
+          verificationStatus: 'contradicted',
+          claimSummary: 'Child 声明满足'
+        }
+      ]
+    },
+    warnings: [{ code: 'warning-code', message: '公开告警' }],
+    error: {
+      code: 'runtime_failed',
+      phase: 'runtime',
+      category: 'runtime',
+      retryable: false,
+      message: '辅助错误说明',
+      details: {
+        reason: '公开原因',
+        toolName: 'read_file',
+        secret: 'SECRET_ERROR_DETAIL'
+      }
+    },
+    usage: {
+      inputTokens: 0,
+      outputTokens: 2,
+      totalTokens: 2,
+      modelCalls: 1,
+      toolRounds: 1,
+      queueDurationMs: 10,
+      executionDurationMs: 20,
+      externalRequests: 0,
+      monetaryCost: {
+        currency: 'unknown',
+        pricingVersion: 'unknown',
+        estimated: 'unknown',
+        actual: 'unknown'
+      }
+    },
+    changeset: {
+      changesetId: 'changeset-1',
+      baseRevision: 'base-1',
+      diffHash: 'diff-1',
+      operationSetHash: 'ops-1',
+      displayPaths: ['src/example.ts'],
+      phase: 'awaiting_confirmation'
+    },
+    artifacts: [
+      {
+        artifactId: 'artifact-visible',
+        kind: 'document',
+        reference: 'document-1',
+        owner: {
+          taskId: 'task-1',
+          agentId: 'agent-1',
+          attemptId: 'attempt-1'
+        },
+        visibility: 'user',
+        createdAt: '2026-07-28T00:00:02.000Z'
+      },
+      {
+        artifactId: 'artifact-forged',
+        kind: 'document',
+        reference: 'document-forged',
+        owner: {
+          taskId: 'task-other',
+          agentId: 'agent-1',
+          attemptId: 'attempt-1'
+        },
+        visibility: 'user',
+        createdAt: '2026-07-28T00:00:02.000Z'
+      }
+    ],
+    ...patch
+  } as Partial<ChatAgentTaskDetailSnapshot>);
+}
+
+/**
+ * 创建确认快照。
+ * @param patch - 可覆盖字段
+ * @returns 完整公开 confirmation
+ */
+function createConfirmation(patch: Partial<ChatAgentConfirmationSnapshot> = {}): ChatAgentConfirmationSnapshot {
+  return {
+    confirmationId: 'confirmation-1',
+    sessionId: 'session-1',
+    turnId: 'turn-1',
+    taskId: 'task-1',
+    attemptId: 'attempt-1',
+    agentId: 'agent-1',
+    runtimeId: 'runtime-1',
+    toolCallId: 'tool-call-1',
+    changesetId: 'changeset-1',
+    status: 'pending',
+    version: 1,
+    riskLevel: 'write',
+    displayPaths: ['src/example.ts'],
+    resourceScopes: ['file:/workspace/src/example.ts'],
+    unifiedDiff: '--- a/src/example.ts\n+++ b/src/example.ts',
+    baseRevision: 'base-1',
+    diffHash: 'diff-1',
+    operationSetHash: 'ops-1',
+    planHash: 'plan-1',
+    createdAt: '2026-07-28T00:00:00.000Z',
+    updatedAt: '2026-07-28T00:00:00.000Z',
     ...patch
   };
 }
@@ -439,6 +607,9 @@ describe('readTaskResultId', (): void => {
 describe('BubblePartAgentTask', (): void => {
   beforeEach((): void => {
     agentAPI.getTask.mockReset();
+    agentAPI.listConfirmations.mockReset();
+    routerAPI.push.mockReset();
+    routerAPI.push.mockResolvedValue(undefined);
     loggerAPI.error.mockReset();
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-28T00:00:10.000Z'));
@@ -460,6 +631,313 @@ describe('BubblePartAgentTask', (): void => {
     expect(wrapper.text()).toContain('约 10 秒');
     expect(wrapper.find('[data-icon="lucide:play-circle"]').exists()).toBe(true);
     expect(agentAPI.getTask).not.toHaveBeenCalled();
+  });
+
+  it('loads Detail only on first expansion and reuses the trusted cached sequence', async (): Promise<void> => {
+    const { wrapper } = mountProjected(createSummary());
+    agentAPI.getTask.mockResolvedValue(createTaskResult(createFullDetail()));
+
+    await wrapper.find('[data-action="toggle-detail"]').trigger('click');
+    await flushPromises();
+    expect(agentAPI.getTask).toHaveBeenCalledOnce();
+    expect(wrapper.find('[data-section="contract"]').exists()).toBe(true);
+
+    await wrapper.find('[data-action="toggle-detail"]').trigger('click');
+    await wrapper.find('[data-action="toggle-detail"]').trigger('click');
+    await flushPromises();
+    expect(agentAPI.getTask).toHaveBeenCalledOnce();
+  });
+
+  it('invalidates old Detail on a newer Summary and performs one bounded follow-up after an obsolete flight', async (): Promise<void> => {
+    const first = createDeferred<ChatAgentHandlerResult<ChatAgentGetTaskResult>>();
+    agentAPI.getTask
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce(createTaskResult(createFullDetail({ taskSequence: 3, acceptanceCriteria: ['最新详情标准'] })));
+    const { pinia, wrapper } = mountProjected(createSummary());
+
+    await wrapper.find('[data-action="toggle-detail"]').trigger('click');
+    setActivePinia(pinia);
+    useChatAgentTaskStore().applySummary(createSummary({ taskSequence: 2, summary: '最新摘要', updatedAt: '2026-07-28T00:00:02.000Z' }));
+    useChatAgentTaskStore().applySummary(createSummary({ taskSequence: 3, summary: '最终摘要', updatedAt: '2026-07-28T00:00:03.000Z' }));
+    first.resolve(createTaskResult(createFullDetail({ taskSequence: 1, summary: '过期详情' })));
+    await flushPromises();
+    await flushPromises();
+
+    expect(agentAPI.getTask).toHaveBeenCalledTimes(2);
+    expect(wrapper.text()).toContain('最新详情标准');
+    expect(wrapper.text()).not.toContain('过期详情');
+  });
+
+  it('renders the fixed public Detail order without raw fields or forged artifacts', async (): Promise<void> => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    useChatAgentTaskStore().applyDetail(createFullDetail({ status: 'completed' }));
+    const wrapper = mountWithPinia(pinia);
+
+    await wrapper.find('[data-action="toggle-detail"]').trigger('click');
+    await flushPromises();
+    const sections = wrapper.findAll('[data-section]').map((section): string | undefined => section.attributes('data-section'));
+
+    expect(sections).toEqual(['contract', 'execution', 'timeline', 'completion', 'usage', 'changeset', 'artifacts']);
+    expect(wrapper.text()).toContain('更早事件已截断');
+    expect(wrapper.text()).toContain('contradicted');
+    expect(wrapper.text()).toContain('runtime_failed');
+    expect(wrapper.text()).toContain('runtime');
+    expect(wrapper.text()).toContain('不可重试');
+    expect(wrapper.text()).toContain('未知');
+    expect(wrapper.text()).not.toContain('$0');
+    expect(wrapper.html()).not.toContain('SECRET_RAW_PAYLOAD');
+    expect(wrapper.html()).not.toContain('SECRET_RAW_INPUT');
+    expect(wrapper.html()).not.toContain('SECRET_RAW_OUTPUT');
+    expect(wrapper.html()).not.toContain('SECRET_ERROR_DETAIL');
+    expect(wrapper.html()).not.toContain('document-forged');
+    expect(wrapper.findAll('[data-action="open-artifact"]')).toHaveLength(1);
+    expect(wrapper.find('.b-agent-task-card__criterion--contradicted').exists()).toBe(true);
+  });
+
+  it('renders all public contract, attempt and usage accounting fields with unknown distinct from zero', async (): Promise<void> => {
+    const detail = createFullDetail({
+      mode: 'write',
+      priority: 'high',
+      required: false,
+      deadlineAt: '2026-07-29T00:00:00.000Z',
+      status: 'completed',
+      currentAttempt: {
+        attemptId: 'attempt-public',
+        attemptNumber: 2,
+        agentId: 'agent-1',
+        attemptState: 'completed',
+        runtimeId: 'runtime-public',
+        createdAt: '2026-07-28T00:00:00.000Z',
+        startedAt: '2026-07-28T00:00:01.000Z',
+        endedAt: '2026-07-28T00:00:03.000Z'
+      },
+      usage: {
+        inputTokens: 0,
+        outputTokens: 2,
+        totalTokens: 2,
+        modelCalls: 1,
+        toolRounds: 1,
+        queueDurationMs: 10,
+        executionDurationMs: 20,
+        externalRequests: 0,
+        monetaryCost: {
+          currency: 'USD',
+          pricingVersion: 'pricing-v1',
+          estimated: 'unknown',
+          actual: 0
+        }
+      },
+      artifacts: []
+    });
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    useChatAgentTaskStore().applyDetail(detail);
+    const wrapper = mountWithPinia(pinia);
+
+    await wrapper.find('[data-action="toggle-detail"]').trigger('click');
+    expect(wrapper.text()).toContain('受控写入');
+    expect(wrapper.text()).toContain('高优先级');
+    expect(wrapper.text()).toContain('可选任务');
+    expect(wrapper.text()).toContain('2026-07-29T00:00:00.000Z');
+    expect(wrapper.text()).toContain('agent-1');
+    expect(wrapper.text()).toContain('runtime-public');
+    expect(wrapper.text()).toContain('2026-07-28T00:00:00.000Z');
+    expect(wrapper.text()).toContain('排队耗时10 ms');
+    expect(wrapper.text()).toContain('执行耗时20 ms');
+    expect(wrapper.text()).toContain('pricing-v1');
+    expect(wrapper.text()).toContain('估算成本未知');
+    expect(wrapper.text()).toContain('实际成本USD 0');
+  });
+
+  it('shows artifact metadata while allowing open only for a completed Task', async (): Promise<void> => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    useChatAgentTaskStore().applyDetail(createFullDetail({ status: 'running' }));
+    const wrapper = mountWithPinia(pinia);
+
+    await wrapper.find('[data-action="toggle-detail"]').trigger('click');
+
+    expect(wrapper.text()).toContain('document-1');
+    expect(wrapper.findAll('[data-action="open-artifact"]')).toHaveLength(0);
+  });
+
+  it.each(
+    (['changesetId', 'baseRevision', 'diffHash', 'operationSetHash'] as const).flatMap(
+      (field): ReadonlyArray<readonly [typeof field, 'blank' | 'mismatch']> => [
+        [field, 'blank'],
+        [field, 'mismatch']
+      ]
+    )
+  )('rejects %s integrity when values are %s', async (field, condition): Promise<void> => {
+    const detailValue = condition === 'blank' ? '' : `detail-${field}`;
+    const confirmationValue = condition === 'blank' ? '' : `confirmation-${field}`;
+    const detail = createFullDetail({
+      status: 'waiting_confirmation',
+      changeset: {
+        changesetId: 'changeset-1',
+        baseRevision: 'base-1',
+        diffHash: 'diff-1',
+        operationSetHash: 'ops-1',
+        displayPaths: ['src/example.ts'],
+        phase: 'awaiting_confirmation',
+        [field]: detailValue
+      }
+    });
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    useChatAgentTaskStore().applyDetail(detail);
+    useChatConfirmationQueueStore().applyAgent(
+      createConfirmation({
+        [field]: confirmationValue
+      })
+    );
+    const wrapper = mountWithPinia(pinia);
+
+    await wrapper.find('[data-action="toggle-detail"]').trigger('click');
+    await wrapper.find('[data-action="open-confirmation"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('agent_confirmation_integrity_invalid');
+    expect(useChatConfirmationQueueStore().selectedId).toBeNull();
+  });
+
+  it.each([
+    ['attempt', { currentAttempt: undefined }],
+    ['changeset', { changeset: undefined }]
+  ] as const)('shows a stable protocol error when waiting confirmation lacks %s', async (_label, patch): Promise<void> => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    useChatAgentTaskStore().applyDetail(createFullDetail({ status: 'waiting_confirmation', ...patch }));
+    const wrapper = mountWithPinia(pinia);
+
+    await wrapper.find('[data-action="toggle-detail"]').trigger('click');
+
+    expect(wrapper.text()).toContain('agent_confirmation_context_invalid');
+    expect(wrapper.find('[data-action="open-confirmation"]').exists()).toBe(false);
+  });
+
+  it('ignores a late artifact open failure after collapse and never mutates Task Store', async (): Promise<void> => {
+    const navigation = createDeferred<void>();
+    routerAPI.push.mockReturnValue(navigation.promise);
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const taskStore = useChatAgentTaskStore();
+    taskStore.applyDetail(createFullDetail({ status: 'completed' }));
+    const beforeTasks = JSON.stringify(taskStore.tasksById);
+    const beforeDetails = JSON.stringify(taskStore.detailsById);
+    const wrapper = mountWithPinia(pinia);
+
+    await wrapper.find('[data-action="toggle-detail"]').trigger('click');
+    await wrapper.find('[data-action="open-artifact"]').trigger('click');
+    await wrapper.find('[data-action="toggle-detail"]').trigger('click');
+    navigation.reject(new Error('navigation failed'));
+    await flushPromises();
+    await wrapper.find('[data-action="toggle-detail"]').trigger('click');
+
+    expect(wrapper.text()).not.toContain('agent_artifact_open_failed');
+    expect(JSON.stringify(taskStore.tasksById)).toBe(beforeTasks);
+    expect(JSON.stringify(taskStore.detailsById)).toBe(beforeDetails);
+  });
+
+  it('does not leak an old artifact failure into an already expanded replacement Task', async (): Promise<void> => {
+    const navigation = createDeferred<void>();
+    routerAPI.push.mockReturnValue(navigation.promise);
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const taskStore = useChatAgentTaskStore();
+    taskStore.applyDetail(createFullDetail({ status: 'completed' }));
+    taskStore.applyDetail(
+      createFullDetail({
+        taskId: 'task-2',
+        turnId: 'turn-2',
+        checkpointId: 'checkpoint-2',
+        assistantMessageId: 'assistant-2',
+        toolCallId: 'tool-call-2',
+        agentId: 'agent-2',
+        status: 'completed',
+        currentAttempt: {
+          attemptId: 'attempt-2',
+          attemptNumber: 1,
+          agentId: 'agent-2',
+          attemptState: 'completed',
+          runtimeId: 'runtime-2',
+          createdAt: '2026-07-28T00:00:00.000Z',
+          startedAt: '2026-07-28T00:00:01.000Z',
+          endedAt: '2026-07-28T00:00:02.000Z'
+        },
+        artifacts: [
+          {
+            artifactId: 'artifact-2',
+            kind: 'document',
+            reference: 'document-2',
+            owner: {
+              taskId: 'task-2',
+              agentId: 'agent-2',
+              attemptId: 'attempt-2'
+            },
+            visibility: 'user',
+            createdAt: '2026-07-28T00:00:02.000Z'
+          }
+        ]
+      })
+    );
+    const wrapper = mountWithPinia(pinia);
+
+    await wrapper.find('[data-action="toggle-detail"]').trigger('click');
+    await wrapper.find('[data-action="open-artifact"]').trigger('click');
+    const replacementPart = createSuccessPart('task-2');
+    replacementPart.toolCallId = 'tool-call-2';
+    await wrapper.setProps({
+      assistantMessageId: 'assistant-2',
+      part: replacementPart
+    });
+    await flushPromises();
+    await wrapper.find('[data-action="toggle-detail"]').trigger('click');
+    expect(wrapper.text()).toContain('document-2');
+
+    navigation.reject(new Error('old navigation failed'));
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain('agent_artifact_open_failed');
+    expect(wrapper.text()).toContain('document-2');
+  });
+
+  it('selects the one exact integrity-bound confirmation from waiting Detail', async (): Promise<void> => {
+    const detail = createFullDetail({ status: 'waiting_confirmation' });
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    useChatAgentTaskStore().applyDetail(detail);
+    useChatConfirmationQueueStore().applyAgent(createConfirmation());
+    const wrapper = mountWithPinia(pinia);
+
+    await wrapper.find('[data-action="toggle-detail"]').trigger('click');
+    await wrapper.find('[data-action="open-confirmation"]').trigger('click');
+
+    expect(useChatConfirmationQueueStore().selectedId).toBe('confirmation-1');
+    expect(wrapper.text()).not.toContain('agent_confirmation_integrity_invalid');
+  });
+
+  it('recovers zero confirmation matches once and reports multiple matches as a protocol error', async (): Promise<void> => {
+    const detail = createFullDetail({ status: 'waiting_confirmation' });
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    useChatAgentTaskStore().applyDetail(detail);
+    const recovered = createConfirmation();
+    agentAPI.listConfirmations.mockResolvedValue({ ok: true, data: [recovered] });
+    const wrapper = mountWithPinia(pinia);
+
+    await wrapper.find('[data-action="toggle-detail"]').trigger('click');
+    await wrapper.find('[data-action="open-confirmation"]').trigger('click');
+    await flushPromises();
+    expect(agentAPI.listConfirmations).toHaveBeenCalledOnce();
+    expect(useChatConfirmationQueueStore().selectedId).toBe('confirmation-1');
+
+    useChatConfirmationQueueStore().applyAgent(createConfirmation({ confirmationId: 'confirmation-2' }));
+    await wrapper.find('[data-action="open-confirmation"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('agent_confirmation_ambiguous');
+    expect(agentAPI.listConfirmations).toHaveBeenCalledOnce();
   });
 
   it('uses projected status and summary instead of the outer Tool Result', (): void => {

@@ -74,8 +74,9 @@
 </template>
 
 <script setup lang="ts">
+import type { ConfirmationSheetActionPayload } from './components/ConfirmationSheet.vue';
 import type { BChatProps, BChatRuntimeSourceStatus, BChatRuntimeStatusChange, Message } from './utils/types';
-import type { ChatMessageConfirmationAction, ChatSession } from 'types/chat';
+import type { ChatSession } from 'types/chat';
 import type { ChatRuntimeContextUsageSnapshot } from 'types/chat-runtime';
 import { computed, h, onUnmounted, provide, ref, toRef, watch } from 'vue';
 import { useRouter } from 'vue-router';
@@ -269,13 +270,32 @@ const { workspaceRoot, getActiveTools, syncAIResources, getSkillContentHashes, r
 
 /**
  * 处理底部确认弹窗操作。
- * @param action - 用户操作（approve/approve-session/approve-always/cancel）
+ * @param payload - 绑定点击时实际展示项的用户操作
  */
-async function handleConfirmationSheetAction(action: ChatMessageConfirmationAction): Promise<void> {
-  const confirmation = confirmationController.currentConfirmation.value;
-  if (!confirmation) return;
+async function handleConfirmationSheetAction(payload: ConfirmationSheetActionPayload): Promise<void> {
+  const confirmation = confirmationQueue.items[payload.confirmationId];
+  const currentConfirmation = confirmationQueue.current;
+  if (
+    !confirmation ||
+    !currentConfirmation ||
+    currentConfirmation.confirmationId !== payload.confirmationId ||
+    currentConfirmation.source !== payload.source ||
+    confirmation.source !== payload.source ||
+    confirmation.confirmationId !== payload.confirmationId
+  ) {
+    return;
+  }
+  const { action } = payload;
 
   if (confirmation.source === 'agent') {
+    if (
+      payload.expectedVersion === undefined ||
+      confirmation.snapshot.confirmationId !== payload.confirmationId ||
+      confirmation.snapshot.status !== 'pending' ||
+      confirmation.snapshot.version !== payload.expectedVersion
+    ) {
+      return;
+    }
     const [requestError, response] = await asyncTo(
       getElectronAPI().chatAgentResolveConfirmation({
         confirmationId: confirmation.confirmationId,

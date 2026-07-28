@@ -73,6 +73,7 @@ describe('ConfirmationSheet', (): void => {
     expect(wrapper.text()).toContain('Child Agent 变更确认');
     expect(wrapper.text()).toContain('task-1');
     expect(wrapper.text()).toContain('child-1');
+    expect(wrapper.text()).toContain('session-1');
     expect(wrapper.text()).toContain('notes.md');
     expect(wrapper.text()).toContain('file:/workspace/notes.md');
     expect(wrapper.text()).toContain('-before');
@@ -81,10 +82,19 @@ describe('ConfirmationSheet', (): void => {
     expect(wrapper.text()).not.toContain('始终允许');
 
     await wrapper.findAll('button')[0]?.trigger('click');
-    expect(wrapper.emitted('action')).toEqual([['approve']]);
+    expect(wrapper.emitted('action')).toEqual([
+      [
+        {
+          action: 'approve',
+          confirmationId: 'confirmation-1',
+          source: 'agent',
+          expectedVersion: 1
+        }
+      ]
+    ]);
   });
 
-  it('keeps Runtime remember actions for eligible local tool confirmations', (): void => {
+  it('keeps Runtime remember actions and emits its displayed stable identity', async (): Promise<void> => {
     const runtimeItem: ChatConfirmationQueueItem = {
       source: 'runtime',
       confirmationId: 'runtime-confirmation-1',
@@ -112,5 +122,15 @@ describe('ConfirmationSheet', (): void => {
     expect(wrapper.text()).toContain('写入文件');
     expect(wrapper.text()).toContain('本会话允许');
     expect(wrapper.text()).toContain('始终允许');
+    await wrapper.findAll('button')[1]?.trigger('click');
+    expect(wrapper.emitted('action')).toEqual([
+      [
+        {
+          action: 'approve-session',
+          confirmationId: 'runtime-confirmation-1',
+          source: 'runtime'
+        }
+      ]
+    ]);
   });
 });

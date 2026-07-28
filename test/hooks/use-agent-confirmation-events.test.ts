@@ -67,10 +67,33 @@ function createSnapshot(patch: Partial<ChatAgentConfirmationSnapshot> = {}): Cha
   };
 }
 
+/** 可手动完成的测试 Promise。 */
+interface Deferred<T> {
+  /** 未决 Promise。 */
+  promise: Promise<T>;
+  /** 完成 Promise。 */
+  resolve: (value: T) => void;
+}
+
+/**
+ * 创建可手动完成的 Promise。
+ * @returns Deferred 控制器
+ */
+function createDeferred<T>(): Deferred<T> {
+  let resolvePromise: (value: T) => void = (): void => undefined;
+  const promise = new Promise<T>((resolve): void => {
+    resolvePromise = resolve;
+  });
+  return { promise, resolve: resolvePromise };
+}
+
 /**
  * 等待 hook 的异步 list 恢复完成。
  */
 async function flushConfirmationEvents(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
@@ -95,6 +118,7 @@ describe('useAgentConfirmationEvents', (): void => {
     );
     const scope = effectScope();
     scope.run((): void => useAgentConfirmationEvents());
+    await Promise.resolve();
 
     expect(agentAPI.onEvent).toHaveBeenCalledBefore(agentAPI.listConfirmations);
     agentAPI.listener?.({
@@ -153,5 +177,24 @@ describe('useAgentConfirmationEvents', (): void => {
     });
     expect(useChatConfirmationQueueStore().current).toBeNull();
     scope.stop();
+  });
+
+  it('shares one Store recovery flight across concurrent hook subscribers', async (): Promise<void> => {
+    const recovery = createDeferred<ChatAgentHandlerResult<ChatAgentConfirmationSnapshot[]>>();
+    agentAPI.listConfirmations.mockReturnValue(recovery.promise);
+    const firstScope = effectScope();
+    const secondScope = effectScope();
+
+    firstScope.run((): void => useAgentConfirmationEvents());
+    secondScope.run((): void => useAgentConfirmationEvents());
+    expect(agentAPI.onEvent).toHaveBeenCalledTimes(2);
+    await Promise.resolve();
+    expect(agentAPI.listConfirmations).toHaveBeenCalledOnce();
+
+    recovery.resolve({ ok: true, data: [createSnapshot()] });
+    await flushConfirmationEvents();
+    expect(useChatConfirmationQueueStore().current?.confirmationId).toBe('confirmation-1');
+    firstScope.stop();
+    secondScope.stop();
   });
 });

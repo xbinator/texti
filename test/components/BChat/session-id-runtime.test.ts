@@ -13,7 +13,7 @@ import type {
   ChatMessageWidgetResultPart,
   ChatSession
 } from 'types/chat';
-import type { ChatAgentApplicationEvent } from 'types/chat-agent';
+import type { ChatAgentApplicationEvent, ChatAgentConfirmationSnapshot } from 'types/chat-agent';
 import type {
   ChatRuntimeCompactInput,
   ChatRuntimeContinueInput,
@@ -36,6 +36,7 @@ import { useProvideActorSystem } from '@/hooks/useChat/useActorSystem';
 import { emitChatFileReferenceInsert } from '@/shared/chat/fileReference';
 import { native } from '@/shared/platform';
 import type { StoredFile } from '@/shared/storage';
+import { useChatConfirmationQueueStore } from '@/stores/chat/confirmationQueue';
 import { useChatPermissionStore } from '@/stores/chat/permission';
 import type { TodoItem } from '@/stores/chat/todo';
 import { useSettingStore } from '@/stores/ui/setting';
@@ -76,6 +77,7 @@ const electronAPIMock = vi.hoisted(() => ({
   }),
   chatAgentListTasks: vi.fn(),
   chatAgentGetTask: vi.fn(),
+  chatAgentResolveConfirmation: vi.fn(),
   chatRuntimeEstimateContext: vi.fn(),
   chatRuntimeSend: vi.fn(),
   chatRuntimeContinue: vi.fn(),
@@ -239,6 +241,12 @@ vi.mock('vue-router', () => ({
   useRouter: vi.fn(() => ({
     push: vi.fn()
   }))
+}));
+
+vi.mock('@/router', () => ({
+  default: {
+    push: vi.fn()
+  }
 }));
 
 vi.mock('@/hooks/useChat/useActorSystem', async (importOriginal) => {
@@ -527,6 +535,38 @@ function createSession(id: string, title: string): ChatSession {
 }
 
 /**
+ * 创建 BChat confirmation 竞态测试快照。
+ * @param confirmationId - confirmation 身份
+ * @param riskLevel - 风险等级
+ * @returns 完整公开快照
+ */
+function createAgentConfirmation(confirmationId: string, riskLevel: 'write' | 'dangerous'): ChatAgentConfirmationSnapshot {
+  return {
+    confirmationId,
+    sessionId: 'session-active',
+    turnId: 'turn-1',
+    taskId: `task-${confirmationId}`,
+    attemptId: `attempt-${confirmationId}`,
+    agentId: `agent-${confirmationId}`,
+    runtimeId: `runtime-${confirmationId}`,
+    toolCallId: `tool-call-${confirmationId}`,
+    changesetId: `changeset-${confirmationId}`,
+    status: 'pending',
+    version: 1,
+    riskLevel,
+    displayPaths: [`${confirmationId}.md`],
+    resourceScopes: [`file:/workspace/${confirmationId}.md`],
+    unifiedDiff: `--- a/${confirmationId}.md\n+++ b/${confirmationId}.md`,
+    baseRevision: 'a'.repeat(64),
+    diffHash: 'b'.repeat(64),
+    operationSetHash: 'c'.repeat(64),
+    planHash: 'd'.repeat(64),
+    createdAt: '2026-07-28T00:00:00.000Z',
+    updatedAt: '2026-07-28T00:00:00.000Z'
+  };
+}
+
+/**
  * 创建测试消息。
  * @param id - 消息 ID
  * @param content - 消息内容
@@ -696,6 +736,7 @@ describe('BChat sessionId runtime', (): void => {
     electronAPIMock.chatAgentOnEvent.mockClear();
     electronAPIMock.chatAgentListTasks.mockReset();
     electronAPIMock.chatAgentGetTask.mockReset();
+    electronAPIMock.chatAgentResolveConfirmation.mockReset();
     electronAPIMock.chatRuntimeEstimateContext.mockReset();
     electronAPIMock.chatRuntimeContinue.mockReset();
     electronAPIMock.chatRuntimeCompact.mockReset();
@@ -808,6 +849,11 @@ describe('BChat sessionId runtime', (): void => {
     electronAPIMock.chatAgentGetTask.mockResolvedValue({
       ok: true,
       data: null
+    });
+    electronAPIMock.chatAgentResolveConfirmation.mockResolvedValue({
+      ok: false,
+      code: 'UNEXPECTED_CALL',
+      error: 'unexpected confirmation resolution'
     });
     getModelToolSupportMock.mockResolvedValue({ supported: true });
     useSettingStore().setSidebarVisible(true);
@@ -1460,7 +1506,13 @@ describe('BChat sessionId runtime', (): void => {
       }
     });
     await flushPromises();
-    wrapper.findComponent({ name: 'ConfirmationSheet' }).vm.$emit('action', 'approve-session');
+    const sheet = wrapper.findComponent({ name: 'ConfirmationSheet' });
+    const displayed = sheet.props('confirmation') as { confirmationId: string };
+    sheet.vm.$emit('action', {
+      action: 'approve-session',
+      confirmationId: displayed.confirmationId,
+      source: 'runtime'
+    });
     await flushPromises();
 
     expect(useChatPermissionStore().sessionToolPermissionGrants.write_file).toBe(true);
@@ -1469,6 +1521,110 @@ describe('BChat sessionId runtime', (): void => {
       confirmationId: 'confirmation-1',
       decision: { approved: true, grantScope: 'session' }
     });
+    wrapper.unmount();
+  });
+
+  it('does not resolve a new current item from a stale displayed Agent action', async (): Promise<void> => {
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+    const queue = useChatConfirmationQueueStore();
+    const displayed = createAgentConfirmation('agent-a', 'dangerous');
+    const next = createAgentConfirmation('agent-b', 'write');
+    queue.applyAgent(displayed);
+    queue.applyAgent(next);
+    await flushPromises();
+
+    queue.applyAgent({
+      ...displayed,
+      status: 'rejected',
+      version: 2,
+      updatedAt: '2026-07-28T00:00:01.000Z'
+    });
+    expect(queue.current?.confirmationId).toBe('agent-b');
+    wrapper.findComponent({ name: 'ConfirmationSheet' }).vm.$emit('action', {
+      action: 'approve',
+      confirmationId: 'agent-a',
+      source: 'agent',
+      expectedVersion: 1
+    });
+    await flushPromises();
+
+    expect(electronAPIMock.chatAgentResolveConfirmation).not.toHaveBeenCalled();
+    expect(queue.current?.confirmationId).toBe('agent-b');
+    wrapper.unmount();
+  });
+
+  it('does not resolve an Agent item that is no longer the selected current confirmation', async (): Promise<void> => {
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+    const queue = useChatConfirmationQueueStore();
+    const displayed = createAgentConfirmation('agent-selected-a', 'dangerous');
+    const selected = createAgentConfirmation('agent-selected-b', 'write');
+    queue.applyAgent(displayed);
+    queue.applyAgent(selected);
+    queue.select(selected.confirmationId);
+    await flushPromises();
+
+    wrapper.findComponent({ name: 'ConfirmationSheet' }).vm.$emit('action', {
+      action: 'approve',
+      confirmationId: displayed.confirmationId,
+      source: 'agent',
+      expectedVersion: displayed.version
+    });
+    await flushPromises();
+
+    expect(electronAPIMock.chatAgentResolveConfirmation).not.toHaveBeenCalled();
+    expect(queue.current?.confirmationId).toBe(selected.confirmationId);
+    wrapper.unmount();
+  });
+
+  it('does not settle a Runtime item that is no longer the selected current confirmation', async (): Promise<void> => {
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+    const runtimeId = await submitTextAndReadRuntimeId(wrapper, 'write stale runtime');
+    emitRuntimeEvent(runtimeListeners, 'confirmationRequest', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      confirmationId: 'runtime-source-a',
+      request: {
+        toolName: 'write_file',
+        title: '写入文件',
+        description: '是否写入？',
+        riskLevel: 'write'
+      }
+    });
+    await flushPromises();
+    const sheet = wrapper.findComponent({ name: 'ConfirmationSheet' });
+    const displayed = sheet.props('confirmation') as { confirmationId: string };
+    const queue = useChatConfirmationQueueStore();
+    queue.addRuntime({
+      source: 'runtime',
+      confirmationId: 'runtime-selected-b',
+      ownerId: 'other-owner',
+      request: {
+        toolName: 'write_file',
+        title: '另一个写入',
+        description: '另一个请求',
+        riskLevel: 'dangerous'
+      },
+      createdAt: '2026-07-28T00:00:01.000Z'
+    });
+    queue.select('runtime-selected-b');
+    await flushPromises();
+
+    sheet.vm.$emit('action', {
+      action: 'approve',
+      confirmationId: displayed.confirmationId,
+      source: 'runtime'
+    });
+    await flushPromises();
+
+    expect(electronAPIMock.chatRuntimeSubmitConfirmation).not.toHaveBeenCalled();
+    expect(queue.current?.confirmationId).toBe('runtime-selected-b');
     wrapper.unmount();
   });
 

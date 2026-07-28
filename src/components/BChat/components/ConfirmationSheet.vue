@@ -10,7 +10,8 @@
       <template v-if="agentSnapshot">
         <div class="confirm-bottom-sheet__description">
           Child Task <code>{{ agentSnapshot.taskId }}</code
-          >（Agent <code>{{ agentSnapshot.agentId }}</code
+          >（Session <code>{{ agentSnapshot.sessionId }}</code
+          >，Agent <code>{{ agentSnapshot.agentId }}</code
           >）请求应用 {{ agentSnapshot.displayPaths.length }} 个文件变更，风险级别为 {{ agentSnapshot.riskLevel }}。
         </div>
 
@@ -100,10 +101,22 @@ interface ConfirmationFingerprint {
   shortValue: string;
 }
 
+/** ConfirmationSheet 绑定实际展示项的操作事件。 */
+export interface ConfirmationSheetActionPayload {
+  /** 用户确认操作。 */
+  readonly action: ChatMessageConfirmationAction;
+  /** 点击时实际展示的 confirmation 身份。 */
+  readonly confirmationId: string;
+  /** 点击时实际展示的 owner 域。 */
+  readonly source: ChatConfirmationQueueItem['source'];
+  /** Agent confirmation 点击时观察到的 CAS 版本。 */
+  readonly expectedVersion?: number;
+}
+
 const props = withDefaults(defineProps<Props>(), {});
 
 const emit = defineEmits<{
-  (e: 'action', action: ChatMessageConfirmationAction): void;
+  (e: 'action', payload: ConfirmationSheetActionPayload): void;
 }>();
 
 /** 内容区域是否折叠。 */
@@ -172,7 +185,14 @@ function truncatePreview(text: string): string {
  * @param action - 确认操作类型
  */
 function handleAction(action: ChatMessageConfirmationAction): void {
-  emit('action', action);
+  const { confirmation } = props;
+  if (!confirmation) return;
+  emit('action', {
+    action,
+    confirmationId: confirmation.confirmationId,
+    source: confirmation.source,
+    ...(confirmation.source === 'agent' ? { expectedVersion: confirmation.snapshot.version } : {})
+  });
 }
 </script>
 

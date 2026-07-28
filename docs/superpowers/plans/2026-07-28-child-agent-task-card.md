@@ -735,11 +735,15 @@ git commit -m "feat(chat): 渲染 Child Agent 任务卡片"
 
 **Files:**
 
+- Modify: `src/components/BChat/components/ConfirmationSheet.vue`
 - Modify: `src/components/BChat/components/MessageBubble/BubblePartAgentTask.vue`
+- Modify: `src/components/BChat/index.vue`
 - Create: `src/components/BChat/utils/agentArtifact.ts`
 - Modify: `src/stores/chat/confirmationQueue.ts`
 - Modify: `src/hooks/useChat/useAgentConfirmationEvents.ts`
 - Modify: `test/components/BChat/bubble-part-agent-task.component.test.ts`
+- Modify: `test/components/BChat/confirmation-sheet.component.test.ts`
+- Modify: `test/components/BChat/session-id-runtime.test.ts`
 - Create: `test/components/BChat/agent-artifact.test.ts`
 - Modify: `test/stores/chat/confirmation-queue.test.ts`
 - Modify: `test/hooks/use-agent-confirmation-events.test.ts`
@@ -751,7 +755,7 @@ git commit -m "feat(chat): 渲染 Child Agent 任务卡片"
 - ConfirmationQueue provides exact Task/Attempt matching and explicit recovery.
 - Artifact openers are a closed kind registry.
 
-- [ ] **Step 1: Write failing detail and interaction tests**
+- [x] **Step 1: Write failing detail and interaction tests**
 
 Cover:
 
@@ -768,17 +772,17 @@ Cover:
 - only `visibility=user` artifacts render, and only registered kinds render an open action;
 - artifact open failure does not modify Task state.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run:
 
 ```bash
-pnpm exec vitest run test/components/BChat/bubble-part-agent-task.component.test.ts test/components/BChat/agent-artifact.test.ts test/stores/chat/confirmation-queue.test.ts test/hooks/use-agent-confirmation-events.test.ts
+pnpm exec vitest run test/components/BChat/bubble-part-agent-task.component.test.ts test/components/BChat/agent-artifact.test.ts test/stores/chat/confirmation-queue.test.ts test/hooks/use-agent-confirmation-events.test.ts test/components/BChat/confirmation-sheet.component.test.ts test/components/BChat/session-id-runtime.test.ts
 ```
 
 Expected: FAIL because lazy Detail, exact confirmation lookup and artifact registry do not exist.
 
-- [ ] **Step 3: Add exact confirmation lookup and recovery**
+- [x] **Step 3: Add exact confirmation lookup and recovery**
 
 Add Store actions:
 
@@ -793,7 +797,7 @@ recoverAgent(): Promise<void>;
 
 Move the reusable Main snapshot call out of the hook’s closed local function so both the hook and card can call the same deduplicated recovery. `findAgent()` must return only pending `source='agent'` entries whose snapshot identities all match.
 
-- [ ] **Step 4: Add the closed artifact registry**
+- [x] **Step 4: Add the closed artifact registry**
 
 Export:
 
@@ -814,17 +818,17 @@ export function openAgentArtifact(
 
 Register only kinds with an existing safe navigation API. Do not reinterpret an unknown reference as a file path. When no opener is registered, render metadata without a button.
 
-- [ ] **Step 5: Render the complete public Detail**
+- [x] **Step 5: Render the complete public Detail**
 
 On expansion, await `ensureTask(sessionId, taskId)`. Render the design section 9.3 order and limits. Confirmation selection must run zero/one/many logic. Compare all three changeset integrity fields before enabling confirmation navigation; mismatch is a protocol error.
 
-- [ ] **Step 6: Run focused tests and verify GREEN**
+- [x] **Step 6: Run focused tests and verify GREEN**
 
 Run the command from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 7: Update changelog and commit**
+- [x] **Step 7: Update changelog and commit**
 
 Add under `## Added`:
 
@@ -835,7 +839,7 @@ Add under `## Added`:
 Commit:
 
 ```bash
-git add src/components/BChat/components/MessageBubble/BubblePartAgentTask.vue src/components/BChat/utils/agentArtifact.ts src/stores/chat/confirmationQueue.ts src/hooks/useChat/useAgentConfirmationEvents.ts test/components/BChat/bubble-part-agent-task.component.test.ts test/components/BChat/agent-artifact.test.ts test/stores/chat/confirmation-queue.test.ts test/hooks/use-agent-confirmation-events.test.ts changelog/2026-07-28.md
+git add src/components/BChat/components/ConfirmationSheet.vue src/components/BChat/components/MessageBubble/BubblePartAgentTask.vue src/components/BChat/index.vue src/components/BChat/utils/agentArtifact.ts src/stores/chat/confirmationQueue.ts src/hooks/useChat/useAgentConfirmationEvents.ts test/components/BChat/bubble-part-agent-task.component.test.ts test/components/BChat/confirmation-sheet.component.test.ts test/components/BChat/session-id-runtime.test.ts test/components/BChat/agent-artifact.test.ts test/stores/chat/confirmation-queue.test.ts test/hooks/use-agent-confirmation-events.test.ts changelog/2026-07-28.md docs/superpowers/plans/2026-07-28-child-agent-task-card.md
 git commit -m "feat(chat): 完善 Child Task 详情交互"
 ```
 
