@@ -4135,11 +4135,16 @@ describe('chat runtime service shell', (): void => {
       finished: false,
       createdAt: '2026-07-23T00:00:00.000Z'
     };
-    const createTerminalResult = (taskId: string, agentId: string, attemptId: string) => ({
+    const createTerminalResult = (
+      taskId: string,
+      agentId: string,
+      attemptId: string,
+      executionStatus: 'completed' | 'cancelled' = 'completed'
+    ) => ({
       taskId,
       agentId,
       attemptId,
-      executionStatus: 'completed' as const,
+      executionStatus,
       completion: { level: 'none' as const, criteria: [] },
       summary: `Result for ${taskId}`,
       warnings: [],
@@ -4159,9 +4164,20 @@ describe('chat runtime service shell', (): void => {
           estimated: 'unknown' as const,
           actual: 'unknown' as const
         }
-      }
+      },
+      ...(executionStatus === 'cancelled'
+        ? {
+            error: {
+              code: 'cancelled' as const,
+              phase: 'runtime' as const,
+              category: 'user' as const,
+              retryable: false,
+              details: { reason: 'user_cancelled' }
+            }
+          }
+        : {})
     });
-    const firstResult = createTerminalResult('task-1', 'child-1', 'attempt-1');
+    const firstResult = createTerminalResult('task-1', 'child-1', 'attempt-1', 'cancelled');
     const secondResult = createTerminalResult('task-2', 'child-2', 'attempt-2');
     const toolSchemaSnapshot = [{ name: 'delegate_task', description: 'deferred', parameters: { type: 'object' as const } }];
     const continuationSnapshot = {
@@ -4226,6 +4242,9 @@ describe('chat runtime service shell', (): void => {
         tools: [],
         ownerCheckpointId: 'checkpoint-1'
       });
+      expect(runtime.system).toContain('base system');
+      expect(runtime.system).toContain('required cancelled tasks: task-1');
+      expect(runtime.system).toContain('must explicitly state');
       expect(forceFinal).toBe(true);
       expect(activeAssistant.parts).toEqual([
         expect.objectContaining({
@@ -4263,7 +4282,8 @@ describe('chat runtime service shell', (): void => {
       context: {
         clientId: 'client-1',
         modelSnapshot: { providerId: 'provider-frozen', modelId: 'model-frozen' },
-        toolSchemaSnapshot
+        toolSchemaSnapshot,
+        system: 'base system'
       },
       model: { providerId: 'renderer-override', modelId: 'renderer-override' },
       messages: [],

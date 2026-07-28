@@ -1141,7 +1141,7 @@ describe('agent coordinator', (): void => {
     expect(fixture.releaseActor).toHaveBeenCalledWith(tasks[1]!.taskId);
   });
 
-  it('revokes a pending confirmation and records a cancelled write Result before cleanup', async (): Promise<void> => {
+  it('revokes a pending confirmation and records a cancelled write Result only after cleanup', async (): Promise<void> => {
     const task = createWriteTask();
     const fixture = createDependencies([task]);
     const authorized = authorizeWriteTask(task);
@@ -1219,6 +1219,11 @@ describe('agent coordinator', (): void => {
     fixture.dependencies.queueCommit = vi.fn();
     fixture.dependencies.createConfirmationId = (): string => confirmation.confirmationId;
     fixture.dependencies.fileCommitter = { commit: vi.fn(), cancelTask: vi.fn(), recover: vi.fn() };
+    let finishDiscard: () => void = (): void => undefined;
+    const discardGate = new Promise<void>((resolve): void => {
+      finishDiscard = resolve;
+    });
+    fixture.discardRuntime.mockReturnValue(discardGate);
     const coordinator = createAgentCoordinator(fixture.dependencies);
     await coordinator.accept(payload);
     await vi.waitFor((): void => {
@@ -1226,7 +1231,13 @@ describe('agent coordinator', (): void => {
       expect(currentTask.status).toBe('waiting_confirmation');
     });
 
-    await expect(coordinator.cancelTask(task.taskId)).resolves.toBe('cancel_requested');
+    const cancellation = coordinator.cancelTask(task.taskId);
+    await vi.waitFor((): void => {
+      expect(fixture.discardRuntime).toHaveBeenCalledWith(runtimeId);
+    });
+    expect(fixture.recordTaskResult).not.toHaveBeenCalled();
+    finishDiscard();
+    await expect(cancellation).resolves.toBe('cancel_requested');
 
     expect(revokeTask).toHaveBeenCalledWith(task.taskId, 'user_cancelled');
     expect(fixture.cancelTask).not.toHaveBeenCalled();
@@ -1244,6 +1255,67 @@ describe('agent coordinator', (): void => {
     );
     expect(fixture.dependencies.queueCommit).not.toHaveBeenCalled();
     expect(fixture.dependencies.fileCommitter?.commit).not.toHaveBeenCalled();
+  });
+
+  it('records a recovery failure instead of false cancellation when write cleanup fails', async (): Promise<void> => {
+    const task = createWriteTask();
+    const fixture = createDependencies([task]);
+    const controller = new AbortController();
+    const authorized = authorizeWriteTask(task);
+    const runtimeId = `runtime-${task.taskId}`;
+    const attemptId = `attempt-${runtimeId}`;
+    const runningTask: AgentTaskRecord = {
+      ...authorized,
+      status: 'running',
+      queuePhase: undefined,
+      currentAttemptId: attemptId
+    };
+    const changeset = createChangeset(runningTask, attemptId, runtimeId);
+    fixture.authorizeTask.mockReturnValue(authorized);
+    fixture.getTask.mockReturnValue(authorized);
+    fixture.enqueueTask.mockResolvedValue({
+      taskId: task.taskId,
+      phase: 'start',
+      kind: 'write-intent',
+      signal: controller.signal,
+      release: vi.fn()
+    });
+    fixture.executeTask.mockImplementation(async (): Promise<ChildExecutionOutcome> => {
+      controller.abort('user_cancelled');
+      return {
+        kind: 'changeset_prepared',
+        changeset: changeset.snapshot,
+        draft: createWriteDraft(runningTask, attemptId)
+      };
+    });
+    fixture.discardRuntime.mockRejectedValue(new Error('overlay_cleanup_failed'));
+    const coordinator = createAgentCoordinator(fixture.dependencies);
+
+    await coordinator.accept(payload);
+    await vi.waitFor((): void => {
+      expect(fixture.recordTaskResult).toHaveBeenCalledOnce();
+    });
+
+    expect(fixture.recordTaskResult).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: task.taskId }),
+      expect.objectContaining({
+        executionStatus: 'failed',
+        error: {
+          code: 'runtime_interrupted',
+          phase: 'recovery',
+          category: 'runtime',
+          retryable: true,
+          details: {
+            reason: 'write_overlay_cleanup_failed',
+            runtimeId
+          }
+        }
+      })
+    );
+    expect(fixture.recordTaskResult).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ executionStatus: 'cancelled' })
+    );
   });
 
   it('lets cancellation win after the commit lease is active but before external mutation', async (): Promise<void> => {
@@ -1315,6 +1387,11 @@ describe('agent coordinator', (): void => {
     });
     fixture.dependencies.createConfirmationId = (): string => confirmation.confirmationId;
     fixture.dependencies.fileCommitter = { commit: vi.fn(), cancelTask: vi.fn(), recover: vi.fn() };
+    let finishDiscard: () => void = (): void => undefined;
+    const discardGate = new Promise<void>((resolve): void => {
+      finishDiscard = resolve;
+    });
+    fixture.discardRuntime.mockReturnValue(discardGate);
     fixture.enqueueTask.mockImplementation((request: AgentScheduleRequest): Promise<AgentResourceLease> => {
       if (request.phase === 'commit') {
         return new Promise<AgentResourceLease>((resolve): void => {
@@ -1349,6 +1426,11 @@ describe('agent coordinator', (): void => {
     });
     const cancellation = coordinator.cancelTask(task.taskId);
 
+    await vi.waitFor((): void => {
+      expect(fixture.discardRuntime).toHaveBeenCalledWith(runtimeId);
+    });
+    expect(fixture.recordTaskResult).not.toHaveBeenCalled();
+    finishDiscard();
     await expect(cancellation).resolves.toBe('cancel_requested');
 
     expect(fixture.cancelTask).toHaveBeenCalledWith(task.taskId, 'user_cancelled');
@@ -1646,8 +1728,10 @@ describe('agent coordinator', (): void => {
     );
     expect(fixture.unbindRuntime).toHaveBeenCalledWith(`runtime-${task.taskId}`);
     expect(release).toHaveBeenCalledOnce();
-    expect(fixture.releaseActor).toHaveBeenCalledWith(task.taskId);
+    expect(fixture.releaseActor).toHaveBeenCalledTimes(3);
+    fixture.releaseActor.mockImplementation((): void => undefined);
     await expect(coordinator.cancelTask(task.taskId)).resolves.toBe('already_settled');
+    expect(fixture.releaseActor).toHaveBeenCalledTimes(4);
   });
 
   it('persists running cancellation before the signal and hard-aborts only after the grace period', async (): Promise<void> => {

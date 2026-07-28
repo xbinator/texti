@@ -231,8 +231,8 @@ const AGENT_TASK_WARNING_LIMIT = 16;
  * @param reason - 机器可判断的错误原因
  * @returns 不包含内部事实的错误
  */
-function createProjectorError(reason: string): Error {
-  return new Error(reason);
+function createProjectorError(reason: string): Error & { readonly code: 'PROTOCOL_ERROR' } {
+  return Object.assign(new Error(reason), { code: 'PROTOCOL_ERROR' as const });
 }
 
 /**
@@ -1033,6 +1033,11 @@ class DefaultAgentTaskProjector implements AgentTaskProjector {
               createdAt: currentAttempt.createdAt,
               ...(currentAttempt.startedAt ? { startedAt: currentAttempt.startedAt } : {}),
               ...(currentAttempt.finishedAt ? { endedAt: currentAttempt.finishedAt } : {})
+            }),
+            duration: Object.freeze({
+              queueDurationMs: currentAttempt.usageSnapshot.queueDurationMs,
+              executionDurationMs: currentAttempt.usageSnapshot.executionDurationMs,
+              complete: currentAttempt.usageComplete
             })
           }
         : {}),
@@ -3001,6 +3006,7 @@ export async function recoverChatAgentDelegations(): Promise<void> {
   chatAgentConfirmationQueue.recover();
   await chatAgentDelegationService.recoverInterruptedWrites(journalResults);
   chatAgentDelegationService.recoverCancellations();
+  defaultBudgetLedger.recoverTerminalReservations();
   controlledWriteReady = true;
   await chatAgentCoordinator.recover();
 }

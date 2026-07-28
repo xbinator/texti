@@ -2,6 +2,7 @@
  * @file ipc.test.ts
  * @description Chat Agent application IPC 的窄输入、allowlist 输出与结构化错误测试。
  */
+import * as path from 'node:path';
 import type {
   ChatAgentCheckpointSnapshot,
   ChatAgentCancelTaskResult,
@@ -12,6 +13,10 @@ import type {
 } from 'types/chat-agent';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerChatAgentHandlers } from '../../../../../../electron/main/modules/chat/agents/ipc.mjs';
+
+/** 公开 IPC 中禁止出现的秘密形态。 */
+const PUBLIC_SECRET_PATTERN =
+  /(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|cookie)\s*[:=]|\b(?:sk|rk)-[A-Za-z0-9_-]{16,}\b/i;
 
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => Promise<unknown>>(),
@@ -91,6 +96,31 @@ function createConfirmation(): ChatAgentConfirmationSnapshot {
     createdAt: '2026-07-27T00:00:00.000Z',
     updatedAt: '2026-07-27T00:00:00.000Z'
   };
+}
+
+/**
+ * 递归断言 IPC 成功信封不含内部键、秘密或绝对路径。
+ * @param value - 待检查公开值
+ * @param location - 当前递归位置
+ */
+function expectPublicSafe(value: unknown, location = '$'): void {
+  if (typeof value === 'string') {
+    expect(value, `${location} must not contain a secret-shaped value`).not.toMatch(PUBLIC_SECRET_PATTERN);
+    expect(path.posix.isAbsolute(value), `${location} must not contain a POSIX absolute path`).toBe(false);
+    expect(path.win32.isAbsolute(value), `${location} must not contain a Windows absolute path`).toBe(false);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry, index): void => expectPublicSafe(entry, `${location}[${index}]`));
+    return;
+  }
+  if (typeof value !== 'object' || value === null) return;
+  Object.entries(value).forEach(([key, entry]): void => {
+    expect(key, `${location}.${key} must be public`).not.toMatch(
+      /modelSnapshot|permissionSnapshot|executionPlanSnapshot|targetPath|overlay|journalId|rollbackReference|continuation|raw.*tool|tool.*(?:input|output)/i
+    );
+    expectPublicSafe(entry, `${location}.${key}`);
+  });
 }
 
 describe('chat agent IPC', (): void => {
@@ -221,6 +251,60 @@ describe('chat agent IPC', (): void => {
       })
     );
     expect(await handler({}, { sessionId: 'session-1', taskId: 'task-1' }, 'extra')).toMatchObject({ ok: false, code: 'INVALID_INPUT' });
+  });
+
+  it('keeps Task query and cancellation success envelopes recursively public-safe', async (): Promise<void> => {
+    const task = {
+      recordState: 'active',
+      taskId: 'task-safe',
+      sessionId: 'session-safe',
+      turnId: 'turn-safe',
+      checkpointId: 'checkpoint-safe',
+      assistantMessageId: 'assistant-safe',
+      toolCallId: 'tool-call-safe',
+      agentId: 'child-safe',
+      projectionSchemaVersion: 1,
+      taskSequence: 2,
+      task: 'Inspect public context',
+      mode: 'read',
+      required: false,
+      priority: 'normal',
+      status: 'running',
+      queuePhase: 'start',
+      createdAt: '2026-07-28T00:00:00.000Z',
+      updatedAt: '2026-07-28T00:00:01.000Z'
+    } satisfies ChatAgentTaskSummarySnapshot;
+    mocks.listTasks.mockReturnValue({ tasks: [task] });
+    mocks.getTask.mockReturnValue(task);
+    mocks.cancelTask.mockResolvedValue({ disposition: 'cancel_requested', task });
+    registerChatAgentHandlers();
+    const listHandler = mocks.handlers.get('chat:agent:list-tasks');
+    const getHandler = mocks.handlers.get('chat:agent:get-task');
+    const cancelHandler = mocks.handlers.get('chat:agent:cancel-task');
+    if (!listHandler || !getHandler || !cancelHandler) throw new Error('Task handlers were not registered');
+
+    const results = await Promise.all([
+      listHandler({}, { sessionId: 'session-safe' }),
+      getHandler({}, { sessionId: 'session-safe', taskId: 'task-safe' }),
+      cancelHandler({}, { sessionId: 'session-safe', taskId: 'task-safe' })
+    ]);
+
+    results.forEach((result): void => expectPublicSafe(result));
+  });
+
+  it('preserves a stable projector protocol code in the error envelope', async (): Promise<void> => {
+    mocks.listTasks.mockImplementation((): never => {
+      throw Object.assign(new Error('agent_task_projection_invalid'), { code: 'PROTOCOL_ERROR' });
+    });
+    registerChatAgentHandlers();
+    const handler = mocks.handlers.get('chat:agent:list-tasks');
+    if (!handler) throw new Error('Task list handler was not registered');
+
+    expect(await handler({}, { sessionId: 'session-1' })).toEqual({
+      ok: false,
+      error: 'agent_task_projection_invalid',
+      code: 'PROTOCOL_ERROR'
+    });
   });
 
   it('registers narrow confirmation list and CAS resolution handlers', async (): Promise<void> => {

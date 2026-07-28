@@ -1000,8 +1000,9 @@ export async function createAgentWriteOverlay(input: CreateAgentWriteOverlayInpu
     },
     async dispose(): Promise<void> {
       if (disposed) return;
-      disposed = true;
       await fs.rm(attemptDirectory, { recursive: true, force: true });
+      // 只有真实删除成功后才冻结 overlay；失败时允许恢复流程幂等重试。
+      disposed = true;
       entries.clear();
       accessEntries.clear();
     }

@@ -363,6 +363,25 @@ function createRuntimeError(
 }
 
 /**
+ * 创建 write overlay 无法完成外部清理时的恢复错误。
+ * @param runtimeId - 当前 Runtime 身份
+ * @returns 可由恢复流程重试的结构化错误
+ */
+function createCleanupError(runtimeId: string): AgentTaskError {
+  return {
+    code: 'runtime_interrupted',
+    phase: 'recovery',
+    category: 'runtime',
+    retryable: true,
+    message: 'Child Runtime write overlay cleanup did not complete.',
+    details: {
+      reason: 'write_overlay_cleanup_failed',
+      runtimeId
+    }
+  };
+}
+
+/**
  * 校验 Task、Attempt 与 Checkpoint 的聚合身份和冻结 hash。
  * @param input - Child 执行输入
  * @returns 稳定失败原因或 null
@@ -899,7 +918,22 @@ export function createChildRuntimeExecutor(dependencies: ChildExecutorDependenci
         }
         return executionResult.value.outcome;
       }
-      if (createdWriteTools) await Promise.allSettled([createdWriteTools.dispose()]);
+      if (createdWriteTools) {
+        const [disposeResult] = await Promise.allSettled([createdWriteTools.dispose()]);
+        if (disposeResult.status === 'rejected') {
+          return createTerminal(
+            createResult(
+              dependencies,
+              input,
+              plan,
+              state,
+              'failed',
+              'Child Runtime write overlay cleanup requires recovery.',
+              createCleanupError(input.attempt.currentRuntimeId)
+            )
+          );
+        }
+      }
 
       return createTerminal(
         createResult(
@@ -921,8 +955,8 @@ export function createChildRuntimeExecutor(dependencies: ChildExecutorDependenci
     async discard(runtimeId: string): Promise<void> {
       const tools = retainedWriteTools.get(runtimeId);
       if (!tools) return;
-      retainedWriteTools.delete(runtimeId);
       await tools.dispose();
+      retainedWriteTools.delete(runtimeId);
     }
   };
 }

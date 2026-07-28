@@ -64,7 +64,13 @@ import { createRuntimeConfirmationRequests, type RuntimeConfirmationRequestInput
 import { createRuntimeRendererToolRequests } from './controllers/renderer-tool.mjs';
 import { ChatRuntimeError } from './errors.mjs';
 import { chatRuntimeLocks, createRuntimeLockRegistry, type RuntimeLockResult } from './infrastructure/locks.mjs';
-import { findLastRuntimeAssistantMessage, findLastRuntimeUserMessage, injectAgentResults, normalizeContinuationMessages } from './messages/continuation.mjs';
+import {
+  createCancellationPolicy,
+  findLastRuntimeAssistantMessage,
+  findLastRuntimeUserMessage,
+  injectAgentResults,
+  normalizeContinuationMessages
+} from './messages/continuation.mjs';
 import { createRuntimeAssistantPlaceholder, createRuntimeInterruptMessage, createRuntimeUserMessage } from './messages/factory.mjs';
 import { materializeRuntimeFileParts } from './messages/file-parts.mjs';
 import {
@@ -1349,6 +1355,10 @@ export function createChatRuntimeService(
       ) {
         throw new ChatRuntimeError('INVALID_CONTINUATION', 'Primary continuation snapshot failed integrity validation');
       }
+      const cancellationPolicy = createCancellationPolicy(
+        checkpoint.continuationSnapshot.orderedToolCalls,
+        checkpoint.terminalResults
+      );
       assertRuntimeIdAvailable(input.runtimeId);
       const lock = locks.acquireContinuationWritingLock({
         sessionId: checkpoint.sessionId,
@@ -1365,7 +1375,8 @@ export function createChatRuntimeService(
         primaryAgentId: checkpoint.primaryAgentId,
         rootRuntimeId: checkpoint.rootRuntimeId,
         sourceRuntimeId: checkpoint.sourceRuntimeId,
-        context
+        context,
+        ...(cancellationPolicy ? { cancellationPolicy } : {})
       });
       activeRuntimes.set(runtime.runtimeId, runtime);
       let sourceAssistant: ChatMessageRecord | undefined;

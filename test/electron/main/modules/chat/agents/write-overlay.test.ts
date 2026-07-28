@@ -572,6 +572,30 @@ describe('agent write overlay', (): void => {
     });
   });
 
+  it('keeps dispose retryable when removing the Attempt overlay fails', async (): Promise<void> => {
+    const roots = await createRoots();
+    const facts = createFacts([`directory:${roots.workspaceRoot}/**`]);
+    const overlay = await createAgentWriteOverlay({
+      ...facts,
+      runtimeId: facts.attempt.currentRuntimeId,
+      workspaceRoot: roots.workspaceRoot,
+      overlayRoot: roots.overlayRoot,
+      now: (): string => occurredAt,
+      createId: createIdFactory()
+    });
+    await overlay.writeFile({ path: 'retry.md', content: 'candidate' });
+    const taskDirectory = path.join(roots.overlayRoot, facts.task.taskId);
+    const attemptDirectory = path.join(taskDirectory, facts.attempt.attemptId);
+    await fs.chmod(taskDirectory, 0o500);
+
+    await expect(overlay.dispose()).rejects.toMatchObject({ code: 'EACCES' });
+    await expect(fs.stat(attemptDirectory)).resolves.toBeDefined();
+
+    await fs.chmod(taskDirectory, 0o700);
+    await expect(overlay.dispose()).resolves.toBeUndefined();
+    await expect(fs.stat(attemptDirectory)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('rejects a pre-existing Task overlay symlink before creating an Attempt directory', async (): Promise<void> => {
     const roots = await createRoots();
     const facts = createFacts([`directory:${roots.workspaceRoot}/**`]);

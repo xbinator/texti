@@ -5,7 +5,10 @@
 import type { ChatMessageRecord } from 'types/chat';
 import type { AgentOrderedToolCallSnapshot, ChatAgentResult } from 'types/chat-agent';
 import { describe, expect, it } from 'vitest';
-import { injectAgentResults } from '../../../../../../../electron/main/modules/chat/runtime/messages/continuation.mts';
+import {
+  createCancellationPolicy,
+  injectAgentResults
+} from '../../../../../../../electron/main/modules/chat/runtime/messages/continuation.mts';
 
 /**
  * 创建一个最小结构化 Child 结果。
@@ -14,12 +17,17 @@ import { injectAgentResults } from '../../../../../../../electron/main/modules/c
  * @param attemptId - Attempt 身份
  * @returns 可注入模型上下文的结果
  */
-function createResult(taskId: string, agentId: string, attemptId: string): ChatAgentResult {
+function createResult(
+  taskId: string,
+  agentId: string,
+  attemptId: string,
+  executionStatus: ChatAgentResult['executionStatus'] = 'completed'
+): ChatAgentResult {
   return {
     taskId,
     agentId,
     attemptId,
-    executionStatus: 'completed',
+    executionStatus,
     completion: { level: 'none', criteria: [] },
     summary: `Result for ${taskId}`,
     warnings: [],
@@ -145,6 +153,83 @@ describe('agent result continuation injection', (): void => {
     expect((): void => {
       injectAgentResults(assistant, orderedToolCalls, {
         'call-missing': { result: createResult('task-1', 'child-1', 'attempt-1'), resultHash: 'c'.repeat(64) }
+      });
+    }).toThrowError(/protocol_error/u);
+  });
+
+  it('creates distinct continuation rules for required and optional cancellations', (): void => {
+    const orderedToolCalls: AgentOrderedToolCallSnapshot[] = [
+      {
+        toolCallId: 'call-required',
+        taskId: 'task-required',
+        required: true,
+        argumentsHash: 'a'.repeat(64),
+        providerMetadataHash: 'b'.repeat(64)
+      },
+      {
+        toolCallId: 'call-optional',
+        taskId: 'task-optional',
+        required: false,
+        argumentsHash: 'c'.repeat(64),
+        providerMetadataHash: 'd'.repeat(64)
+      }
+    ];
+
+    const policy = createCancellationPolicy(orderedToolCalls, {
+      'call-required': {
+        result: createResult('task-required', 'child-required', 'attempt-required', 'cancelled'),
+        resultHash: 'e'.repeat(64)
+      },
+      'call-optional': {
+        result: createResult('task-optional', 'child-optional', 'attempt-optional', 'cancelled'),
+        resultHash: 'f'.repeat(64)
+      }
+    });
+
+    expect(policy).toContain('required cancelled tasks: task-required');
+    expect(policy).toContain('must explicitly state');
+    expect(policy).toContain('optional cancelled tasks: task-optional');
+    expect(policy).toContain('information gap');
+  });
+
+  it('does not add a cancellation policy when every delegated task completed', (): void => {
+    const orderedToolCalls: AgentOrderedToolCallSnapshot[] = [
+      {
+        toolCallId: 'call-1',
+        taskId: 'task-1',
+        required: true,
+        argumentsHash: 'a'.repeat(64),
+        providerMetadataHash: 'b'.repeat(64)
+      }
+    ];
+
+    expect(
+      createCancellationPolicy(orderedToolCalls, {
+        'call-1': {
+          result: createResult('task-1', 'child-1', 'attempt-1'),
+          resultHash: 'c'.repeat(64)
+        }
+      })
+    ).toBeUndefined();
+  });
+
+  it('fails closed when cancellation policy inputs do not match frozen identities', (): void => {
+    const orderedToolCalls: AgentOrderedToolCallSnapshot[] = [
+      {
+        toolCallId: 'call-1',
+        taskId: 'task-1',
+        required: true,
+        argumentsHash: 'a'.repeat(64),
+        providerMetadataHash: 'b'.repeat(64)
+      }
+    ];
+
+    expect((): void => {
+      createCancellationPolicy(orderedToolCalls, {
+        'call-1': {
+          result: createResult('task-other', 'child-1', 'attempt-1', 'cancelled'),
+          resultHash: 'c'.repeat(64)
+        }
       });
     }).toThrowError(/protocol_error/u);
   });

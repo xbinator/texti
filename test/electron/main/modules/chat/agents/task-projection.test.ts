@@ -529,6 +529,7 @@ describe('public Agent Task projection protocol', (): void => {
         taskSequence: 5
       }
     ]);
+    expectPublicSafe(published[0]);
   });
 
   it('keeps enqueue no-throw when scheduling and error reporting fail', (): void => {
@@ -673,6 +674,11 @@ describe('Agent Task Summary projector', (): void => {
         createdAt: '2026-07-28T08:00:00.500Z',
         startedAt: '2026-07-28T08:00:01.000Z',
         endedAt: '2026-07-28T08:00:02.000Z'
+      },
+      duration: {
+        queueDurationMs: 1,
+        executionDurationMs: 1,
+        complete: true
       },
       summary: 'Done [REDACTED]',
       createdAt: projection.task.createdAt,
@@ -876,6 +882,27 @@ describe('Agent Task list projector', (): void => {
       projector.listTasks({ sessionId: 'session-projector', cursor });
     }).toThrow('agent_task_cursor_invalid');
     expect(fixture.listTasksBySession).not.toHaveBeenCalled();
+  });
+
+  it('attaches one stable protocol code to projector failures', (): void => {
+    const fixture = createProjectorStore([]);
+    const projector = createAgentTaskProjector({
+      store: fixture.store,
+      resolveResource: (): null => null,
+      resolveArtifact: (): null => null
+    });
+    let thrown: unknown;
+
+    try {
+      projector.listTasks({ sessionId: 'session-projector', cursor: 'not+base64' });
+    } catch (error: unknown) {
+      thrown = error;
+    }
+
+    expect(thrown).toMatchObject({
+      message: 'agent_task_cursor_invalid',
+      code: 'PROTOCOL_ERROR'
+    });
   });
 
   it('rejects a cursor bound to another Session', (): void => {

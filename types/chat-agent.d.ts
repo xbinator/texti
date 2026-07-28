@@ -1122,6 +1122,16 @@ export interface ChatAgentTaskCancellationSnapshot {
   readonly requestedAt: string;
 }
 
+/** Summary 可直接展示的持久化耗时。 */
+export interface ChatAgentTaskDurationSnapshot {
+  /** 已持久化排队耗时。 */
+  readonly queueDurationMs: number;
+  /** 已持久化执行耗时。 */
+  readonly executionDurationMs: number;
+  /** 是否覆盖 Attempt 最终 outcome。 */
+  readonly complete: boolean;
+}
+
 /** 列表、事件和卡片收起态使用的轻量 Task 摘要。 */
 export interface ChatAgentTaskSummarySnapshot {
   /** 判别字段。 */
@@ -1160,6 +1170,8 @@ export interface ChatAgentTaskSummarySnapshot {
   readonly queuePhase?: AgentTaskQueuePhase;
   /** 当前可选 Attempt 投影。 */
   readonly currentAttempt?: ChatAgentTaskAttemptSnapshot;
+  /** 当前 Attempt 的轻量持久化耗时。 */
+  readonly duration?: ChatAgentTaskDurationSnapshot;
   /** 已记录的取消请求；没有请求时省略。 */
   readonly cancellation?: ChatAgentTaskCancellationSnapshot;
   /** 经 Main 生成或裁剪的一句进度或终态摘要。 */

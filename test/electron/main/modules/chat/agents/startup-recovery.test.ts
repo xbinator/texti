@@ -293,6 +293,7 @@ function createDependencies(
         settleAttempt: vi.fn(),
         releaseTask: vi.fn(),
         releaseCheckpoint,
+        recoverTerminalReservations: vi.fn((): number => 0),
         remainingTurnTokens: vi.fn((): number => 1_000)
       },
       startPrimaryContinuation: vi.fn()
@@ -512,7 +513,9 @@ describe('agent startup recovery', (): void => {
     const confirmationIndex = serviceSource.indexOf('chatAgentConfirmationQueue.recover()', journalIndex);
     const interruptIndex = serviceSource.indexOf('await chatAgentDelegationService.recoverInterruptedWrites(journalResults)', confirmationIndex);
     const cancellationIndex = serviceSource.indexOf('chatAgentDelegationService.recoverCancellations()', interruptIndex);
-    const coordinatorIndex = serviceSource.indexOf('await chatAgentCoordinator.recover()', cancellationIndex);
+    const budgetIndex = serviceSource.indexOf('defaultBudgetLedger.recoverTerminalReservations()', cancellationIndex);
+    const gateIndex = serviceSource.indexOf('controlledWriteReady = true', budgetIndex);
+    const coordinatorIndex = serviceSource.indexOf('await chatAgentCoordinator.recover()', gateIndex);
 
     expect(databaseIndex).toBeGreaterThan(-1);
     expect(recoveryIndex).toBeGreaterThan(databaseIndex);
@@ -523,6 +526,8 @@ describe('agent startup recovery', (): void => {
     expect(confirmationIndex).toBeGreaterThan(journalIndex);
     expect(interruptIndex).toBeGreaterThan(confirmationIndex);
     expect(cancellationIndex).toBeGreaterThan(interruptIndex);
-    expect(coordinatorIndex).toBeGreaterThan(cancellationIndex);
+    expect(budgetIndex).toBeGreaterThan(cancellationIndex);
+    expect(gateIndex).toBeGreaterThan(budgetIndex);
+    expect(coordinatorIndex).toBeGreaterThan(gateIndex);
   });
 });

@@ -26,6 +26,8 @@ export interface PrimaryContinuationFactoryInput {
   sourceRuntimeId: string;
   /** 经 Agent service 完整性校验的易失上下文。 */
   context: ChatRuntimePrimaryContinuationContext;
+  /** Main 根据冻结 required 与取消结果生成的续接策略。 */
+  cancellationPolicy?: string;
 }
 
 /** ActiveChatRuntime 中由全部创建路径共享的基础状态。 */
@@ -117,6 +119,18 @@ export function createContinuationRuntime(input: ChatRuntimeContinueInput, runti
 }
 
 /**
+ * 把 Main-owned 续接策略追加到原系统提示。
+ * @param system - Runtime A 原系统提示
+ * @param policy - Main 生成的取消策略
+ * @returns Runtime B 使用的合并提示
+ */
+function mergeSystemPrompt(system?: string, policy?: string): string | undefined {
+  if (!policy) return system;
+  if (!system) return policy;
+  return `${system}\n\n${policy}`;
+}
+
+/**
  * 从 Checkpoint 与冻结易失上下文创建内部 Primary Runtime B。
  * 工厂固定 `tools=[]` 与 `forceFinal=true`，不存在 Renderer 覆盖入口。
  * @param input - 已 claim 的 Checkpoint lineage 与上下文
@@ -124,6 +138,7 @@ export function createContinuationRuntime(input: ChatRuntimeContinueInput, runti
  */
 export function createPrimaryContinuationRuntime(input: PrimaryContinuationFactoryInput): ActiveChatRuntime {
   const { context } = input;
+  const system = mergeSystemPrompt(context.system, input.cancellationPolicy);
   return {
     runtimeId: input.runtimeId,
     sessionId: input.sessionId,
@@ -136,7 +151,7 @@ export function createPrimaryContinuationRuntime(input: PrimaryContinuationFacto
     model: structuredClone(context.modelSnapshot),
     ...(context.capabilities ? { capabilities: structuredClone(context.capabilities) } : {}),
     ...(context.contextWindow ? { contextWindow: context.contextWindow } : {}),
-    ...(context.system ? { system: context.system } : {}),
+    ...(system ? { system } : {}),
     ...(context.workspaceRoot ? { workspaceRoot: context.workspaceRoot } : {}),
     tools: [],
     ...(context.skillContentHashes ? { skillContentHashes: structuredClone(context.skillContentHashes) } : {}),

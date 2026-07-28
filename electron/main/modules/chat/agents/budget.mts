@@ -4,6 +4,13 @@
  */
 import type { AgentStoreDatabase } from './types.mjs';
 import type { AgentBudgetSnapshot, AgentTaskError, AgentTaskErrorPhase, AgentUsageAccounting } from 'types/chat-agent';
+import {
+  hashAgentPayload,
+  normalizeUsage,
+  validateChatAgentResult,
+  validatePreAttemptCancellation,
+  validatePreAttemptFailure
+} from './contracts.mjs';
 
 /** 预算账本可稳定判断的错误码。 */
 export type AgentBudgetErrorCode = 'budget_exceeded' | 'protocol_error';
@@ -66,6 +73,36 @@ interface TurnUsageRow {
   tokens: unknown;
   /** 活跃预留与已结算实际成本合计。 */
   cost_usd: unknown;
+}
+
+/** 仍有 active 预留的终态 Task 恢复行。 */
+interface TerminalReservationRow {
+  /** Task 身份。 */
+  task_id: unknown;
+  /** Child Actor 身份。 */
+  agent_id: unknown;
+  /** Task 终态。 */
+  task_status: unknown;
+  /** 当前 Attempt；无 Attempt 终态时为 null。 */
+  current_attempt_id: unknown;
+  /** 冻结终态结果 JSON。 */
+  result_json: unknown;
+  /** 冻结终态结果 hash。 */
+  result_hash: unknown;
+}
+
+/** 终态 Attempt 的冻结 usage 恢复行。 */
+interface TerminalAttemptRow {
+  /** Attempt 身份。 */
+  attempt_id: unknown;
+  /** Attempt 所属 Task。 */
+  task_id: unknown;
+  /** Attempt 终态。 */
+  status: unknown;
+  /** 冻结 usage JSON。 */
+  usage_snapshot_json: unknown;
+  /** usage 是否已最终冻结。 */
+  usage_complete: unknown;
 }
 
 /** 已验证的预算聚合身份。 */
@@ -144,6 +181,12 @@ export interface AgentBudgetLedger {
    * @param checkpointId - Checkpoint 身份
    */
   releaseCheckpoint(checkpointId: string): void;
+  /**
+   * 从终态 Task/Attempt 持久化事实恢复遗留的 active 预留。
+   * @param taskId - 可选精确 Task；省略时扫描全部终态预留
+   * @returns 本次 settled 或 released 的预留数量
+   */
+  recoverTerminalReservations(taskId?: string): number;
   /**
    * 查询当前 Checkpoint 所属 Turn 的剩余 token。
    * @param checkpointId - Checkpoint 身份
@@ -237,6 +280,21 @@ function requireCost(value: unknown, reason: string): number {
   }
 
   return value;
+}
+
+/**
+ * 解析预算恢复使用的持久化 JSON。
+ * @param value - SQLite 文本
+ * @param reason - 非法时的稳定原因
+ * @returns 未可信 JSON 值
+ */
+function parseRecoveryJson(value: unknown, reason: string): unknown {
+  if (typeof value !== 'string') throw protocolError(reason);
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    throw protocolError(reason);
+  }
 }
 
 /**
@@ -532,6 +590,141 @@ export function createAgentBudgetLedger(dependencies: AgentBudgetLedgerDependenc
     }
   }
 
+  /**
+   * 使用冻结实际用量幂等结算一个 Task 预留。
+   * @param taskId - Task 身份
+   * @param usage - 已验证实际用量
+   */
+  function settleAttempt(taskId: string, usage: AgentUsageAccounting): void {
+    dependencies.database.transaction((): void => {
+      const identity = readTask(taskId);
+      validateUsage(usage);
+      const row = dependencies.database.select<BudgetReservationRow>('SELECT * FROM chat_agent_budget_reservations WHERE reservation_id = ?', [
+        `budget:task:${taskId}`
+      ])[0];
+      if (!row) throw protocolError('budget_task_reservation_missing');
+      validateReplay(row, {
+        ...identity,
+        reservationId: `budget:task:${taskId}`,
+        kind: 'task',
+        budget: {
+          tokenLimit: requireInteger(row.reserved_tokens, 'budget_tokens_invalid'),
+          costLimitUsd: requireCost(row.reserved_cost_usd, 'budget_cost_invalid'),
+          pricingVersion: requireIdentity(row.pricing_version, 'budget_pricing_invalid')
+        }
+      });
+      const status = parseStatus(row.status);
+      const usedCost = resolveUsageCost(row, usage);
+      if (status === 'settled') {
+        const persistedCost = row.used_cost_usd === null ? null : requireCost(row.used_cost_usd, 'budget_used_cost_invalid');
+        if (requireInteger(row.used_tokens, 'budget_used_tokens_invalid') !== usage.totalTokens || persistedCost !== usedCost) {
+          throw protocolError('budget_settlement_conflict');
+        }
+        return;
+      }
+      if (status !== 'active') throw protocolError('budget_settlement_released');
+
+      const result = dependencies.database.execute(
+        `UPDATE chat_agent_budget_reservations
+         SET used_tokens = ?, used_cost_usd = ?, status = 'settled', updated_at = ?
+         WHERE reservation_id = ? AND status = 'active'`,
+        [usage.totalTokens, usedCost, dependencies.now(), `budget:task:${taskId}`]
+      );
+      if (result.changes !== 1) throw protocolError('budget_settlement_conflict');
+    });
+  }
+
+  /**
+   * 幂等释放尚未执行的 Task 预留。
+   * @param taskId - Task 身份
+   */
+  function releaseTask(taskId: string): void {
+    dependencies.database.transaction((): void => {
+      readTask(taskId);
+      const row = dependencies.database.select<BudgetReservationRow>('SELECT * FROM chat_agent_budget_reservations WHERE reservation_id = ?', [
+        `budget:task:${taskId}`
+      ])[0];
+      if (!row) return;
+      const status = parseStatus(row.status);
+      if (status !== 'active') return;
+
+      const result = dependencies.database.execute(
+        `UPDATE chat_agent_budget_reservations
+         SET status = 'released', updated_at = ?
+         WHERE reservation_id = ? AND status = 'active'`,
+        [dependencies.now(), `budget:task:${taskId}`]
+      );
+      if (result.changes !== 1) throw protocolError('budget_release_conflict');
+    });
+  }
+
+  /**
+   * 校验一个带 Attempt 的终态恢复行并结算用量。
+   * @param row - Task 终态行
+   * @param taskId - 已验证 Task 身份
+   * @param agentId - 已验证 Child Actor 身份
+   * @param resultValue - 已校验 hash 的结果值
+   */
+  function recoverAttempt(
+    row: TerminalReservationRow,
+    taskId: string,
+    agentId: string,
+    resultValue: unknown
+  ): void {
+    const attemptId = requireIdentity(row.current_attempt_id, 'budget_recovery_attempt_invalid');
+    const attempt = dependencies.database.select<TerminalAttemptRow>(
+      `SELECT attempt_id, task_id, status, usage_snapshot_json, usage_complete
+       FROM chat_agent_attempts
+       WHERE attempt_id = ?`,
+      [attemptId]
+    )[0];
+    if (
+      !attempt ||
+      requireIdentity(attempt.attempt_id, 'budget_recovery_attempt_invalid') !== attemptId ||
+      requireIdentity(attempt.task_id, 'budget_recovery_attempt_task_invalid') !== taskId ||
+      attempt.usage_complete !== 1 ||
+      !['completed', 'failed', 'cancelled', 'deadline_exceeded', 'interrupted'].includes(String(attempt.status))
+    ) {
+      throw protocolError('budget_recovery_attempt_incomplete');
+    }
+    const usage = normalizeUsage(parseRecoveryJson(attempt.usage_snapshot_json, 'budget_recovery_usage_invalid'));
+    const validation = validateChatAgentResult(resultValue);
+    if (
+      !usage ||
+      !validation.ok ||
+      validation.result.taskId !== taskId ||
+      validation.result.agentId !== agentId ||
+      validation.result.attemptId !== attemptId ||
+      validation.result.executionStatus !== row.task_status ||
+      hashAgentPayload(validation.result.usage) !== hashAgentPayload(usage)
+    ) {
+      throw protocolError('budget_recovery_result_invalid');
+    }
+    settleAttempt(taskId, usage);
+  }
+
+  /**
+   * 校验一个无 Attempt 终态并释放未使用预留。
+   * @param row - Task 终态行
+   * @param taskId - 已验证 Task 身份
+   * @param agentId - 已验证 Child Actor 身份
+   * @param resultValue - 已校验 hash 的结果值
+   */
+  function recoverPreAttempt(
+    row: TerminalReservationRow,
+    taskId: string,
+    agentId: string,
+    resultValue: unknown
+  ): void {
+    const failure = validatePreAttemptFailure(resultValue);
+    const cancellation = validatePreAttemptCancellation(resultValue);
+    const result = failure.ok ? failure.result : cancellation.ok ? cancellation.result : null;
+    if (!result || result.taskId !== taskId || result.agentId !== agentId || result.executionStatus !== row.task_status) {
+      throw protocolError('budget_recovery_pre_attempt_invalid');
+    }
+    releaseTask(taskId);
+  }
+
   return {
     reserveResume(checkpointId: string, budget: AgentBudgetSnapshot): void {
       dependencies.database.transaction((): void => {
@@ -558,64 +751,9 @@ export function createAgentBudgetLedger(dependencies: AgentBudgetLedgerDependenc
       });
     },
 
-    settleAttempt(taskId: string, usage: AgentUsageAccounting): void {
-      dependencies.database.transaction((): void => {
-        const identity = readTask(taskId);
-        validateUsage(usage);
-        const row = dependencies.database.select<BudgetReservationRow>('SELECT * FROM chat_agent_budget_reservations WHERE reservation_id = ?', [
-          `budget:task:${taskId}`
-        ])[0];
-        if (!row) throw protocolError('budget_task_reservation_missing');
-        validateReplay(row, {
-          ...identity,
-          reservationId: `budget:task:${taskId}`,
-          kind: 'task',
-          budget: {
-            tokenLimit: requireInteger(row.reserved_tokens, 'budget_tokens_invalid'),
-            costLimitUsd: requireCost(row.reserved_cost_usd, 'budget_cost_invalid'),
-            pricingVersion: requireIdentity(row.pricing_version, 'budget_pricing_invalid')
-          }
-        });
-        const status = parseStatus(row.status);
-        const usedCost = resolveUsageCost(row, usage);
-        if (status === 'settled') {
-          const persistedCost = row.used_cost_usd === null ? null : requireCost(row.used_cost_usd, 'budget_used_cost_invalid');
-          if (requireInteger(row.used_tokens, 'budget_used_tokens_invalid') !== usage.totalTokens || persistedCost !== usedCost) {
-            throw protocolError('budget_settlement_conflict');
-          }
-          return;
-        }
-        if (status !== 'active') throw protocolError('budget_settlement_released');
+    settleAttempt,
 
-        const result = dependencies.database.execute(
-          `UPDATE chat_agent_budget_reservations
-           SET used_tokens = ?, used_cost_usd = ?, status = 'settled', updated_at = ?
-           WHERE reservation_id = ? AND status = 'active'`,
-          [usage.totalTokens, usedCost, dependencies.now(), `budget:task:${taskId}`]
-        );
-        if (result.changes !== 1) throw protocolError('budget_settlement_conflict');
-      });
-    },
-
-    releaseTask(taskId: string): void {
-      dependencies.database.transaction((): void => {
-        readTask(taskId);
-        const row = dependencies.database.select<BudgetReservationRow>('SELECT * FROM chat_agent_budget_reservations WHERE reservation_id = ?', [
-          `budget:task:${taskId}`
-        ])[0];
-        if (!row) return;
-        const status = parseStatus(row.status);
-        if (status !== 'active') return;
-
-        const result = dependencies.database.execute(
-          `UPDATE chat_agent_budget_reservations
-           SET status = 'released', updated_at = ?
-           WHERE reservation_id = ? AND status = 'active'`,
-          [dependencies.now(), `budget:task:${taskId}`]
-        );
-        if (result.changes !== 1) throw protocolError('budget_release_conflict');
-      });
-    },
+    releaseTask,
 
     releaseCheckpoint(checkpointId: string): void {
       dependencies.database.transaction((): void => {
@@ -637,6 +775,40 @@ export function createAgentBudgetLedger(dependencies: AgentBudgetLedgerDependenc
           [dependencies.now(), checkpointId]
         );
       });
+    },
+
+    recoverTerminalReservations(taskId?: string): number {
+      const rows = dependencies.database.select<TerminalReservationRow>(
+        `SELECT
+           task.task_id,
+           task.agent_id,
+           task.status AS task_status,
+           task.current_attempt_id,
+           task.result_json,
+           task.result_hash
+         FROM chat_agent_budget_reservations AS reservation
+         INNER JOIN chat_agent_tasks AS task ON task.task_id = reservation.task_id
+         WHERE reservation.kind = 'task'
+           AND reservation.status = 'active'
+           AND task.record_state = 'active'
+           AND task.result_json IS NOT NULL
+           AND task.result_hash IS NOT NULL
+           AND (? IS NULL OR task.task_id = ?)
+         ORDER BY task.task_id ASC`,
+        [taskId ?? null, taskId ?? null]
+      );
+      let recovered = 0;
+      rows.forEach((row): void => {
+        const recoveredTaskId = requireIdentity(row.task_id, 'budget_recovery_task_invalid');
+        const agentId = requireIdentity(row.agent_id, 'budget_recovery_agent_invalid');
+        const resultHash = requireIdentity(row.result_hash, 'budget_recovery_hash_invalid');
+        const resultValue = parseRecoveryJson(row.result_json, 'budget_recovery_result_json_invalid');
+        if (hashAgentPayload(resultValue) !== resultHash) throw protocolError('budget_recovery_hash_mismatch');
+        if (row.current_attempt_id === null) recoverPreAttempt(row, recoveredTaskId, agentId, resultValue);
+        else recoverAttempt(row, recoveredTaskId, agentId, resultValue);
+        recovered += 1;
+      });
+      return recovered;
     },
 
     remainingTurnTokens(checkpointId: string): number {

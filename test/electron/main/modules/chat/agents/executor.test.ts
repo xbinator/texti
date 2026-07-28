@@ -481,7 +481,7 @@ describe('child task runtime executor', (): void => {
   });
 
   it('returns a prepared write outcome and retains protected references until Coordinator discard', async (): Promise<void> => {
-    const { workspaceRoot, filePath } = await createWorkspace();
+    const { workspaceRoot, filePath, overlayRoot } = await createWorkspace();
     const streamText = vi.fn<RuntimeStreamText>();
     streamText
       .mockResolvedValueOnce(
@@ -531,9 +531,54 @@ describe('child task runtime executor', (): void => {
     expect(await fs.readFile(filePath, 'utf8')).toBe('# Tibis\nChild runtime context.');
     await expect(fs.readFile(outcome.changeset.operations[0]?.candidateReference as string, 'utf8')).resolves.toContain('Controlled write context.');
 
+    await fs.chmod(path.join(overlayRoot, task.taskId), 0o500);
+    await expect(executor.discard(attempt.currentRuntimeId)).rejects.toMatchObject({ code: 'EACCES' });
+    await fs.chmod(path.join(overlayRoot, task.taskId), 0o700);
     await executor.discard(attempt.currentRuntimeId);
 
     await expect(fs.stat(outcome.changeset.operations[0]?.candidateReference as string)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('fails in recovery when a rejected write Runtime cannot remove its overlay', async (): Promise<void> => {
+    const { workspaceRoot, filePath, overlayRoot } = await createWorkspace();
+    const streamText = vi.fn<RuntimeStreamText>();
+    streamText
+      .mockResolvedValueOnce(
+        createStreamResult([
+          {
+            type: 'tool-call',
+            toolCallId: 'write-cleanup-1',
+            toolName: 'stage_file_edit',
+            input: { path: 'CONTEXT.md', oldString: 'Child runtime context.', newString: 'Temporary candidate.', replaceAll: false }
+          },
+          { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 } }
+        ])
+      )
+      .mockImplementationOnce(async (): Promise<[undefined, AIStreamResult]> => {
+        await fs.chmod(path.join(overlayRoot, 'task-1'), 0o500);
+        throw new Error('provider_rejected');
+      });
+    const executor = createExecutor(workspaceRoot, streamText);
+
+    const outcome = await executor.execute({
+      task: createTask(filePath, 100, 'write'),
+      attempt: createAttempt(),
+      checkpoint: createCheckpoint(),
+      signal: new AbortController().signal
+    });
+    await fs.chmod(path.join(overlayRoot, 'task-1'), 0o700);
+    const result = readTerminal(outcome);
+
+    expect(result).toMatchObject({
+      executionStatus: 'failed',
+      error: {
+        code: 'runtime_interrupted',
+        phase: 'recovery',
+        category: 'runtime',
+        retryable: true,
+        details: { reason: 'write_overlay_cleanup_failed' }
+      }
+    });
   });
 
   it('returns a completed terminal result without changeset for a no-op write', async (): Promise<void> => {

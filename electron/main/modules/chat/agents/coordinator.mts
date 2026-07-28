@@ -45,6 +45,9 @@ const DEFAULT_CHILD_TIMEOUT_MS = 30 * 60 * 1_000;
 /** 生产默认 cooperative cancellation 宽限期。 */
 const DEFAULT_CANCEL_GRACE_MS = 2_000;
 
+/** 单次内存清理恢复 sweep 的最大尝试次数。 */
+const MAX_CLEANUP_SWEEP_ATTEMPTS = 3;
+
 /** Coordinator 对一个 Checkpoint 的进程内执行状态。 */
 export type AgentCoordinatorState = 'idle' | 'planning' | 'running' | 'terminal';
 
@@ -262,6 +265,19 @@ interface PreparedWriteExecution {
   readonly changeset: AgentChangesetRecord;
   /** commit journal 最终结果草稿。 */
   readonly draft: AgentWriteResultDraft;
+}
+
+/** Task 内存收尾中可独立重试的幂等动作。 */
+type TaskCleanupAction = () => void | Promise<void>;
+
+/** 一个 Task 的有界内存清理恢复事实。 */
+interface TaskCleanupSweep {
+  /** 每轮只重试仍失败的动作。 */
+  actions: readonly TaskCleanupAction[];
+  /** 全部动作成功后的进程内引用收尾。 */
+  complete: () => void;
+  /** 当前 sweep flight；失败后清空以允许显式重试。 */
+  flight?: Promise<void>;
 }
 
 /** Coordinator write 分支必需依赖的收窄投影。 */
@@ -558,6 +574,24 @@ function createRuntimeError(phase: 'starting' | 'runtime', reason: string, runti
 }
 
 /**
+ * 创建无 journal write overlay 清理失败的恢复错误。
+ * @param runtimeId - 当前 Runtime 身份
+ * @returns 可由精确清理流程重试的结构化错误
+ */
+function createCleanupError(runtimeId: string): AgentTaskError {
+  return {
+    code: 'runtime_interrupted',
+    phase: 'recovery',
+    category: 'runtime',
+    retryable: true,
+    details: {
+      reason: 'write_overlay_cleanup_failed',
+      runtimeId
+    }
+  };
+}
+
+/**
  * 从 AbortSignal 判断 deadline 或用户取消。
  * @param signal - Scheduler lease 信号
  * @returns 对应执行终态和错误；未中止时为 null
@@ -748,6 +782,7 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
   const preparedWrites = new Map<string, PreparedWriteExecution>();
   const runtimeIds = new Map<string, string>();
   const abortTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const cleanupSweeps = new Map<string, TaskCleanupSweep>();
   const systemChildTimeoutMs = dependencies.systemChildTimeoutMs ?? DEFAULT_CHILD_TIMEOUT_MS;
   const cancellationGraceMs = dependencies.cancellationGraceMs ?? DEFAULT_CANCEL_GRACE_MS;
   if (!Number.isSafeInteger(systemChildTimeoutMs) || systemChildTimeoutMs <= 0 || !Number.isSafeInteger(cancellationGraceMs) || cancellationGraceMs <= 0) {
@@ -761,6 +796,54 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
    */
   function setState(checkpointId: string, status: AgentCoordinatorState): void {
     executions.set(checkpointId, { status, updatedAt: dependencies.now() });
+  }
+
+  /**
+   * 对失败动作执行固定次数的有界恢复。
+   * @param actions - 幂等清理动作
+   */
+  async function executeCleanup(actions: readonly TaskCleanupAction[]): Promise<void> {
+    let pending = [...actions];
+    let firstFailure: unknown = new Error('coordinator_cleanup_failed');
+    for (let attempt = 0; attempt < MAX_CLEANUP_SWEEP_ATTEMPTS && pending.length > 0; attempt += 1) {
+      const outcomes = await Promise.allSettled(pending.map((action): Promise<void> => Promise.resolve().then(action)));
+      const failedActions: TaskCleanupAction[] = [];
+      outcomes.forEach((outcome, index): void => {
+        if (outcome.status !== 'rejected') return;
+        if (failedActions.length === 0) firstFailure = outcome.reason;
+        const action = pending[index];
+        if (action) failedActions.push(action);
+      });
+      pending = failedActions;
+    }
+    if (pending.length > 0) throw firstFailure;
+  }
+
+  /**
+   * 创建或重试一个 Task 的有界清理 sweep。
+   * @param taskId - 目标 Task
+   * @param actions - 首次注册的精确清理动作
+   * @param complete - 全部动作成功后的引用收尾
+   */
+  function runCleanupSweep(taskId: string, actions?: readonly TaskCleanupAction[], complete: () => void = (): void => undefined): Promise<void> {
+    const existing = cleanupSweeps.get(taskId);
+    const sweep: TaskCleanupSweep =
+      existing ??
+      {
+        actions: actions ?? [],
+        complete
+      };
+    if (!existing) cleanupSweeps.set(taskId, sweep);
+    if (sweep.flight) return sweep.flight;
+    const execution = executeCleanup(sweep.actions).then((): void => {
+      sweep.complete();
+      if (cleanupSweeps.get(taskId) === sweep) cleanupSweeps.delete(taskId);
+    });
+    sweep.flight = execution;
+    void execution.catch((): void => {
+      if (cleanupSweeps.get(taskId) === sweep && sweep.flight === execution) sweep.flight = undefined;
+    });
+    return execution;
   }
 
   /**
@@ -900,6 +983,29 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
   }
 
   /**
+   * 先删除无 journal 的 write overlay，再持久化真实终态。
+   * @param projection - 当前 Task/Attempt 投影
+   * @param runtimeId - retained write Runtime 身份
+   * @param result - 清理成功后应写入的终态结果
+   * @param usage - 清理失败时仍需冻结的实际用量
+   * @returns 是否按原结果完成收敛
+   */
+  async function commitAfterDiscard(
+    projection: AgentAttemptProjection,
+    runtimeId: string,
+    result: ChatAgentResult,
+    usage: AgentUsageAccounting
+  ): Promise<boolean> {
+    const [discardOutcome] = await Promise.allSettled([dependencies.executor.discard(runtimeId)]);
+    if (discardOutcome.status === 'rejected') {
+      await commitTaskResult(projection.task, createFailureResult(projection, 'failed', createCleanupError(runtimeId), usage));
+      return false;
+    }
+    await commitTaskResult(projection.task, result);
+    return true;
+  }
+
+  /**
    * 在 start lease 内创建 Attempt、执行模型并持久化可选 changeset。
    * @param task - 已授权 Task
    * @param checkpoint - Task 所属 Checkpoint
@@ -992,8 +1098,12 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
       return null;
     }
     if (abortResult) {
-      await Promise.allSettled([dependencies.executor.discard(runtimeId)]);
-      await commitTaskResult(projection.task, createFailureResult(projection, abortResult.status, abortResult.error, execution.draft.usage));
+      await commitAfterDiscard(
+        projection,
+        runtimeId,
+        createFailureResult(projection, abortResult.status, abortResult.error, execution.draft.usage),
+        execution.draft.usage
+      );
       return null;
     }
     const writeDependencies = readWriteDependencies(dependencies);
@@ -1097,7 +1207,12 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
             details: { reason: 'confirmation_revoked' }
           }
         : createConfirmationError();
-      await commitTaskResult(prepared.task, createFailureResult(projection, revoked ? 'cancelled' : 'failed', error, prepared.draft.usage));
+      const result = createFailureResult(projection, revoked ? 'cancelled' : 'failed', error, prepared.draft.usage);
+      if (revoked) {
+        await commitAfterDiscard(projection, prepared.attempt.currentRuntimeId, result, prepared.draft.usage);
+        return;
+      }
+      await commitTaskResult(prepared.task, result);
       await Promise.allSettled([dependencies.executor.discard(prepared.attempt.currentRuntimeId)]);
       return;
     }
@@ -1175,11 +1290,13 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
           retryable: false,
           details: { reason: cancelReasons.get(prepared.task.taskId) ?? 'cooperative_cancellation' }
         };
-        await commitTaskResult(
-          currentTask,
-          createFailureResult({ task: currentTask, attempt: prepared.attempt }, 'cancelled', cancellationError, prepared.draft.usage)
+        const cancellationProjection = { task: currentTask, attempt: prepared.attempt };
+        await commitAfterDiscard(
+          cancellationProjection,
+          prepared.attempt.currentRuntimeId,
+          createFailureResult(cancellationProjection, 'cancelled', cancellationError, prepared.draft.usage),
+          prepared.draft.usage
         );
-        await dependencies.executor.discard(prepared.attempt.currentRuntimeId);
         return;
       }
       const error = createCommitError(leaseOutcome.reason);
@@ -1191,6 +1308,7 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
       return;
     }
     const lease = leaseOutcome.value;
+    let deferredCancellation: { readonly projection: AgentAttemptProjection; readonly result: ChatAgentResult } | undefined;
     /** 在 commit lease 内执行受控外部写入并持久化最终结果。 */
     const applyCommit = async (): Promise<void> => {
       const currentTask = dependencies.getTask?.(prepared.task.taskId);
@@ -1213,10 +1331,16 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
               retryable: false,
               details: { reason: cancelReasons.get(prepared.task.taskId) ?? 'cooperative_cancellation' }
             };
-        await commitTaskResult(
-          cancellation,
-          createFailureResult({ task: cancellation, attempt: prepared.attempt }, handoffAbort?.status ?? 'cancelled', cancellationError, prepared.draft.usage)
-        );
+        const cancellationProjection = { task: cancellation, attempt: prepared.attempt };
+        deferredCancellation = {
+          projection: cancellationProjection,
+          result: createFailureResult(
+            cancellationProjection,
+            handoffAbort?.status ?? 'cancelled',
+            cancellationError,
+            prepared.draft.usage
+          )
+        };
         return;
       }
       if (currentTask?.status !== 'queued' || currentTask.queuePhase !== 'commit') {
@@ -1271,14 +1395,29 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
       }
     };
     const [operationOutcome] = await Promise.allSettled([applyCommit()]);
-    const cleanupOutcomes = await Promise.allSettled([
+    const [leaseCleanup, overlayCleanup] = await Promise.allSettled([
       Promise.resolve().then((): void => lease.release()),
       dependencies.executor.discard(prepared.attempt.currentRuntimeId)
     ]);
-    const cleanupFailure = cleanupOutcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
     // 业务错误优先，避免清理异常覆盖真正的提交失败。
     if (operationOutcome.status === 'rejected') throw operationOutcome.reason;
-    if (cleanupFailure) throw cleanupFailure.reason;
+    if (deferredCancellation) {
+      if (overlayCleanup.status === 'rejected') {
+        await commitTaskResult(
+          deferredCancellation.projection.task,
+          createFailureResult(
+            deferredCancellation.projection,
+            'failed',
+            createCleanupError(prepared.attempt.currentRuntimeId),
+            prepared.draft.usage
+          )
+        );
+      } else {
+        await commitTaskResult(deferredCancellation.projection.task, deferredCancellation.result);
+      }
+    }
+    if (leaseCleanup.status === 'rejected') throw leaseCleanup.reason;
+    if (overlayCleanup.status === 'rejected' && !deferredCancellation) throw overlayCleanup.reason;
   }
 
   /**
@@ -1289,7 +1428,6 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
   async function releaseStartResources(taskId: string, lease: AgentResourceLease): Promise<void> {
     clearAbortTimer(taskId);
     const runtimeId = runtimeIds.get(taskId);
-    runtimeIds.delete(taskId);
     const outcomes = await Promise.allSettled([
       Promise.resolve().then((): void => {
         if (runtimeId) dependencies.registry.unbindRuntime(runtimeId);
@@ -1298,6 +1436,7 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
     ]);
     const failure = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
     if (failure) throw failure.reason;
+    runtimeIds.delete(taskId);
   }
 
   /**
@@ -1332,21 +1471,27 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
     const [operationOutcome] = await Promise.allSettled([executeScheduled()]);
     clearAbortTimer(task.taskId);
     const runtimeId = runtimeIds.get(task.taskId);
-    runtimeIds.delete(task.taskId);
-    preparedWrites.delete(task.taskId);
-    const cleanupOutcomes = await Promise.allSettled([
-      Promise.resolve().then((): void => {
-        if (runtimeId) dependencies.registry.unbindRuntime(runtimeId);
-      }),
-      Promise.resolve().then((): void => {
-        lease?.release();
-      }),
-      Promise.resolve().then((): void => dependencies.registry.releaseTask(task.taskId))
+    const [cleanupOutcome] = await Promise.allSettled([
+      runCleanupSweep(
+        task.taskId,
+        [
+          (): void => {
+            if (runtimeId) dependencies.registry.unbindRuntime(runtimeId);
+          },
+          (): void => {
+            lease?.release();
+          },
+          (): void => dependencies.registry.releaseTask(task.taskId)
+        ],
+        (): void => {
+          runtimeIds.delete(task.taskId);
+          preparedWrites.delete(task.taskId);
+        }
+      )
     ]);
-    const cleanupFailure = cleanupOutcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
-    // 保留执行主错误；只有执行成功时才把清理失败上抛给统一收敛逻辑。
+    // 保留执行主错误；只有执行成功时才把有界清理失败上抛。
     if (operationOutcome.status === 'rejected') throw operationOutcome.reason;
-    if (cleanupFailure) throw cleanupFailure.reason;
+    if (cleanupOutcome.status === 'rejected') throw cleanupOutcome.reason;
   }
 
   /**
@@ -1397,6 +1542,7 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
     taskId: string,
     requestKind: 'single_task' | 'checkpoint_cascade'
   ): Promise<AgentTaskCancellationProjection['disposition']> {
+    if (cleanupSweeps.has(taskId)) await runCleanupSweep(taskId);
     const task = readCancelTask(taskId);
     const reason = cancelReasons.get(taskId) ?? (requestKind === 'single_task' ? 'user_cancelled' : 'checkpoint_cancelled');
     if (isTaskTerminal(task.status)) {
@@ -1453,8 +1599,6 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
     const currentTask = projection.task;
     if (task.status === 'waiting_confirmation') {
       dependencies.confirmationQueue?.revokeTask(task.taskId, reason);
-      const runtimeId = runtimeIds.get(task.taskId) ?? preparedWrites.get(task.taskId)?.attempt.currentRuntimeId;
-      if (runtimeId) await dependencies.executor.discard(runtimeId);
       await waitTaskRun(task.taskId);
       return projection.disposition;
     }

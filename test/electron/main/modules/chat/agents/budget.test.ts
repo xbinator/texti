@@ -3,10 +3,16 @@
  * @description 使用真实 SQLite 验证 Main-owned Turn/Checkpoint/Task 分层预算预留、结算和恢复事实。
  */
 import type { AgentStoreDatabase } from '../../../../../../electron/main/modules/chat/agents/types.mjs';
-import type { AgentBudgetSnapshot, AgentUsageAccounting } from 'types/chat-agent';
+import type {
+  AgentBudgetSnapshot,
+  AgentPreAttemptCancellationResult,
+  AgentUsageAccounting,
+  ChatAgentResult
+} from 'types/chat-agent';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createAgentBudgetLedger } from '../../../../../../electron/main/modules/chat/agents/budget.mjs';
+import { hashAgentPayload } from '../../../../../../electron/main/modules/chat/agents/contracts.mjs';
 import { createAgentTables } from '../../../../../../electron/main/modules/database/service.mjs';
 
 /** 仅在 ABI 与 better-sqlite3 一致的 Electron Node 进程中执行真实数据库测试。 */
@@ -131,6 +137,66 @@ function createUsage(totalTokens: number, estimatedCost: number): AgentUsageAcco
       pricingVersion: 'pricing-v1',
       estimated: estimatedCost,
       actual: 'unknown'
+    }
+  };
+}
+
+/**
+ * 创建预算恢复使用的终态 Attempt 结果。
+ * @param taskId - 结果所属 Task
+ * @param usage - 已冻结实际用量
+ * @returns 完整终态结果
+ */
+function createCompletedResult(taskId: string, usage: AgentUsageAccounting): ChatAgentResult {
+  return {
+    taskId,
+    agentId: taskId.replace('-task-', '-child-'),
+    attemptId: `${taskId}-attempt-1`,
+    executionStatus: 'completed',
+    completion: { level: 'none', criteria: [] },
+    summary: 'Completed the bounded task.',
+    warnings: [],
+    artifacts: [],
+    usage
+  };
+}
+
+/**
+ * 创建预算恢复使用的无 Attempt 取消结果。
+ * @param taskId - 结果所属 Task
+ * @returns canonical 零用量取消结果
+ */
+function createPreCancellation(taskId: string): AgentPreAttemptCancellationResult {
+  return {
+    resultKind: 'pre_attempt_cancelled',
+    taskId,
+    agentId: taskId.replace('-task-', '-child-'),
+    executionStatus: 'cancelled',
+    completion: { level: 'none', criteria: [] },
+    summary: 'Child Task was cancelled before Runtime creation.',
+    warnings: [],
+    artifacts: [],
+    usage: {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      modelCalls: 0,
+      toolRounds: 0,
+      queueDurationMs: 0,
+      executionDurationMs: 0,
+      externalRequests: 0,
+      monetaryCost: {
+        currency: 'unknown',
+        pricingVersion: 'unknown',
+        estimated: 'unknown',
+        actual: 'unknown'
+      }
+    },
+    error: {
+      code: 'cancelled',
+      phase: 'queue',
+      category: 'user',
+      retryable: false
     }
   };
 }
@@ -339,5 +405,94 @@ describeWithSqlite('agent budget ledger', (): void => {
     ]);
     ledger.settleAttempt('checkpoint-result-task-1', createUsage(100, 0.01));
     expect(ledger.remainingTurnTokens('checkpoint-result')).toBe(1_900);
+  });
+
+  it('recovers one terminal Attempt reservation from frozen durable usage', (): void => {
+    seedBudgetFacts(database, 'checkpoint-recover', 'session-recover', 'turn-recover', 2);
+    const ledger = createAgentBudgetLedger({
+      database: adapter,
+      resolveTurnBudget: (): AgentBudgetSnapshot => knownTurnBudget,
+      now: (): string => '2026-07-27T00:00:02.000Z'
+    });
+    ledger.reserveResume('checkpoint-recover', resumeBudget);
+    ledger.reserveTask('checkpoint-recover-task-1', childBudget);
+    ledger.reserveTask('checkpoint-recover-task-2', childBudget);
+    const taskId = 'checkpoint-recover-task-1';
+    const usage = createUsage(100, 0.01);
+    const result = createCompletedResult(taskId, usage);
+    adapter.execute(
+      `INSERT INTO chat_agent_attempts (
+        attempt_id, task_id, attempt_number, parent_runtime_id, plan_hash,
+        initial_runtime_id, current_runtime_id, status, usage_snapshot_json,
+        usage_complete, usage_updated_at, finished_at, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+      [
+        result.attemptId,
+        taskId,
+        1,
+        'runtime-root-turn-recover',
+        'a'.repeat(64),
+        'runtime-child-1',
+        'runtime-child-1',
+        'completed',
+        JSON.stringify(usage),
+        '2026-07-27T00:00:01.000Z',
+        '2026-07-27T00:00:01.000Z',
+        '2026-07-27T00:00:00.000Z'
+      ]
+    );
+    adapter.execute(
+      `UPDATE chat_agent_tasks
+       SET status = 'completed', current_attempt_id = ?, result_json = ?, result_hash = ?
+       WHERE task_id = ?`,
+      [result.attemptId, JSON.stringify(result), hashAgentPayload(result), taskId]
+    );
+
+    expect(ledger.recoverTerminalReservations()).toBe(1);
+    expect(ledger.recoverTerminalReservations()).toBe(0);
+    expect(
+      adapter.select<{ task_id: string; status: string; used_tokens: number }>(
+        `SELECT task_id, status, used_tokens
+         FROM chat_agent_budget_reservations
+         WHERE kind = 'task'
+         ORDER BY task_id`
+      )
+    ).toEqual([
+      { task_id: 'checkpoint-recover-task-1', status: 'settled', used_tokens: 100 },
+      { task_id: 'checkpoint-recover-task-2', status: 'active', used_tokens: 0 }
+    ]);
+  });
+
+  it('releases a canonical pre-Attempt cancellation without touching resume budget', (): void => {
+    seedBudgetFacts(database, 'checkpoint-pre-cancel', 'session-pre-cancel', 'turn-pre-cancel', 1);
+    const ledger = createAgentBudgetLedger({
+      database: adapter,
+      resolveTurnBudget: (): AgentBudgetSnapshot => knownTurnBudget,
+      now: (): string => '2026-07-27T00:00:02.000Z'
+    });
+    ledger.reserveResume('checkpoint-pre-cancel', resumeBudget);
+    ledger.reserveTask('checkpoint-pre-cancel-task-1', childBudget);
+    const taskId = 'checkpoint-pre-cancel-task-1';
+    const result = createPreCancellation(taskId);
+    adapter.execute(
+      `UPDATE chat_agent_tasks
+       SET status = 'cancelled', result_json = ?, result_hash = ?
+       WHERE task_id = ?`,
+      [JSON.stringify(result), hashAgentPayload(result), taskId]
+    );
+
+    expect(ledger.recoverTerminalReservations(taskId)).toBe(1);
+    expect(
+      adapter.select<{ kind: string; status: string }>(
+        `SELECT kind, status
+         FROM chat_agent_budget_reservations
+         WHERE checkpoint_id = ?
+         ORDER BY kind`,
+        ['checkpoint-pre-cancel']
+      )
+    ).toEqual([
+      { kind: 'resume', status: 'active' },
+      { kind: 'task', status: 'released' }
+    ]);
   });
 });

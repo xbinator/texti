@@ -343,6 +343,7 @@ function createDependencies(): {
         settleAttempt: vi.fn(),
         releaseTask: releaseBudget,
         releaseCheckpoint,
+        recoverTerminalReservations: vi.fn((): number => 0),
         remainingTurnTokens: vi.fn((): number => 10_000)
       },
       startPrimaryContinuation,
