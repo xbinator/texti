@@ -1377,4 +1377,4 @@ git commit -m "fix(chat): 守住 Child 提交取消边界"
 - [x] journal `applying/applied` is never hard-aborted or misreported as cancelled.
 - [x] Main/Renderer protocol output contains no forbidden internal or path data.
 - [x] production `controlledWriteChildEnabled` remains false.
-- [ ] all focused tests, TypeScript, Main build, ESLint, Stylelint and full test suite pass.
+- [x] all focused tests, TypeScript, Main build, ESLint, Stylelint and full test suite pass.
