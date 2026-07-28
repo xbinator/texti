@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** 已完成；后续受控写入与任务卡片计划也已实施，最终验收见对应计划。
+
 **Goal:** 让 Primary 在一次 Turn 中自动委派最多六个单层 `pure_read` Child Task，并由专用 Child Runtime 在不写普通聊天消息的前提下执行、受控并行、回传结果和触发唯一一次 Primary 续接。
 
 **Architecture:** 主进程按稳定 `agentId` 注册 Child Actor，并把可替换 Runtime 地址单独绑定到 Actor；Renderer 只消费 allowlist Checkpoint/Task 投影，不持有执行真相。主进程 Coordinator 负责重新校验计划、预算和资源范围，并拥有 Attempt、调度许可、AbortController 与 Child Runtime。Child executor 复用无持久化的 Runtime stream executor，以内存消息承载模型/工具循环，并在每次工具执行前经过冻结计划门禁。第一阶段只允许显式资源范围内的本地 `pure_read` 主进程工具；Renderer Bridge、`external_read`、写入和二次委派全部 fail-closed。
@@ -958,15 +960,15 @@ git commit -m "test(chat): 验证只读 Child 委派闭环"
 
 ---
 
-## Series Handoff
+## Series Handoff（已完成）
 
-本计划完成后，下一份计划实现：
+本计划交出的六项后续边界已分别在 [Child Agent 受控写入计划](2026-07-27-child-agent-controlled-write.md) 和 [Child Agent 任务卡片计划](2026-07-28-child-agent-task-card.md) 中实施：
 
-1. Task overlay 与 `staged_file_write` changeset。
-2. `baseRevision + diffHash + operationSetHash + planHash` 完整性。
-3. 应用级 ConfirmationQueue 和重载恢复。
-4. 三阶段 commit journal、原子文件替换、commit validation 与恢复。
-5. `write-intent/exclusive-commit` 资源门禁。
-6. 轻量任务卡片、artifact visibility 与已裁剪 Event 时间线。
+1. Task 私有 overlay、`staged_file_write` changeset 与四项完整性绑定。
+2. 应用级 ConfirmationQueue、重载恢复和 diff integrity 校验。
+3. 三阶段 commit journal、原子文件替换、commit validation 与恢复协议。
+4. `write-intent/exclusive-commit` resource-scope 门禁。
+5. 轻量任务卡片、artifact visibility 与裁剪 Event 时间线。
+6. 单 Task cooperative cancellation、预算恢复、Primary 取消策略和 Renderer 降级提示。
 
-在上述边界完整验证前，write Child、即时外部副作用和 UI 提交入口保持关闭。
+生产 `controlledWriteChildEnabled` 仍保持关闭；是否开放属于独立发布决策，不由这些实施计划自动改变。

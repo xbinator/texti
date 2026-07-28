@@ -2,7 +2,7 @@
 
 **日期：** 2026-07-28
 
-**状态：** 已确认，待实施计划
+**状态：** 已实施并验收
 
 **上位设计：** [Primary 委派 Child Agent 设计](2026-07-22-primary-delegated-child-agent-design.md)
 
@@ -315,6 +315,16 @@ export interface ChatAgentTaskCancellationSnapshot {
   readonly requestedAt: string;
 }
 
+/** Summary 可直接展示的持久化耗时。 */
+export interface ChatAgentTaskDurationSnapshot {
+  /** 已持久化排队耗时。 */
+  readonly queueDurationMs: number;
+  /** 已持久化执行耗时。 */
+  readonly executionDurationMs: number;
+  /** 是否覆盖 Attempt 最终 outcome。 */
+  readonly complete: boolean;
+}
+
 /** 列表、事件和卡片收起态使用的轻量 Task 摘要。 */
 export interface ChatAgentTaskSummarySnapshot {
   /** 判别字段。 */
@@ -342,6 +352,8 @@ export interface ChatAgentTaskSummarySnapshot {
   readonly status: AgentTaskStatus;
   readonly queuePhase?: AgentTaskQueuePhase;
   readonly currentAttempt?: ChatAgentTaskAttemptSnapshot;
+  /** 当前 Attempt 的轻量持久化耗时。 */
+  readonly duration?: ChatAgentTaskDurationSnapshot;
   /** 已记录的取消请求；没有请求时省略。 */
   readonly cancellation?: ChatAgentTaskCancellationSnapshot;
   /** 经 Main 生成或裁剪的一句进度/终态摘要。 */
@@ -396,7 +408,7 @@ export type ChatAgentTaskEventSnapshot = ChatAgentTaskSummarySnapshot | ChatAgen
 export type ChatAgentTaskSnapshot = ChatAgentTaskDetailSnapshot | ChatAgentTaskTombstoneSnapshot;
 ```
 
-实际声明中每个字段都保留 JSDoc。上述 `task`、验收标准、资源和摘要仍需经过长度限制与控制字符校验；类型安全不能替代内容裁剪。
+实际声明中每个字段都保留 JSDoc。上述 `task`、验收标准、资源和摘要仍需经过长度限制与控制字符校验；类型安全不能替代内容裁剪。Summary 仍不暴露完整 usage，只增加收起态所需的排队/执行耗时；`complete=false` 时 UI 必须标记为近似值，终态的 `complete=true` 耗时必须冻结。
 
 `claimSummary` 明确标记为 Child 声明，不能作为系统验证结论。卡片以 `verificationStatus` 为主要结果；`contradicted` 必须覆盖 claim 的 satisfied 视觉语义并形成 warning。
 
@@ -1006,5 +1018,6 @@ Renderer 协议明确禁止：
 5. Detail 按需加载、时间线、成本、changeset、确认定位和 artifact 展示。
 6. 无 Attempt 取消结果、单 Task cooperative cancellation 和收尾不变式。
 7. commit 边界迟到取消、端到端恢复、安全和并发回归。
+8. 取消清理真值、预算恢复、Primary 取消策略、Renderer 降级提示和协议安全审计收口。
 
 每个边界单独验证和提交。生产开关不在上述任一任务中开启。

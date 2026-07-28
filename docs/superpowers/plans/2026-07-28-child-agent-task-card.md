@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** 已实施并验收。
+
 **Goal:** 在原 `delegate_task` Tool Part 位置展示可恢复、可展开的 Child Agent 轻量任务卡片，并提供不影响 sibling Task、遵守 commit 不可逆边界的单 Task cooperative cancellation。
 
 **Architecture:** Main 继续拥有 Task、Attempt、Event、Runtime、Confirmation、Changeset 和 Commit Journal 的权威事实；新增只读事务快照、显式 allowlist Projector 和提交后 Projection Pump，把轻量 Summary/Tombstone 通过既有 `chat:agent:event` 频道推送给 Renderer。Renderer 用应用级 Pinia Store 按 `taskSequence` 收敛列表、定向详情和事件，并以 `sessionId + assistantMessageId + toolCallId` 把 Task 固定回原消息位置。取消命令只持久化意图；Scheduler、Runtime、Overlay 和 FileCommitter 分别在自己的线性化边界收敛，Renderer 不做乐观 cancelled。
@@ -1364,6 +1366,68 @@ git add types/chat-agent.d.ts electron/main/modules/chat/agents/contracts.mts el
 git commit -m "fix(chat): 守住 Child 提交取消边界"
 ```
 
+---
+
+### Task 8: Close Cleanup, Recovery And Renderer Audit Gaps
+
+**Files:**
+
+- Modify: `electron/main/modules/chat/agents/write-overlay.mts`
+- Modify: `electron/main/modules/chat/agents/executor.mts`
+- Modify: `electron/main/modules/chat/agents/coordinator.mts`
+- Modify: `electron/main/modules/chat/agents/budget.mts`
+- Modify: `electron/main/modules/chat/agents/service.mts`
+- Modify: `electron/main/modules/chat/runtime/messages/continuation.mts`
+- Modify: `electron/main/modules/chat/runtime/runners/factory.mts`
+- Modify: `electron/main/modules/chat/runtime/service.mts`
+- Modify: `types/chat-agent.d.ts`
+- Modify: `src/stores/chat/agentTask.ts`
+- Modify: `src/hooks/useChat/useAgentTaskEvents.ts`
+- Modify: `src/components/BChat/index.vue`
+- Create: `src/components/BChat/components/AgentTaskProjectionNotice.vue`
+- Modify: `src/components/BChat/components/MessageBubble/BubblePartAgentTask.vue`
+- Modify: matching unit, component, database and runtime tests
+- Modify: `changelog/2026-07-28.md`
+
+**Interfaces:**
+
+- Makes overlay disposal retryable and prevents cleanup failure from becoming false `cancelled`.
+- Recovers terminal Task budget reservations before controlled-write readiness.
+- Produces explicit required/optional cancellation policy for Primary continuation.
+- Adds persisted Summary duration, bounded projection recovery and one Session-level stale/incompatible notice.
+- Gives Projector failures a stable `PROTOCOL_ERROR` code and recursively audits public IPC/event values.
+
+- [x] **Step 1: Make cleanup truth retryable**
+
+`dispose()` only records success after the private overlay is actually removed. Executor and Coordinator retain failed cleanup handles, retry a bounded three-pass sweep, and persist a structured `phase=recovery` failure instead of publishing false cancellation. Runtime/lease/Registry references are removed only after their own cleanup succeeds.
+
+- [x] **Step 2: Recover budgets and cancellation policy**
+
+Budget recovery validates the durable terminal Result, Attempt usage snapshot and canonical hash before settling or releasing only the target reservation. Startup completes this recovery before opening the controlled-write gate. Primary continuation distinguishes required cancellation from optional information loss and rejects a mismatched Tool Call/Result set.
+
+- [x] **Step 3: Complete Renderer degradation behavior**
+
+Summary carries only persisted queue/execution duration, not full usage. Active incomplete duration remains approximate and terminal duration freezes. Projection mismatch recovery uses deduplicated `0/250/1000 ms` attempts, stops after three failures, resets on a valid event and never clears the last trusted cards. One Session-level notice exposes stable local codes and an explicit force-retry without raw Main errors.
+
+- [x] **Step 4: Close protocol security tests**
+
+Projector failures carry `PROTOCOL_ERROR`; IPC preserves that code. Tests recursively scan Task list/get/cancel success envelopes and `task.updated` events for forbidden keys, secret-shaped values and absolute paths. A late retry from a previous Session cannot overwrite the current notice.
+
+- [x] **Step 5: Run final verification and commit**
+
+Run:
+
+```bash
+pnpm test
+pnpm run test:database
+pnpm exec tsc --noEmit
+pnpm lint
+pnpm lint:style
+pnpm build
+```
+
+After all commands exit 0, mark the design and this plan accepted, update the changelog and commit by feature boundary. Keep `controlledWriteChildEnabled` disabled and do not push.
+
 ## Final Acceptance
 
 - [x] `chat_agent_delegation_checkpoints.assistant_message_id` is audited before a unique index is created.
@@ -1376,5 +1440,11 @@ git commit -m "fix(chat): 守住 Child 提交取消边界"
 - [x] every cancelled Task has a terminal Result, including pre-Attempt and Checkpoint cascade paths.
 - [x] journal `applying/applied` is never hard-aborted or misreported as cancelled.
 - [x] Main/Renderer protocol output contains no forbidden internal or path data.
+- [x] cleanup failure remains retryable and cannot publish false `cancelled`.
+- [x] terminal durable Results settle target budget reservations before startup readiness.
+- [x] required and optional cancellation produce different Primary continuation constraints.
+- [x] stale/incompatible recovery is bounded, keeps trusted cards and exposes one explicit retry.
+- [x] collapsed duration uses persisted facts and freezes after completion.
+- [x] Projector protocol errors retain a stable machine code through IPC.
 - [x] production `controlledWriteChildEnabled` remains false.
-- [x] all focused tests, TypeScript, Main build, ESLint, Stylelint and full test suite pass.
+- [x] all focused tests, database tests, TypeScript, Main build, ESLint, Stylelint and full test suite pass after Task 8.
