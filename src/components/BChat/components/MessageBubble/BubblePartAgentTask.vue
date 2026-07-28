@@ -48,6 +48,7 @@
     <p v-if="cancelError" :class="bem('notice')" role="alert">
       <code>{{ cancelError }}</code>
     </p>
+    <p v-if="resolvedTask.status === 'committing'" :class="bem('notice')">提交可能已无法中断</p>
     <p v-if="resolvedTask.summary" :class="bem('summary')">{{ resolvedTask.summary }}</p>
 
     <div v-if="expanded" :id="detailPanelId" :class="bem('detail')">
@@ -528,6 +529,7 @@ const canCancelTask = computed<boolean>(() => resolvedTask.value?.recordState ==
 /** committing 仅记录意图，文案不得暗示已中止提交。 */
 const cancelButtonLabel = computed<string>(() => {
   const snapshot = resolvedTask.value;
+  if (snapshot?.recordState === 'active' && snapshot.cancellation) return '取消已请求';
   if (snapshot?.recordState === 'active' && snapshot.status === 'committing') return '请求取消';
   return cancelBusy.value ? '正在取消…' : '取消任务';
 });
@@ -642,6 +644,11 @@ function formatTimestamp(value: string): string {
 const elapsedText = computed<string | undefined>(() => {
   const snapshot = resolvedTask.value;
   if (snapshot?.recordState !== 'active') return undefined;
+  if (snapshot.duration) {
+    const duration = formatDuration(snapshot.duration.queueDurationMs + snapshot.duration.executionDurationMs);
+    if (!duration) return undefined;
+    return snapshot.duration.complete ? duration : `约 ${duration}`;
+  }
   const createdAt = parseTimestamp(snapshot.createdAt);
   if (createdAt === undefined) return undefined;
   const endAt = statusView.value.terminal ? parseTimestamp(snapshot.updatedAt) : nowMs.value;

@@ -5,6 +5,7 @@
 <template>
   <div ref="containerRef" :class="bem('container')">
     <div :class="bem('conversation-container')">
+      <AgentTaskProjectionNotice :session-id="activeSessionId" />
       <ConversationView
         ref="conversationRef"
         v-model:messages="messages"
@@ -97,6 +98,7 @@ import { useChatSessionStore } from '@/stores/chat/session';
 import { useCommandPanelStore } from '@/stores/ui/commandPanel';
 import { asyncTo } from '@/utils/asyncTo';
 import { createNamespace } from '@/utils/namespace';
+import AgentTaskProjectionNotice from './components/AgentTaskProjectionNotice.vue';
 import ConfirmationSheet from './components/ConfirmationSheet.vue';
 import ConversationView from './components/ConversationView.vue';
 import ImagePreview from './components/ImagePreview.vue';

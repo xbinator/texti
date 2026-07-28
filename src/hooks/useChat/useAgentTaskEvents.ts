@@ -8,6 +8,23 @@ import { logger } from '@/shared/logger';
 import { getElectronAPI } from '@/shared/platform/electron-api';
 import { createTaskIndexKey, type ChatAgentTaskApplyOutcome, useChatAgentTaskStore } from '@/stores/chat/agentTask';
 
+/** 一个 sequence mismatch streak 的三次自动恢复延迟。 */
+const RECOVERY_DELAYS_MS = [0, 250, 1_000] as const;
+
+/** Session sequence mismatch 的有界恢复状态。 */
+interface SessionRecoveryState {
+  /** 当前 streak 已实际发起的列表次数。 */
+  attempts: number;
+  /** 当前是否有真实 forced list。 */
+  inFlight: boolean;
+  /** 活动或冷却期间是否合并了新 mismatch。 */
+  pending: boolean;
+  /** 最近一次 mismatch 签名。 */
+  lastSignature: string;
+  /** 可选退避计时器。 */
+  timer?: ReturnType<typeof setTimeout>;
+}
+
 /**
  * 注册应用级 Task event 监听。
  * 该 hook 只由 useProvideActorSystem 调用，不主动执行 Session list。
@@ -16,19 +33,72 @@ export function useAgentTaskEvents(): void {
   const electronAPI = getElectronAPI();
   if (typeof electronAPI.chatAgentOnEvent !== 'function') return;
   const taskStore = useChatAgentTaskStore();
-  const recoveredSessions = new Map<string, string>();
+  const sessionRecoveries = new Map<string, SessionRecoveryState>();
   const recoveredTasks = new Set<string>();
   let disposed = false;
 
   /**
-   * 对同一协议异常 signature 合并恢复，不同 signature 视为新的有界 incident。
+   * 清除一个 Session 当前 mismatch streak 和退避计时器。
    * @param sessionId - Session 身份
-   * @param signature - 当前异常 streak 的稳定签名
+   */
+  function resetSessionRecovery(sessionId: string): void {
+    const state = sessionRecoveries.get(sessionId);
+    if (state?.timer) clearTimeout(state.timer);
+    sessionRecoveries.delete(sessionId);
+  }
+
+  /**
+   * 执行或延迟一个 Session 的下一次 forced list。
+   * @param sessionId - Session 身份
+   * @param state - 当前 mismatch streak
+   */
+  function scheduleSessionRecovery(sessionId: string, state: SessionRecoveryState): void {
+    if (disposed || state.inFlight || state.timer || state.attempts >= RECOVERY_DELAYS_MS.length) return;
+    /** 发起一次真实列表，并在结束后只调度一个 trailing incident。 */
+    const executeRecovery = (): void => {
+      state.timer = undefined;
+      if (disposed || sessionRecoveries.get(sessionId) !== state) return;
+      state.inFlight = true;
+      state.pending = false;
+      state.attempts += 1;
+      const recovery = taskStore.ensureSession(sessionId, { force: true });
+      const finishRecovery = (): void => {
+        if (sessionRecoveries.get(sessionId) !== state) return;
+        state.inFlight = false;
+        if (state.pending) scheduleSessionRecovery(sessionId, state);
+      };
+      recovery.then(finishRecovery, finishRecovery);
+    };
+    const delay = RECOVERY_DELAYS_MS[state.attempts] ?? 1_000;
+    if (delay === 0) executeRecovery();
+    else state.timer = setTimeout(executeRecovery, delay);
+  }
+
+  /**
+   * 合并同一 Session 的 mismatch，并限制一个 streak 最多三次列表。
+   * @param sessionId - Session 身份
+   * @param signature - 当前异常稳定签名
    */
   function recoverSession(sessionId: string, signature: string): void {
-    if (recoveredSessions.get(sessionId) === signature) return;
-    recoveredSessions.set(sessionId, signature);
-    taskStore.ensureSession(sessionId, { force: true });
+    const existing = sessionRecoveries.get(sessionId);
+    if (existing?.lastSignature === signature) return;
+    const state: SessionRecoveryState = existing ?? {
+      attempts: 0,
+      inFlight: false,
+      pending: false,
+      lastSignature: signature
+    };
+    state.lastSignature = signature;
+    if (!existing) sessionRecoveries.set(sessionId, state);
+    if (state.attempts >= RECOVERY_DELAYS_MS.length) {
+      logger.error(`[chat-agent-task-recovery-exhausted] sessionId=${sessionId}`);
+      return;
+    }
+    if (state.inFlight || state.timer) {
+      state.pending = true;
+      return;
+    }
+    scheduleSessionRecovery(sessionId, state);
   }
 
   /**
@@ -68,6 +138,7 @@ export function useAgentTaskEvents(): void {
     if (outcome === 'schema_incompatible') {
       // schema 不兼容不能用相同 Renderer 版本递归查询恢复。
       logger.error(`[chat-agent-task-schema-incompatible] sessionId=${sessionId} taskId=${taskId}`);
+      resetSessionRecovery(sessionId);
     }
   }
 
@@ -88,7 +159,7 @@ export function useAgentTaskEvents(): void {
     handleOutcome(outcome, task.sessionId, task.taskId);
     if (outcome === 'applied') {
       // 一个外层 cursor 自洽且 schema 受支持的事件结束此前 sequence mismatch streak。
-      recoveredSessions.delete(task.sessionId);
+      resetSessionRecovery(task.sessionId);
       if (wasIncompatible) recoverSession(task.sessionId, `schema-supported:${task.projectionSchemaVersion}`);
     }
   }
@@ -97,6 +168,10 @@ export function useAgentTaskEvents(): void {
   const disposeEvent = electronAPI.chatAgentOnEvent(handleEvent);
   onScopeDispose((): void => {
     disposed = true;
+    sessionRecoveries.forEach((state): void => {
+      if (state.timer) clearTimeout(state.timer);
+    });
+    sessionRecoveries.clear();
     disposeEvent();
   });
 }

@@ -683,7 +683,15 @@ describe('BubblePartAgentTask', (): void => {
 
     expect(taskStore.tasksById['task-1']).toEqual(updated);
     expect(wrapper.text()).toContain('取消中');
+    expect(wrapper.text()).toContain('取消已请求');
     expect(wrapper.find('[data-action="cancel-task"]').attributes('disabled')).toBeDefined();
+  });
+
+  it('warns that a committing Task may no longer be interruptible', (): void => {
+    const { wrapper } = mountProjected(createSummary({ status: 'committing' }));
+
+    expect(wrapper.find('[data-action="cancel-task"]').text()).toBe('请求取消');
+    expect(wrapper.text()).toContain('提交可能已无法中断');
   });
 
   it('keeps the current Summary on cancellation failure and exposes only a stable local error', async (): Promise<void> => {
@@ -1123,6 +1131,36 @@ describe('BubblePartAgentTask', (): void => {
     expect(wrapper.text()).not.toContain('约 4 秒');
     await vi.advanceTimersByTimeAsync(20_000);
     expect(wrapper.text()).toContain('4 秒');
+  });
+
+  it('prefers complete persisted Summary duration over wall-clock fallback', (): void => {
+    const { wrapper } = mountProjected(
+      createSummary({
+        duration: {
+          queueDurationMs: 2_000,
+          executionDurationMs: 3_000,
+          complete: true
+        }
+      })
+    );
+
+    expect(wrapper.text()).toContain('5 秒');
+    expect(wrapper.text()).not.toContain('约 5 秒');
+    expect(wrapper.text()).not.toContain('约 10 秒');
+  });
+
+  it('marks an incomplete persisted duration as approximate', (): void => {
+    const { wrapper } = mountProjected(
+      createSummary({
+        duration: {
+          queueDurationMs: 2_000,
+          executionDurationMs: 3_000,
+          complete: false
+        }
+      })
+    );
+
+    expect(wrapper.text()).toContain('约 5 秒');
   });
 
   it('omits invalid or negative elapsed time', (): void => {

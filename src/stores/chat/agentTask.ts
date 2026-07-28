@@ -214,6 +214,7 @@ function trimTaskSummary(detail: ChatAgentTaskDetailSnapshot): ChatAgentTaskSumm
     status: detail.status,
     ...(detail.queuePhase ? { queuePhase: detail.queuePhase } : {}),
     ...(detail.currentAttempt ? { currentAttempt: detail.currentAttempt } : {}),
+    ...(detail.duration ? { duration: detail.duration } : {}),
     ...(detail.cancellation ? { cancellation: detail.cancellation } : {}),
     ...(detail.summary ? { summary: detail.summary } : {}),
     createdAt: detail.createdAt,

@@ -208,6 +208,32 @@ describe('useChatAgentTaskStore', (): void => {
     expect(store.detailsById['task-1']).toBeUndefined();
   });
 
+  it('preserves lightweight duration when trimming Detail into Summary', (): void => {
+    const store = useChatAgentTaskStore();
+
+    expect(
+      store.applyDetail(
+        createDetail({
+          taskSequence: 2,
+          duration: {
+            queueDurationMs: 2_000,
+            executionDurationMs: 3_000,
+            complete: true
+          }
+        })
+      )
+    ).toBe('applied');
+
+    expect(store.tasksById['task-1']).toMatchObject({
+      duration: {
+        queueDurationMs: 2_000,
+        executionDurationMs: 3_000,
+        complete: true
+      }
+    });
+    expect(store.tasksById['task-1']).not.toHaveProperty('usage');
+  });
+
   it('keeps tombstones and their index irreversible even against a larger live sequence', (): void => {
     const store = useChatAgentTaskStore();
     store.applyDetail(createDetail({ taskSequence: 2 }));

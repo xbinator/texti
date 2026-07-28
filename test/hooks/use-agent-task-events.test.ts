@@ -285,6 +285,57 @@ describe('useAgentTaskEvents', (): void => {
     scope.stop();
   });
 
+  it('limits changing mismatch signatures to three delayed recoveries until a valid event resets the streak', async (): Promise<void> => {
+    vi.useFakeTimers();
+    const scope = effectScope();
+    scope.run((): void => useAgentTaskEvents());
+
+    agentAPI.listener?.(createEvent(createSummary({ taskSequence: 2 }), 3));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(agentAPI.listTasks).toHaveBeenCalledTimes(1);
+
+    agentAPI.listener?.(createEvent(createSummary({ taskSequence: 4 }), 5));
+    await vi.advanceTimersByTimeAsync(249);
+    expect(agentAPI.listTasks).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(agentAPI.listTasks).toHaveBeenCalledTimes(2);
+
+    agentAPI.listener?.(createEvent(createSummary({ taskSequence: 6 }), 7));
+    await vi.advanceTimersByTimeAsync(999);
+    expect(agentAPI.listTasks).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(agentAPI.listTasks).toHaveBeenCalledTimes(3);
+
+    agentAPI.listener?.(createEvent(createSummary({ taskSequence: 8 }), 9));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(agentAPI.listTasks).toHaveBeenCalledTimes(3);
+    expect(loggerAPI.error).toHaveBeenCalledWith('[chat-agent-task-recovery-exhausted] sessionId=session-1');
+
+    agentAPI.listener?.(createEvent(createSummary({ taskSequence: 10 })));
+    agentAPI.listener?.(createEvent(createSummary({ taskSequence: 11 }), 12));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(agentAPI.listTasks).toHaveBeenCalledTimes(4);
+
+    scope.stop();
+    vi.useRealTimers();
+  });
+
+  it('cancels a pending recovery timer when the application scope stops', async (): Promise<void> => {
+    vi.useFakeTimers();
+    const scope = effectScope();
+    scope.run((): void => useAgentTaskEvents());
+
+    agentAPI.listener?.(createEvent(createSummary({ taskSequence: 2 }), 3));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(agentAPI.listTasks).toHaveBeenCalledOnce();
+    agentAPI.listener?.(createEvent(createSummary({ taskSequence: 4 }), 5));
+
+    scope.stop();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(agentAPI.listTasks).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
   it('forces one validating list when a supported event reaches an incompatible Session', async (): Promise<void> => {
     const scope = effectScope();
     scope.run((): void => useAgentTaskEvents());
