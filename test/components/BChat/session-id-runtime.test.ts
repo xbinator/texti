@@ -455,6 +455,10 @@ const InputToolbarStub = defineComponent({
 const ConversationViewStub = defineComponent({
   name: 'ConversationView',
   props: {
+    sessionId: {
+      type: String,
+      default: null
+    },
     messages: {
       type: Array,
       default: () => []
@@ -889,6 +893,7 @@ describe('BChat sessionId runtime', (): void => {
     });
     expect(wrapper.emitted('session-created')?.[0]).toEqual([createdSession]);
     expect(electronAPIMock.chatRuntimeSend).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'session-created', content: 'hello' }));
+    expect(wrapper.findComponent(ConversationViewStub).props('sessionId')).toBe('session-created');
     expect(wrapper.emitted('loading-change')).toContainEqual([true]);
   });
 
@@ -911,6 +916,7 @@ describe('BChat sessionId runtime', (): void => {
   it('recovers Child Tasks for the initial and externally switched authoritative Session IDs', async (): Promise<void> => {
     const wrapper = mountBChat('session-initial');
     await flushPromises();
+    expect(wrapper.findComponent(ConversationViewStub).props('sessionId')).toBe('session-initial');
     expect(electronAPIMock.chatAgentListTasks).toHaveBeenCalledWith({
       sessionId: 'session-initial',
       limit: 50
@@ -920,6 +926,7 @@ describe('BChat sessionId runtime', (): void => {
     await wrapper.setProps({ sessionId: 'session-switched' });
     await flushPromises();
 
+    expect(wrapper.findComponent(ConversationViewStub).props('sessionId')).toBe('session-switched');
     expect(electronAPIMock.chatAgentListTasks).toHaveBeenCalledWith({
       sessionId: 'session-switched',
       limit: 50

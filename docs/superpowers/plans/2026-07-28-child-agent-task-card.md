@@ -641,9 +641,12 @@ git commit -m "feat(chat): 恢复 Renderer Child Task 状态"
 - Modify: `src/components/BChat/components/MessageBubble.vue`
 - Create: `src/components/BChat/components/MessageBubble/BubblePartAgentTask.vue`
 - Create: `src/components/BChat/utils/agentTaskPart.ts`
+- Modify: `src/stores/chat/agentTask.ts`
 - Modify: `test/components/BChat/conversation-view.component.test.ts`
 - Modify: `test/components/BChat/message-bubble.component.test.ts`
 - Create: `test/components/BChat/bubble-part-agent-task.component.test.ts`
+- Modify: `test/components/BChat/session-id-runtime.test.ts`
+- Modify: `test/stores/chat/agent-task.test.ts`
 - Modify: `changelog/2026-07-28.md`
 
 **Interfaces:**
@@ -652,7 +655,7 @@ git commit -m "feat(chat): 恢复 Renderer Child Task 状态"
 - `BubblePartAgentTask` receives `sessionId`、`assistantMessageId` and the original `ChatMessageToolPart`.
 - `readTaskResultId()` extracts only a valid terminal Result `taskId`.
 
-- [ ] **Step 1: Write failing routing, matching and fallback tests**
+- [x] **Step 1: Write failing routing, matching and fallback tests**
 
 Cover:
 
@@ -667,7 +670,7 @@ Cover:
 - terminal duration freezes while active elapsed time is labelled approximate;
 - unknown monetary cost never renders as `$0`.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run:
 
@@ -677,7 +680,7 @@ pnpm exec vitest run test/components/BChat/conversation-view.component.test.ts t
 
 Expected: FAIL because the card route and component do not exist.
 
-- [ ] **Step 3: Pass Session and Assistant Message identity**
+- [x] **Step 3: Pass Session and Assistant Message identity**
 
 Add `sessionId: string | null` to `ConversationView` and `MessageBubble`. `BChat/index.vue` must pass `activeSessionId`; `MessageBubble` must pass `message.id` as `assistantMessageId`.
 
@@ -693,7 +696,7 @@ Extend the render union with a complete new branch:
 
 Route only Tool Parts whose normalized name is exactly `delegate_task`. Preserve the original `key` and array order.
 
-- [ ] **Step 4: Add safe Result parsing and the collapsed card**
+- [x] **Step 4: Add safe Result parsing and the collapsed card**
 
 Export:
 
@@ -705,13 +708,13 @@ export function readTaskResultId(
 
 Use `isPlainObject`/`isString`; never cast arbitrary `part.result.data`. The card first resolves the composite index, then cross-checks the terminal Result ID. Its collapsed state renders mode, task title, status, elapsed time, priority and one summary. Use `createNamespace()` and full BEM selectors; add file header/JSDoc comments.
 
-- [ ] **Step 5: Run focused tests and verify GREEN**
+- [x] **Step 5: Run focused tests and verify GREEN**
 
 Run the command from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 6: Update changelog and commit**
+- [x] **Step 6: Update changelog and commit**
 
 Add under `## Added`:
 
@@ -722,7 +725,7 @@ Add under `## Added`:
 Commit:
 
 ```bash
-git add src/components/BChat/index.vue src/components/BChat/components/ConversationView.vue src/components/BChat/components/MessageBubble.vue src/components/BChat/components/MessageBubble/BubblePartAgentTask.vue src/components/BChat/utils/agentTaskPart.ts test/components/BChat/conversation-view.component.test.ts test/components/BChat/message-bubble.component.test.ts test/components/BChat/bubble-part-agent-task.component.test.ts changelog/2026-07-28.md
+git add src/components/BChat/index.vue src/components/BChat/components/ConversationView.vue src/components/BChat/components/MessageBubble.vue src/components/BChat/components/MessageBubble/BubblePartAgentTask.vue src/components/BChat/utils/agentTaskPart.ts src/stores/chat/agentTask.ts test/components/BChat/conversation-view.component.test.ts test/components/BChat/message-bubble.component.test.ts test/components/BChat/bubble-part-agent-task.component.test.ts test/components/BChat/session-id-runtime.test.ts test/stores/chat/agent-task.test.ts changelog/2026-07-28.md docs/superpowers/plans/2026-07-28-child-agent-task-card.md
 git commit -m "feat(chat): 渲染 Child Agent 任务卡片"
 ```
 

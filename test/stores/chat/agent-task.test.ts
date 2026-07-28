@@ -340,6 +340,53 @@ describe('useChatAgentTaskStore', (): void => {
     expect(store.detailsById['task-1']).toBeUndefined();
   });
 
+  it('rejects a scoped response position before mutating any global projection state', async (): Promise<void> => {
+    const store = useChatAgentTaskStore();
+    agentAPI.getTask.mockResolvedValue({
+      ok: true,
+      data: createDetail({
+        assistantMessageId: 'assistant-other',
+        toolCallId: 'tool-other',
+        task: 'SECRET_WRONG_POSITION'
+      })
+    } satisfies ChatAgentHandlerResult<ChatAgentGetTaskResult>);
+
+    await expect(
+      store.ensureTask('session-1', 'task-1', {
+        assistantMessageId: 'assistant-1',
+        toolCallId: 'tool-call-1'
+      })
+    ).rejects.toMatchObject({
+      code: 'agent_task_projection_invalid'
+    });
+
+    expect(store.tasksById['task-1']).toBeUndefined();
+    expect(store.detailsById['task-1']).toBeUndefined();
+    expect(store.taskCursors['task-1']).toBeUndefined();
+    expect(store.findTask('session-1', 'assistant-other', 'tool-other')).toBeUndefined();
+    expect(Object.values(store.taskIdsByMessageToolCall)).not.toContain('task-1');
+  });
+
+  it('does not merge scoped and unscoped directed flights', async (): Promise<void> => {
+    const unscopedResponse = createDeferred<ChatAgentHandlerResult<ChatAgentGetTaskResult>>();
+    const scopedResponse = createDeferred<ChatAgentHandlerResult<ChatAgentGetTaskResult>>();
+    agentAPI.getTask.mockReturnValueOnce(unscopedResponse.promise).mockReturnValueOnce(scopedResponse.promise);
+    const store = useChatAgentTaskStore();
+    store.applySummary(createSummary());
+
+    const unscoped = store.ensureTask('session-1', 'task-1');
+    const scoped = store.ensureTask('session-1', 'task-1', {
+      assistantMessageId: 'assistant-1',
+      toolCallId: 'tool-call-1'
+    });
+    await Promise.resolve();
+
+    expect(agentAPI.getTask).toHaveBeenCalledTimes(2);
+    unscopedResponse.resolve({ ok: true, data: createDetail() });
+    scopedResponse.resolve({ ok: true, data: createDetail() });
+    await Promise.all([unscoped, scoped]);
+  });
+
   it('queues one forced refresh behind an existing ensure flight', async (): Promise<void> => {
     const initialPage = createDeferred<ChatAgentHandlerResult<ChatAgentListTasksResult>>();
     const forcedPage = createDeferred<ChatAgentHandlerResult<ChatAgentListTasksResult>>();

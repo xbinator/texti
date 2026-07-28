@@ -11,6 +11,7 @@
           <MessageBubble
             v-for="item in messages"
             :key="item.id"
+            :session-id="sessionId"
             :message="item"
             :disabled="disabled"
             :can-rollback="canRollback"
@@ -55,6 +56,8 @@ defineOptions({ name: 'ConversationView' });
 
 /** ConversationView 组件属性。 */
 interface Props {
+  /** 当前权威 Session 身份。 */
+  sessionId: string | null;
   // 对话消息列表
   messages: Message[];
   // 是否正在加载历史记录

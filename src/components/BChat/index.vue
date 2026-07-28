@@ -8,6 +8,7 @@
       <ConversationView
         ref="conversationRef"
         v-model:messages="messages"
+        :session-id="activeSessionId"
         :loading="loading"
         :disabled="messageInteractionDisabled"
         :on-load-history="handleLoadHistory"

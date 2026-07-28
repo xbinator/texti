@@ -21,6 +21,8 @@ import { asyncTo } from '@/utils/asyncTo';
 const TASK_SCHEMA_VERSION = 1;
 /** Session 摘要和历史分页的固定页大小。 */
 const TASK_PAGE_LIMIT = 50;
+/** scoped 定向响应位置不匹配的稳定机器码。 */
+const TASK_PROJECTION_ERROR_CODE = 'agent_task_projection_invalid';
 
 /** Task 投影的精确应用结果。 */
 export type ChatAgentTaskApplyOutcome = 'applied' | 'stale' | 'identity_conflict' | 'schema_incompatible' | 'tombstone_conflict';
@@ -31,6 +33,20 @@ interface PageApplyResult {
   compatible: boolean;
   /** 当前页是否没有身份、tombstone 或 Session 冲突。 */
   valid: boolean;
+}
+
+/** 定向 Task 查询必须匹配的原始消息位置。 */
+export interface AgentTaskExpectedPosition {
+  /** 原 Assistant 消息身份。 */
+  readonly assistantMessageId: string;
+  /** 原 Tool Call 身份。 */
+  readonly toolCallId: string;
+}
+
+/** scoped 定向响应位置不匹配的稳定协议错误。 */
+export interface TaskProjectionError extends Error {
+  /** 不依赖 message 的稳定机器码。 */
+  readonly code: typeof TASK_PROJECTION_ERROR_CODE;
 }
 
 /** 带稳定机器码的 Agent IPC 失败。 */
@@ -82,6 +98,47 @@ function readErrorCode(error: Error): string {
   const { cause } = error;
   if (cause instanceof Error && 'code' in cause && typeof cause.code === 'string') return cause.code;
   return 'transport_failed';
+}
+
+/**
+ * 创建 scoped Task 投影位置错误。
+ * @returns 带稳定机器码的协议错误
+ */
+function createProjectionError(): TaskProjectionError {
+  const error = new Error('Task projection does not match the expected position') as TaskProjectionError;
+  Object.defineProperty(error, 'code', {
+    value: TASK_PROJECTION_ERROR_CODE,
+    enumerable: true
+  });
+  return error;
+}
+
+/**
+ * 判断 Error 自有 code 是否为 Task 投影协议码。
+ * @param value - 未可信异常
+ * @returns 是否为稳定投影错误
+ */
+function hasProjectionCode(value: unknown): value is TaskProjectionError {
+  if (!(value instanceof Error)) return false;
+  const descriptor = Object.getOwnPropertyDescriptor(value, 'code');
+  return Boolean(descriptor && 'value' in descriptor && descriptor.value === TASK_PROJECTION_ERROR_CODE);
+}
+
+/**
+ * 安全识别直接或 asyncTo cause 中的 Task 投影协议错误。
+ * @param value - 未可信异常
+ * @returns 是否携带稳定投影错误码
+ */
+export function isTaskProjectionError(value: unknown): value is TaskProjectionError {
+  try {
+    if (hasProjectionCode(value)) return true;
+    if (!(value instanceof Error)) return false;
+    const causeDescriptor = Object.getOwnPropertyDescriptor(value, 'cause');
+    const cause = causeDescriptor && 'value' in causeDescriptor ? causeDescriptor.value : undefined;
+    return hasProjectionCode(cause);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -322,7 +379,7 @@ export const useChatAgentTaskStore = defineStore('chat-agent-task', () => {
    * @param taskId - Task 身份
    * @returns 收敛后的 Detail、tombstone 或 null
    */
-  async function runEnsureTask(sessionId: string, taskId: string): Promise<ChatAgentTaskSnapshot | null> {
+  async function runEnsureTask(sessionId: string, taskId: string, expected?: AgentTaskExpectedPosition): Promise<ChatAgentTaskSnapshot | null> {
     const responsePromise = Promise.resolve()
       .then(() => getElectronAPI().chatAgentGetTask({ sessionId, taskId }))
       .then(unwrapAgentResult);
@@ -336,6 +393,10 @@ export const useChatAgentTaskStore = defineStore('chat-agent-task', () => {
       logger.error(`[chat-agent-task-get-identity-conflict] sessionId=${sessionId} taskId=${taskId}`);
       return null;
     }
+    if (expected && (snapshot.assistantMessageId !== expected.assistantMessageId || snapshot.toolCallId !== expected.toolCallId)) {
+      logger.error(`[chat-agent-task-get-position-conflict] sessionId=${sessionId} taskId=${taskId} code=${TASK_PROJECTION_ERROR_CODE}`);
+      throw createProjectionError();
+    }
 
     const outcome = snapshot.recordState === 'active' ? applyDetail(snapshot) : applySummary(snapshot);
     if (outcome === 'identity_conflict' || outcome === 'schema_incompatible' || outcome === 'tombstone_conflict') return null;
@@ -346,20 +407,44 @@ export const useChatAgentTaskStore = defineStore('chat-agent-task', () => {
   }
 
   /**
+   * 创建包含可选原消息位置的定向请求 flight key。
+   * scoped 与 unscoped 请求不能共享响应。
+   * @param sessionId - Session 身份
+   * @param taskId - Task 身份
+   * @param expected - 可选原消息位置
+   * @returns 无碰撞 flight key
+   */
+  function createTaskFlightKey(sessionId: string, taskId: string, expected?: AgentTaskExpectedPosition): string {
+    const positionKey = expected ? createTaskIndexKey('scoped', expected.assistantMessageId, expected.toolCallId) : createTaskIndexKey('unscoped', '', '');
+    return createTaskIndexKey(sessionId, taskId, positionKey);
+  }
+
+  /**
    * 启动或复用一个 Task 定向查询，不读取当前 Summary 快捷路径。
    * @param sessionId - Session 身份
    * @param taskId - Task 身份
+   * @param expected - 可选原消息位置
    * @returns 定向查询 flight
    */
-  function startTaskFlight(sessionId: string, taskId: string): Promise<ChatAgentTaskSnapshot | null> {
-    const flightKey = createTaskIndexKey(sessionId, taskId, '');
+  function startTaskFlight(sessionId: string, taskId: string, expected?: AgentTaskExpectedPosition): Promise<ChatAgentTaskSnapshot | null> {
+    const flightKey = createTaskFlightKey(sessionId, taskId, expected);
     const existingFlight = taskFlights.get(flightKey);
     if (existingFlight) return existingFlight;
-    const flight = runEnsureTask(sessionId, taskId).finally((): void => {
+    const flight = runEnsureTask(sessionId, taskId, expected).finally((): void => {
       if (taskFlights.get(flightKey) === flight) taskFlights.delete(flightKey);
     });
     taskFlights.set(flightKey, flight);
     return flight;
+  }
+
+  /**
+   * 判断公开快照是否位于调用方冻结的原消息位置。
+   * @param snapshot - 当前可信快照
+   * @param expected - 可选原消息位置
+   * @returns 未限定位置或位置完全匹配时返回 true
+   */
+  function matchesExpectedPosition(snapshot: ChatAgentTaskEventSnapshot, expected?: AgentTaskExpectedPosition): boolean {
+    return !expected || (snapshot.assistantMessageId === expected.assistantMessageId && snapshot.toolCallId === expected.toolCallId);
   }
 
   /**
@@ -601,14 +686,16 @@ export const useChatAgentTaskStore = defineStore('chat-agent-task', () => {
    * @param taskId - Task 身份
    * @returns 合并后的定向查询结果
    */
-  function ensureTask(sessionId: string, taskId: string): Promise<ChatAgentTaskSnapshot | null> {
+  function ensureTask(sessionId: string, taskId: string, expected?: AgentTaskExpectedPosition): Promise<ChatAgentTaskSnapshot | null> {
     if (!isIdentity(sessionId) || !isIdentity(taskId)) return Promise.resolve(null);
     const current = tasksById.value[taskId];
+    if (current?.sessionId === sessionId && !matchesExpectedPosition(current, expected)) return Promise.reject(createProjectionError());
     if (current?.sessionId === sessionId && current.recordState === 'tombstoned') return Promise.resolve(current);
     const detail = detailsById.value[taskId];
+    if (detail?.sessionId === sessionId && !matchesExpectedPosition(detail, expected)) return Promise.reject(createProjectionError());
     if (detail?.sessionId === sessionId && detail.taskSequence === taskCursors.value[taskId]) return Promise.resolve(detail);
 
-    return startTaskFlight(sessionId, taskId);
+    return startTaskFlight(sessionId, taskId, expected);
   }
 
   /**

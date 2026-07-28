@@ -6,7 +6,7 @@
 /* eslint-disable vue/one-component-per-file */
 import type { ChatMessageCompactionPart, ChatMessageToolPart, ChatMessageWidgetResultPart } from 'types/chat';
 import type { WidgetData, WidgetRenderContext } from 'types/widget';
-import { defineComponent, nextTick } from 'vue';
+import { defineComponent, h, nextTick } from 'vue';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import MessageBubble from '@/components/BChat/components/MessageBubble.vue';
@@ -173,6 +173,40 @@ const BubblePartToolOrderStub = defineComponent({
     }
   },
   template: '<div class="order-tool">{{ part.result.data.marker }}</div>'
+});
+
+/** 顺序测试用 Child Agent Task 片段替身。 */
+let agentTaskStubInstance = 0;
+
+/** 顺序测试用 Child Agent Task 片段替身。 */
+const BubblePartAgentTaskOrderStub = defineComponent({
+  name: 'BubblePartAgentTask',
+  props: {
+    sessionId: {
+      type: String,
+      default: null
+    },
+    assistantMessageId: {
+      type: String,
+      required: true
+    },
+    part: {
+      type: Object,
+      required: true
+    }
+  },
+  setup(stubProps): () => ReturnType<typeof h> {
+    const instanceId = ++agentTaskStubInstance;
+    return (): ReturnType<typeof h> =>
+      h(
+        'div',
+        {
+          class: 'order-agent',
+          'data-instance': instanceId
+        },
+        String((stubProps.part as ChatMessageToolPart).input && ((stubProps.part as ChatMessageToolPart).input as Record<string, unknown>).marker)
+      );
+  }
 });
 
 /** 静默 BWidgetRuntime 测试替身，用于只验证宿主初始化动作。 */
@@ -381,6 +415,23 @@ function createQuestionToolPart(): ChatMessageToolPart {
 }
 
 /**
+ * 创建顺序测试用 delegate_task 片段。
+ * @param id - Part 稳定身份
+ * @param marker - 可观察展示标记
+ * @returns 执行中的委派片段
+ */
+function createTaskOrderPart(id: string, marker: string): ChatMessageToolPart {
+  return {
+    id,
+    type: 'tool',
+    toolCallId: `${id}-call`,
+    toolName: 'delegate_task',
+    status: 'executing',
+    input: { marker }
+  };
+}
+
+/**
  * 挂载消息气泡。
  * @param message - 待渲染消息
  * @returns 组件包装器
@@ -388,6 +439,7 @@ function createQuestionToolPart(): ChatMessageToolPart {
 function mountMessageBubble(message: Message, submitAction?: (action: SubmitAction) => Promise<void> | void): VueWrapper {
   return mount(MessageBubble, {
     props: {
+      sessionId: 'session-1',
       message,
       submitAction
     },
@@ -410,12 +462,16 @@ function mountMessageBubble(message: Message, submitAction?: (action: SubmitActi
  */
 function mountOrderedMessageBubble(message: Message): VueWrapper {
   return mount(MessageBubble, {
-    props: { message },
+    props: {
+      sessionId: 'session-1',
+      message
+    },
     global: {
       stubs: {
         BBubble: BBubbleStub,
         BButton: BButtonStub,
         BIcon: true,
+        BubblePartAgentTask: BubblePartAgentTaskOrderStub,
         BubblePartText: BubblePartTextOrderStub,
         BubblePartTool: BubblePartToolOrderStub
       }
@@ -431,6 +487,7 @@ function mountOrderedMessageBubble(message: Message): VueWrapper {
 function mountMessageBubbleWithSilentWidgetRuntime(message: Message, submitAction?: (action: SubmitAction) => Promise<void> | void): VueWrapper {
   return mount(MessageBubble, {
     props: {
+      sessionId: 'session-1',
       message,
       submitAction
     },
@@ -497,6 +554,100 @@ describe('MessageBubble', (): void => {
     expect(content.indexOf('first tool')).toBeLessThan(content.indexOf('上下文已压缩'));
     expect(content.indexOf('上下文已压缩')).toBeLessThan(content.indexOf('second tool'));
     expect(content.indexOf('second tool')).toBeLessThan(content.indexOf('after text'));
+  });
+
+  it('routes only exact delegate_task parts at their original key and order', (): void => {
+    const delegatePart = createQuestionToolPart();
+    delegatePart.id = 'delegate-part';
+    delegatePart.toolCallId = 'delegate-call';
+    delegatePart.toolName = 'delegate_task';
+    delegatePart.status = 'executing';
+    delegatePart.input = { marker: 'delegated task' };
+    delegatePart.result = undefined;
+    const otherPart = structuredClone(delegatePart);
+    Reflect.deleteProperty(otherPart, 'id');
+    otherPart.toolCallId = 'other-call';
+    otherPart.toolName = 'delegate_task_similar';
+    otherPart.status = 'done';
+    otherPart.input = {};
+    otherPart.result = {
+      toolName: 'delegate_task_similar',
+      status: 'success',
+      data: { marker: 'generic tool' }
+    };
+    const message = createAssistantMessage({
+      id: 'assistant-route',
+      content: '',
+      parts: [
+        { id: 'text-before-agent', type: 'text', text: 'before agent' },
+        delegatePart,
+        otherPart,
+        { id: 'text-after-agent', type: 'text', text: 'after agent' }
+      ]
+    });
+    const wrapper = mountOrderedMessageBubble(message);
+    const content = wrapper.get('.message-bubble__parts').text();
+    const agentTask = wrapper.getComponent(BubblePartAgentTaskOrderStub);
+
+    expect(content.indexOf('before agent')).toBeLessThan(content.indexOf('delegated task'));
+    expect(content.indexOf('delegated task')).toBeLessThan(content.indexOf('generic tool'));
+    expect(content.indexOf('generic tool')).toBeLessThan(content.indexOf('after agent'));
+    expect(agentTask.props()).toMatchObject({
+      sessionId: 'session-1',
+      assistantMessageId: 'assistant-route',
+      part: delegatePart
+    });
+    expect(wrapper.findAllComponents(BubblePartToolOrderStub)).toHaveLength(1);
+  });
+
+  it('keeps keyed delegate_task component identity when message parts reorder', async (): Promise<void> => {
+    const firstTask = createTaskOrderPart('delegate-first', 'first task');
+    const secondTask = createTaskOrderPart('delegate-second', 'second task');
+    const message = createAssistantMessage({
+      content: '',
+      parts: [firstTask, secondTask]
+    });
+    const wrapper = mountOrderedMessageBubble(message);
+    const initialInstances = Object.fromEntries(
+      wrapper.findAll('.order-agent').map((item): readonly [string, string | undefined] => [item.text(), item.attributes('data-instance')])
+    );
+
+    await wrapper.setProps({
+      sessionId: 'session-1',
+      message: {
+        ...message,
+        parts: [secondTask, firstTask]
+      }
+    });
+
+    const reorderedInstances = Object.fromEntries(
+      wrapper.findAll('.order-agent').map((item): readonly [string, string | undefined] => [item.text(), item.attributes('data-instance')])
+    );
+    expect(reorderedInstances).toEqual(initialInstances);
+  });
+
+  it('routes delegate_task before question-result detection and keeps case-sensitive near names generic', (): void => {
+    const delegateQuestion = createQuestionToolPart();
+    delegateQuestion.toolName = 'delegate_task';
+    const caseVariant = structuredClone(delegateQuestion);
+    caseVariant.id = 'delegate-case';
+    caseVariant.toolCallId = 'delegate-case-call';
+    caseVariant.toolName = 'Delegate_Task';
+    caseVariant.result = {
+      toolName: 'Delegate_Task',
+      status: 'success',
+      data: { marker: 'case variant' }
+    };
+    const wrapper = mountOrderedMessageBubble(
+      createAssistantMessage({
+        content: '',
+        parts: [delegateQuestion, caseVariant]
+      })
+    );
+
+    expect(wrapper.findAllComponents(BubblePartAgentTaskOrderStub)).toHaveLength(1);
+    expect(wrapper.findAllComponents(BubblePartToolOrderStub)).toHaveLength(1);
+    expect(wrapper.findComponent({ name: 'QuestionCard' }).exists()).toBe(false);
   });
 
   it('hides assistant actions for compaction-only messages', (): void => {
