@@ -19,11 +19,16 @@ const sidebarActionSource = readFileSync('src/views/widget/components/SidebarAct
  * 读取指定 Less 选择器的首个规则体。
  * @param source - Vue 单文件组件源码
  * @param selector - 需要匹配的样式选择器
+ * @param indentation - 选择器在 Less 源码中的预期缩进
  * @returns 样式规则体，未找到时返回空字符串
  */
-function readStyleRuleBody(source: string, selector: string): string {
+function readStyleRuleBody(source: string, selector: string, indentation = ''): string {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-  const match = new RegExp(`(?:^|\\n)\\s*${escapedSelector}\\s*\\{(?<body>[\\s\\S]*?)\\n\\}`, 'u').exec(source);
+  const escapedIndentation = indentation.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const match = new RegExp(
+    `(?:^|\\n)${escapedIndentation}${escapedSelector}\\s*\\{(?<body>[\\s\\S]*?)\\n${escapedIndentation}\\}`,
+    'u'
+  ).exec(source);
 
   return match?.groups?.body ?? '';
 }
@@ -329,7 +334,7 @@ describe('PanelSidebar', (): void => {
     const sidebarRuleBody = readStyleRuleBody(panelSidebarSource, '.widget-sidebar');
     const splitterRuleBody = readStyleRuleBody(panelSidebarSource, '.widget-sidebar__splitter');
     const expandMotionRuleBody = readStyleRuleBody(panelSidebarSource, '.widget-sidebar--expand-motion');
-    const expandMotionSplitterRuleBody = readStyleRuleBody(panelSidebarSource, '.widget-sidebar--expand-motion .widget-sidebar__splitter');
+    const expandMotionSplitterRuleBody = readStyleRuleBody(panelSidebarSource, '.widget-sidebar__splitter', '  ');
 
     expect(sidebarRuleBody).not.toContain('overflow: hidden;');
     expect(splitterRuleBody).not.toContain('overflow: hidden;');

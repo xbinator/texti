@@ -33,11 +33,11 @@ describe('Shell PTY package configuration', (): void => {
     expect(config.asarUnpack).toEqual(expect.arrayContaining(['node_modules/node-pty/**/*']));
   });
 
-  it('blocks release until development and packaged PTY smoke checks pass', (): void => {
+  it('keeps PTY smoke checks out of the release workflow', (): void => {
     const workflow = readFileSync(resolve(process.cwd(), '.github/workflows/release.yml'), 'utf8');
 
-    expect(workflow).toContain('pnpm shell:pty:smoke');
-    expect(workflow).toContain('pnpm shell:pty:packaged-smoke');
-    expect(workflow).toContain('xvfb-run -a pnpm shell:pty:smoke');
+    expect(workflow).not.toContain('pnpm shell:pty:smoke');
+    expect(workflow).not.toContain('pnpm shell:pty:packaged-smoke');
+    expect(workflow).not.toContain('xvfb-run -a pnpm shell:pty:smoke');
   });
 });
