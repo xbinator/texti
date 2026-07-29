@@ -195,7 +195,9 @@
           <li v-for="artifact in visibleArtifacts" :key="artifact.artifactId">
             <code>{{ artifact.kind }}</code>
             <span>{{ artifact.reference }}</span>
-            <button type="button" data-action="open-artifact" @click="emit('open-artifact', artifact)">打开</button>
+            <button v-if="openableArtifactIds.has(artifact.artifactId)" :class="bem('open-artifact')" type="button" @click="emit('open-artifact', artifact)">
+              打开
+            </button>
           </li>
         </ul>
         <p v-if="visibleArtifacts.length === 0">无公开产物</p>
@@ -219,6 +221,8 @@ import type {
   ChatAgentTaskDetailSnapshot,
   ChatAgentTaskErrorDetailKey
 } from 'types/chat-agent';
+import { computed } from 'vue';
+import { canOpenArtifact } from '@/components/BChat/utils/agentArtifact';
 import { createNamespace } from '@/utils/namespace';
 
 /** Agent Task Detail 属性。 */
@@ -257,9 +261,16 @@ interface Emits {
   (event: 'open-artifact', artifact: ChatAgentTaskArtifactSnapshot): void;
 }
 
-defineProps<Props>();
+const props = defineProps<Props>();
 const emit = defineEmits<Emits>();
 const [, bem] = createNamespace('agent-task-card');
+
+/** 当前 Detail 下允许打开的 artifact ID 集合；仅 completed 状态且通过 opener 闭集校验的 artifact 才可打开。 */
+const openableArtifactIds = computed<Set<string>>(() => {
+  const detail = props.trustedDetail;
+  if (detail?.status !== 'completed') return new Set();
+  return new Set(detail.artifacts.filter(canOpenArtifact).map((artifact: ChatAgentTaskArtifactSnapshot): string => artifact.artifactId));
+});
 
 /** Task 模式展示文案。 */
 const MODE_LABELS: Record<AgentTaskMode, string> = {

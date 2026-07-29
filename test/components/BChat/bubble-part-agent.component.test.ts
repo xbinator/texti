@@ -1,5 +1,5 @@
 /**
- * @file bubble-part-agent-task.component.test.ts
+ * @file bubble-part-agent.component.test.ts
  * @description Child Agent 轻量任务卡片的身份匹配、恢复、状态与安全回退测试。
  * @vitest-environment jsdom
  */
@@ -20,7 +20,7 @@ import { defineComponent, nextTick } from 'vue';
 import { createPinia, setActivePinia, type Pinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import BubblePartAgentTask from '@/components/BChat/components/MessageBubble/BubblePartAgentTask.vue';
+import BubblePartAgent from '@/components/BChat/components/MessageBubble/BubblePartAgent/index.vue';
 import { readTaskResultId, readTaskResultStatus } from '@/components/BChat/utils/agentTaskPart';
 import { createTaskIndexKey, useChatAgentTaskStore } from '@/stores/chat/agentTask';
 import { useChatConfirmationQueueStore } from '@/stores/chat/confirmationQueue';
@@ -420,7 +420,7 @@ function createTaskResult(snapshot: ChatAgentGetTaskResult): ChatAgentHandlerRes
 function mountTaskCard(part: ChatMessageToolPart = createTaskPart(), sessionId: string | null = 'session-1', assistantMessageId = 'assistant-1'): CardHarness {
   const pinia = createPinia();
   setActivePinia(pinia);
-  const wrapper = mount(BubblePartAgentTask, {
+  const wrapper = mount(BubblePartAgent, {
     props: {
       sessionId,
       assistantMessageId,
@@ -453,7 +453,7 @@ function mountWithPinia(
   assistantMessageId = 'assistant-1'
 ): VueWrapper {
   setActivePinia(pinia);
-  return mount(BubblePartAgentTask, {
+  return mount(BubblePartAgent, {
     props: {
       sessionId,
       assistantMessageId,
@@ -607,7 +607,7 @@ describe('readTaskResultId', (): void => {
   });
 });
 
-describe('BubblePartAgentTask', (): void => {
+describe('BubblePartAgent', (): void => {
   beforeEach((): void => {
     agentAPI.getTask.mockReset();
     agentAPI.listConfirmations.mockReset();
@@ -798,7 +798,7 @@ describe('BubblePartAgentTask', (): void => {
     expect(wrapper.html()).not.toContain('SECRET_RAW_OUTPUT');
     expect(wrapper.html()).not.toContain('SECRET_ERROR_DETAIL');
     expect(wrapper.html()).not.toContain('document-forged');
-    expect(wrapper.findAll('[data-action="open-artifact"]')).toHaveLength(1);
+    expect(wrapper.findAll('.b-agent-task-card__open-artifact')).toHaveLength(1);
     expect(wrapper.find('.b-agent-task-card__criterion--contradicted').exists()).toBe(true);
   });
 
@@ -866,7 +866,7 @@ describe('BubblePartAgentTask', (): void => {
     await wrapper.find('[data-action="toggle-detail"]').trigger('click');
 
     expect(wrapper.text()).toContain('document-1');
-    expect(wrapper.findAll('[data-action="open-artifact"]')).toHaveLength(0);
+    expect(wrapper.findAll('.b-agent-task-card__open-artifact')).toHaveLength(0);
   });
 
   it.each(
@@ -936,7 +936,7 @@ describe('BubblePartAgentTask', (): void => {
     const wrapper = mountWithPinia(pinia);
 
     await wrapper.find('[data-action="toggle-detail"]').trigger('click');
-    await wrapper.find('[data-action="open-artifact"]').trigger('click');
+    await wrapper.find('.b-agent-task-card__open-artifact').trigger('click');
     await wrapper.find('[data-action="toggle-detail"]').trigger('click');
     navigation.reject(new Error('navigation failed'));
     await flushPromises();
@@ -992,7 +992,7 @@ describe('BubblePartAgentTask', (): void => {
     const wrapper = mountWithPinia(pinia);
 
     await wrapper.find('[data-action="toggle-detail"]').trigger('click');
-    await wrapper.find('[data-action="open-artifact"]').trigger('click');
+    await wrapper.find('.b-agent-task-card__open-artifact').trigger('click');
     const replacementPart = createSuccessPart('task-2');
     replacementPart.toolCallId = 'tool-call-2';
     await wrapper.setProps({
