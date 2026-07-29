@@ -70,7 +70,7 @@
         </RouterView>
       </MainDropZone>
 
-      <ChatSider />
+      <ChatSider :motion-enabled="sidebarMotionEnabled" @button-close="handleSidebarClose" />
 
       <ShortcutsHelp v-model:visible="visible.shortcutsHelp" />
     </div>
@@ -132,13 +132,17 @@ const WELCOME_ROUTE_PATH = '/welcome';
 const SETTINGS_TAB_ID = 'settings';
 /** 设置页根路由。 */
 const SETTINGS_ROUTE_ROOT = '/settings';
+/** 侧栏拖拽关闭后重新打开使用的默认宽度。 */
+const SIDEBAR_DEFAULT_WIDTH = 340;
+/** 按钮触发的侧栏显隐动画时长，需与 ChatSider Less 过渡保持一致。 */
+const SIDEBAR_MOTION_DURATION = 360;
+/** 是否临时启用侧栏按钮显隐动画。 */
+const sidebarMotionEnabled = ref(false);
+/** 侧栏动画状态清理定时器。 */
+let sidebarMotionTimer: number | null = null;
 
 onMounted(() => {
   tabsStore.subscribeToFileWatchEvents();
-});
-
-onUnmounted(() => {
-  tabsStore.unsubscribeFromFileWatchEvents();
 });
 
 /**
@@ -191,14 +195,52 @@ function handleOpenSettings(): void {
 }
 
 /**
+ * 清理侧栏按钮动画定时器。
+ */
+function clearSidebarMotion(): void {
+  if (sidebarMotionTimer === null) {
+    return;
+  }
+
+  window.clearTimeout(sidebarMotionTimer);
+  sidebarMotionTimer = null;
+}
+
+onUnmounted((): void => {
+  tabsStore.unsubscribeFromFileWatchEvents();
+  clearSidebarMotion();
+});
+
+/**
+ * 临时启用侧栏按钮显隐动画。
+ */
+function enableSidebarMotion(): void {
+  clearSidebarMotion();
+  sidebarMotionEnabled.value = true;
+  sidebarMotionTimer = window.setTimeout((): void => {
+    sidebarMotionEnabled.value = false;
+    sidebarMotionTimer = null;
+  }, SIDEBAR_MOTION_DURATION);
+}
+
+/**
  * 切换右侧辅助栏显示状态。
- * 如果侧边栏宽度为 0（通过拖拽关闭），重新打开时恢复为默认宽度 340px。
+ * 如果侧边栏宽度为 0（通过拖拽关闭），重新打开时恢复为默认宽度。
  */
 function handleToggleSidebar(): void {
+  enableSidebarMotion();
   if (!settingStore.sidebarVisible && settingStore.sidebarWidth === 0) {
-    settingStore.setSidebarWidth(340);
+    settingStore.setSidebarWidth(SIDEBAR_DEFAULT_WIDTH);
   }
   settingStore.toggleSidebar();
+}
+
+/**
+ * 处理 ChatSider 内部关闭按钮请求。
+ */
+function handleSidebarClose(): void {
+  enableSidebarMotion();
+  settingStore.setSidebarVisible(false);
 }
 
 // --- Window Controls ---

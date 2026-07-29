@@ -7,8 +7,9 @@
 import { defineComponent, nextTick } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { shallowMount, type VueWrapper } from '@vue/test-utils';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import DefaultLayout from '@/layouts/default/index.vue';
+import { useSettingStore } from '@/stores/ui/setting';
 import type { Tab } from '@/stores/workspace/tabs';
 import { useTabsStore } from '@/stores/workspace/tabs';
 
@@ -159,6 +160,18 @@ const BButtonStub = defineComponent({
 });
 
 /**
+ * ChatSider 测试替身，暴露动画属性与内部按钮关闭事件。
+ */
+const ChatSiderStub = defineComponent({
+  name: 'ChatSider',
+  props: {
+    motionEnabled: { type: Boolean, default: false }
+  },
+  emits: ['button-close'],
+  template: '<aside class="chat-sider-stub"></aside>'
+});
+
+/**
  * 创建标签页测试数据。
  * @param id - 标签 ID
  * @param path - 标签路径
@@ -185,7 +198,7 @@ function mountDefaultLayout(): VueWrapper {
         BButton: BButtonStub,
         BCommandPanel: true,
         BToolbar: true,
-        ChatSider: true,
+        ChatSider: ChatSiderStub,
         HeaderEditorActions: true,
         HeaderTabs: true,
         HeaderUpdateNotice: true,
@@ -211,6 +224,22 @@ function getBButtonByIcon(wrapper: VueWrapper, icon: string): ReturnType<VueWrap
 }
 
 /**
+ * 读取辅助工具侧边栏切换按钮。
+ * @param wrapper - 默认布局 wrapper
+ * @returns 侧边栏切换按钮 wrapper
+ */
+function getSidebarButton(wrapper: VueWrapper): VueWrapper {
+  const button = wrapper.findAllComponents(BButtonStub).find((item): boolean => {
+    const icon = item.findComponent({ name: 'Icon' });
+
+    return icon.exists() && icon.attributes('icon')?.startsWith('tabler:layout-sidebar-right') === true;
+  });
+  if (!button) throw new Error('Missing sidebar toggle button');
+
+  return button;
+}
+
+/**
  * 点击指定图标对应的布局按钮。
  * @param wrapper - 默认布局 wrapper
  * @param icon - 按钮图标
@@ -229,6 +258,10 @@ async function clickSettingsButton(wrapper: VueWrapper): Promise<void> {
 }
 
 describe('Default layout settings button', (): void => {
+  afterEach((): void => {
+    vi.useRealTimers();
+  });
+
   beforeEach((): void => {
     localStorage.clear();
     setActivePinia(createPinia());
@@ -289,5 +322,50 @@ describe('Default layout settings button', (): void => {
 
     expect(routerPushMock).toHaveBeenCalledTimes(1);
     expect(routerPushMock).toHaveBeenCalledWith('/settings');
+  });
+
+  it('enables temporary motion when the top sidebar button toggles visibility', async (): Promise<void> => {
+    vi.useFakeTimers();
+    const settingStore = useSettingStore();
+    settingStore.setSidebarVisible(false);
+    const wrapper = mountDefaultLayout();
+    const chatSider = wrapper.findComponent(ChatSiderStub);
+
+    await getSidebarButton(wrapper).trigger('click');
+    await nextTick();
+
+    expect(settingStore.sidebarVisible).toBe(true);
+    expect(chatSider.props('motionEnabled')).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(360);
+    expect(chatSider.props('motionEnabled')).toBe(false);
+  });
+
+  it('enables temporary motion when ChatSider requests button close', async (): Promise<void> => {
+    vi.useFakeTimers();
+    const settingStore = useSettingStore();
+    settingStore.setSidebarVisible(true);
+    const wrapper = mountDefaultLayout();
+    const chatSider = wrapper.findComponent(ChatSiderStub);
+
+    chatSider.vm.$emit('button-close');
+    await nextTick();
+
+    expect(settingStore.sidebarVisible).toBe(false);
+    expect(chatSider.props('motionEnabled')).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(360);
+    expect(chatSider.props('motionEnabled')).toBe(false);
+  });
+
+  it('keeps programmatic sidebar visibility changes free of motion', async (): Promise<void> => {
+    const settingStore = useSettingStore();
+    const wrapper = mountDefaultLayout();
+    const chatSider = wrapper.findComponent(ChatSiderStub);
+
+    settingStore.setSidebarVisible(true);
+    await nextTick();
+
+    expect(chatSider.props('motionEnabled')).toBe(false);
   });
 });

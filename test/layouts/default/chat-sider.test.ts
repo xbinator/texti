@@ -140,11 +140,21 @@ const AInputStub = defineComponent({
 });
 
 /**
+ * ChatSider 测试挂载属性。
+ */
+interface ChatSiderMountProps {
+  /** 是否启用按钮显隐动画 */
+  motionEnabled?: boolean;
+}
+
+/**
  * 挂载 ChatSider。
+ * @param props - 组件挂载属性
  * @returns 组件包装器
  */
-function mountChatSider(): ReturnType<typeof mount> {
+function mountChatSider(props: ChatSiderMountProps = {}): ReturnType<typeof mount> {
   return mount(ChatSider, {
+    props,
     global: {
       stubs: {
         AInput: AInputStub,
@@ -207,13 +217,32 @@ describe('ChatSider', (): void => {
     wrapper.unmount();
   });
 
-  it('keeps ChatSider opening animated from its own root element', (): void => {
-    expect(chatSiderSource).toContain(':class="bem({ visible: settingStore.sidebarVisible })"');
-    expect(chatSiderSource).toContain("'--chat-sider-width'");
+  it('only adds the motion class when motion is explicitly enabled', async (): Promise<void> => {
+    const settingStore = useSettingStore();
+    settingStore.setSidebarVisible(false);
+    const wrapper = mountChatSider();
+    const sider = wrapper.find('.b-panel-splitter');
+
+    settingStore.setSidebarVisible(true);
+    await nextTick();
+    expect(sider.classes()).toContain('chat-sider--visible');
+    expect(sider.classes()).not.toContain('chat-sider--motion');
+
+    await wrapper.setProps({ motionEnabled: true });
+    expect(sider.classes()).toContain('chat-sider--motion');
+  });
+
+  it('scopes transitions to motion and leaves the splitter handle unclipped', (): void => {
+    const rootStyle = chatSiderSource.match(/\.chat-sider \{(?<body>[\s\S]*?)\n\}/u)?.groups?.body ?? '';
+    const contentStyle = chatSiderSource.match(/\.chat-sider__content \{(?<body>[\s\S]*?)\n\}/u)?.groups?.body ?? '';
+
+    expect(chatSiderSource).toContain(':class="bem({ motion: props.motionEnabled, visible: settingStore.sidebarVisible })"');
+    expect(chatSiderSource).toContain('.chat-sider--motion {');
+    expect(rootStyle).not.toContain('overflow: hidden;');
+    expect(rootStyle).not.toContain('transition:');
+    expect(contentStyle).toContain('overflow: hidden;');
     expect(chatSiderSource).toContain('transition: width 0.36s ease, opacity 0.24s ease, transform 0.36s ease;');
     expect(chatSiderSource).toContain('@media (prefers-reduced-motion: reduce)');
-    expect(chatSiderSource).not.toContain(':aria-hidden=');
-    expect(chatSiderSource).not.toContain('v-show="settingStore.sidebarVisible"');
   });
 
   it('renders BChat with the active session id and displays the SessionHistory current session', async (): Promise<void> => {
@@ -232,7 +261,7 @@ describe('ChatSider', (): void => {
     expect(chatStore.ensureSessions).toHaveBeenCalledTimes(1);
   });
 
-  it('closes the sidebar from the close button', async (): Promise<void> => {
+  it('requests animated close only from the internal close button', async (): Promise<void> => {
     const settingStore = useSettingStore();
     settingStore.setSidebarVisible(true);
     const wrapper = mountChatSider();
@@ -245,7 +274,14 @@ describe('ChatSider', (): void => {
     expect(closeButton?.props('tooltip')).toBeUndefined();
     await closeButton?.trigger('click');
 
+    expect(wrapper.emitted('button-close')).toEqual([[]]);
+    expect(settingStore.sidebarVisible).toBe(true);
+
+    wrapper.findComponent({ name: 'BPanelSplitter' }).vm.$emit('close');
+    await nextTick();
+
     expect(settingStore.sidebarVisible).toBe(false);
+    expect(wrapper.emitted('button-close')).toEqual([[]]);
   });
 
   it('loads the next shared session page when history requests more data', async (): Promise<void> => {

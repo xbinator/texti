@@ -5,13 +5,13 @@
 <template>
   <BPanelSplitter
     v-model:size="settingStore.sidebarWidth"
-    :class="bem({ visible: settingStore.sidebarVisible })"
+    :class="bem({ motion: props.motionEnabled, visible: settingStore.sidebarVisible })"
     :inert="settingStore.sidebarVisible ? undefined : true"
     :style="siderStyle"
     position="left"
     :min-width="340"
     max-width="40%"
-    @close="handleClose"
+    @close="handleSplitterClose"
   >
     <div :class="bem('content')">
       <div :class="bem('header')">
@@ -43,7 +43,7 @@
         </BButton>
 
         <div :class="bem('divider')"></div>
-        <BButton square size="small" type="text" @click="handleClose">
+        <BButton square size="small" type="text" @click="requestButtonClose">
           <BIcon icon="lucide:x" :size="16" />
         </BButton>
       </div>
@@ -85,6 +85,23 @@ type ChatSiderStyle = CSSProperties & {
   /** 当前聊天侧栏宽度，用于显示状态切换时做显式宽度过渡。 */
   '--chat-sider-width': string;
 };
+
+/**
+ * ChatSider 组件属性。
+ */
+interface Props {
+  /** 是否临时启用按钮触发的显隐动画 */
+  motionEnabled?: boolean;
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  motionEnabled: false
+});
+
+const emit = defineEmits<{
+  /** 请求通过内部关闭按钮关闭侧栏 */
+  'button-close': [];
+}>();
 
 /** 应用设置存储。 */
 const settingStore = useSettingStore();
@@ -165,10 +182,17 @@ async function finishTitleEdit(): Promise<void> {
 }
 
 /**
- * 关闭聊天侧栏。
+ * 处理分隔器拖拽关闭，不启用按钮动画。
  */
-function handleClose(): void {
+function handleSplitterClose(): void {
   settingStore.setSidebarVisible(false);
+}
+
+/**
+ * 请求通过内部关闭按钮关闭侧栏。
+ */
+function requestButtonClose(): void {
+  emit('button-close');
 }
 
 /**
@@ -211,10 +235,12 @@ function handleChatLoadingChange(loading: boolean): void {
   width: 0;
   min-width: 0;
   max-width: 40%;
-  overflow: hidden;
   pointer-events: none;
   opacity: 0;
   transform: translateX(12px);
+}
+
+.chat-sider--motion {
   transition: width 0.36s ease, opacity 0.24s ease, transform 0.36s ease;
   will-change: width, opacity, transform;
 }
@@ -267,7 +293,7 @@ function handleChatLoadingChange(loading: boolean): void {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-sider {
+  .chat-sider--motion {
     transition: none;
   }
 }
