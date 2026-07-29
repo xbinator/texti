@@ -20,243 +20,36 @@
   </div>
 
   <div v-else-if="resolvedTask?.recordState === 'active'" :class="name">
-    <div :class="bem('header')">
-      <span :class="bem('mode')">{{ MODE_LABELS[resolvedTask.mode] }}</span>
-      <span :class="bem('task')">{{ resolvedTask.task }}</span>
-      <button :class="bem('toggle')" type="button" data-action="toggle-detail" :aria-controls="detailPanelId" :aria-expanded="expanded" @click="toggleDetail">
-        {{ expanded ? '收起详情' : '展开详情' }}
-      </button>
-    </div>
-    <div :class="bem('meta')">
-      <span :class="bem('status')">
-        <BIcon :icon="statusView.icon" :size="14" />
-        <span>{{ statusLabel }}</span>
-      </span>
-      <span v-if="elapsedText" :class="bem('elapsed')">{{ elapsedText }}</span>
-      <span :class="bem('priority')">{{ PRIORITY_LABELS[resolvedTask.priority] }}</span>
-      <button
-        v-if="canCancelTask"
-        :class="bem('cancel')"
-        type="button"
-        data-action="cancel-task"
-        :disabled="cancelBusy || Boolean(resolvedTask.cancellation)"
-        @click="cancelTask"
-      >
-        {{ cancelButtonLabel }}
-      </button>
-    </div>
-    <p v-if="cancelError" :class="bem('notice')" role="alert">
-      <code>{{ cancelError }}</code>
-    </p>
-    <p v-if="resolvedTask.status === 'committing'" :class="bem('notice')">提交可能已无法中断</p>
-    <p v-if="resolvedTask.summary" :class="bem('summary')">{{ resolvedTask.summary }}</p>
-
-    <div v-if="expanded" :id="detailPanelId" :class="bem('detail')">
-      <div v-if="detailLoading" :class="bem('detail-state')" role="status">正在加载任务详情…</div>
-      <div v-else-if="detailError" :class="bem('detail-state')" role="alert">
-        <code>{{ detailError }}</code>
-        <button type="button" data-action="retry-detail" @click="retryDetail">重试</button>
-      </div>
-
-      <template v-else-if="trustedDetail">
-        <section :class="bem('section')" data-section="contract">
-          <h4>任务契约</h4>
-          <dl>
-            <dt>模式</dt>
-            <dd>{{ MODE_LABELS[trustedDetail.mode] }}</dd>
-            <dt>优先级</dt>
-            <dd>{{ PRIORITY_LABELS[trustedDetail.priority] }}</dd>
-            <dt>必要性</dt>
-            <dd>{{ trustedDetail.required ? '必需任务' : '可选任务' }}</dd>
-            <dt>截止时间</dt>
-            <dd>{{ trustedDetail.deadlineAt ?? '未设置' }}</dd>
-          </dl>
-          <ol>
-            <li v-for="(criterion, index) in trustedDetail.acceptanceCriteria" :key="`${index}:${criterion}`">{{ criterion }}</li>
-          </ol>
-          <ul>
-            <li v-for="resource in trustedDetail.resources" :key="`${resource.kind}:${resource.displayReference}`">
-              <code>{{ resource.kind }}</code>
-              <span>{{ resource.displayReference }}</span>
-              <small v-if="resource.revision">revision {{ resource.revision }}</small>
-            </li>
-          </ul>
-        </section>
-
-        <section :class="bem('section')" data-section="execution">
-          <h4>执行</h4>
-          <template v-if="trustedDetail.currentAttempt">
-            <dl>
-              <dt>Attempt</dt>
-              <dd>{{ trustedDetail.currentAttempt.attemptNumber }}</dd>
-              <dt>状态</dt>
-              <dd>{{ trustedDetail.currentAttempt.attemptState }}</dd>
-              <dt>Agent</dt>
-              <dd>{{ trustedDetail.currentAttempt.agentId }}</dd>
-              <dt>Runtime</dt>
-              <dd>{{ trustedDetail.currentAttempt.runtimeId }}</dd>
-              <dt>创建</dt>
-              <dd>{{ trustedDetail.currentAttempt.createdAt }}</dd>
-              <dt>开始</dt>
-              <dd>{{ trustedDetail.currentAttempt.startedAt ?? '尚未开始' }}</dd>
-              <dt>结束</dt>
-              <dd>{{ trustedDetail.currentAttempt.endedAt ?? '尚未结束' }}</dd>
-            </dl>
-          </template>
-          <p v-else>尚无执行 Attempt</p>
-        </section>
-
-        <section :class="bem('section')" data-section="timeline">
-          <h4>时间线</h4>
-          <p v-if="trustedDetail.timeline.truncated" :class="bem('notice')">更早事件已截断</p>
-          <ol>
-            <li v-for="entry in trustedDetail.timeline.entries" :key="entry.sequence">
-              <time>{{ entry.occurredAt }}</time>
-              <code>{{ entry.type }}</code>
-              <code>{{ entry.code }}</code>
-              <span v-if="entry.summary">{{ entry.summary }}</span>
-            </li>
-          </ol>
-        </section>
-
-        <section :class="bem('section')" data-section="completion">
-          <h4>完成与诊断</h4>
-          <template v-if="trustedDetail.completion">
-            <p>
-              <code>{{ trustedDetail.completion.level }}</code>
-              {{ trustedDetail.completion.summary }}
-            </p>
-            <ol>
-              <li
-                v-for="criterion in trustedDetail.completion.criteria"
-                :key="criterion.criterionIndex"
-                :class="criterion.verificationStatus === 'contradicted' ? bem('criterion', { contradicted: true }) : bem('criterion')"
-              >
-                <span>#{{ criterion.criterionIndex + 1 }}</span>
-                <code>{{ criterion.claimStatus }}</code>
-                <code>{{ criterion.verificationStatus }}</code>
-                <span>{{ criterion.claimSummary }}</span>
-              </li>
-            </ol>
-          </template>
-          <p v-else>暂无完成信息</p>
-          <ul v-if="trustedDetail.warnings.length > 0">
-            <li v-for="warning in trustedDetail.warnings" :key="warning.code">
-              <code>{{ warning.code }}</code>
-              <span>{{ warning.message }}</span>
-            </li>
-          </ul>
-          <div v-if="trustedDetail.error" :class="bem('error')" role="alert">
-            <dl>
-              <dt>code</dt>
-              <dd>
-                <code>{{ trustedDetail.error.code }}</code>
-              </dd>
-              <dt>phase</dt>
-              <dd>
-                <code>{{ trustedDetail.error.phase }}</code>
-              </dd>
-              <dt>category</dt>
-              <dd>
-                <code>{{ trustedDetail.error.category }}</code>
-              </dd>
-              <dt>retryable</dt>
-              <dd>{{ trustedDetail.error.retryable ? '可重试' : '不可重试' }}</dd>
-            </dl>
-            <p v-if="trustedDetail.error.message">{{ trustedDetail.error.message }}</p>
-            <dl v-if="trustedDetail.error.details">
-              <template v-for="key in ERROR_DETAIL_KEYS" :key="key">
-                <template v-if="trustedDetail.error.details[key] !== undefined">
-                  <dt>{{ key }}</dt>
-                  <dd>{{ trustedDetail.error.details[key] }}</dd>
-                </template>
-              </template>
-            </dl>
-          </div>
-        </section>
-
-        <section :class="bem('section')" data-section="usage">
-          <h4>用量</h4>
-          <template v-if="trustedDetail.usage">
-            <dl>
-              <dt>输入 token</dt>
-              <dd>{{ trustedDetail.usage.inputTokens }}</dd>
-              <dt>输出 token</dt>
-              <dd>{{ trustedDetail.usage.outputTokens }}</dd>
-              <dt>总 token</dt>
-              <dd>{{ trustedDetail.usage.totalTokens }}</dd>
-              <dt>模型调用</dt>
-              <dd>{{ trustedDetail.usage.modelCalls }}</dd>
-              <dt>工具轮次</dt>
-              <dd>{{ trustedDetail.usage.toolRounds }}</dd>
-              <dt>外部请求</dt>
-              <dd>{{ trustedDetail.usage.externalRequests }}</dd>
-              <dt>排队耗时</dt>
-              <dd>{{ trustedDetail.usage.queueDurationMs }} ms</dd>
-              <dt>执行耗时</dt>
-              <dd>{{ trustedDetail.usage.executionDurationMs }} ms</dd>
-              <dt>定价版本</dt>
-              <dd>{{ trustedDetail.usage.monetaryCost.pricingVersion }}</dd>
-              <dt>估算成本</dt>
-              <dd>{{ formatCost(trustedDetail.usage.monetaryCost.estimated, trustedDetail.usage.monetaryCost.currency) }}</dd>
-              <dt>实际成本</dt>
-              <dd>{{ formatCost(trustedDetail.usage.monetaryCost.actual, trustedDetail.usage.monetaryCost.currency) }}</dd>
-            </dl>
-          </template>
-          <p v-else>用量未知</p>
-        </section>
-
-        <section :class="bem('section')" data-section="changeset">
-          <h4>变更集</h4>
-          <template v-if="trustedDetail.changeset">
-            <dl>
-              <dt>阶段</dt>
-              <dd>{{ trustedDetail.changeset.phase }}</dd>
-              <dt>基础修订</dt>
-              <dd>
-                <code>{{ trustedDetail.changeset.baseRevision }}</code>
-              </dd>
-              <dt>diff</dt>
-              <dd>
-                <code>{{ trustedDetail.changeset.diffHash }}</code>
-              </dd>
-              <dt>operations</dt>
-              <dd>
-                <code>{{ trustedDetail.changeset.operationSetHash }}</code>
-              </dd>
-            </dl>
-            <ul>
-              <li v-for="displayPath in trustedDetail.changeset.displayPaths" :key="displayPath">{{ displayPath }}</li>
-            </ul>
-            <button v-if="canLocateConfirmation" type="button" data-action="open-confirmation" :disabled="confirmationBusy" @click="locateConfirmation">
-              查看确认
-            </button>
-            <p v-if="confirmationError" :class="bem('notice')" role="alert">
-              <code>{{ confirmationError }}</code>
-            </p>
-          </template>
-          <p v-else>无变更集</p>
-          <p v-if="confirmationContextError" :class="bem('notice')" role="alert">
-            <code>{{ confirmationContextError }}</code>
-          </p>
-        </section>
-
-        <section :class="bem('section')" data-section="artifacts">
-          <h4>产物</h4>
-          <ul>
-            <li v-for="artifact in visibleArtifacts" :key="artifact.artifactId">
-              <code>{{ artifact.kind }}</code>
-              <span>{{ artifact.reference }}</span>
-              <button v-if="canOpenTaskArtifact(artifact)" type="button" data-action="open-artifact" @click="openArtifact(artifact)">打开</button>
-            </li>
-          </ul>
-          <p v-if="visibleArtifacts.length === 0">无公开产物</p>
-          <p v-if="artifactError" :class="bem('notice')" role="alert">
-            <code>{{ artifactError }}</code>
-          </p>
-        </section>
-      </template>
-    </div>
+    <AgentTaskHeader
+      :resolved-task="resolvedTask"
+      :status-view="statusView"
+      :status-label="statusLabel"
+      :elapsed-text="elapsedText"
+      :can-cancel-task="canCancelTask"
+      :cancel-busy="cancelBusy"
+      :cancel-button-label="cancelButtonLabel"
+      :cancel-error="cancelError"
+      :expanded="expanded"
+      :detail-panel-id="detailPanelId"
+      @toggle-detail="toggleDetail"
+      @cancel-task="cancelTask"
+    />
+    <AgentTaskDetail
+      :expanded="expanded"
+      :detail-panel-id="detailPanelId"
+      :detail-loading="detailLoading"
+      :detail-error="detailError"
+      :trusted-detail="trustedDetail"
+      :visible-artifacts="visibleArtifacts"
+      :confirmation-context-error="confirmationContextError"
+      :can-locate-confirmation="canLocateConfirmation"
+      :confirmation-busy="confirmationBusy"
+      :confirmation-error="confirmationError"
+      :artifact-error="artifactError"
+      @retry-detail="retryDetail"
+      @locate-confirmation="locateConfirmation"
+      @open-artifact="openArtifact"
+    />
   </div>
 
   <BubblePartTool v-else :part="safeFallbackPart" />
@@ -264,33 +57,32 @@
 
 <script setup lang="ts">
 /**
- * @file BubblePartAgentTask.vue
+ * @file BubblePartAgent/index.vue
  * @description 在原 delegate_task Tool Part 位置展示 Main-owned Child Task 轻量投影。
  */
 import type { ChatMessageToolPart } from 'types/chat';
 import type {
-  AgentTaskMode,
-  AgentTaskPriority,
   AgentTaskStatus,
   ChatAgentCancelTaskResult,
   ChatAgentTaskArtifactSnapshot,
   ChatAgentTaskDetailSnapshot,
-  ChatAgentTaskErrorDetailKey,
   ChatAgentTaskEventSnapshot,
   ChatAgentTaskSnapshot,
   ChatAgentTaskSummarySnapshot
 } from 'types/chat-agent';
 import { computed, onScopeDispose, ref, watch } from 'vue';
-import { canOpenArtifact, openAgentArtifact } from '@/components/BChat/utils/agentArtifact';
+import { openAgentArtifact } from '@/components/BChat/utils/agentArtifact';
 import { readTaskResultId, readTaskResultStatus } from '@/components/BChat/utils/agentTaskPart';
 import { getElectronAPI } from '@/shared/platform/electron-api';
 import { createTaskIndexKey, isTaskProjectionError, useChatAgentTaskStore } from '@/stores/chat/agentTask';
 import { useChatConfirmationQueueStore, type ChatAgentConfirmationItem } from '@/stores/chat/confirmationQueue';
 import { asyncTo } from '@/utils/asyncTo';
 import { createNamespace } from '@/utils/namespace';
-import BubblePartTool from './BubblePartTool/index.vue';
+import BubblePartTool from '../BubblePartTool/index.vue';
+import AgentTaskDetail from './AgentTaskDetail.vue';
+import AgentTaskHeader from './AgentTaskHeader.vue';
 
-defineOptions({ name: 'BubblePartAgentTask' });
+defineOptions({ name: 'BubblePartAgent' });
 
 /** 任务卡片属性。 */
 interface Props {
@@ -303,7 +95,7 @@ interface Props {
 }
 
 /** 状态的文字、图标和终态属性。 */
-interface StatusView {
+export interface StatusView {
   /** 用户可读状态。 */
   label: string;
   /** 同时表达状态语义的图标。 */
@@ -319,19 +111,6 @@ const props = defineProps<Props>();
 const [name, bem] = createNamespace('agent-task-card');
 const agentTaskStore = useChatAgentTaskStore();
 const confirmationQueue = useChatConfirmationQueueStore();
-
-/** Task 模式展示文案。 */
-const MODE_LABELS: Record<AgentTaskMode, string> = {
-  read: '只读',
-  write: '受控写入'
-};
-
-/** Task 优先级展示文案。 */
-const PRIORITY_LABELS: Record<AgentTaskPriority, string> = {
-  low: '低优先级',
-  normal: '普通优先级',
-  high: '高优先级'
-};
 
 /** 全部 Task 状态的穷举文字、图标和终态映射。 */
 const STATUS_VIEWS: Record<AgentTaskStatus, StatusView> = {
@@ -350,20 +129,6 @@ const STATUS_VIEWS: Record<AgentTaskStatus, StatusView> = {
   deadline_exceeded: { label: '已超时', icon: 'lucide:timer-off', terminal: true },
   commit_failed: { label: '提交失败', icon: 'lucide:git-commit-horizontal', terminal: true }
 };
-
-/** 错误 details 的固定展示顺序与闭集。 */
-const ERROR_DETAIL_KEYS: readonly ChatAgentTaskErrorDetailKey[] = [
-  'reason',
-  'toolName',
-  'expectedHash',
-  'actualHash',
-  'expectedVersion',
-  'actualVersion',
-  'status',
-  'limit',
-  'observed',
-  'deadlineAt'
-];
 
 /** Renderer 当前时钟，仅供已解析的活动 Task 近似计时。 */
 const nowMs = ref(Date.now());
@@ -734,26 +499,6 @@ function retryDetail(): void {
 }
 
 /**
- * 格式化 monetary cost，不把 unknown 伪装为零。
- * @param amount - 成本数值或 unknown
- * @param currency - 货币代码或 unknown
- * @returns 用户可读成本
- */
-function formatCost(amount: number | 'unknown', currency: string | 'unknown'): string {
-  if (amount === 'unknown' || currency === 'unknown') return '未知';
-  return `${currency} ${amount}`;
-}
-
-/**
- * 判断 artifact 是否允许在当前终态 Task 上打开。
- * @param artifact - 当前可信公开 artifact
- * @returns Task 状态与闭集 opener 是否同时允许
- */
-function canOpenTaskArtifact(artifact: ChatAgentTaskArtifactSnapshot): boolean {
-  return trustedDetail.value?.status === 'completed' && canOpenArtifact(artifact);
-}
-
-/**
  * 校验 confirmation 与当前 Detail changeset 的身份和完整性绑定。
  * @param confirmation - 精确 Task/Attempt 匹配的 confirmation
  * @param detail - 当前可信 Detail
@@ -1027,80 +772,17 @@ onScopeDispose((): void => {
   border-radius: 8px;
 }
 
-.b-agent-task-card__header,
-.b-agent-task-card__meta,
-.b-agent-task-card__title,
 .b-agent-task-card__protocol-error {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: center;
+  color: var(--color-error);
 }
 
-.b-agent-task-card__toggle {
-  flex-shrink: 0;
-  padding: 0;
-  margin-left: auto;
-  font: inherit;
-  color: var(--color-primary);
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-}
-
-.b-agent-task-card__mode {
-  flex-shrink: 0;
-  font-weight: 600;
-  color: var(--color-primary);
-}
-
-.b-agent-task-card__task {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-weight: 500;
-  color: var(--text-primary);
-  white-space: nowrap;
-}
-
-.b-agent-task-card__meta {
-  flex-wrap: wrap;
-  margin-top: 6px;
-}
-
-.b-agent-task-card__status {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  color: var(--text-primary);
-}
-
-.b-agent-task-card__cancel {
-  padding: 0;
-  margin-left: auto;
-  font: inherit;
-  color: var(--color-primary);
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-}
-
-.b-agent-task-card__cancel:disabled {
+.b-agent-task-card__protocol-error code {
+  font-family: Monaco, 'SF Mono', Consolas, monospace;
   color: var(--text-tertiary);
-  cursor: not-allowed;
-}
-
-.b-agent-task-card__elapsed,
-.b-agent-task-card__priority,
-.b-agent-task-card__updated {
-  color: var(--text-tertiary);
-}
-
-.b-agent-task-card__summary {
-  margin: 6px 0 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.5;
-  color: var(--text-secondary);
-  white-space: nowrap;
 }
 
 .b-agent-task-card__tombstone {
@@ -1110,70 +792,13 @@ onScopeDispose((): void => {
 }
 
 .b-agent-task-card__title {
+  display: flex;
+  gap: 6px;
+  align-items: center;
   color: var(--text-primary);
 }
 
-.b-agent-task-card__protocol-error {
-  flex-wrap: wrap;
-  color: var(--color-error);
-}
-
-.b-agent-task-card__protocol-error code {
-  font-family: Monaco, 'SF Mono', Consolas, monospace;
+.b-agent-task-card__updated {
   color: var(--text-tertiary);
-}
-
-.b-agent-task-card__detail {
-  padding-top: 8px;
-  margin-top: 8px;
-  border-top: 1px solid var(--border-primary);
-}
-
-.b-agent-task-card__detail-state,
-.b-agent-task-card__notice {
-  color: var(--text-tertiary);
-}
-
-.b-agent-task-card__section + .b-agent-task-card__section {
-  margin-top: 10px;
-}
-
-.b-agent-task-card__section h4 {
-  margin: 0 0 4px;
-  font-size: 12px;
-  color: var(--text-primary);
-}
-
-.b-agent-task-card__section p,
-.b-agent-task-card__section ol,
-.b-agent-task-card__section ul,
-.b-agent-task-card__section dl {
-  margin: 4px 0 0;
-}
-
-.b-agent-task-card__section ol,
-.b-agent-task-card__section ul {
-  padding-left: 18px;
-}
-
-.b-agent-task-card__section li {
-  margin-top: 3px;
-}
-
-.b-agent-task-card__section dl {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 3px 8px;
-}
-
-.b-agent-task-card__section dd {
-  min-width: 0;
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.b-agent-task-card__criterion--contradicted,
-.b-agent-task-card__error {
-  color: var(--color-error);
 }
 </style>

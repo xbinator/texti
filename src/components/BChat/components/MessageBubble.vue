@@ -33,7 +33,7 @@
 
             <BubblePartThinking v-else-if="item.kind === 'thinking'" :part="item.part" />
 
-            <BubblePartAgentTask v-else-if="item.kind === 'agent-task'" :session-id="sessionId" :assistant-message-id="message.id" :part="item.part" />
+            <BubblePartAgent v-else-if="item.kind === 'agent-task'" :session-id="sessionId" :assistant-message-id="message.id" :part="item.part" />
 
             <QuestionCard v-else-if="item.kind === 'question'" :question="item.question" :disabled="disabled" :submit-action="submitAction" />
 
@@ -97,7 +97,7 @@ import { useImagePreview } from '@/hooks/useImagePreview';
 import { createNamespace } from '@/utils/namespace';
 import { extractLastTextPart, isAwaitingUserChoiceResult, isWidgetToolPart, type WidgetToolPart } from '../utils/messageHelper';
 import { formatMessageTime } from '../utils/timeFormat';
-import BubblePartAgentTask from './MessageBubble/BubblePartAgentTask.vue';
+import BubblePartAgent from './MessageBubble/BubblePartAgent/index.vue';
 import BubblePartStatus from './MessageBubble/BubblePartStatus/index.vue';
 import BubblePartText from './MessageBubble/BubblePartText/index.vue';
 import BubblePartThinking from './MessageBubble/BubblePartThinking/index.vue';
