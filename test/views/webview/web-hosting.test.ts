@@ -4,7 +4,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { ensureWebviewHostLayer, WEBVIEW_HOST_LAYER_ID } from '@/views/webview/web/utils/hosting';
+import { ensureHostedWebviewElement, ensureWebviewHostLayer, WEBVIEW_HOST_LAYER_ID } from '@/views/webview/web/utils/hosting';
 
 describe('webview hosting', () => {
   afterEach((): void => {
@@ -25,5 +25,18 @@ describe('webview hosting', () => {
     expect(firstLayer.id).not.toContain('example.com');
     expect(firstLayer.id).not.toContain('%3A');
     expect(secondLayer.id).not.toBe(firstLayer.id);
+  });
+
+  it('enables popup requests on created and reused webview elements', (): void => {
+    const hostLayer = document.createElement('div');
+    const firstElement = ensureHostedWebviewElement(hostLayer);
+
+    expect(firstElement.hasAttribute('allowpopups')).toBe(true);
+
+    firstElement.removeAttribute('allowpopups');
+    const reusedElement = ensureHostedWebviewElement(hostLayer);
+
+    expect(reusedElement).toBe(firstElement);
+    expect(reusedElement.hasAttribute('allowpopups')).toBe(true);
   });
 });

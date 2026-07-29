@@ -113,10 +113,11 @@ function applyWebviewHostLayerStyle(hostLayer: HTMLElement): void {
 }
 
 /**
- * 同步真实 `<webview>` 的基础布局样式。
+ * 配置真实 `<webview>` 的基础属性与布局样式。
  * @param webviewElement - 真实 `<webview>` 节点
  */
-function applyHostedWebviewElementStyle(webviewElement: HTMLElement): void {
+function configureHostedWebviewElement(webviewElement: HTMLElement): void {
+  webviewElement.setAttribute('allowpopups', '');
   webviewElement.style.display = 'flex';
   webviewElement.style.flex = '1 1 auto';
   webviewElement.style.width = '100%';
@@ -182,13 +183,13 @@ export function ensureWebviewHostLayer(doc: Document, hostKey?: string): HTMLDiv
 export function ensureHostedWebviewElement(hostLayer: HTMLElement): WebviewTag {
   const existing = hostLayer.querySelector('webview');
   if (existing instanceof HTMLElement) {
-    applyHostedWebviewElementStyle(existing);
+    configureHostedWebviewElement(existing);
     return existing as WebviewTag;
   }
 
   const webviewElement = document.createElement('webview') as WebviewTag;
   webviewElement.className = 'webview-content__element';
-  applyHostedWebviewElementStyle(webviewElement);
+  configureHostedWebviewElement(webviewElement);
   hostLayer.appendChild(webviewElement);
   return webviewElement;
 }

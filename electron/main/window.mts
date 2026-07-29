@@ -10,6 +10,33 @@ const __dirname = path.dirname(__filename);
 let mainWindow: BrowserWindow | null = null;
 
 /**
+ * WebView 新标签页 URL 发送器。
+ */
+type NewTabUrlSender = (url: string) => void;
+
+/**
+ * 创建 WebView 新窗口请求处理器。
+ * @param send - 合法 URL 转发函数
+ * @returns Electron 新窗口处理器
+ */
+export function createWindowOpenHandler(
+  send: NewTabUrlSender
+): (details: Pick<Electron.HandlerDetails, 'url'>) => Electron.WindowOpenHandlerResponse {
+  return ({ url }): Electron.WindowOpenHandlerResponse => {
+    try {
+      const targetUrl = new URL(url);
+      if (targetUrl.protocol === 'http:' || targetUrl.protocol === 'https:') {
+        send(targetUrl.href);
+      }
+    } catch {
+      // 无效 URL 保持拒绝，不转发到渲染进程。
+    }
+
+    return { action: 'deny' };
+  };
+}
+
+/**
  * 判断主进程目录是否来自编译后的 dist-electron 输出。
  * @param mainModuleDir - 主进程模块目录
  * @returns 是否为 dist-electron/electron/main 目录
@@ -115,6 +142,14 @@ export function createWindow(): BrowserWindow {
         reason: error instanceof Error ? error.message : 'Unknown webview attach error'
       });
     }
+  });
+
+  mainWindow.webContents.on('did-attach-webview', (_event, guestContents) => {
+    guestContents.setWindowOpenHandler(
+      createWindowOpenHandler((url: string): void => {
+        mainWindow?.webContents.send('webview:open-in-new-tab', url);
+      })
+    );
   });
 
   if (isDev()) {
