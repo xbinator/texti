@@ -111,6 +111,41 @@ describe('tabs store replacement', (): void => {
     expect(local.getItem<TabsState>('app_tabs')?.tabs[0]).toMatchObject({ recentKey: 'file:file-a' });
   });
 
+  it('persists the last active route path with tab state', (): void => {
+    const store = useTabsStore();
+    store.addTab(createTab('chat:session-a', '/chat/session-a'));
+
+    store.setActivePath('/chat/session-a');
+
+    expect(store.activePath).toBe('/chat/session-a');
+    expect(local.getItem<TabsState>('app_tabs')?.activePath).toBe('/chat/session-a');
+  });
+
+  it('loads a persisted active route only when it still points to an open tab or welcome page', (): void => {
+    local.setItem('app_tabs', {
+      tabs: [createTab('chat:session-a', '/chat/session-a')],
+      dirtyById: {},
+      missingById: {},
+      cachedKeys: [],
+      activePath: '/missing'
+    });
+
+    const store = useTabsStore();
+
+    expect(store.activePath).toBeNull();
+  });
+
+  it('clears the active route when removing its owning tab', (): void => {
+    const store = useTabsStore();
+    store.addTab(createTab('chat:session-a', '/chat/session-a'));
+    store.setActivePath('/chat/session-a');
+
+    store.removeTab('chat:session-a');
+
+    expect(store.activePath).toBeNull();
+    expect(local.getItem<TabsState>('app_tabs')?.activePath).toBeNull();
+  });
+
   it('derives recentKey for legacy persisted editor and widget tabs', (): void => {
     local.setItem('app_tabs', {
       tabs: [

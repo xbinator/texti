@@ -27,12 +27,13 @@ router.afterEach((to, _from, failure): void => {
   if (failure) return;
 
   // 路由拦截添加 Tab
+  const tabsStore = useTabsStore();
   if (!to.meta?.hideTab) {
-    const tabsStore = useTabsStore();
     const { tabId, cacheKey, title, icon } = resolveRouteTabInfo(to);
 
     tabsStore.addTab({ id: tabId, path: to.fullPath, title, cacheKey, icon }, { preserveTitle: true });
   }
+  tabsStore.setActivePath(to.fullPath);
 });
 
 export function setupRouter(app: App<Element>): void {

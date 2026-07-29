@@ -83,6 +83,8 @@ export interface ReplaceTabOptions {
 export interface TabsState {
   /** 标签页列表 */
   tabs: Tab[];
+  /** 最近一次成功导航到的页面路径。 */
+  activePath: string | null;
   /** 标签页未保存修改状态映射 */
   dirtyById: Record<string, boolean>;
   /** 标签页对应文件已从磁盘丢失的状态映射 */
@@ -118,9 +120,11 @@ export interface TabClosePlan {
 }
 
 const TABS_STORAGE_KEY = 'app_tabs';
+const WELCOME_ROUTE_PATH = '/welcome';
 
 const DEFAULT_TABS_STATE: TabsState = {
   tabs: [],
+  activePath: null,
   dirtyById: {},
   missingById: {},
   cachedKeys: []
@@ -245,6 +249,32 @@ function normalizeCachedKeys(keys: string[]): string[] {
 }
 
 /**
+ * 规范化待持久化的路由路径。
+ * @param value - 未知路由路径值
+ * @returns 合法应用内路径，非法时返回 null
+ */
+function normalizeActiveRoutePath(value: unknown): string | null {
+  const path = typeof value === 'string' ? value.trim() : '';
+  if (!path || path === '/' || !path.startsWith('/')) return null;
+
+  return path;
+}
+
+/**
+ * 过滤恢复入口路径，避免启动时跳转到已关闭的标签。
+ * @param value - 未知持久化路径
+ * @param tabs - 已恢复的标签页列表
+ * @returns 可用于启动恢复的路径
+ */
+function normalizeRestoredActivePath(value: unknown, tabs: Tab[]): string | null {
+  const path = normalizeActiveRoutePath(value);
+  if (!path) return null;
+  if (path === WELCOME_ROUTE_PATH) return path;
+
+  return tabs.some((tab: Tab): boolean => tab.path === path) ? path : null;
+}
+
+/**
  * 归一化持久化的标签页数据。
  * @param value - 从 localStorage 读取的原始数据
  * @returns 归一化后的标签页状态
@@ -265,6 +295,7 @@ function normalizeTabsState(value: unknown): TabsState {
 
   return {
     tabs,
+    activePath: normalizeRestoredActivePath(saved.activePath, tabs),
     dirtyById: normalizeFlagMap(saved.dirtyById, validIds),
     missingById: normalizeFlagMap(saved.missingById, validIds),
     cachedKeys: normalizeCachedKeys(tabs.map((tab: Tab): string => tab.cacheKey || tab.id))
@@ -286,6 +317,7 @@ function loadTabsState(): TabsState {
 
   return {
     tabs: state.tabs.map(normalizeTab),
+    activePath: state.activePath,
     dirtyById: { ...state.dirtyById },
     missingById: { ...state.missingById },
     cachedKeys: [...state.cachedKeys]
@@ -440,15 +472,29 @@ export const useTabsStore = defineStore('tabs', {
 
     /**
      * 获取当前激活的标签页对象。
-     * @returns 当前激活标签页，暂未维护 activeId 时返回 null
+     * @returns 当前激活标签页，未命中或欢迎页时返回 null
      */
-    activeTab: (): Tab | null => {
-      // 由于 activeId 已移除，这里返回 null
-      return null;
-    }
+    activeTab: (state): Tab | null => state.tabs.find((tab: Tab): boolean => tab.path === state.activePath) ?? null
   },
 
   actions: {
+    /**
+     * 更新最近一次成功导航路径。
+     * @param path - 当前路由完整路径
+     */
+    setActivePath(path: string | null): void {
+      this.activePath = normalizeActiveRoutePath(path);
+      persistTabsState(this.$state);
+    },
+
+    /**
+     * 获取冷启动时应恢复的页面路径。
+     * @returns 可恢复路径；没有可恢复页面时返回欢迎页
+     */
+    getStartupPath(): string {
+      return this.activePath ?? WELCOME_ROUTE_PATH;
+    },
+
     /**
      * 添加或更新标签页。
      * @param tab - 需要加入状态的标签页
@@ -621,6 +667,7 @@ export const useTabsStore = defineStore('tabs', {
       }
 
       const idSet = new Set(ids);
+      const shouldClearActivePath = this.activePath ? this.tabs.some((tab: Tab): boolean => idSet.has(tab.id) && tab.path === this.activePath) : false;
       const removedCacheKeys = this.tabs
         .filter((tab) => idSet.has(tab.id))
         .map((tab) => tab.cacheKey || tab.id)
@@ -633,6 +680,9 @@ export const useTabsStore = defineStore('tabs', {
         delete this.dirtyById[id];
         delete this.missingById[id];
       });
+      if (shouldClearActivePath) {
+        this.activePath = null;
+      }
 
       persistTabsState(this.$state);
     },
