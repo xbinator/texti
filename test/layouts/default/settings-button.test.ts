@@ -44,12 +44,13 @@ vi.mock('@/components/BButton/index.vue', () => ({
   default: {
     name: 'BButton',
     props: {
+      icon: { type: String, default: '' },
       type: { type: String, default: '' },
       size: { type: String, default: '' },
       square: { type: Boolean, default: false }
     },
     emits: ['click'],
-    template: '<button class="b-button-module-stub" type="button" @click="$emit(\'click\')"><slot /></button>'
+    template: '<button class="b-button-module-stub" type="button" :data-icon="icon" :data-type="type" @click="$emit(\'click\')"><slot /></button>'
   }
 }));
 
@@ -134,18 +135,27 @@ vi.mock('@/layouts/default/hooks/useHelpActive', () => ({
   useHelpActive: () => ({ toolbarHelpOptions: [] })
 }));
 
+vi.mock('@/layouts/default/hooks/useWatchSkill', () => ({
+  useWatchSkill: vi.fn<() => void>()
+}));
+
+vi.mock('@/layouts/default/hooks/useWatchWidget', () => ({
+  useWatchWidget: vi.fn<() => void>()
+}));
+
 /**
  * BButton 测试替身，用原生按钮承接点击事件。
  */
 const BButtonStub = defineComponent({
   name: 'BButton',
   props: {
+    icon: { type: String, default: '' },
     type: { type: String, default: '' },
     size: { type: String, default: '' },
     square: { type: Boolean, default: false }
   },
   emits: ['click'],
-  template: '<button class="b-button-stub" type="button" @click="$emit(\'click\')"><slot /></button>'
+  template: '<button class="b-button-stub" type="button" :data-icon="icon" :data-type="type" @click="$emit(\'click\')"><slot /></button>'
 });
 
 /**
@@ -188,19 +198,34 @@ function mountDefaultLayout(): VueWrapper {
 }
 
 /**
+ * 读取指定图标对应的 BButton 测试替身。
+ * @param wrapper - 默认布局 wrapper
+ * @param icon - 按钮图标
+ * @returns 按钮 wrapper
+ */
+function getBButtonByIcon(wrapper: VueWrapper, icon: string): ReturnType<VueWrapper['get']> {
+  const button = wrapper.findAll('.b-button-stub').find((item): boolean => item.attributes('data-icon') === icon);
+  if (!button) throw new Error(`Missing layout button: ${icon}`);
+
+  return button;
+}
+
+/**
+ * 点击指定图标对应的布局按钮。
+ * @param wrapper - 默认布局 wrapper
+ * @param icon - 按钮图标
+ */
+async function clickLayoutButton(wrapper: VueWrapper, icon: string): Promise<void> {
+  await getBButtonByIcon(wrapper, icon).trigger('click');
+  await nextTick();
+}
+
+/**
  * 触发设置按钮点击。
  * @param wrapper - 默认布局 wrapper
  */
 async function clickSettingsButton(wrapper: VueWrapper): Promise<void> {
-  // 右侧区域依次为搜索、侧边栏、设置按钮；只验证设置按钮的点击行为。
-  const settingsButton = wrapper.findAll('.b-button-stub').at(2);
-
-  if (!settingsButton) {
-    throw new Error('Settings button should exist');
-  }
-
-  await settingsButton.trigger('click');
-  await nextTick();
+  await clickLayoutButton(wrapper, 'tabler:settings');
 }
 
 describe('Default layout settings button', (): void => {
@@ -218,6 +243,30 @@ describe('Default layout settings button', (): void => {
     await clickSettingsButton(wrapper);
 
     expect(routerPushMock).not.toHaveBeenCalled();
+  });
+
+  it('marks the welcome button soft while the welcome route is active', (): void => {
+    routeMock.fullPath = '/welcome';
+
+    const wrapper = mountDefaultLayout();
+    const welcomeButton = getBButtonByIcon(wrapper, 'lucide:blocks');
+
+    expect(welcomeButton.attributes('data-type')).toBe('soft');
+  });
+
+  it('opens the welcome page from the dashboard button in the tab bar', async (): Promise<void> => {
+    routeMock.fullPath = '/settings/provider';
+
+    const wrapper = mountDefaultLayout();
+    const welcomeButton = getBButtonByIcon(wrapper, 'lucide:blocks');
+
+    expect(welcomeButton.attributes('data-icon')).toBe('lucide:blocks');
+    expect(welcomeButton.attributes('data-type')).toBe('secondary');
+
+    await clickLayoutButton(wrapper, 'lucide:blocks');
+
+    expect(routerPushMock).toHaveBeenCalledTimes(1);
+    expect(routerPushMock).toHaveBeenCalledWith('/welcome');
   });
 
   it('activates the existing settings tab path instead of reopening the settings root', async (): Promise<void> => {

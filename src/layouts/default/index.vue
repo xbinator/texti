@@ -25,6 +25,7 @@
           <div class="b-layout-header__divider"></div>
         </template>
         <div class="b-layout-header__center">
+          <BButton icon="lucide:blocks" :type="welcomeButtonType" size="small" square @click="handleOpenWelcome" />
           <HeaderTabs />
         </div>
         <div class="b-layout-header__right">
@@ -39,9 +40,7 @@
             <Icon :icon="settingStore.sidebarVisible ? 'tabler:layout-sidebar-right-filled' : 'tabler:layout-sidebar-right'" width="16" height="16" />
           </BButton>
 
-          <BButton type="secondary" size="small" square @click="handleOpenSettings">
-            <Icon icon="tabler:settings" width="16" height="16" />
-          </BButton>
+          <BButton icon="tabler:settings" type="secondary" size="small" square @click="handleOpenSettings" />
         </div>
       </div>
 
@@ -127,6 +126,8 @@ const { toolbarEditOptions } = useEditActive();
 const { toolbarViewOptions } = useViewActive();
 const { toolbarHelpOptions } = useHelpActive(visible);
 
+/** 欢迎页路由。 */
+const WELCOME_ROUTE_PATH = '/welcome';
 /** 设置页标签固定 ID。 */
 const SETTINGS_TAB_ID = 'settings';
 /** 设置页根路由。 */
@@ -141,6 +142,20 @@ onUnmounted(() => {
 });
 
 /**
+ * 判断路径是否位于欢迎页。
+ * @param path - 待判断的完整路由路径
+ * @returns 是否是欢迎页
+ */
+function isWelcomeRoutePath(path: string): boolean {
+  const routePath = path.split(/[?#]/u)[0] ?? path;
+
+  return routePath === WELCOME_ROUTE_PATH;
+}
+
+/** 欢迎页按钮类型，当前页激活时使用柔和态。 */
+const welcomeButtonType = computed<'soft' | 'secondary'>((): 'soft' | 'secondary' => (isWelcomeRoutePath(currentRoute.fullPath) ? 'soft' : 'secondary'));
+
+/**
  * 判断路径是否位于设置页内。
  * @param path - 待判断的完整路由路径
  * @returns 是否是设置页或设置页子路由
@@ -149,6 +164,17 @@ function isSettingsRoutePath(path: string): boolean {
   const routePath = path.split(/[?#]/u)[0] ?? path;
 
   return routePath === SETTINGS_ROUTE_ROOT || routePath.startsWith(`${SETTINGS_ROUTE_ROOT}/`);
+}
+
+/**
+ * 打开欢迎页。
+ */
+function handleOpenWelcome(): void {
+  if (isWelcomeRoutePath(currentRoute.fullPath)) {
+    return;
+  }
+
+  router.push(WELCOME_ROUTE_PATH);
 }
 
 /**
@@ -277,6 +303,7 @@ useEventListener(window, 'resize', validateWindowState);
 .b-layout-header__center {
   display: flex;
   flex: 1;
+  gap: 4px;
   align-items: center;
   width: 0;
   height: 100%;
