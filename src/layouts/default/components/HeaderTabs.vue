@@ -185,7 +185,6 @@ function handleWheel(event: WheelEvent): void {
   align-items: center;
   width: 100%;
   height: 100%;
-  padding-left: 4px;
   overflow: auto hidden;
 
   /* Hide scrollbar for Chrome, Safari and Opera */
