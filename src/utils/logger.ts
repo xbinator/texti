@@ -1,4 +1,4 @@
-import { hasElectronAPI, getElectronAPI } from '../shared/platform/electron-api';
+import { hasElectronAPI, getElectronAPI } from '../shared/platform/electron-api.js';
 
 class Logger {
   /**

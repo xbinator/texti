@@ -2,7 +2,7 @@
  * @file asyncTo.ts
  * @description 将 Promise 结果转换为错误优先元组，并统一未知异常结构。
  */
-import { logger } from './logger';
+import { logger } from './logger.js';
 
 /** 未提供有效错误消息时使用的兜底文案。 */
 const DEFAULT_ERROR_MESSAGE = '未知错误';
