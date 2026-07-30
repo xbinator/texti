@@ -89,12 +89,14 @@ const modelIcons: Record<string, string> = {
 
 const iconId = computed(() => {
   if (props.model) {
-    const model = (props.model?.match(/^[a-zA-Z]+/i) || [])[0]?.toLocaleLowerCase();
+    const modelLower = props.model.toLocaleLowerCase();
 
-    const matchedEntry = Object.entries(modelIcons).find(([key]) => model?.includes(key));
+    // 按 key 长度降序匹配，避免短 key 优先命中（如 glm 优先于 chatglm）
+    const keys = Object.keys(modelIcons).sort((a, b) => b.length - a.length);
+    const matchedKey = keys.find((key) => modelLower.includes(key));
 
-    if (matchedEntry) {
-      const [, value] = matchedEntry;
+    if (matchedKey) {
+      const value = modelIcons[matchedKey];
 
       return modelIcons[value] || value;
     }
