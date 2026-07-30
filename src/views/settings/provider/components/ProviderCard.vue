@@ -1,5 +1,5 @@
 <template>
-  <div class="provider-card" @click="handleClick">
+  <div ref="cardRef" class="provider-card" :data-provider-id="provider.id" @click="handleClick">
     <div class="card-header">
       <div class="provider-logo">
         <img v-if="provider.logo" :src="provider.logo" :alt="provider.name" class="provider-logo-img" />
@@ -22,11 +22,10 @@
 
 <script setup lang="ts">
 import type { AIProvider } from 'types/ai';
-import { useRouter } from 'vue-router';
+import { ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import BModelIcon from '@/components/BModel/Icon.vue';
-
-const router = useRouter();
+import { useProviderTransition } from '../hooks/useProviderTransition';
 
 interface Props {
   provider: AIProvider;
@@ -36,12 +35,22 @@ const props = withDefaults(defineProps<Props>(), {});
 
 const emit = defineEmits<{ (e: 'toggle', id: string, enabled: boolean): void }>();
 
+const { navigateToDetail } = useProviderTransition();
+
+/** 卡片根元素引用，用于视图过渡捕获共享元素位置。 */
+const cardRef = ref<HTMLElement>();
+
 function handleToggle(checked: boolean | string): void {
   emit('toggle', props.provider.id, checked as boolean);
 }
 
-function handleClick(): void {
-  router.push(`/settings/provider/${props.provider.id}`);
+/**
+ * 点击卡片时触发共享元素缩放转场进入详情页。
+ */
+async function handleClick(): Promise<void> {
+  if (cardRef.value) {
+    await navigateToDetail(cardRef.value, props.provider.id);
+  }
 }
 </script>
 

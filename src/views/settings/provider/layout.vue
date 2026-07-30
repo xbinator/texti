@@ -365,3 +365,35 @@ const providerDropdownOptionsMap = computed<Map<string, DropdownOptionItem[]>>((
   color: var(--text-tertiary);
 }
 </style>
+
+<style lang="less">
+/*
+ * 视图过渡样式：仅对 provider-nav 类型生效，避免污染未来其他 View Transition。
+ * hero（卡片→详情容器）在 0–0.3s 缩放 morph；列表（::view-transition-old(root)）
+ * 保持可见至 0.3s 后再用 0.2s 淡出，实现“缩放完成后列表淡出”。
+ */
+:root:active-view-transition-type(provider-nav) {
+  ::view-transition-group(provider-hero) {
+    animation-duration: 0.3s;
+    animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  ::view-transition-old(root) {
+    animation: provider-nav-list-fade 0.2s ease 0.3s both;
+  }
+
+  ::view-transition-new(root) {
+    animation: none;
+  }
+}
+
+@keyframes provider-nav-list-fade {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+</style>

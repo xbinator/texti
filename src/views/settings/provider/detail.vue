@@ -38,8 +38,11 @@ const providerStore = useProviderStore();
 
 const providerId: ComputedRef<string> = computed(() => route.params.provider as string);
 
-const provider: Ref<AIProvider | null> = ref(null);
-const models: Ref<AIProviderModel[]> = ref([]);
+// 同步从已填充的 store 读取初始值，使视图过渡的新快照能立即捕获真实内容（避免 morph 期间显示 spinner）。
+// watch 仍会从存储刷新一次，对已渲染内容无视觉破坏。
+const initialProvider = providerStore.providers.find((item) => item.id === providerId.value) ?? null;
+const provider: Ref<AIProvider | null> = ref<AIProvider | null>(initialProvider);
+const models: Ref<AIProviderModel[]> = ref<AIProviderModel[]>(initialProvider?.models ? initialProvider.models.map((model) => ({ ...model })) : []);
 const isLoadingProvider: Ref<boolean> = ref(false);
 const modalVisible: Ref<boolean> = ref(false);
 
@@ -126,6 +129,7 @@ async function handleRefreshModels(): Promise<void> {
   overflow: auto;
   background: var(--bg-primary);
   border-radius: 8px;
+  view-transition-name: provider-hero;
 }
 
 .loading-state {

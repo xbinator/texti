@@ -32,7 +32,14 @@ module.exports = {
       // 不允许未知的选择器
       true,
       {
-        ignorePseudoClasses: ['global', 'v-deep', 'deep'] // 忽略属性，修改element默认样式的时候能使用到
+        ignorePseudoClasses: ['global', 'v-deep', 'deep', 'active-view-transition', 'active-view-transition-type'] // 忽略属性，修改element默认样式的时候能使用到；末两项用于 View Transition API 类型作用域
+      }
+    ],
+    'selector-pseudo-element-no-unknown': [
+      // 不允许未知的伪元素
+      true,
+      {
+        ignorePseudoElements: ['view-transition-group', 'view-transition-old', 'view-transition-new', 'view-transition-image-pair', 'view-transition-shade'] // View Transition API 快照伪元素
       }
     ],
     'function-no-unknown': [
