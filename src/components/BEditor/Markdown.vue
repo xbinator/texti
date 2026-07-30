@@ -825,7 +825,7 @@ defineExpose({
   transition: background 0.2s ease;
 
   &:hover {
-    background: rgb(255 213 79 / 50%);
+    background-image: linear-gradient(var(--comment-highlight-line), rgb(255 213 79 / 50%));
   }
 }
 </style>
