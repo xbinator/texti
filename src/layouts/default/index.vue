@@ -70,7 +70,7 @@
         </RouterView>
       </MainDropZone>
 
-      <ChatSider :motion-enabled="sidebarMotionEnabled" @button-close="handleSidebarClose" @resize-start="cancelSidebarMotion" />
+      <ChatSider ref="chatSiderRef" />
 
       <ShortcutsHelp v-model:visible="visible.shortcutsHelp" />
     </div>
@@ -80,13 +80,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { useEventListener } from '@vueuse/core';
 import BButton from '@/components/BButton/index.vue';
 import BCommandPanel from '@/components/BCommandPanel/index.vue';
-import { useIntentMotion } from '@/hooks/useIntentMotion';
 import { getElectronAPI } from '@/shared/platform/electron-api';
 import { isMac } from '@/shared/platform/env';
 import { useCommandPanelStore } from '@/stores/ui/commandPanel';
@@ -135,15 +134,9 @@ const SETTINGS_TAB_ID = 'settings';
 const SETTINGS_ROUTE_ROOT = '/settings';
 /** 侧栏拖拽关闭后重新打开使用的默认宽度。 */
 const SIDEBAR_DEFAULT_WIDTH = 340;
-/** ChatSider 只在按钮动作与真实状态目标一致时保留显隐动画。 */
-const {
-  motionEnabled: sidebarMotionEnabled,
-  startMotion: startSidebarMotion,
-  syncState: syncSidebarVisibility,
-  cancelMotion: cancelSidebarMotion
-} = useIntentMotion<boolean>();
 
-watch((): boolean => settingStore.sidebarVisible, syncSidebarVisibility);
+/** ChatSider 组件实例引用，用于切换按钮触发动画。 */
+const chatSiderRef = ref<InstanceType<typeof ChatSider>>();
 
 onMounted(() => {
   tabsStore.subscribeToFileWatchEvents();
@@ -208,19 +201,11 @@ onUnmounted((): void => {
  */
 function handleToggleSidebar(): void {
   const nextVisible = !settingStore.sidebarVisible;
-  startSidebarMotion(nextVisible);
+  chatSiderRef.value?.startMotion(nextVisible);
   if (!settingStore.sidebarVisible && settingStore.sidebarWidth === 0) {
     settingStore.setSidebarWidth(SIDEBAR_DEFAULT_WIDTH);
   }
   settingStore.toggleSidebar();
-}
-
-/**
- * 处理 ChatSider 内部关闭按钮请求。
- */
-function handleSidebarClose(): void {
-  startSidebarMotion(false);
-  settingStore.setSidebarVisible(false);
 }
 
 // --- Window Controls ---
@@ -291,7 +276,6 @@ useEventListener(window, 'resize', validateWindowState);
   position: relative;
   display: flex;
   flex: 1;
-  gap: 6px;
   height: 0;
   margin: 0 6px 6px;
 

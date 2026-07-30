@@ -748,7 +748,6 @@ defineExpose({
 <style lang="less">
 .b-markdown-layout {
   display: flex;
-  gap: 6px;
   height: 100%;
 
   --selection-bg: var(--color-primary-border);

@@ -5,14 +5,14 @@
 <template>
   <BPanelSplitter
     v-model:size="settingStore.sidebarWidth"
-    :class="bem({ motion: props.motionEnabled, visible: settingStore.sidebarVisible })"
+    :class="bem({ motion: motionEnabled, visible: settingStore.sidebarVisible })"
     :inert="settingStore.sidebarVisible ? undefined : true"
     :style="siderStyle"
     position="left"
     :min-width="340"
     max-width="40%"
     @close="handleSplitterClose"
-    @resize-start="emit('resize-start')"
+    @resize-start="cancelMotion"
   >
     <div :class="bem('content')">
       <div :class="bem('header')">
@@ -63,11 +63,12 @@
 <script setup lang="ts">
 import type { ChatSession } from 'types/chat';
 import type { CSSProperties } from 'vue';
-import { computed, defineAsyncComponent, onMounted, reactive, ref } from 'vue';
+import { computed, defineAsyncComponent, onMounted, reactive, ref, watch } from 'vue';
 import { Input as AInput, message } from 'ant-design-vue';
 import BButton from '@/components/BButton/index.vue';
 import SessionHistory from '@/components/BChat/components/SessionHistory.vue';
 import { vFocus } from '@/directives/focus';
+import { useIntentMotion } from '@/hooks/useIntentMotion';
 import { useChatSessionStore } from '@/stores/chat/session';
 import { useSettingStore } from '@/stores/ui/setting';
 import { asyncTo } from '@/utils/asyncTo';
@@ -87,29 +88,16 @@ type ChatSiderStyle = CSSProperties & {
   '--chat-sider-width': string;
 };
 
-/**
- * ChatSider 组件属性。
- */
-interface Props {
-  /** 是否临时启用按钮触发的显隐动画 */
-  motionEnabled?: boolean;
-}
-
-const props = withDefaults(defineProps<Props>(), {
-  motionEnabled: false
-});
-
-const emit = defineEmits<{
-  /** 请求通过内部关闭按钮关闭侧栏 */
-  'button-close': [];
-  /** 用户开始拖拽调整侧栏宽度 */
-  'resize-start': [];
-}>();
-
 /** 应用设置存储。 */
 const settingStore = useSettingStore();
 /** 聊天会话持久化存储。 */
 const chatStore = useChatSessionStore();
+
+/** ChatSider 只在按钮动作与真实状态目标一致时保留显隐动画。 */
+const { motionEnabled, startMotion, syncState, cancelMotion } = useIntentMotion<boolean>();
+
+/** 监听侧栏显隐状态，当外部状态与动画目标冲突时取消动画。 */
+watch((): boolean => settingStore.sidebarVisible, syncState);
 /** 聊天运行时是否忙碌。 */
 const chatLoading = ref(false);
 /** 会话标题编辑状态。 */
@@ -185,17 +173,19 @@ async function finishTitleEdit(): Promise<void> {
 }
 
 /**
- * 处理分隔器拖拽关闭，不启用按钮动画。
+ * 处理分隔器拖拽关闭，取消动画并直接关闭。
  */
 function handleSplitterClose(): void {
+  cancelMotion();
   settingStore.setSidebarVisible(false);
 }
 
 /**
- * 请求通过内部关闭按钮关闭侧栏。
+ * 通过内部关闭按钮关闭侧栏，启用动画。
  */
 function requestButtonClose(): void {
-  emit('button-close');
+  startMotion(false);
+  settingStore.setSidebarVisible(false);
 }
 
 /**
@@ -230,6 +220,9 @@ function handleSessionCreated(session: ChatSession): void {
 function handleChatLoadingChange(loading: boolean): void {
   chatLoading.value = loading;
 }
+
+/** 暴露 startMotion 供父组件通过 ref 调用（如布局头部切换按钮）。 */
+defineExpose({ startMotion });
 </script>
 
 <style lang="less">
@@ -250,6 +243,7 @@ function handleChatLoadingChange(loading: boolean): void {
 
 .chat-sider--visible {
   width: var(--chat-sider-width);
+  margin-left: 6px;
   pointer-events: auto;
   opacity: 1;
   transform: translateX(0);

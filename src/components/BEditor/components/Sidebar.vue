@@ -182,6 +182,7 @@ function handleTitleClick(): void {
 
 .b-markdown-sidebar-panel--visible {
   width: var(--markdown-sidebar-width);
+  margin-right: 6px;
   pointer-events: auto;
   opacity: 1;
   transform: translateX(0);
