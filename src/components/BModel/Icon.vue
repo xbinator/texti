@@ -84,7 +84,9 @@ const modelIcons: Record<string, string> = {
   gemma: 'gemma-color',
   grok: 'grok',
   hy: 'hunyuan-color',
-  sensenova: 'sensenova-color'
+  sensenova: 'sensenova-color',
+  wenxin: 'wenxin-color',
+  ernie: 'wenxin-color'
 };
 
 const iconId = computed(() => {
