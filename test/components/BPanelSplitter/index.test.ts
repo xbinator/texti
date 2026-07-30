@@ -115,6 +115,17 @@ describe('BPanelSplitter', (): void => {
     expect(wrapper.find('.b-panel-splitter__section').attributes('style')).toContain('width: 360px;');
   });
 
+  it('emits resize-start when the user begins dragging', async (): Promise<void> => {
+    const wrapper = mountSplitter();
+    const splitter = wrapper.findComponent(BPanelSplitter);
+
+    await wrapper.find('.b-panel-splitter__line').trigger('mousedown', { clientX: 300 });
+
+    expect(splitter.emitted('resize-start')).toHaveLength(1);
+
+    window.dispatchEvent(createMouseEvent('mouseup', 300));
+  });
+
   it('keeps external classes on the splitter root for layout states', (): void => {
     const updateSize = vi.fn<(_value: number) => void>();
     const wrapper = mount(BPanelSplitter, {

@@ -1,3 +1,7 @@
+<!--
+  @file index.vue
+  @description 通用可拖拽面板分隔器，负责宽度约束、拖拽生命周期和关闭事件。
+-->
 <template>
   <div ref="rootRef" :class="name">
     <div :class="[bem('section'), sectionClass]" :style="sectionStyle">
@@ -39,7 +43,10 @@ const props = withDefaults(defineProps<Props>(), {
 const size = defineModel<number>('size', { default: 300 });
 
 const emit = defineEmits<{
-  (e: 'close'): void;
+  /** 拖拽关闭面板 */
+  close: [];
+  /** 用户开始拖拽调整面板宽度 */
+  'resize-start': [];
 }>();
 
 const isDragging = ref(false);
@@ -196,6 +203,7 @@ function handleMouseUp(): void {
  */
 function handleMouseDown(e: MouseEvent): void {
   e.preventDefault();
+  emit('resize-start');
 
   isDragging.value = true;
   state.startX = e.clientX;

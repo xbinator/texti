@@ -5,16 +5,29 @@
 <template>
   <div ref="layoutRef" class="b-markdown-layout" @click="commentActions.handleCommentClick">
     <Sidebar
-      v-if="showOutline"
+      :visible="showOutline"
+      :motion-enabled="outlineMotionEnabled"
       :title="editorState.name"
       :content="outlineContent"
       :anchor-id-prefix="editorState.id"
       :active-id="activeAnchorId"
       @change="handleEditorAnchorChange"
-      @close="showOutline = false"
+      @close="closeOutlineByDrag"
+      @resize-start="cancelOutlineMotion"
+      @button-close="closeOutlineByButton"
     />
 
     <div class="b-markdown-main">
+      <BButton
+        v-if="!showOutline"
+        class="b-markdown-main__outline-toggle"
+        type="ghost"
+        size="small"
+        square
+        icon="lucide:list-indent-increase"
+        @click="openOutlineByButton"
+      />
+
       <BScrollbar ref="scrollbarRef" class="b-markdown-scrollbar" @scroll="handleEditorScrollEvent">
         <div class="b-markdown-container" :style="editorContainerStyle">
           <PaneRichEditor
@@ -119,9 +132,10 @@ import type { AnchorRecord } from './hooks/useAnchors';
 import type { EditorController, EditorPublicInstance, EditorState } from './types';
 import type { Editor as TiptapEditor } from '@tiptap/vue-3';
 import type { CSSProperties } from 'vue';
-import { computed, nextTick, onActivated, onDeactivated, ref, shallowRef, watchEffect } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, ref, shallowRef, watch, watchEffect } from 'vue';
 import BScrollbar from '@/components/BScrollbar/index.vue';
 import { PDF_FILE_FILTER } from '@/constants/extensions';
+import { useIntentMotion } from '@/hooks/useIntentMotion';
 import { native } from '@/shared/platform';
 import type { EditorPageWidth } from '@/stores/editor/preferences';
 import { useEditorPreferencesStore } from '@/stores/editor/preferences';
@@ -206,6 +220,40 @@ const showOutline = computed<boolean>({
   get: () => editorPreferencesStore.showOutline,
   set: (val: boolean) => editorPreferencesStore.setShowOutline(val)
 });
+
+/** 大纲侧栏只在按钮动作与真实状态目标一致时保留显隐动画。 */
+const {
+  motionEnabled: outlineMotionEnabled,
+  startMotion: startOutlineMotion,
+  syncState: syncOutlineVisibility,
+  cancelMotion: cancelOutlineMotion
+} = useIntentMotion<boolean>();
+
+watch(showOutline, syncOutlineVisibility);
+
+/**
+ * 通过主内容区按钮打开大纲。
+ */
+function openOutlineByButton(): void {
+  startOutlineMotion(true);
+  showOutline.value = true;
+}
+
+/**
+ * 通过 Sidebar 按钮关闭大纲。
+ */
+function closeOutlineByButton(): void {
+  startOutlineMotion(false);
+  showOutline.value = false;
+}
+
+/**
+ * 处理分隔器拖拽关闭，不启用动画。
+ */
+function closeOutlineByDrag(): void {
+  cancelOutlineMotion();
+  showOutline.value = false;
+}
 
 const content = defineModel<string>('content', { default: '' });
 const outlineContent = defineModel<string>('outlineContent', { default: '' });
@@ -714,6 +762,7 @@ defineExpose({
 }
 
 .b-markdown-main {
+  position: relative;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -722,6 +771,13 @@ defineExpose({
   background: var(--bg-primary);
   border: 1px solid var(--border-primary);
   border-radius: 8px;
+
+  .b-markdown-main__outline-toggle {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 3;
+  }
 }
 
 .b-markdown-scrollbar {

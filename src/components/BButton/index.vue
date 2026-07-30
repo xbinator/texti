@@ -132,7 +132,7 @@ export default defineComponent({
 });
 </script>
 
-<style scoped lang="less">
+<style lang="less">
 .b-button {
   position: relative;
   display: inline-flex;

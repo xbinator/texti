@@ -12,6 +12,7 @@
     :min-width="340"
     max-width="40%"
     @close="handleSplitterClose"
+    @resize-start="emit('resize-start')"
   >
     <div :class="bem('content')">
       <div :class="bem('header')">
@@ -101,6 +102,8 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   /** 请求通过内部关闭按钮关闭侧栏 */
   'button-close': [];
+  /** 用户开始拖拽调整侧栏宽度 */
+  'resize-start': [];
 }>();
 
 /** 应用设置存储。 */

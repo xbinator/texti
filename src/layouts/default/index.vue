@@ -70,7 +70,7 @@
         </RouterView>
       </MainDropZone>
 
-      <ChatSider :motion-enabled="sidebarMotionEnabled" @button-close="handleSidebarClose" />
+      <ChatSider :motion-enabled="sidebarMotionEnabled" @button-close="handleSidebarClose" @resize-start="cancelSidebarMotion" />
 
       <ShortcutsHelp v-model:visible="visible.shortcutsHelp" />
     </div>
@@ -80,12 +80,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, defineAsyncComponent, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { useEventListener } from '@vueuse/core';
 import BButton from '@/components/BButton/index.vue';
 import BCommandPanel from '@/components/BCommandPanel/index.vue';
+import { useIntentMotion } from '@/hooks/useIntentMotion';
 import { getElectronAPI } from '@/shared/platform/electron-api';
 import { isMac } from '@/shared/platform/env';
 import { useCommandPanelStore } from '@/stores/ui/commandPanel';
@@ -134,12 +135,15 @@ const SETTINGS_TAB_ID = 'settings';
 const SETTINGS_ROUTE_ROOT = '/settings';
 /** 侧栏拖拽关闭后重新打开使用的默认宽度。 */
 const SIDEBAR_DEFAULT_WIDTH = 340;
-/** 按钮触发的侧栏显隐动画时长，需与 ChatSider Less 过渡保持一致。 */
-const SIDEBAR_MOTION_DURATION = 360;
-/** 是否临时启用侧栏按钮显隐动画。 */
-const sidebarMotionEnabled = ref(false);
-/** 侧栏动画状态清理定时器。 */
-let sidebarMotionTimer: number | null = null;
+/** ChatSider 只在按钮动作与真实状态目标一致时保留显隐动画。 */
+const {
+  motionEnabled: sidebarMotionEnabled,
+  startMotion: startSidebarMotion,
+  syncState: syncSidebarVisibility,
+  cancelMotion: cancelSidebarMotion
+} = useIntentMotion<boolean>();
+
+watch((): boolean => settingStore.sidebarVisible, syncSidebarVisibility);
 
 onMounted(() => {
   tabsStore.subscribeToFileWatchEvents();
@@ -194,41 +198,17 @@ function handleOpenSettings(): void {
   router.push(settingsTab?.path ?? SETTINGS_ROUTE_ROOT);
 }
 
-/**
- * 清理侧栏按钮动画定时器。
- */
-function clearSidebarMotion(): void {
-  if (sidebarMotionTimer === null) {
-    return;
-  }
-
-  window.clearTimeout(sidebarMotionTimer);
-  sidebarMotionTimer = null;
-}
-
 onUnmounted((): void => {
   tabsStore.unsubscribeFromFileWatchEvents();
-  clearSidebarMotion();
 });
-
-/**
- * 临时启用侧栏按钮显隐动画。
- */
-function enableSidebarMotion(): void {
-  clearSidebarMotion();
-  sidebarMotionEnabled.value = true;
-  sidebarMotionTimer = window.setTimeout((): void => {
-    sidebarMotionEnabled.value = false;
-    sidebarMotionTimer = null;
-  }, SIDEBAR_MOTION_DURATION);
-}
 
 /**
  * 切换右侧辅助栏显示状态。
  * 如果侧边栏宽度为 0（通过拖拽关闭），重新打开时恢复为默认宽度。
  */
 function handleToggleSidebar(): void {
-  enableSidebarMotion();
+  const nextVisible = !settingStore.sidebarVisible;
+  startSidebarMotion(nextVisible);
   if (!settingStore.sidebarVisible && settingStore.sidebarWidth === 0) {
     settingStore.setSidebarWidth(SIDEBAR_DEFAULT_WIDTH);
   }
@@ -239,7 +219,7 @@ function handleToggleSidebar(): void {
  * 处理 ChatSider 内部关闭按钮请求。
  */
 function handleSidebarClose(): void {
-  enableSidebarMotion();
+  startSidebarMotion(false);
   settingStore.setSidebarVisible(false);
 }
 

@@ -167,7 +167,7 @@ const ChatSiderStub = defineComponent({
   props: {
     motionEnabled: { type: Boolean, default: false }
   },
-  emits: ['button-close'],
+  emits: ['button-close', 'resize-start'],
   template: '<aside class="chat-sider-stub"></aside>'
 });
 
@@ -355,6 +355,40 @@ describe('Default layout settings button', (): void => {
     expect(chatSider.props('motionEnabled')).toBe(true);
 
     await vi.advanceTimersByTimeAsync(360);
+    expect(chatSider.props('motionEnabled')).toBe(false);
+  });
+
+  it('cancels active button motion when ChatSider resizing starts', async (): Promise<void> => {
+    vi.useFakeTimers();
+    const settingStore = useSettingStore();
+    settingStore.setSidebarVisible(false);
+    const wrapper = mountDefaultLayout();
+    const chatSider = wrapper.findComponent(ChatSiderStub);
+
+    await getSidebarButton(wrapper).trigger('click');
+    await nextTick();
+    expect(chatSider.props('motionEnabled')).toBe(true);
+
+    chatSider.vm.$emit('resize-start');
+    await nextTick();
+
+    expect(chatSider.props('motionEnabled')).toBe(false);
+  });
+
+  it('cancels active button motion for a conflicting programmatic update', async (): Promise<void> => {
+    vi.useFakeTimers();
+    const settingStore = useSettingStore();
+    settingStore.setSidebarVisible(false);
+    const wrapper = mountDefaultLayout();
+    const chatSider = wrapper.findComponent(ChatSiderStub);
+
+    await getSidebarButton(wrapper).trigger('click');
+    await nextTick();
+    expect(chatSider.props('motionEnabled')).toBe(true);
+
+    settingStore.setSidebarVisible(false);
+    await nextTick();
+
     expect(chatSider.props('motionEnabled')).toBe(false);
   });
 
