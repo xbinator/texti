@@ -55,7 +55,6 @@ function handleTitleClick(): void {
 .sidebar-section {
   display: flex;
   flex-direction: column;
-  gap: 4px;
   user-select: none;
 
   & + .sidebar-section {
@@ -64,11 +63,14 @@ function handleTitleClick(): void {
 }
 
 .section-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 8px;
-  margin-bottom: 8px;
+  padding: 0 8px 12px;
+  background: var(--bg-primary);
 }
 
 .section-content {
@@ -96,6 +98,15 @@ function handleTitleClick(): void {
   color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+/* slot title 分支：作为 sidebar-section 直接子元素时粘性吸顶 */
+.sidebar-section > .section-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0 8px 12px;
+  background: var(--bg-primary);
 }
 
 .section-actions {
