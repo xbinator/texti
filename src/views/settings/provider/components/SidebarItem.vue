@@ -1,5 +1,5 @@
 <template>
-  <div class="sidebar-item" :class="{ active, collapsed }" :title="title" @click="emit('click')">
+  <div ref="rootRef" class="sidebar-item" :class="{ active, collapsed }" :title="title" @click="emit('click')">
     <img v-if="logo" class="provider-logo" :src="logo" :alt="label" />
     <Icon v-else-if="icon" :icon="icon" width="16" height="16" />
     <Icon v-else-if="isCustom" icon="lucide:bot" width="16" height="16" />
@@ -11,6 +11,7 @@
 </template>
 
 <script setup lang="ts">
+import { ref, watch } from 'vue';
 import { Icon } from '@iconify/vue';
 import BModelIcon from '@/components/BModel/Icon.vue';
 
@@ -26,7 +27,7 @@ interface Props {
   title?: string;
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   active: false,
   collapsed: false,
   count: undefined,
@@ -38,6 +39,20 @@ withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<{ (e: 'click'): void }>();
+
+const rootRef = ref<HTMLElement>();
+
+/**
+ * 激活时将元素滚入可视区域，使用 'nearest' 策略仅在不可见时滚动，最小化滚动距离。
+ */
+watch(
+  () => props.active,
+  (active) => {
+    if (active && rootRef.value) {
+      rootRef.value.scrollIntoView({ block: 'nearest' });
+    }
+  }
+);
 </script>
 
 <style scoped lang="less">
