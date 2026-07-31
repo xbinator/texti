@@ -6,8 +6,8 @@
 import { defineComponent, nextTick } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import ServiceConfig from '@/views/settings/service-model/components/ServiceConfig.vue';
-import ServiceModelSettings from '@/views/settings/service-model/index.vue';
+import ServiceConfig from '@/views/settings/serviceModel/components/ServiceConfig.vue';
+import ServiceModelSettings from '@/views/settings/serviceModel/index.vue';
 
 const mockLoadProviders = vi.hoisted(() => vi.fn<() => Promise<void>>());
 const mockProviders = vi.hoisted(() => [

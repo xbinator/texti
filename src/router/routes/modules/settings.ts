@@ -49,7 +49,7 @@ const routes: AppRouteRecordRaw[] = [
       {
         path: 'service-model',
         name: 'service-model',
-        component: () => import('@/views/settings/service-model/index.vue'),
+        component: () => import('@/views/settings/serviceModel/index.vue'),
         meta: { title: '默认模型' }
       },
       {
