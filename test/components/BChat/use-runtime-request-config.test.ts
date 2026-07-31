@@ -56,6 +56,9 @@ describe('useRuntimeRequestConfig', (): void => {
         order.push('service');
         return { providerId: 'provider', modelId: 'model', toolSupport: { supported: true, reason: 'supported' } };
       }),
+      assertWorkspaceAvailable: vi.fn(async (): Promise<void> => {
+        order.push('workspace');
+      }),
       syncAIResources: vi.fn(async (): Promise<void> => {
         order.push('sync');
       }),
@@ -80,7 +83,7 @@ describe('useRuntimeRequestConfig', (): void => {
       }
     ]);
 
-    expect(order).toEqual(['service', 'sync']);
+    expect(order).toEqual(['service', 'workspace', 'sync']);
     const preparedModel: ChatRuntimeModelSelection | undefined = prepared?.config.model;
     expect(preparedModel).toBeDefined();
     expect(prepared?.config.model).toEqual({ providerId: 'provider', modelId: 'model' });

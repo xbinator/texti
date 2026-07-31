@@ -61,6 +61,18 @@ export function registerChatHandlers(): void {
     })
   );
   ipcMain.handle(
+    'chat:session:updateWorkspace',
+    wrapHandler((_event, sessionId, workspaceRoot) => {
+      return chatSessionManager.updateSessionWorkspace(sessionId as string, workspaceRoot as string);
+    })
+  );
+  ipcMain.handle(
+    'chat:session:clearWorkspace',
+    wrapHandler((_event, sessionId) => {
+      return chatSessionManager.clearSessionWorkspace(sessionId as string);
+    })
+  );
+  ipcMain.handle(
     'chat:session:delete',
     wrapHandler((_event, sessionId) => {
       assertSessionHistoryWritable(sessionId as string);

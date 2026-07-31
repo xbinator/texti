@@ -64,10 +64,16 @@
           :context-window="contextWindow"
           :supports-vision="supportsVision"
           :can-submit="canSubmit"
+          :workspace-label="workspaceLabel"
+          :has-workspace-override="workspaceOverride !== undefined"
+          :workspace-disabled="loading"
+          :show-workspace-control="props.workspaceControlEnabled && activeSessionId === null"
           @submit="handleChatSubmit"
           @abort="handleAbort"
           @image-select="imageUpload.appendImages"
           @model-change="handleModelChange"
+          @workspace-select="handleWorkspaceSelect"
+          @workspace-clear="handleWorkspaceClear"
         />
       </div>
     </div>
@@ -77,7 +83,7 @@
 <script setup lang="ts">
 import type { ConfirmationSheetActionPayload } from './components/ConfirmationSheet.vue';
 import type { BChatProps, BChatResetDraftOptions, BChatRuntimeSourceStatus, BChatRuntimeStatusChange, Message } from './utils/types';
-import type { ChatSession } from 'types/chat';
+import type { ChatSession, ChatSessionModelMetadata } from 'types/chat';
 import type { ChatRuntimeContextUsageSnapshot } from 'types/chat-runtime';
 import { computed, h, onUnmounted, provide, ref, toRef, watch } from 'vue';
 import { useRouter } from 'vue-router';
@@ -88,6 +94,7 @@ import type { BSmartEditorExpose, SlashCommandOption } from '@/components/BSmart
 import { useActorSystem } from '@/hooks/useChat/useActorSystem';
 import { useAgentConfirmationEvents } from '@/hooks/useChat/useAgentConfirmationEvents';
 import { useNavigate } from '@/hooks/useNavigate';
+import { useWorkspaceRoot } from '@/hooks/useWorkspaceRoot';
 import { getElectronAPI } from '@/shared/platform/electron-api';
 import { useProviderStore } from '@/stores/ai/provider';
 import type { SelectedModel } from '@/stores/ai/serviceModel';
@@ -115,6 +122,7 @@ import { useRuntimeBridgeHandler } from './hooks/useRuntimeBridgeHandler';
 import { useRuntimeConfig } from './hooks/useRuntimeConfig';
 import { useRuntimeRequestConfig } from './hooks/useRuntimeRequestConfig';
 import { useRuntimeTools } from './hooks/useRuntimeTools';
+import { useSessionWorkspace } from './hooks/useSessionWorkspace';
 import { createSkillSlashCommands, useSlashCommands, chatSlashCommands } from './hooks/useSlashCommands';
 import { useTodoPanel } from './hooks/useTodoPanel';
 import { createChatConfirmationController } from './utils/confirmationController';
@@ -128,7 +136,8 @@ type EditorInstance = InstanceType<typeof BSmartEditor> & BSmartEditorExpose;
 const [, bem] = createNamespace('chat');
 
 const props = withDefaults(defineProps<BChatProps>(), {
-  sessionId: null
+  sessionId: null,
+  workspaceControlEnabled: false
 });
 
 const emit = defineEmits<{
@@ -142,6 +151,9 @@ const emit = defineEmits<{
 
 /** 聊天数据存储 */
 const chatStore = useChatSessionStore();
+
+/** 全局默认的 Tibis 工作区根目录。 */
+const { workspaceRoot: defaultWorkspaceRoot } = useWorkspaceRoot();
 
 const router = useRouter();
 
@@ -216,12 +228,21 @@ const {
   setLoadedMessages,
   fetchAllPriorHistory,
   messages,
-  ensureActiveSession,
+  ensureActiveSession: ensureSession,
   resetDraftState,
   handleLoadHistory,
   captureAutoNameSnapshot,
   scheduleAutoName
 } = sessionRuntime;
+/** 当前会话的工作区覆盖、默认回退和目录预检能力。 */
+const { workspaceRoot, workspaceOverride, workspaceLabel, selectWorkspace, clearWorkspace, assertWorkspaceAvailable } = useSessionWorkspace({
+  activeSessionId,
+  defaultWorkspaceRoot
+});
+/** 首轮会话创建时将草稿选择的工作区一并持久化。 */
+function ensureActiveSession(title: string, model: ChatSessionModelMetadata): Promise<string> {
+  return ensureSession(title, model, workspaceOverride.value);
+}
 /** 应用级 Child Task Renderer 投影。 */
 const agentTaskStore = useChatAgentTaskStore();
 watch(
@@ -263,10 +284,12 @@ watch(messages, (loadedMessages: Message[]): void => {
 /** Todo 面板状态和回退恢复能力。 */
 const { currentSessionTodos, todoPanelVisible, todoPanelDismissed, restoreTodoSnapshotsForMessages } = useTodoPanel({ activeSessionId });
 /** Runtime 内置工具能力。 */
-const { workspaceRoot, getActiveTools, syncAIResources, getSkillContentHashes, resolveSkillSnapshots, openDraft, openFileByPath } = useRuntimeTools({
+const { getActiveTools, syncAIResources, getSkillContentHashes, resolveSkillSnapshots, openDraft, openFileByPath } = useRuntimeTools({
   messages,
   confirm: confirmationController.createAdapter(),
   getSessionId: (): string | undefined => activeSessionId.value ?? undefined,
+  workspaceRoot,
+  getWorkspaceRoot: (): string | null => workspaceRoot.value,
   openWebview
 });
 
@@ -402,6 +425,7 @@ const { resolveRuntimeSystemPrompt, resolveRuntimeTavilyConfig, resolveRuntimeMc
 const { prepareRuntimeRequest, resolveRuntimeRequestConfig } = useRuntimeRequestConfig({
   contextWindow,
   workspaceRoot,
+  assertWorkspaceAvailable,
   resolveServiceConfig: chatServiceConfig.resolveServiceConfig,
   syncAIResources,
   getActiveTools,
@@ -574,6 +598,26 @@ async function resetDraft(options: BChatResetDraftOptions = {}): Promise<void> {
 async function handleModelChange(model: { providerId: string; modelId: string }): Promise<void> {
   const [error] = await asyncTo(modelSelectionEvents.onModelChange(model));
   if (error) interactionAPI.showToast({ type: 'error', content: error.message || '保存会话模型失败' });
+}
+
+/**
+ * 选择并保存当前会话的工作区覆盖目录。
+ */
+async function handleWorkspaceSelect(): Promise<void> {
+  if (loading.value) return;
+
+  const [error] = await asyncTo(selectWorkspace());
+  if (error) interactionAPI.showToast({ type: 'error', content: `选择工作区失败：${error.message}` });
+}
+
+/**
+ * 清除当前会话的工作区覆盖并恢复默认工作区。
+ */
+async function handleWorkspaceClear(): Promise<void> {
+  if (loading.value) return;
+
+  const [error] = await asyncTo(clearWorkspace());
+  if (error) interactionAPI.showToast({ type: 'error', content: `恢复默认工作区失败：${error.message}` });
 }
 
 /** 斜杠命令处理 hook */

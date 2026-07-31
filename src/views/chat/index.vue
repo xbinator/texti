@@ -7,6 +7,7 @@
     <BChat
       ref="bChatRef"
       class="chat-container"
+      workspace-control-enabled
       :session-id="initialSessionId"
       @session-created="handleSessionCreated"
       @session-title-persisted="handleTitlePersisted"

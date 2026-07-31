@@ -11,7 +11,9 @@ import { registerChatHandlers } from '../../../../../electron/main/modules/chat/
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   getSessionById: vi.fn(),
-  updateSessionModel: vi.fn()
+  updateSessionModel: vi.fn(),
+  updateSessionWorkspace: vi.fn(),
+  clearSessionWorkspace: vi.fn()
 }));
 
 vi.mock('electron', () => ({
@@ -25,7 +27,9 @@ vi.mock('electron', () => ({
 vi.mock('../../../../../electron/main/modules/chat/service.mjs', () => ({
   chatSessionManager: {
     getSessionById: mocks.getSessionById,
-    updateSessionModel: mocks.updateSessionModel
+    updateSessionModel: mocks.updateSessionModel,
+    updateSessionWorkspace: mocks.updateSessionWorkspace,
+    clearSessionWorkspace: mocks.clearSessionWorkspace
   }
 }));
 
@@ -46,6 +50,8 @@ describe('chat session model IPC', (): void => {
     mocks.handlers.clear();
     mocks.getSessionById.mockReset();
     mocks.updateSessionModel.mockReset();
+    mocks.updateSessionWorkspace.mockReset();
+    mocks.clearSessionWorkspace.mockReset();
     registerChatHandlers();
   });
 
@@ -81,10 +87,45 @@ describe('chat session model IPC', (): void => {
     expect(mocks.updateSessionModel).toHaveBeenCalledWith('session-1', model);
   });
 
+  it('updates one session workspace through the standard result envelope', (): void => {
+    const workspaceRoot = '/private/tmp/project';
+    const session: ChatSession = {
+      id: 'session-1',
+      type: 'assistant',
+      title: 'Session',
+      createdAt: '2026-07-22T00:00:00.000Z',
+      updatedAt: '2026-07-22T00:00:01.000Z',
+      lastMessageAt: '2026-07-22T00:00:00.000Z',
+      metadata: { workspaceRoot }
+    };
+    mocks.updateSessionWorkspace.mockReturnValue(session);
+
+    expect(callHandler<ChatSession>('chat:session:updateWorkspace', 'session-1', workspaceRoot)).toEqual({ ok: true, data: session });
+    expect(mocks.updateSessionWorkspace).toHaveBeenCalledWith('session-1', workspaceRoot);
+  });
+
+  it('clears one session workspace through the standard result envelope', (): void => {
+    const session: ChatSession = {
+      id: 'session-1',
+      type: 'assistant',
+      title: 'Session',
+      createdAt: '2026-07-22T00:00:00.000Z',
+      updatedAt: '2026-07-22T00:00:01.000Z',
+      lastMessageAt: '2026-07-22T00:00:00.000Z',
+      metadata: { model: { providerId: 'provider-1', modelId: 'model-1' } }
+    };
+    mocks.clearSessionWorkspace.mockReturnValue(session);
+
+    expect(callHandler<ChatSession>('chat:session:clearWorkspace', 'session-1')).toEqual({ ok: true, data: session });
+    expect(mocks.clearSessionWorkspace).toHaveBeenCalledWith('session-1');
+  });
+
   it('forwards both session channels from the preload bridge', (): void => {
     const preloadSource = readFileSync('electron/preload/index.mts', 'utf8');
 
     expect(preloadSource).toContain("ipcRenderer.invoke('chat:session:get', sessionId)");
     expect(preloadSource).toContain("ipcRenderer.invoke('chat:session:updateModel', sessionId, model)");
+    expect(preloadSource).toContain("ipcRenderer.invoke('chat:session:updateWorkspace', sessionId, workspaceRoot)");
+    expect(preloadSource).toContain("ipcRenderer.invoke('chat:session:clearWorkspace', sessionId)");
   });
 });

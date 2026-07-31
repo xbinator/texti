@@ -3,6 +3,7 @@
  * @description 原生文件对话框 IPC handler 注册。
  */
 import * as path from 'node:path';
+import { realpath } from 'node:fs/promises';
 import type { ElectronFileResult, ElectronOpenFileOptions, ElectronSaveFileOptions } from 'types/electron-api';
 import { ipcMain } from 'electron';
 import { showOpenDialog, showSaveDialog } from './utils.mjs';
@@ -41,6 +42,8 @@ class SingleRunner {
 
 /** 打开文件对话框锁 */
 const openLock = new SingleRunner();
+/** 打开目录对话框锁。 */
+const directoryLock = new SingleRunner();
 /** 保存文件对话框锁 */
 const saveLock = new SingleRunner();
 
@@ -57,7 +60,21 @@ function normalizeBinaryContent(content: ArrayBuffer | Uint8Array): Buffer {
   return Buffer.from(content);
 }
 
+/**
+ * 打开原生目录选择框，并返回规范化后的真实目录路径。
+ * @returns 用户取消时返回 null，选择成功时返回真实路径
+ */
+async function openDirectory(): Promise<string | null> {
+  return directoryLock.run(async (): Promise<string | null> => {
+    const result = await showOpenDialog({ properties: ['openDirectory'] });
+    if (result.canceled || !result.filePaths[0]) return null;
+    return realpath(result.filePaths[0]);
+  });
+}
+
 export function registerDialogHandlers(): void {
+  ipcMain.handle('dialog:openDirectory', async (): Promise<string | null> => openDirectory());
+
   ipcMain.handle('dialog:openFile', async (_event, options?: ElectronOpenFileOptions): Promise<ElectronFileResult> => {
     return openLock.run(async () => {
       const result = await showOpenDialog({

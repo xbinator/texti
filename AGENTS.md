@@ -266,7 +266,7 @@ import { debounce } from 'lodash-es'
 - ❌ 禁止手写与 `createNamespace` 不一致的类名前缀
 
 ### `&` 允许使用的场景
-不影响类名命名的 `&` 嵌套是被允许的：伪类（`&:hover` / `&:focus` / `&:active`）、伪元素（`&::before` / `&::after`）、修饰符（`&.is-active` / `&.is-dragging`）、组合选择器（`&:not(.is-group).is-active` / `& .child-class`）、媒体查询（`@media` 内部的 `&`）。
+`&` 可以任意嵌套使用；仅禁止用 `&__xxx` / `&--xxx` 省略父类名来生成 BEM 类名。常见允许用法包括：伪类（`&:hover` / `&:focus` / `&:active`）、伪元素（`&::before` / `&::after`）、修饰符（`&.is-active` / `&.is-dragging`）、组合选择器（`&:not(.is-group).is-active` / `& .child-class`）、媒体查询（`@media` 内部的 `&`）。
 
 ## 代码风格
 

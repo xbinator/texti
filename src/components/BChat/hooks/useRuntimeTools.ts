@@ -27,7 +27,6 @@ import { webviewToolContextRegistry } from '@/ai/tools/context/webview';
 import { createWidgetHttpClient, executeWidgetRuntime, type WidgetConsoleLevel, type WidgetLogLevel } from '@/components/BWidget/utils/widgetRuntime';
 import { formatWidgetLogArgs } from '@/components/BWidget/utils/widgetRuntime/logger';
 import { useNavigate } from '@/hooks/useNavigate';
-import { useWorkspaceRoot } from '@/hooks/useWorkspaceRoot';
 import { logger } from '@/shared/logger';
 import { native } from '@/shared/platform';
 import { useSkillStore } from '@/stores/ai/skill';
@@ -47,6 +46,10 @@ interface UseRuntimeToolsOptions {
   confirm: AIToolConfirmationAdapter;
   /** 获取当前活跃会话 ID。 */
   getSessionId: () => string | undefined;
+  /** 当前会话最终生效的工作区根目录。 */
+  workspaceRoot: Readonly<Ref<string | null>>;
+  /** 同步读取当前会话最终生效的工作区根目录。 */
+  getWorkspaceRoot: () => string | null;
   /** 在内置 WebView 中打开 URL。 */
   openWebview: (url: URL) => void;
 }
@@ -55,10 +58,6 @@ interface UseRuntimeToolsOptions {
  * Runtime 工具 hook 返回值。
  */
 interface UseRuntimeToolsReturn {
-  /** 当前工作区根目录。 */
-  workspaceRoot: ReturnType<typeof useWorkspaceRoot>['workspaceRoot'];
-  /** 获取当前工作区根目录。 */
-  getWorkspaceRoot: ReturnType<typeof useWorkspaceRoot>['getWorkspaceRoot'];
   /** 动态获取当前可用工具列表。 */
   getActiveTools: () => AIToolExecutor[];
   /** 发送请求前同步 Skill 与 Widget 磁盘定义。 */
@@ -84,7 +83,6 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
   const toolSettingsStore = useToolSettingsStore();
   const recentStore = useRecentStore();
   const { openDraft, openFileByPath } = useNavigate();
-  const { workspaceRoot, getWorkspaceRoot } = useWorkspaceRoot();
   /** open_widget 前置执行阶段复用的托管 HTTP 客户端。 */
   const widgetHttpClient = createWidgetHttpClient();
   /**
@@ -117,7 +115,7 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
     skillStore,
     widgetStore,
     mcpStore: toolSettingsStore,
-    getWorkspaceRoot,
+    getWorkspaceRoot: options.getWorkspaceRoot,
     isFileInRecent: (filePath: string) => {
       return Boolean(recentStore.recentFiles?.some((file) => file.path === filePath));
     },
@@ -177,7 +175,7 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
   function getActiveTools(): AIToolExecutor[] {
     const hasActiveEditor = Boolean(editorToolContextRegistry.getCurrentContext());
     const hasActiveWebview = Boolean(webviewToolContextRegistry.getCurrentContext());
-    const hasWorkspace = Boolean(workspaceRoot.value);
+    const hasWorkspace = Boolean(options.workspaceRoot.value);
     const enabledWidgets = widgetStore.initialized ? widgetStore.getEnabledWidgets() : [];
     const hasActiveWidgets = widgetStore.initialized && enabledWidgets.length > 0;
     const baseBuiltinTools = hasActiveWidgets
@@ -271,8 +269,6 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
   }
 
   return {
-    workspaceRoot,
-    getWorkspaceRoot,
     getActiveTools,
     syncAIResources,
     getSkillContentHashes,

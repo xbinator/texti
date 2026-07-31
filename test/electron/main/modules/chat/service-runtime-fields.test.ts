@@ -12,16 +12,28 @@ const databaseMock = vi.hoisted(() => ({
   transaction: vi.fn((fn: () => unknown): unknown => fn())
 }));
 
+const filesystemMock = vi.hoisted(() => ({
+  /** 同步规范化路径。 */
+  realpathSync: vi.fn(),
+  /** 同步读取路径状态。 */
+  statSync: vi.fn()
+}));
+
 vi.mock('../../../../../electron/main/modules/database/service.mjs', () => databaseMock);
+vi.mock('node:fs', () => filesystemMock);
 
 describe('chat main service runtime fields', (): void => {
   beforeEach((): void => {
     databaseMock.dbExecute.mockReset();
     databaseMock.dbSelect.mockReset();
     databaseMock.transaction.mockImplementation((fn: () => unknown): unknown => fn());
+    filesystemMock.realpathSync.mockReset();
+    filesystemMock.statSync.mockReset();
+    filesystemMock.realpathSync.mockImplementation((targetPath: string): string => targetPath);
+    filesystemMock.statSync.mockReturnValue({ isDirectory: (): boolean => true });
   });
 
-  it('maps valid session model metadata and ignores malformed metadata', (): void => {
+  it('maps valid session metadata and ignores malformed model or workspace fields', (): void => {
     databaseMock.dbSelect
       .mockReturnValueOnce([
         {
@@ -32,7 +44,7 @@ describe('chat main service runtime fields', (): void => {
           updated_at: '2026-07-22T00:00:00.000Z',
           last_message_at: '2026-07-22T00:00:00.000Z',
           usage_json: null,
-          metadata_json: JSON.stringify({ model: { providerId: 'provider-1', modelId: 'model-2' } })
+          metadata_json: JSON.stringify({ model: { providerId: 'provider-1', modelId: 'model-2' }, workspaceRoot: '/private/tmp/project' })
         }
       ])
       .mockReturnValueOnce([
@@ -46,10 +58,26 @@ describe('chat main service runtime fields', (): void => {
           usage_json: null,
           metadata_json: JSON.stringify({ model: { providerId: '', modelId: 1 } })
         }
+      ])
+      .mockReturnValueOnce([
+        {
+          id: 'session-invalid-workspace',
+          type: 'assistant',
+          title: 'Invalid workspace',
+          created_at: '2026-07-22T00:00:00.000Z',
+          updated_at: '2026-07-22T00:00:00.000Z',
+          last_message_at: '2026-07-22T00:00:00.000Z',
+          usage_json: null,
+          metadata_json: JSON.stringify({ workspaceRoot: 1 })
+        }
       ]);
 
-    expect(chatSessionManager.getSessionById('session-valid')?.metadata?.model).toEqual({ providerId: 'provider-1', modelId: 'model-2' });
+    const validSession = chatSessionManager.getSessionById('session-valid');
+
+    expect(validSession?.metadata?.model).toEqual({ providerId: 'provider-1', modelId: 'model-2' });
+    expect(validSession?.metadata?.workspaceRoot).toBe('/private/tmp/project');
     expect(chatSessionManager.getSessionById('session-invalid')?.metadata).toBeUndefined();
+    expect(chatSessionManager.getSessionById('session-invalid-workspace')?.metadata).toBeUndefined();
   });
 
   it('serializes model metadata when creating a session', (): void => {
@@ -98,6 +126,120 @@ describe('chat main service runtime fields', (): void => {
     expect(databaseMock.transaction).toHaveBeenCalled();
     expect(databaseMock.dbExecute).toHaveBeenCalledWith(expect.stringContaining('UPDATE chat_sessions'), [
       JSON.stringify({ layout: 'compact', model }),
+      expect.any(String),
+      'session-1'
+    ]);
+  });
+
+  it('atomically merges and returns updated session workspace metadata', (): void => {
+    const workspaceRoot = '/private/tmp/project';
+    databaseMock.dbSelect.mockReturnValueOnce([
+      {
+        id: 'session-1',
+        type: 'assistant',
+        title: 'Session',
+        created_at: '2026-07-22T00:00:00.000Z',
+        updated_at: '2026-07-22T00:00:00.000Z',
+        last_message_at: '2026-07-22T00:00:00.000Z',
+        usage_json: null,
+        metadata_json: JSON.stringify({ layout: 'compact', model: { providerId: 'provider-1', modelId: 'model-1' } })
+      }
+    ]);
+
+    const session = chatSessionManager.updateSessionWorkspace('session-1', workspaceRoot);
+
+    expect(session.metadata).toMatchObject({ layout: 'compact', model: { providerId: 'provider-1', modelId: 'model-1' }, workspaceRoot });
+    expect(databaseMock.transaction).toHaveBeenCalled();
+    expect(databaseMock.dbExecute).toHaveBeenCalledWith(expect.stringContaining('UPDATE chat_sessions'), [
+      JSON.stringify({ layout: 'compact', model: { providerId: 'provider-1', modelId: 'model-1' }, workspaceRoot }),
+      expect.any(String),
+      'session-1'
+    ]);
+  });
+
+  it('canonicalizes the workspace directory before persisting it', (): void => {
+    databaseMock.dbSelect.mockReturnValueOnce([
+      {
+        id: 'session-1',
+        type: 'assistant',
+        title: 'Session',
+        created_at: '2026-07-22T00:00:00.000Z',
+        updated_at: '2026-07-22T00:00:00.000Z',
+        last_message_at: '2026-07-22T00:00:00.000Z',
+        usage_json: null,
+        metadata_json: null
+      }
+    ]);
+    filesystemMock.realpathSync.mockReturnValue('/private/tmp/workspace');
+
+    const session = chatSessionManager.updateSessionWorkspace('session-1', '/tmp/link-workspace');
+
+    expect(session.metadata?.workspaceRoot).toBe('/private/tmp/workspace');
+    expect(filesystemMock.statSync).toHaveBeenCalledWith('/private/tmp/workspace');
+  });
+
+  it('rejects an unavailable workspace before persisting it', (): void => {
+    databaseMock.dbSelect.mockReturnValueOnce([
+      {
+        id: 'session-1',
+        type: 'assistant',
+        title: 'Session',
+        created_at: '2026-07-22T00:00:00.000Z',
+        updated_at: '2026-07-22T00:00:00.000Z',
+        last_message_at: '2026-07-22T00:00:00.000Z',
+        usage_json: null,
+        metadata_json: null
+      }
+    ]);
+    filesystemMock.realpathSync.mockImplementation((): never => {
+      throw new Error('ENOENT');
+    });
+
+    expect((): void => {
+      chatSessionManager.updateSessionWorkspace('session-1', '/tmp/missing-workspace');
+    }).toThrow('会话工作区不可用');
+    expect(databaseMock.dbExecute).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unavailable workspace while creating a session', (): void => {
+    filesystemMock.realpathSync.mockImplementation((): never => {
+      throw new Error('ENOENT');
+    });
+
+    expect((): void => {
+      chatSessionManager.createSession({
+        id: 'session-created',
+        type: 'assistant',
+        title: 'Created',
+        createdAt: '2026-07-22T00:00:00.000Z',
+        updatedAt: '2026-07-22T00:00:00.000Z',
+        lastMessageAt: '2026-07-22T00:00:00.000Z',
+        metadata: { workspaceRoot: '/tmp/missing-workspace' }
+      });
+    }).toThrow('会话工作区不可用');
+    expect(databaseMock.dbExecute).not.toHaveBeenCalled();
+  });
+
+  it('clears only the workspace metadata and preserves the remaining session metadata', (): void => {
+    databaseMock.dbSelect.mockReturnValueOnce([
+      {
+        id: 'session-1',
+        type: 'assistant',
+        title: 'Session',
+        created_at: '2026-07-22T00:00:00.000Z',
+        updated_at: '2026-07-22T00:00:00.000Z',
+        last_message_at: '2026-07-22T00:00:00.000Z',
+        usage_json: null,
+        metadata_json: JSON.stringify({ layout: 'compact', model: { providerId: 'provider-1', modelId: 'model-1' }, workspaceRoot: '/private/tmp/project' })
+      }
+    ]);
+
+    const session = chatSessionManager.clearSessionWorkspace('session-1');
+
+    expect(session.metadata).toEqual({ layout: 'compact', model: { providerId: 'provider-1', modelId: 'model-1' } });
+    expect(databaseMock.transaction).toHaveBeenCalled();
+    expect(databaseMock.dbExecute).toHaveBeenCalledWith(expect.stringContaining('UPDATE chat_sessions'), [
+      JSON.stringify({ layout: 'compact', model: { providerId: 'provider-1', modelId: 'model-1' } }),
       expect.any(String),
       'session-1'
     ]);

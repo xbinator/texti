@@ -72,6 +72,10 @@ vi.mock('@/components/BChat/index.vue', () => ({
       sessionId: {
         type: String,
         default: null
+      },
+      workspaceControlEnabled: {
+        type: Boolean,
+        default: false
       }
     },
     emits: ['session-created', 'session-title-persisted', 'new-session', 'runtime-status-change', 'navigate-to-provider'],
@@ -201,8 +205,8 @@ describe('chat page', (): void => {
     const draftWrapper = mountPage(null);
     const persistedWrapper = mountPage('session-a');
 
-    expect(draftWrapper.findComponent({ name: 'BChat' }).props()).toEqual({ sessionId: null });
-    expect(persistedWrapper.findComponent({ name: 'BChat' }).props()).toEqual({ sessionId: 'session-a' });
+    expect(draftWrapper.findComponent({ name: 'BChat' }).props()).toEqual({ sessionId: null, workspaceControlEnabled: true });
+    expect(persistedWrapper.findComponent({ name: 'BChat' }).props()).toEqual({ sessionId: 'session-a', workspaceControlEnabled: true });
   });
 
   it('releases a matching sidebar session when the chat page claims it', (): void => {
