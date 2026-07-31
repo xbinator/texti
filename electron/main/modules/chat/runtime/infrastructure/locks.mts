@@ -2,6 +2,7 @@
  * @file locks.mts
  * @description ChatRuntime session 写入锁与 resource-scope continuation fence。
  */
+import { ChatRuntimeError } from '../errors.mjs';
 
 /** 锁获取成功结果。 */
 export interface RuntimeLockAcquired {
@@ -299,4 +300,18 @@ export function assertSessionHistoryWritable(sessionId: string, ownerCheckpointI
   if (fence && fence.checkpointId !== ownerCheckpointId) {
     throw new ChatHistoryFenceError(sessionId, fence.checkpointId);
   }
+}
+
+/**
+ * 断言 Session 当前可以安全删除。
+ * continuation fence 与普通 Runtime 写锁都必须已释放。
+ * @param sessionId - Session ID
+ * @param locks - 共享锁注册表
+ * @throws ChatHistoryFenceError 当 Turn 正等待 Child
+ * @throws ChatRuntimeError 当普通 Runtime 仍持有写锁
+ */
+export function assertSessionDeletable(sessionId: string, locks: RuntimeLockRegistry = chatRuntimeLocks): void {
+  assertSessionHistoryWritable(sessionId, undefined, locks);
+  const runtimeId = locks.getWritingOwner(sessionId);
+  if (runtimeId) throw new ChatRuntimeError('SESSION_BUSY', `Session ${sessionId} is still running ${runtimeId}`);
 }

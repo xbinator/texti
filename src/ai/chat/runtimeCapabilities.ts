@@ -49,7 +49,9 @@ export function createRuntimeCapabilityRegistry(): RuntimeCapabilityRegistry {
         Object.freeze({
           ...capabilities,
           tools: Object.freeze([...capabilities.tools]),
-          descriptor: capabilities.descriptor ? { ...capabilities.descriptor, rendererToolNames: [...capabilities.descriptor.rendererToolNames] } : undefined
+          descriptor: capabilities.descriptor
+            ? Object.freeze({ ...capabilities.descriptor, rendererToolNames: Object.freeze([...capabilities.descriptor.rendererToolNames]) })
+            : undefined
         })
       );
     },

@@ -18,9 +18,11 @@ const mocks = vi.hoisted(() => ({
   getMessages: vi.fn(),
   addMessage: vi.fn(),
   updateMessage: vi.fn(),
+  deleteMessage: vi.fn(),
   setSessionMessages: vi.fn(),
   branchSession: vi.fn(),
-  deleteSession: vi.fn()
+  deleteSession: vi.fn(),
+  getSessionById: vi.fn()
 }));
 
 vi.mock('electron', () => ({
@@ -44,7 +46,7 @@ vi.mock('../../../../../../electron/main/modules/chat/service.mjs', () => ({
   chatSessionManager: {
     getSessionsByType: vi.fn(),
     createSession: vi.fn(),
-    getSessionById: vi.fn(),
+    getSessionById: mocks.getSessionById,
     branchSession: mocks.branchSession,
     updateSessionTitle: vi.fn(),
     updateSessionModel: vi.fn(),
@@ -53,6 +55,7 @@ vi.mock('../../../../../../electron/main/modules/chat/service.mjs', () => ({
     getMessages: mocks.getMessages,
     addMessage: mocks.addMessage,
     updateMessage: mocks.updateMessage,
+    deleteMessage: mocks.deleteMessage,
     setSessionMessages: mocks.setSessionMessages
   }
 }));
@@ -68,9 +71,12 @@ describe('chat runtime recovery IPC', (): void => {
     mocks.getMessages.mockReset();
     mocks.addMessage.mockReset();
     mocks.updateMessage.mockReset();
+    mocks.deleteMessage.mockReset();
     mocks.setSessionMessages.mockReset();
     mocks.branchSession.mockReset();
     mocks.deleteSession.mockReset();
+    mocks.getSessionById.mockReset();
+    mocks.getSessionById.mockReturnValue({ id: 'session-1' });
   });
 
   it('returns active runtime recovery snapshots through the standard result envelope', async (): Promise<void> => {
@@ -111,6 +117,20 @@ describe('chat runtime recovery IPC', (): void => {
     expect(result).toEqual({ ok: true, data: { runtimeId: 'runtime-compact', sessionId: 'session-1' } });
   });
 
+  it('rejects a Runtime start after its explicit Session has already been deleted', async (): Promise<void> => {
+    mocks.getSessionById.mockReturnValue(undefined);
+    mocks.compact.mockResolvedValue({ runtimeId: 'runtime-compact', sessionId: 'session-deleted' });
+    registerChatRuntimeHandlers();
+
+    const handler = mocks.handlers.get('chat:runtime:compact');
+    if (!handler) throw new Error('compact handler was not registered');
+    const input = { runtimeId: 'runtime-compact', sessionId: 'session-deleted', clientId: 'bchat', agentId: 'primary', contextWindow: 12_000 };
+    const result = await handler({}, input);
+
+    expect(result).toMatchObject({ ok: false, code: 'SESSION_NOT_FOUND' });
+    expect(mocks.compact).not.toHaveBeenCalled();
+  });
+
   it('registers the idle context estimate query with the standard result envelope', async (): Promise<void> => {
     const input = { sessionId: 'session-1', contextWindow: 1_000_000 };
     const snapshot = { usedTokens: 54_700, contextWindow: 1_000_000 };
@@ -140,6 +160,7 @@ describe('chat runtime recovery IPC', (): void => {
         { channel: 'chat:session:delete', args: ['session-fenced'], mutation: mocks.deleteSession },
         { channel: 'chat:message:add', args: [{ id: 'message-2', sessionId: 'session-fenced' }], mutation: mocks.addMessage },
         { channel: 'chat:message:update', args: [{ id: 'message-2', sessionId: 'session-fenced' }], mutation: mocks.updateMessage },
+        { channel: 'chat:message:delete', args: ['session-fenced', 'message-2'], mutation: mocks.deleteMessage },
         { channel: 'chat:message:setAll', args: ['session-fenced', []], mutation: mocks.setSessionMessages }
       ];
       for (const testCase of mutationCases) {
@@ -157,6 +178,22 @@ describe('chat runtime recovery IPC', (): void => {
       expect(mocks.getMessages).toHaveBeenCalledWith('session-fenced', undefined);
     } finally {
       fence.release();
+    }
+  });
+
+  it('rejects session deletion while a main Runtime owns the writing lock', async (): Promise<void> => {
+    registerChatHandlers();
+    const lock = chatRuntimeLocks.acquireWritingLock({ sessionId: 'session-running', runtimeId: 'runtime-1' });
+    expect(lock).toEqual({ ok: true });
+
+    try {
+      const handler = mocks.handlers.get('chat:session:delete');
+      if (!handler) throw new Error('chat:session:delete handler was not registered');
+
+      expect(await handler({}, 'session-running')).toMatchObject({ ok: false, code: 'SESSION_BUSY' });
+      expect(mocks.deleteSession).not.toHaveBeenCalled();
+    } finally {
+      chatRuntimeLocks.releaseWritingLock({ sessionId: 'session-running', runtimeId: 'runtime-1' });
     }
   });
 

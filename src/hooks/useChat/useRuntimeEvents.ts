@@ -22,10 +22,14 @@ import { getRememberedRuntimeConfirmationDecision } from '@/ai/chat/policies/run
 import { normalizeToolConfirmationRequest } from '@/ai/tools/confirmation';
 import { createShellCommandId } from '@/ai/tools/shellCommandId';
 import { executeToolCall } from '@/ai/tools/stream';
+import { expireRuntimeConfirmations } from '@/components/BChat/utils/confirmationController';
 import { createChatTabId } from '@/router/routes/helpers/chatRouteTab';
 import { getElectronAPI } from '@/shared/platform/electron-api';
 import { useChatPermissionStore } from '@/stores/chat/permission';
 import { useChatTabStore } from '@/stores/chat/tab';
+import type { Tab } from '@/stores/workspace/tabs';
+import { useTabsStore } from '@/stores/workspace/tabs';
+import { asyncTo } from '@/utils/asyncTo';
 import { assertRuntimeResult, createBridgeFailure, createToolFailure, createWorkflowError, isManagedRuntime } from './error';
 
 /** 工具 Promise 完成后等待已排队 finished 事件的最大时间。 */
@@ -57,6 +61,7 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
   const toolAbortControllers = new Map<string, AbortController>();
   const shellRoutes = new Map<string, ShellEventRoute>();
   const runtimeStore = useChatTabStore();
+  const tabsStore = useTabsStore();
 
   /**
    * 解析 Runtime 会话当前所属的聊天标签，兼容尚未晋升的 chat:new。
@@ -65,6 +70,15 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
    */
   function resolveRuntimeTabId(sessionId: string): string {
     return runtimeStore.findOwner(sessionId)?.tabId ?? createChatTabId(sessionId);
+  }
+
+  /**
+   * 判断 Runtime 记录当前是否仍有顶部可见标签。
+   * @param tabId - Runtime 记录键
+   * @returns 是否存在对应顶部标签
+   */
+  function hasVisibleTab(tabId: string): boolean {
+    return tabsStore.tabs.some((tab: Tab): boolean => tab.id === tabId);
   }
 
   /**
@@ -167,8 +181,12 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
       actorSystem.unregisterRuntime(event.runtimeId);
       return;
     }
+    expireRuntimeConfirmations(event.runtimeId);
+    actorSystem.clearRuntimeInteractions(event.sessionId, event.runtimeId);
     // 先写入后台完成标记，让已挂载页面可在同步事件回调中按当前激活态覆盖它。
-    runtimeStore.markCompleted(resolveRuntimeTabId(event.sessionId), false);
+    const runtimeTabId = resolveRuntimeTabId(event.sessionId);
+    if (hasVisibleTab(runtimeTabId)) runtimeStore.markCompleted(runtimeTabId, false);
+    else runtimeStore.removeTab(runtimeTabId);
     actorSystem.emitSessionEvent(event.sessionId, { type: 'runtimeCompleted', event });
     actorSystem.send({ type: 'runtime.event', runtimeId: event.runtimeId, event: { type: 'runtime.completed', runtimeId: event.runtimeId } });
     actorSystem.sendToSession(event.sessionId, { type: 'session.completed' });
@@ -178,6 +196,8 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
   /** 标记目标 Agent 失败并释放 Runtime。 */
   function handleError(event: ChatRuntimeErrorEvent): void {
     if (!shouldHandle(event)) return;
+    expireRuntimeConfirmations(event.runtimeId);
+    actorSystem.clearRuntimeInteractions(event.sessionId, event.runtimeId);
     actorSystem.send({
       type: 'runtime.event',
       runtimeId: event.runtimeId,
@@ -186,7 +206,9 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
     actorSystem.sendToSession(event.sessionId, { type: 'session.failed', error: createWorkflowError(event.error) });
     actorSystem.emitSessionEvent(event.sessionId, { type: 'runtimeError', event });
     actorSystem.unregisterRuntime(event.runtimeId);
-    runtimeStore.setStatus(resolveRuntimeTabId(event.sessionId), 'error');
+    const runtimeTabId = resolveRuntimeTabId(event.sessionId);
+    if (hasVisibleTab(runtimeTabId)) runtimeStore.setStatus(runtimeTabId, 'error');
+    else runtimeStore.removeTab(runtimeTabId);
   }
 
   /** 执行已捕获的 renderer 工具。 */
@@ -260,6 +282,8 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
   function handleToolCancelled(event: ChatRuntimeToolCancelledEvent): void {
     if (!shouldHandle(event)) return;
     toolAbortControllers.get(createToolAbortKey(event.runtimeId, event.toolCallId))?.abort();
+    expireRuntimeConfirmations(event.runtimeId, event.toolCallId);
+    actorSystem.clearRuntimeInteractions(event.sessionId, event.runtimeId, event.toolCallId);
   }
 
   /** 将确认请求路由到目标 Session UI 和 Agent。 */
@@ -271,14 +295,15 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
       always: toolPermissionStore.alwaysToolPermissionGrants
     });
     if (rememberedDecision) {
-      assertRuntimeResult(
-        await electronAPI.chatRuntimeSubmitConfirmation({
+      const [submitError, result] = await asyncTo(
+        electronAPI.chatRuntimeSubmitConfirmation({
           runtimeId: event.runtimeId,
           confirmationId: event.confirmationId,
           decision: rememberedDecision
         })
       );
-      return;
+      if (!submitError && result?.ok) return;
+      // 自动授权提交失败时回退到可见确认，避免 Main 的无超时 confirmation 永久悬挂。
     }
     actorSystem.send({
       type: 'runtime.event',

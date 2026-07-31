@@ -102,6 +102,7 @@ function createExecutionInput(toolName: string, input: unknown, toolCallId: stri
 
   return {
     ...input,
+    toolCallId,
     commandId: metadata.runtimeId ? createShellCommandId(metadata.runtimeId, toolCallId) : toolCallId,
     ...(metadata.abortSignal ? { abortSignal: metadata.abortSignal } : {})
   };

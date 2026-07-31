@@ -16,6 +16,7 @@ import type {
 import type { ChatAgentApplicationEvent, ChatAgentConfirmationSnapshot } from 'types/chat-agent';
 import type {
   ChatRuntimeCompactInput,
+  ChatRuntimeBridgeRequestEvent,
   ChatRuntimeContinueInput,
   ChatRuntimeHandlerResult,
   ChatRuntimeSendInput,
@@ -27,6 +28,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, shallowMount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BuildMemoryContextOptions } from '@/ai/memory/types';
+import { webviewToolContextRegistry, type WebviewToolContext } from '@/ai/tools/context/webview';
 import type { ToastItem } from '@/components/BChat/components/InteractionContainer/types';
 import BChat from '@/components/BChat/index.vue';
 import { type AdaptedUserMessageInput, type SubmitAction, createUserChoice } from '@/components/BChat/utils/submitAction';
@@ -43,9 +45,8 @@ import { useSettingStore } from '@/stores/ui/setting';
 import { emitRuntimeEvent, resetRuntimeEventListeners, type RuntimeEventListeners } from './runtime-event-test-utils';
 
 const chatStoreMock = vi.hoisted(() => ({
-  createSession: vi.fn<
-    (type: 'assistant', options: { title: string; model?: { providerId: string; modelId: string }; workspaceRoot?: string }) => Promise<ChatSession>
-  >(),
+  createSession:
+    vi.fn<(type: 'assistant', options: { title: string; model?: { providerId: string; modelId: string }; workspaceRoot?: string }) => Promise<ChatSession>>(),
   branchSession: vi.fn<(sourceSessionId: string, targetMessageId: string) => Promise<ChatSession>>(),
   addSessionMessage: vi.fn<(sessionId: string | null, message: Message) => Promise<void>>(),
   updateSessionMessage: vi.fn<(sessionId: string | null | undefined, message: Message) => Promise<void>>(),
@@ -154,9 +155,21 @@ const toolSettingsMockState = vi.hoisted(() => ({
   }
 }));
 
-const builtinToolsMockState = vi.hoisted(() => ({
-  tools: [] as AIToolExecutor[]
-}));
+const builtinToolsMockState = vi.hoisted(() => {
+  const state = {
+    tools: [] as AIToolExecutor[]
+  };
+
+  return {
+    get tools(): AIToolExecutor[] {
+      return state.tools;
+    },
+    set tools(tools: AIToolExecutor[]) {
+      state.tools = tools;
+    },
+    createBuiltinTools: vi.fn((): AIToolExecutor[] => state.tools.map((tool: AIToolExecutor): AIToolExecutor => ({ ...tool })))
+  };
+});
 
 const loggerMockState = vi.hoisted(() => ({
   info: vi.fn<(_message: string) => Promise<void>>(() => Promise.resolve()),
@@ -280,7 +293,7 @@ vi.mock('@/components/BButton/index.vue', () => ({
 }));
 
 vi.mock('@/ai/tools/builtin', () => ({
-  createBuiltinTools: vi.fn(() => builtinToolsMockState.tools),
+  createBuiltinTools: builtinToolsMockState.createBuiltinTools,
   isBuiltinToolName: vi.fn(() => true),
   EDIT_MEMORY_TOOL_NAME: 'edit_memory',
   OPEN_RESOURCE_TOOL_NAME: 'open_resource',
@@ -803,6 +816,7 @@ describe('BChat sessionId runtime', (): void => {
     toolSettingsMockState.tavily = undefined;
     toolSettingsMockState.mcp.servers = [];
     builtinToolsMockState.tools = [];
+    builtinToolsMockState.createBuiltinTools.mockClear();
     loggerMockState.info.mockReset();
     loggerMockState.info.mockResolvedValue();
     loggerMockState.warn.mockReset();
@@ -831,6 +845,8 @@ describe('BChat sessionId runtime', (): void => {
     resetRuntimeEventListeners(runtimeListeners);
     conversationViewMockState.scrollToBottom.mockReset();
     actorSystemMockState.registerRuntime.mockReset();
+    webviewToolContextRegistry.unregister('webview-a');
+    webviewToolContextRegistry.unregister('webview-b');
     agentTaskEventMockState.listener = undefined;
     agentTaskEventMockState.dispose.mockReset();
     chatStoreMock.getSessionMessages.mockResolvedValue([]);
@@ -1122,6 +1138,158 @@ describe('BChat sessionId runtime', (): void => {
     wrapper.unmount();
   });
 
+  it('registers freshly bound Renderer executors after request preparation', async (): Promise<void> => {
+    builtinToolsMockState.tools = [createRuntimeTool('read_file')];
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+
+    await submitTextAndReadRuntimeId(wrapper, 'bound renderer tools');
+
+    const createdToolSets = builtinToolsMockState.createBuiltinTools.mock.results
+      .map((result): AIToolExecutor[] | undefined => result.value)
+      .filter((tools): tools is AIToolExecutor[] => Boolean(tools));
+    const registeredCapabilities = actorSystemMockState.registerRuntime.mock.calls.at(-1)?.[1] as { tools: readonly AIToolExecutor[] } | undefined;
+    expect(createdToolSets.length).toBeGreaterThanOrEqual(2);
+    expect(registeredCapabilities?.tools[0]).toBe(createdToolSets.at(-1)?.[0]);
+    expect(registeredCapabilities?.tools[0]).not.toBe(createdToolSets[0]?.[0]);
+
+    wrapper.unmount();
+  });
+
+  it('keeps Runtime bridge requests bound to the WebView active at request preparation', async (): Promise<void> => {
+    const webviewA: WebviewToolContext = {
+      readPageSnapshot: vi.fn(async () => ({
+        url: 'https://a.example',
+        title: 'A',
+        summary: 'A',
+        header: '',
+        content: 'A',
+        footer: '',
+        text: 'A',
+        selectedText: '',
+        headings: [],
+        links: [],
+        capturedAt: 1,
+        truncated: { text: false, content: false, headings: false, links: false, selectedText: false }
+      })),
+      operatePage: vi.fn()
+    };
+    const webviewB: WebviewToolContext = {
+      readPageSnapshot: vi.fn(async () => ({
+        url: 'https://b.example',
+        title: 'B',
+        summary: 'B',
+        header: '',
+        content: 'B',
+        footer: '',
+        text: 'B',
+        selectedText: '',
+        headings: [],
+        links: [],
+        capturedAt: 2,
+        truncated: { text: false, content: false, headings: false, links: false, selectedText: false }
+      })),
+      operatePage: vi.fn()
+    };
+    webviewToolContextRegistry.register('webview-a', webviewA);
+    webviewToolContextRegistry.setCurrent('webview-a');
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+    const runtimeId = await submitTextAndReadRuntimeId(wrapper, 'inspect original webpage');
+    const registeredCapabilities = actorSystemMockState.registerRuntime.mock.calls.at(-1)?.[1] as
+      | { handleBridgeRequest: (event: ChatRuntimeBridgeRequestEvent) => Promise<unknown> }
+      | undefined;
+
+    webviewToolContextRegistry.register('webview-b', webviewB);
+    webviewToolContextRegistry.setCurrent('webview-b');
+    const result = await registeredCapabilities?.handleBridgeRequest({
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      requestId: 'bridge-webview-1',
+      kind: 'webview-snapshot'
+    });
+
+    expect(result).toEqual(expect.objectContaining({ url: 'https://a.example' }));
+    expect(webviewA.readPageSnapshot).toHaveBeenCalledOnce();
+    expect(webviewB.readPageSnapshot).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('freezes the WebView identity before asynchronous request preparation', async (): Promise<void> => {
+    const resourceSync = createDeferred<void>();
+    const webviewA: WebviewToolContext = {
+      readPageSnapshot: vi.fn(async () => ({
+        url: 'https://a.example',
+        title: 'A',
+        summary: 'A',
+        header: '',
+        content: 'A',
+        footer: '',
+        text: 'A',
+        selectedText: '',
+        headings: [],
+        links: [],
+        capturedAt: 1,
+        truncated: { text: false, content: false, headings: false, links: false, selectedText: false }
+      })),
+      operatePage: vi.fn()
+    };
+    const webviewB: WebviewToolContext = {
+      readPageSnapshot: vi.fn(async () => ({
+        url: 'https://b.example',
+        title: 'B',
+        summary: 'B',
+        header: '',
+        content: 'B',
+        footer: '',
+        text: 'B',
+        selectedText: '',
+        headings: [],
+        links: [],
+        capturedAt: 2,
+        truncated: { text: false, content: false, headings: false, links: false, selectedText: false }
+      })),
+      operatePage: vi.fn()
+    };
+    webviewToolContextRegistry.register('webview-a', webviewA);
+    webviewToolContextRegistry.register('webview-b', webviewB);
+    webviewToolContextRegistry.setCurrent('webview-a');
+    skillStoreMock.syncDirtyFromDisk.mockReturnValueOnce(resourceSync.promise);
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+
+    wrapper.findComponent(BSmartEditorStub).vm.$emit('update:value', 'inspect original webpage after preflight');
+    wrapper.findComponent(InputToolbarStub).vm.$emit('submit');
+    await vi.waitFor((): void => expect(skillStoreMock.syncDirtyFromDisk).toHaveBeenCalled());
+    webviewToolContextRegistry.setCurrent('webview-b');
+    resourceSync.resolve();
+    await flushPromises();
+
+    const runtimeId = (electronAPIMock.chatRuntimeSend.mock.calls.at(-1)?.[0] as ChatRuntimeSendInput | undefined)?.runtimeId;
+    const registeredCapabilities = actorSystemMockState.registerRuntime.mock.calls.at(-1)?.[1] as
+      | { handleBridgeRequest: (event: ChatRuntimeBridgeRequestEvent) => Promise<unknown> }
+      | undefined;
+    const result = await registeredCapabilities?.handleBridgeRequest({
+      runtimeId: runtimeId ?? 'missing-runtime',
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId ?? 'missing-runtime',
+      requestId: 'bridge-webview-preflight',
+      kind: 'webview-snapshot'
+    });
+
+    expect(result).toEqual(expect.objectContaining({ url: 'https://a.example' }));
+    expect(webviewA.readPageSnapshot).toHaveBeenCalledOnce();
+    expect(webviewB.readPageSnapshot).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
   it('publishes runtime status and completion through one event from the existing workflow', async (): Promise<void> => {
     const wrapper = mountBChat('session-active');
     await flushPromises();
@@ -1201,17 +1369,40 @@ describe('BChat sessionId runtime', (): void => {
     expect(wrapper.emitted('runtime-status-change')).toContainEqual([{ status: 'error' }]);
   });
 
-  it('exposes abort and reset controls for parent hosts', async (): Promise<void> => {
+  it('projects a Renderer-local confirmation queue item as waiting', async (): Promise<void> => {
     const wrapper = mountBChat('session-active');
     await flushPromises();
-    const runtimeId = await submitTextAndReadRuntimeId(wrapper, 'abort from host');
+    const confirmationQueue = useChatConfirmationQueueStore();
+
+    confirmationQueue.addRuntime({
+      source: 'runtime',
+      confirmationId: 'renderer-confirmation-status',
+      sessionId: 'session-active',
+      runtimeId: 'runtime-renderer-tool',
+      toolCallId: 'tool-renderer-status',
+      request: {
+        toolName: 'run_shell_command',
+        title: '执行命令',
+        description: '确认执行',
+        riskLevel: 'dangerous'
+      },
+      createdAt: '2026-08-01T00:00:00.000Z'
+    });
+    await flushPromises();
+
+    expect(wrapper.emitted('runtime-status-change')).toContainEqual([{ status: 'waiting' }]);
+    confirmationQueue.removeRuntime('renderer-confirmation-status');
+    await flushPromises();
+    expect(wrapper.emitted('runtime-status-change')?.at(-1)).toEqual([{ status: 'idle' }]);
+    wrapper.unmount();
+  });
+
+  it('exposes only draft reset control for parent hosts', async (): Promise<void> => {
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
     const exposed = wrapper.vm as unknown as {
-      abortRuntime: () => Promise<void>;
       resetDraft: (options?: { focus?: boolean }) => Promise<void>;
     };
-
-    await exposed.abortRuntime();
-    expect(electronAPIMock.chatRuntimeAbort).toHaveBeenCalledWith({ runtimeId });
 
     await wrapper.setProps({ sessionId: null });
     wrapper.findComponent(BSmartEditorStub).vm.$emit('update:value', 'discard me');
@@ -1236,6 +1427,30 @@ describe('BChat sessionId runtime', (): void => {
     await flushPromises();
 
     expect(promptEditorMockState.focus).not.toHaveBeenCalled();
+  });
+
+  it('cancels an unowned draft preflight when the parent resets the draft', async (): Promise<void> => {
+    const resourceSync = createDeferred<void>();
+    const createdSession = createSession('session-created', 'stale draft');
+    skillStoreMock.syncDirtyFromDisk.mockReturnValueOnce(resourceSync.promise);
+    chatStoreMock.createSession.mockResolvedValue(createdSession);
+    const wrapper = mountBChat(null);
+    await flushPromises();
+    const exposed = wrapper.vm as unknown as {
+      resetDraft: (options?: { focus?: boolean }) => Promise<void>;
+    };
+
+    wrapper.findComponent(BSmartEditorStub).vm.$emit('update:value', 'stale draft');
+    wrapper.findComponent(InputToolbarStub).vm.$emit('submit');
+    await vi.waitFor((): void => expect(skillStoreMock.syncDirtyFromDisk).toHaveBeenCalled());
+    await exposed.resetDraft({ focus: false });
+    resourceSync.resolve();
+    await flushPromises();
+
+    expect(wrapper.findComponent(BSmartEditorStub).props('value')).toBe('');
+    expect(chatStoreMock.createSession).not.toHaveBeenCalled();
+    expect(electronAPIMock.chatRuntimeSend).not.toHaveBeenCalled();
+    wrapper.unmount();
   });
 
   it('does not abort Runtime A or announce local cancellation while waiting for Child checkpoint persistence', async (): Promise<void> => {
@@ -1600,6 +1815,202 @@ describe('BChat sessionId runtime', (): void => {
     wrapper.unmount();
   });
 
+  it('submits one Main confirmation decision after BChat unmount and session-matched remount', async (): Promise<void> => {
+    const ConfirmationHandoffHarness = defineComponent({
+      name: 'ConfirmationHandoffHarness',
+      props: {
+        show: {
+          type: Boolean,
+          required: true
+        }
+      },
+      setup(harnessProps): () => ReturnType<typeof h> {
+        useProvideActorSystem();
+        return (): ReturnType<typeof h> => (harnessProps.show ? h(BChat, { sessionId: 'session-active' }) : h('div'));
+      }
+    });
+    const root = mount(ConfirmationHandoffHarness, {
+      props: { show: true },
+      global: {
+        stubs: {
+          BIcon: true,
+          BCommandPanel: CommandPanelStub,
+          BPanelSplitter: { template: '<div><slot /></div>' },
+          BSmartEditor: BSmartEditorStub,
+          ConfirmationSheet: true,
+          ConversationView: ConversationViewStub,
+          ImagePreview: true,
+          InputToolbar: InputToolbarStub,
+          InteractionContainer: true,
+          SessionHistory: true,
+          TodoPanel: true,
+          UsagePanel: true
+        }
+      }
+    });
+    await flushPromises();
+    const runtimeId = await submitTextAndReadRuntimeId(root.findComponent(BChat), 'handoff confirmation');
+
+    emitRuntimeEvent(runtimeListeners, 'confirmationRequest', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      confirmationId: 'confirmation-handoff',
+      request: {
+        toolName: 'write_file',
+        title: '写入文件',
+        description: '是否写入？',
+        riskLevel: 'write'
+      }
+    });
+    await flushPromises();
+    await root.setProps({ show: false });
+    await root.setProps({ show: true });
+    await flushPromises();
+
+    const sheet = root.findComponent({ name: 'ConfirmationSheet' });
+    const displayed = sheet.props('confirmation') as { confirmationId: string };
+    sheet.vm.$emit('action', {
+      action: 'approve',
+      confirmationId: displayed.confirmationId,
+      source: 'runtime'
+    });
+    await flushPromises();
+
+    expect(electronAPIMock.chatRuntimeSubmitConfirmation).toHaveBeenCalledTimes(1);
+    expect(electronAPIMock.chatRuntimeSubmitConfirmation).toHaveBeenCalledWith({
+      runtimeId,
+      confirmationId: 'confirmation-handoff',
+      decision: { approved: true }
+    });
+    root.unmount();
+  });
+
+  it('restores a Main confirmation when submitting the decision fails', async (): Promise<void> => {
+    electronAPIMock.chatRuntimeSubmitConfirmation
+      .mockResolvedValueOnce({ ok: false, error: 'temporary IPC failure', code: 'IPC_FAILED' })
+      .mockResolvedValue({ ok: true });
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+    const runtimeId = await submitTextAndReadRuntimeId(wrapper, 'retry confirmation');
+
+    emitRuntimeEvent(runtimeListeners, 'confirmationRequest', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      confirmationId: 'confirmation-retry',
+      request: {
+        toolName: 'write_file',
+        title: '写入文件',
+        description: '是否写入？',
+        riskLevel: 'write'
+      }
+    });
+    await flushPromises();
+    const sheet = wrapper.findComponent({ name: 'ConfirmationSheet' });
+    const action = {
+      action: 'approve' as const,
+      confirmationId: 'confirmation-retry',
+      source: 'runtime' as const
+    };
+
+    sheet.vm.$emit('action', action);
+    await flushPromises();
+
+    expect(electronAPIMock.chatRuntimeSubmitConfirmation).toHaveBeenCalledTimes(1);
+    expect((sheet.props('confirmation') as { confirmationId?: string } | null)?.confirmationId).toBe('confirmation-retry');
+
+    sheet.vm.$emit('action', action);
+    await flushPromises();
+
+    expect(electronAPIMock.chatRuntimeSubmitConfirmation).toHaveBeenCalledTimes(2);
+    expect(sheet.props('confirmation')).toBeNull();
+    wrapper.unmount();
+  });
+
+  it('does not resubmit a locally expired confirmation after Runtime failure', async (): Promise<void> => {
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+    const runtimeId = await submitTextAndReadRuntimeId(wrapper, 'expire confirmation');
+
+    emitRuntimeEvent(runtimeListeners, 'confirmationRequest', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      confirmationId: 'confirmation-expired',
+      request: {
+        toolName: 'write_file',
+        title: '写入文件',
+        description: '是否写入？',
+        riskLevel: 'write'
+      }
+    });
+    await flushPromises();
+
+    emitRuntimeEvent(runtimeListeners, 'error', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      error: { code: 'REQUEST_FAILED', message: 'runtime failed' }
+    });
+    await flushPromises();
+
+    expect(electronAPIMock.chatRuntimeSubmitConfirmation).not.toHaveBeenCalled();
+    expect(useChatConfirmationQueueStore().items['confirmation-expired']).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('keeps the Session waiting until every concurrent Runtime confirmation resolves', async (): Promise<void> => {
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+    const runtimeId = await submitTextAndReadRuntimeId(wrapper, 'multiple confirmations');
+    const eventBase = {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat' as const,
+      agentId: 'primary',
+      rootRuntimeId: runtimeId
+    };
+
+    emitRuntimeEvent(runtimeListeners, 'confirmationRequest', {
+      ...eventBase,
+      confirmationId: 'confirmation-multi-a',
+      request: { toolName: 'write_file', title: '写入 A', description: '是否写入 A？', riskLevel: 'write' }
+    });
+    emitRuntimeEvent(runtimeListeners, 'confirmationRequest', {
+      ...eventBase,
+      confirmationId: 'confirmation-multi-b',
+      request: { toolName: 'write_file', title: '写入 B', description: '是否写入 B？', riskLevel: 'write' }
+    });
+    await flushPromises();
+
+    const sheet = wrapper.findComponent({ name: 'ConfirmationSheet' });
+    sheet.vm.$emit('action', {
+      action: 'approve',
+      confirmationId: 'confirmation-multi-a',
+      source: 'runtime'
+    });
+    await flushPromises();
+
+    expect((sheet.props('confirmation') as { confirmationId?: string } | null)?.confirmationId).toBe('confirmation-multi-b');
+    expect(wrapper.emitted('runtime-status-change')?.at(-1)).toEqual([{ status: 'waiting' }]);
+    expect(electronAPIMock.chatRuntimeSubmitConfirmation).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
   it('does not resolve a new current item from a stale displayed Agent action', async (): Promise<void> => {
     const wrapper = mountBChat('session-active');
     await flushPromises();
@@ -1680,7 +2091,8 @@ describe('BChat sessionId runtime', (): void => {
     queue.addRuntime({
       source: 'runtime',
       confirmationId: 'runtime-selected-b',
-      ownerId: 'other-owner',
+      sessionId: 'session-active',
+      runtimeId: 'runtime-other',
       request: {
         toolName: 'write_file',
         title: '另一个写入',
@@ -2542,6 +2954,31 @@ describe('BChat sessionId runtime', (): void => {
     wrapper.unmount();
   });
 
+  it('continues regeneration in its original Session after destructive history persistence starts', async (): Promise<void> => {
+    const userMessage = createMessage('user-regenerate-background', '重新回答');
+    const assistantMessage = createAssistantMessage({
+      id: 'assistant-regenerate-background',
+      content: '旧回答',
+      parts: [{ id: 'part-regenerate-background', type: 'text', text: '旧回答' }]
+    });
+    const persistDeferred = createDeferred<void>();
+    chatStoreMock.getSessionMessages.mockResolvedValueOnce([userMessage, assistantMessage]).mockResolvedValue([]);
+    chatStoreMock.setSessionMessages.mockReturnValueOnce(persistDeferred.promise);
+    const wrapper = mountBChat('session-a');
+    await flushPromises();
+
+    wrapper.findComponent(ConversationViewStub).vm.$emit('regenerate', assistantMessage);
+    await vi.waitFor((): void => {
+      expect(chatStoreMock.setSessionMessages).toHaveBeenCalledWith('session-a', [userMessage]);
+    });
+    await wrapper.setProps({ sessionId: 'session-b' });
+    persistDeferred.resolve(undefined);
+    await flushPromises();
+
+    expect(electronAPIMock.chatRuntimeContinue).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'session-a' }));
+    wrapper.unmount();
+  });
+
   it('creates a branch from the target assistant message and switches through the existing session event', async (): Promise<void> => {
     const assistantMessage = createAssistantMessage();
     const branchedSession = createSession('session-branch', '原标题（2）');
@@ -2790,7 +3227,8 @@ describe('BChat sessionId runtime', (): void => {
       expect.objectContaining({
         system: 'Remember user prefers concise answers.',
         capabilities: {
-          rendererToolNames: expect.any(Array)
+          rendererToolNames: expect.any(Array),
+          workspaceRoot: '/workspace'
         },
         tavily: { enabled: true, apiKey: 'tvly-test' },
         mcp: {
@@ -2821,6 +3259,258 @@ describe('BChat sessionId runtime', (): void => {
     await flushPromises();
 
     expect(chatStoreMock.getSessionMessages).toHaveBeenCalledWith('session-external');
+  });
+
+  it('keeps newer live message content when an older reconnect history snapshot resolves later', async (): Promise<void> => {
+    const historyDeferred = createDeferred<Message[]>();
+    chatStoreMock.getSessionMessages.mockReturnValueOnce(historyDeferred.promise);
+    const wrapper = mountBChat('session-active');
+    await Promise.resolve();
+    const runtimeId = await submitTextAndReadRuntimeId(wrapper, 'resume stream');
+    const liveMessage = {
+      ...createAssistantMessage({
+        id: 'assistant-race',
+        content: 'new live content',
+        parts: [{ id: 'part-race', type: 'text', text: 'new live content' }],
+        runtimeId,
+        loading: true,
+        finished: false
+      }),
+      sessionId: 'session-active'
+    } satisfies ChatMessageRecord;
+    emitRuntimeEvent(runtimeListeners, 'messageUpdated', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      message: liveMessage
+    });
+    await flushPromises();
+
+    historyDeferred.resolve([
+      {
+        ...liveMessage,
+        content: 'old persisted content',
+        parts: [{ id: 'part-race', type: 'text', text: 'old persisted content' }]
+      }
+    ]);
+    await flushPromises();
+
+    expect(wrapper.findComponent(ConversationViewStub).props('messages')).toEqual([
+      expect.objectContaining({ id: 'assistant-race', content: 'new live content' })
+    ]);
+
+    emitRuntimeEvent(runtimeListeners, 'messageUpdated', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      message: { ...liveMessage, content: 'latest live content', parts: [{ id: 'part-race', type: 'text', text: 'latest live content' }] }
+    });
+    await flushPromises();
+    expect(wrapper.findComponent(ConversationViewStub).props('messages')).toEqual([
+      expect.objectContaining({ id: 'assistant-race', content: 'latest live content' })
+    ]);
+    wrapper.unmount();
+  });
+
+  it('ignores an older same-session history request after an A-B-A switch', async (): Promise<void> => {
+    const firstSessionAHistory = createDeferred<Message[]>();
+    const latestSessionAHistory = createDeferred<Message[]>();
+    chatStoreMock.getSessionMessages
+      .mockReturnValueOnce(firstSessionAHistory.promise)
+      .mockResolvedValueOnce([createMessage('session-b-message', 'session B')])
+      .mockReturnValueOnce(latestSessionAHistory.promise);
+    const wrapper = mountBChat('session-a');
+    await Promise.resolve();
+
+    await wrapper.setProps({ sessionId: 'session-b' });
+    await Promise.resolve();
+    await wrapper.setProps({ sessionId: 'session-a' });
+    await Promise.resolve();
+
+    latestSessionAHistory.resolve([createMessage('session-a-message', 'latest session A')]);
+    await flushPromises();
+    firstSessionAHistory.resolve([createMessage('session-a-message', 'stale session A')]);
+    await flushPromises();
+
+    expect(wrapper.findComponent(ConversationViewStub).props('messages')).toEqual([
+      expect.objectContaining({ id: 'session-a-message', content: 'latest session A' })
+    ]);
+    wrapper.unmount();
+  });
+
+  it('does not start a prepared request in a different session after the sidebar switches', async (): Promise<void> => {
+    const resourceSync = createDeferred<void>();
+    skillStoreMock.syncDirtyFromDisk.mockReturnValueOnce(resourceSync.promise);
+    const wrapper = mountBChat('session-a');
+    await flushPromises();
+
+    wrapper.findComponent(BSmartEditorStub).vm.$emit('update:value', 'message owned by session A');
+    wrapper.findComponent(InputToolbarStub).vm.$emit('submit');
+    await Promise.resolve();
+    await wrapper.setProps({ sessionId: 'session-b' });
+
+    expect(wrapper.findComponent(ConversationViewStub).props('loading')).toBe(false);
+    resourceSync.resolve();
+    await flushPromises();
+
+    expect(electronAPIMock.chatRuntimeSend).not.toHaveBeenCalled();
+    const visibleMessages = wrapper.findComponent(ConversationViewStub).props('messages') as Message[];
+    expect(visibleMessages.some((message: Message): boolean => message.content === 'message owned by session A')).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('does not resume a stale prepared request after an A-B-A switch', async (): Promise<void> => {
+    const resourceSync = createDeferred<void>();
+    skillStoreMock.syncDirtyFromDisk.mockReturnValueOnce(resourceSync.promise);
+    const wrapper = mountBChat('session-a');
+    await flushPromises();
+
+    wrapper.findComponent(BSmartEditorStub).vm.$emit('update:value', 'stale message owned by session A');
+    wrapper.findComponent(InputToolbarStub).vm.$emit('submit');
+    await Promise.resolve();
+    await wrapper.setProps({ sessionId: 'session-b' });
+    await Promise.resolve();
+    await wrapper.setProps({ sessionId: 'session-a' });
+    resourceSync.resolve();
+    await flushPromises();
+
+    expect(electronAPIMock.chatRuntimeSend).not.toHaveBeenCalled();
+    const visibleMessages = wrapper.findComponent(ConversationViewStub).props('messages') as Message[];
+    expect(visibleMessages.some((message: Message): boolean => message.content === 'stale message owned by session A')).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('settles regeneration preparation when its Session is switched away', async (): Promise<void> => {
+    const resourceSync = createDeferred<void>();
+    const userMessage = createMessage('user-regenerate-switch', '重新回答');
+    const assistantMessage = createAssistantMessage({ id: 'assistant-regenerate-switch', content: '旧回答' });
+    skillStoreMock.syncDirtyFromDisk.mockReturnValueOnce(resourceSync.promise);
+    chatStoreMock.getSessionMessages.mockResolvedValueOnce([userMessage, assistantMessage]).mockResolvedValue([]);
+    const wrapper = mountBChat('session-a');
+    await flushPromises();
+
+    wrapper.findComponent(ConversationViewStub).vm.$emit('regenerate', assistantMessage);
+    await Promise.resolve();
+    await wrapper.setProps({ sessionId: 'session-b' });
+
+    expect(wrapper.emitted('runtime-status-change')).toContainEqual([{ status: 'idle', sessionId: 'session-a' }]);
+    resourceSync.resolve(undefined);
+    await flushPromises();
+    await wrapper.setProps({ sessionId: 'session-a' });
+    await flushPromises();
+
+    expect(electronAPIMock.chatRuntimeContinue).not.toHaveBeenCalled();
+    expect(wrapper.findComponent(ConversationViewStub).props('loading')).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('settles manual compaction preparation when its Session is switched away', async (): Promise<void> => {
+    const resourceSync = createDeferred<void>();
+    skillStoreMock.syncDirtyFromDisk.mockReturnValueOnce(resourceSync.promise);
+    const wrapper = mountBChat('session-a');
+    await flushPromises();
+
+    wrapper.findComponent(BSmartEditorStub).vm.$emit('slash-command', {
+      id: 'compact',
+      trigger: '/compact',
+      title: '压缩上下文',
+      description: '压缩当前长会话上下文',
+      group: 'command',
+      selectAction: { type: 'emit' }
+    });
+    await Promise.resolve();
+    await wrapper.setProps({ sessionId: 'session-b' });
+
+    expect(wrapper.emitted('runtime-status-change')).toContainEqual([{ status: 'idle', sessionId: 'session-a' }]);
+    resourceSync.resolve(undefined);
+    await flushPromises();
+    await wrapper.setProps({ sessionId: 'session-a' });
+    await flushPromises();
+
+    expect(electronAPIMock.chatRuntimeCompact).not.toHaveBeenCalled();
+    expect(wrapper.findComponent(ConversationViewStub).props('loading')).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('restores a waiting interaction when continuation preparation is switched away', async (): Promise<void> => {
+    const resourceSync = createDeferred<void>();
+    const pendingToolPart: ChatMessageToolPart = {
+      id: 'part-choice-switch',
+      type: 'tool',
+      toolCallId: 'tool-call-switch',
+      toolName: 'ask_user_choice',
+      status: 'done',
+      input: {},
+      result: {
+        toolName: 'ask_user_choice',
+        status: 'awaiting_user_input',
+        data: {
+          questionId: 'question-switch',
+          toolCallId: 'tool-call-switch',
+          mode: 'single',
+          question: '继续吗？',
+          options: [{ label: '继续', value: 'yes' }]
+        }
+      }
+    };
+    const answer: AIUserChoiceAnswerData = {
+      questionId: 'question-switch',
+      toolCallId: 'tool-call-switch',
+      answers: ['yes'],
+      otherText: ''
+    };
+    skillStoreMock.syncDirtyFromDisk.mockReturnValueOnce(resourceSync.promise);
+    chatStoreMock.getSessionMessages
+      .mockResolvedValueOnce([
+        createMessage('user-choice-switch', '需要选择'),
+        createAssistantMessage({ id: 'assistant-choice-switch', parts: [pendingToolPart] })
+      ])
+      .mockResolvedValue([]);
+    const wrapper = mountBChat('session-a');
+    await flushPromises();
+
+    const submission = submitConversationAction(wrapper, createUserChoice(answer));
+    await Promise.resolve();
+    await wrapper.setProps({ sessionId: 'session-b' });
+
+    expect(wrapper.emitted('runtime-status-change')).toContainEqual([{ status: 'waiting', sessionId: 'session-a' }]);
+    resourceSync.resolve(undefined);
+    await submission;
+    await flushPromises();
+
+    expect(electronAPIMock.chatRuntimeSubmitUserChoice).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('settles the original Session when a started request fails after switching away', async (): Promise<void> => {
+    let rejectStart: (error: Error) => void = (): void => undefined;
+    electronAPIMock.chatRuntimeSend.mockReturnValueOnce(
+      new Promise((_, reject): void => {
+        rejectStart = reject;
+      })
+    );
+    const wrapper = mountBChat('session-a');
+    await flushPromises();
+
+    wrapper.findComponent(BSmartEditorStub).vm.$emit('update:value', 'request owned by session A');
+    wrapper.findComponent(InputToolbarStub).vm.$emit('submit');
+    await vi.waitFor((): void => {
+      expect(electronAPIMock.chatRuntimeSend).toHaveBeenCalledOnce();
+    });
+    await wrapper.setProps({ sessionId: 'session-b' });
+    rejectStart(new Error('runtime start failed'));
+    await flushPromises();
+    await wrapper.setProps({ sessionId: 'session-a' });
+    await flushPromises();
+
+    expect(wrapper.findComponent(ConversationViewStub).props('loading')).toBe(false);
+    wrapper.unmount();
   });
 
   it('skips history reload when an internally created session id is written back', async (): Promise<void> => {

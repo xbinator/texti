@@ -40,6 +40,7 @@ function createRollbackFixture(messages: Message[]): {
   const options: UseRollbackOptions = {
     messages: sourceMessages,
     getSessionId: () => 'session-1',
+    isSessionActive: () => true,
     fetchAllPriorHistory: async () => [],
     persistMessages: async () => undefined,
     restoreInput: vi.fn(),
@@ -74,6 +75,7 @@ describe('useRollback', (): void => {
     const rollback = useRollback({
       messages,
       getSessionId: (): string => 'session-1',
+      isSessionActive: (): boolean => true,
       fetchAllPriorHistory: async (): Promise<Message[]> => [],
       persistMessages,
       restoreInput: vi.fn(),
@@ -86,5 +88,35 @@ describe('useRollback', (): void => {
     expect(messages.value).toEqual([firstUser, firstAssistant]);
     expect(messages.value[1].parts).toEqual(firstAssistant.parts);
     expect(persistMessages).toHaveBeenCalledWith('session-1', [firstUser, firstAssistant]);
+  });
+
+  it('does not replace another session messages when history resolves after a switch', async (): Promise<void> => {
+    const firstUser = createMessage('session-a-user', 'user');
+    const firstAssistant = createMessage('session-a-assistant', 'assistant');
+    const messages = ref<Message[]>([firstUser, firstAssistant]);
+    const sessionBMessage = createMessage('session-b-message', 'assistant');
+    let activeSessionId = 'session-a';
+    let resolveHistory: (history: Message[]) => void = (): void => undefined;
+    const history = new Promise<Message[]>((resolve): void => {
+      resolveHistory = resolve;
+    });
+    const rollback = useRollback({
+      messages,
+      getSessionId: (): string => 'session-a',
+      isSessionActive: (sessionId: string): boolean => sessionId === activeSessionId,
+      fetchAllPriorHistory: (): Promise<Message[]> => history,
+      persistMessages: vi.fn(async (): Promise<void> => undefined),
+      restoreInput: vi.fn(),
+      expireConfirmation: vi.fn(),
+      focusInput: vi.fn()
+    });
+
+    const operation = rollback.rollback(firstUser);
+    activeSessionId = 'session-b';
+    messages.value = [sessionBMessage];
+    resolveHistory([]);
+    await operation;
+
+    expect(messages.value).toEqual([sessionBMessage]);
   });
 });

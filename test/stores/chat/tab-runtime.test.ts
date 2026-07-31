@@ -1,10 +1,10 @@
 /**
  * @file tab-runtime.test.ts
- * @description 聊天标签运行时归属、状态与控制器测试。
+ * @description 聊天标签运行时归属、状态与后台分离测试。
  * @vitest-environment jsdom
  */
 import { createPinia, setActivePinia } from 'pinia';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { isActiveRuntimeStatus, useChatTabStore } from '@/stores/chat/tab';
 import type { Tab } from '@/stores/workspace/tabs';
 import { useTabsStore } from '@/stores/workspace/tabs';
@@ -29,15 +29,13 @@ describe('chat tab runtime store', (): void => {
     setActivePinia(createPinia());
   });
 
-  it('promotes draft ownership and controller to the persisted tab', async (): Promise<void> => {
+  it('promotes draft ownership to the persisted tab', (): void => {
     const store = useChatTabStore();
     const tabsStore = useTabsStore();
-    const abort = vi.fn<() => Promise<void>>().mockResolvedValue();
     tabsStore.tabs = [createTab('chat:new')];
     store.ensureTab('chat:new');
     store.bindSession('chat:new', 'session-a');
     store.setStatus('chat:new', 'running');
-    store.registerController('chat:new', { abort });
     tabsStore.tabs = [createTab('chat:session-a')];
 
     store.promoteTab('chat:new', 'chat:session-a', 'session-a');
@@ -45,8 +43,6 @@ describe('chat tab runtime store', (): void => {
     expect(store.findOwner('session-a')?.tabId).toBe('chat:session-a');
     expect(store.records['chat:new']).toBeUndefined();
     expect(tabsStore.tabs[0]?.status).toBe('loading');
-    await store.abortTabs(['chat:session-a']);
-    expect(abort).toHaveBeenCalledOnce();
   });
 
   it('keeps completed unread until the tab is viewed', (): void => {
@@ -114,8 +110,6 @@ describe('chat tab runtime store', (): void => {
 
     store.ensureTab('chat:session-a');
     store.bindSession('chat:session-a', 'session-a');
-    store.registerController('chat:session-a', { abort: vi.fn<() => Promise<void>>().mockResolvedValue() });
-
     expect(tabsStore.tabs[0]?.status).toBe('attention');
   });
 
@@ -158,60 +152,53 @@ describe('chat tab runtime store', (): void => {
     expect(isActiveRuntimeStatus('completed')).toBe(false);
   });
 
-  it('aborts only running or waiting target tabs', async (): Promise<void> => {
+  it('detaches a running persisted Runtime when its visible tab closes', (): void => {
     const store = useChatTabStore();
-    const runningAbort = vi.fn<() => Promise<void>>().mockResolvedValue();
-    const idleAbort = vi.fn<() => Promise<void>>().mockResolvedValue();
-    store.ensureTab('chat:running', 'running');
-    store.ensureTab('chat:idle', 'idle');
-    store.setStatus('chat:running', 'running');
-    store.registerController('chat:running', { abort: runningAbort });
-    store.registerController('chat:idle', { abort: idleAbort });
-
-    await store.abortTabs(['chat:running', 'chat:idle']);
-
-    expect(runningAbort).toHaveBeenCalledOnce();
-    expect(idleAbort).not.toHaveBeenCalled();
-  });
-
-  it('rejects an active runtime without a registered controller', async (): Promise<void> => {
-    const store = useChatTabStore();
+    const tabsStore = useTabsStore();
+    tabsStore.tabs = [createTab('chat:session-a')];
     store.ensureTab('chat:session-a', 'session-a');
-    store.setStatus('chat:session-a', 'waiting');
-
-    await expect(store.abortTabs(['chat:session-a'])).rejects.toThrow('chat:session-a');
-  });
-
-  it('rejects a partially failed batch after invoking every active controller', async (): Promise<void> => {
-    const store = useChatTabStore();
-    const abortA = vi.fn<() => Promise<void>>().mockResolvedValue();
-    const abortB = vi.fn<() => Promise<void>>().mockRejectedValue(new Error('abort B failed'));
-    store.ensureTab('chat:session-a', 'session-a');
-    store.ensureTab('chat:session-b', 'session-b');
     store.setStatus('chat:session-a', 'running');
-    store.setStatus('chat:session-b', 'waiting');
-    store.registerController('chat:session-a', { abort: abortA });
-    store.registerController('chat:session-b', { abort: abortB });
+    store.markClosing(['chat:session-a']);
 
-    await expect(store.abortTabs(['chat:session-a', 'chat:session-b'])).rejects.toThrow('abort B failed');
-    expect(abortA).toHaveBeenCalledOnce();
-    expect(abortB).toHaveBeenCalledOnce();
+    store.closeTab('chat:session-a');
+
+    expect(store.records['chat:session-a']).toEqual({ tabId: 'chat:session-a', sessionId: 'session-a', status: 'running' });
+    expect(tabsStore.tabs[0]?.status).toBeUndefined();
+    expect(store.isClosing('chat:session-a')).toBe(false);
+  });
+
+  it('rekeys a running draft Runtime to its persisted detached identity', (): void => {
+    const store = useChatTabStore();
+    store.ensureTab('chat:new');
+    store.bindSession('chat:new', 'session-a');
+    store.setStatus('chat:new', 'waiting');
+
+    store.closeTab('chat:new');
+
+    expect(store.records['chat:new']).toBeUndefined();
+    expect(store.records['chat:session-a']).toEqual({ tabId: 'chat:session-a', sessionId: 'session-a', status: 'waiting' });
+  });
+
+  it('removes an idle Runtime record when its tab closes', (): void => {
+    const store = useChatTabStore();
+    store.ensureTab('chat:session-a', 'session-a');
+
+    store.closeTab('chat:session-a');
+
+    expect(store.records['chat:session-a']).toBeUndefined();
   });
 
   it('ignores late callbacks after a chat tab runtime is removed', (): void => {
     const store = useChatTabStore();
-    const controller = { abort: vi.fn<() => Promise<void>>().mockResolvedValue() };
     store.ensureTab('chat:session-a', 'session-a');
     store.removeTab('chat:session-a');
 
     store.setStatus('chat:session-a', 'running');
     store.markCompleted('chat:session-a', false);
     store.bindSession('chat:session-a', 'session-b');
-    store.registerController('chat:session-a', controller);
     store.promoteTab('chat:session-a', 'chat:session-b', 'session-b');
 
     expect(store.records).toEqual({});
-    expect(store.controllers.size).toBe(0);
   });
 
   it('tracks a close intent until it is cancelled or the runtime is removed', (): void => {
@@ -242,39 +229,5 @@ describe('chat tab runtime store', (): void => {
     store.markPromoting(['chat:session-a']);
     store.removeTab('chat:session-a');
     expect(store.isPromoting('chat:session-a')).toBe(false);
-  });
-
-  it('waits for every abort request before reporting a batch failure', async (): Promise<void> => {
-    const store = useChatTabStore();
-    let resolveSlowAbort: (() => void) | undefined;
-    const slowAbort = vi.fn(
-      (): Promise<void> =>
-        new Promise((resolve): void => {
-          resolveSlowAbort = resolve;
-        })
-    );
-    const failedAbort = vi.fn<() => Promise<void>>().mockRejectedValue(new Error('abort failed'));
-    store.ensureTab('chat:session-a', 'session-a');
-    store.ensureTab('chat:session-b', 'session-b');
-    store.setStatus('chat:session-a', 'running');
-    store.setStatus('chat:session-b', 'waiting');
-    store.registerController('chat:session-a', { abort: slowAbort });
-    store.registerController('chat:session-b', { abort: failedAbort });
-
-    const abortPromise = store.abortTabs(['chat:session-a', 'chat:session-b']);
-    let settled = false;
-    abortPromise
-      .finally((): void => {
-        settled = true;
-      })
-      .catch((): void => undefined);
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(settled).toBe(false);
-    resolveSlowAbort?.();
-    await expect(abortPromise).rejects.toThrow('abort failed');
-    expect(slowAbort).toHaveBeenCalledOnce();
-    expect(failedAbort).toHaveBeenCalledOnce();
   });
 });

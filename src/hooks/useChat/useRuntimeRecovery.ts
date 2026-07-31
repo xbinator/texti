@@ -9,7 +9,6 @@ import type { RuntimeExecutionCapabilities } from '@/ai/chat/runtimeCapabilities
 import { CHAT_DRAFT_TAB_ID, createChatTabId } from '@/router/routes/helpers/chatRouteTab';
 import { logger } from '@/shared/logger';
 import { getElectronAPI } from '@/shared/platform/electron-api';
-import type { ChatTabRuntimeController } from '@/stores/chat/tab';
 import { useChatTabStore } from '@/stores/chat/tab';
 import { useSettingStore } from '@/stores/ui/setting';
 import type { Tab } from '@/stores/workspace/tabs';
@@ -20,8 +19,6 @@ import { asyncTo } from '@/utils/asyncTo';
 interface RecoveredRuntimeBinding {
   /** Runtime 所属标签 ID。 */
   tabId: string;
-  /** 恢复流程创建的控制器；已挂载 BChat 提供控制器时为空。 */
-  controller?: ChatTabRuntimeController;
 }
 
 /** Runtime 恢复流程的页面状态依赖。 */
@@ -59,41 +56,6 @@ function createDegradedCapabilities(snapshot: ChatRuntimeRecoverySnapshot): Runt
 }
 
 /**
- * 为尚未挂载 BChat 的恢复 Runtime 创建终止控制器。
- * @param actorSystem - 应用级 Chat actor system
- * @param snapshot - 恢复 Runtime 快照
- * @param tabId - Runtime 所属顶部标签 ID
- * @returns 标签 Runtime 控制器
- */
-function createRecoveredController(actorSystem: ChatActorSystem, snapshot: ChatRuntimeRecoverySnapshot, tabId: string): ChatTabRuntimeController {
-  const runtimeStore = useChatTabStore();
-  const electronAPI = getElectronAPI();
-  let controller: ChatTabRuntimeController;
-
-  /** 通过主进程终止恢复 Runtime，并同步 Session actor 状态。 */
-  async function abort(): Promise<void> {
-    actorSystem.sendToSession(snapshot.sessionId, { type: 'session.cancelRequested' });
-    const [requestError, result] = await asyncTo(electronAPI.chatRuntimeAbort({ runtimeId: snapshot.runtimeId }));
-    const abortError = requestError ?? (result && !result.ok ? new Error(result.error ?? '终止恢复的聊天任务失败') : undefined);
-    if (abortError) {
-      actorSystem.sendToSession(snapshot.sessionId, {
-        type: 'session.cancelFailed',
-        error: { code: 'cancel_failed', message: abortError.message, cause: abortError }
-      });
-      throw abortError;
-    }
-
-    actorSystem.sendToSession(snapshot.sessionId, { type: 'session.runtimeCancelled' });
-    actorSystem.unregisterRuntime(snapshot.runtimeId);
-    runtimeStore.setStatus(tabId, 'idle');
-    runtimeStore.unregisterController(tabId, controller);
-  }
-
-  controller = { abort };
-  return controller;
-}
-
-/**
  * 识别重启前仍由唯一草稿标签持有的 Runtime。
  * @param snapshots - 当前活跃 Runtime 快照
  * @returns 可明确归属 chat:new 的 Runtime ID
@@ -111,18 +73,12 @@ function findDraftRuntimeId(snapshots: ChatRuntimeRecoverySnapshot[]): string | 
 }
 
 /**
- * 将恢复 Runtime 同步到顶部聊天标签状态和终止控制器。
- * @param actorSystem - 应用级 Chat actor system
+ * 将恢复 Runtime 同步到可见标签或后台分离记录。
  * @param snapshot - 恢复 Runtime 快照
  * @param bindings - 本轮恢复识别的 Runtime 标签绑定
  * @param draftRuntimeId - 可明确归属唯一草稿标签的 Runtime ID
  */
-function syncRecoveredRuntime(
-  actorSystem: ChatActorSystem,
-  snapshot: ChatRuntimeRecoverySnapshot,
-  bindings: Map<string, RecoveredRuntimeBinding>,
-  draftRuntimeId?: string
-): void {
+function syncRecoveredRuntime(snapshot: ChatRuntimeRecoverySnapshot, bindings: Map<string, RecoveredRuntimeBinding>, draftRuntimeId?: string): void {
   const runtimeStore = useChatTabStore();
   const { tabs } = useTabsStore();
   const persistedTabId = createChatTabId(snapshot.sessionId);
@@ -130,21 +86,13 @@ function syncRecoveredRuntime(
   // 用户可能在两次快照查询之间关闭标签，旧绑定只有在标签仍可见时才可复用。
   const visibleBoundTabId = boundTabId && tabs.some((tab: Tab): boolean => tab.id === boundTabId) ? boundTabId : undefined;
   const knownTabId = visibleBoundTabId ?? (snapshot.runtimeId === draftRuntimeId ? CHAT_DRAFT_TAB_ID : undefined);
-  const tabId = knownTabId ?? (tabs.some((tab: Tab): boolean => tab.id === persistedTabId) ? persistedTabId : undefined);
-  if (!tabId) return;
+  const tabId = knownTabId ?? persistedTabId;
 
   runtimeStore.ensureTab(tabId, snapshot.sessionId);
   const waitingForConfirmation = snapshot.pendingRequests.some((request: ChatRuntimeRecoveryPendingRequest): boolean => request.type === 'confirmation');
   runtimeStore.setStatus(tabId, waitingForConfirmation ? 'waiting' : 'running');
 
-  // 已挂载的 BChat 控制器包含完整可见消息同步能力，恢复控制器不得覆盖它。
-  if (runtimeStore.controllers.has(tabId)) {
-    if (!bindings.has(snapshot.runtimeId)) bindings.set(snapshot.runtimeId, { tabId });
-    return;
-  }
-  const controller = createRecoveredController(actorSystem, snapshot, tabId);
-  runtimeStore.registerController(tabId, controller);
-  bindings.set(snapshot.runtimeId, { tabId, controller });
+  bindings.set(snapshot.runtimeId, { tabId });
 }
 
 /** 处理主进程仍在等待的 renderer 请求。 */
@@ -179,6 +127,41 @@ async function replayPendingRequest(actorSystem: ChatActorSystem, request: ChatR
   if (!result.ok) throw new Error(result.error ?? 'Failed to resolve recovered bridge request');
 }
 
+/** 第二份权威快照确认 pending 后的 replay 退避序列。 */
+const REPLAY_RETRY_DELAYS = [50, 100] as const;
+
+/**
+ * 等待下一次 Runtime replay。
+ * @param delayMs - 等待毫秒数
+ */
+function waitForReplay(delayMs: number): Promise<void> {
+  return new Promise<void>((resolve): void => {
+    setTimeout(resolve, delayMs);
+  });
+}
+
+/**
+ * 立即重放一次，并在失败后执行两次有限退避。
+ * @param actorSystem - 应用级 Chat actor system
+ * @param request - Main 仍在等待的 Renderer 请求
+ */
+async function replayWithRetry(actorSystem: ChatActorSystem, request: ChatRuntimeRecoveryPendingRequest): Promise<void> {
+  let [lastError] = await asyncTo(replayPendingRequest(actorSystem, request));
+  if (!lastError) return;
+
+  for (const delayMs of REPLAY_RETRY_DELAYS) {
+    // 重试必须串行等待，确保当前请求成功前后续请求不能越过。
+    // eslint-disable-next-line no-await-in-loop
+    await waitForReplay(delayMs);
+    // eslint-disable-next-line no-await-in-loop
+    const [retryError] = await asyncTo(replayPendingRequest(actorSystem, request));
+    if (!retryError) return;
+    lastError = retryError;
+  }
+
+  throw lastError;
+}
+
 /**
  * 恢复一批 Runtime 快照并重放其待处理请求。
  * @param actorSystem - 应用级 Chat actor system
@@ -186,24 +169,32 @@ async function replayPendingRequest(actorSystem: ChatActorSystem, request: ChatR
  * @param replayedRequestKeys - 已重放请求的稳定键
  * @param bindings - 本轮恢复识别的 Runtime 标签绑定
  * @param draftRuntimeId - 可明确归属唯一草稿标签的 Runtime ID
+ * @param tolerateReplayFailure - 是否允许第二份权威快照重试失败请求
  */
 async function hydrateSnapshots(
   actorSystem: ChatActorSystem,
   snapshots: ChatRuntimeRecoverySnapshot[],
   replayedRequestKeys: Set<string>,
   bindings: Map<string, RecoveredRuntimeBinding>,
-  draftRuntimeId?: string
+  draftRuntimeId?: string,
+  tolerateReplayFailure = false
 ): Promise<void> {
   for (const snapshot of snapshots) {
     actorSystem.recoverRuntime(snapshot, createDegradedCapabilities(snapshot));
-    syncRecoveredRuntime(actorSystem, snapshot, bindings, draftRuntimeId);
+    syncRecoveredRuntime(snapshot, bindings, draftRuntimeId);
     for (const request of snapshot.pendingRequests) {
       const requestKey = createPendingRequestKey(request);
       if (replayedRequestKeys.has(requestKey)) continue;
-      replayedRequestKeys.add(requestKey);
       // 请求必须按 Runtime 内原始顺序重放，避免 Bridge 与确认结果交叉。
+      const replay = tolerateReplayFailure ? replayPendingRequest(actorSystem, request) : replayWithRetry(actorSystem, request);
       // eslint-disable-next-line no-await-in-loop
-      await replayPendingRequest(actorSystem, request);
+      const [replayError] = await asyncTo(replay);
+      if (replayError) {
+        if (!tolerateReplayFailure) throw replayError;
+        // 当前请求仍未收敛时暂停该 Runtime 的后续回放，由第二份权威快照保持原序重试。
+        break;
+      }
+      replayedRequestKeys.add(requestKey);
     }
   }
 }
@@ -218,7 +209,7 @@ export async function recoverRuntimes(actorSystem: ChatActorSystem, options: Run
   const replayedRequestKeys = new Set<string>();
   const bindings = new Map<string, RecoveredRuntimeBinding>();
   const firstSnapshots = unwrapRuntimeResult(await electronAPI.chatRuntimeListActive());
-  await hydrateSnapshots(actorSystem, firstSnapshots, replayedRequestKeys, bindings, findDraftRuntimeId(firstSnapshots));
+  await hydrateSnapshots(actorSystem, firstSnapshots, replayedRequestKeys, bindings, findDraftRuntimeId(firstSnapshots), true);
 
   // 第二次查询吸收首次查询期间新建或完成的 Runtime，避免恢复出过期路由。
   const finalSnapshots = unwrapRuntimeResult(await electronAPI.chatRuntimeListActive());
@@ -234,10 +225,11 @@ export async function recoverRuntimes(actorSystem: ChatActorSystem, options: Run
     actorSystem.sendToSession(snapshot.sessionId, { type: 'session.completed' });
     actorSystem.unregisterRuntime(snapshot.runtimeId);
     const binding = bindings.get(snapshot.runtimeId);
-    if (binding?.controller) {
-      useChatTabStore().unregisterController(binding.tabId, binding.controller);
+    if (binding) {
+      const hasVisibleTab = useTabsStore().tabs.some((tab: Tab): boolean => tab.id === binding.tabId);
+      if (hasVisibleTab) useChatTabStore().markCompleted(binding.tabId, options.isTabActive?.(binding.tabId) ?? false);
+      else useChatTabStore().removeTab(binding.tabId);
     }
-    if (binding) useChatTabStore().markCompleted(binding.tabId, options.isTabActive?.(binding.tabId) ?? false);
   }
 }
 

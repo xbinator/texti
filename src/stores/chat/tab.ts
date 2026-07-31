@@ -1,8 +1,7 @@
 /**
  * @file tab.ts
- * @description 管理聊天标签的 renderer 运行时归属、可视状态与终止控制器。
+ * @description 管理聊天标签的 renderer 运行时归属、可视状态与后台分离记录。
  */
-import { toRaw } from 'vue';
 import { defineStore } from 'pinia';
 import type { TabStatus } from '@/stores/workspace/tabs';
 import { useTabsStore } from '@/stores/workspace/tabs';
@@ -40,14 +39,6 @@ export function isActiveRuntimeStatus(status: ChatTabRuntimeStatus): boolean {
 }
 
 /**
- * 聊天标签 Runtime 控制器。
- */
-export interface ChatTabRuntimeController {
-  /** 终止当前标签拥有的 Runtime。 */
-  abort: () => Promise<void>;
-}
-
-/**
  * 单个聊天标签运行时记录。
  */
 export interface ChatTabRuntimeRecord {
@@ -67,8 +58,6 @@ export interface ChatTabRuntimeRecord {
 interface ChatTabRuntimeState {
   /** 按标签 ID 保存的可序列化运行时记录。 */
   records: Record<string, ChatTabRuntimeRecord>;
-  /** 按标签 ID 保存的内存控制器，不进入持久化。 */
-  controllers: Map<string, ChatTabRuntimeController>;
   /** 正在执行关闭事务的标签 ID，阻止终止回调改变标签身份。 */
   closingTabIds: Set<string>;
   /** 正在提交草稿晋升导航的标签 ID，阻止并发关闭或删除。 */
@@ -93,7 +82,6 @@ function createRuntimeRecord(tabId: string, sessionId?: string): ChatTabRuntimeR
 export const useChatTabStore = defineStore('chat-tab', {
   state: (): ChatTabRuntimeState => ({
     records: {},
-    controllers: new Map<string, ChatTabRuntimeController>(),
     closingTabIds: new Set<string>(),
     promotingTabIds: new Set<string>()
   }),
@@ -215,26 +203,6 @@ export const useChatTabStore = defineStore('chat-tab', {
     },
 
     /**
-     * 注册聊天标签终止控制器。
-     * @param tabId - 标签 ID
-     * @param controller - Runtime 控制器
-     */
-    registerController(tabId: string, controller: ChatTabRuntimeController): void {
-      if (!this.records[tabId]) return;
-      this.controllers.set(tabId, controller);
-    },
-
-    /**
-     * 注销聊天标签终止控制器。
-     * @param tabId - 标签 ID
-     * @param controller - 可选控制器身份，用于避免旧组件删除新控制器
-     */
-    unregisterController(tabId: string, controller?: ChatTabRuntimeController): void {
-      if (controller && toRaw(this.controllers.get(tabId)) !== controller) return;
-      this.controllers.delete(tabId);
-    },
-
-    /**
      * 同步 BChat 直接运行状态。
      * @param tabId - 标签 ID
      * @param status - BChat 状态
@@ -282,7 +250,7 @@ export const useChatTabStore = defineStore('chat-tab', {
     },
 
     /**
-     * 将草稿标签运行时状态和控制器迁移到持久化标签。
+     * 将草稿标签运行时状态迁移到持久化标签。
      * @param sourceTabId - 原草稿标签 ID
      * @param targetTabId - 新持久化标签 ID
      * @param sessionId - 新持久化会话 ID
@@ -290,7 +258,6 @@ export const useChatTabStore = defineStore('chat-tab', {
     promoteTab(sourceTabId: string, targetTabId: string, sessionId: string): void {
       const sourceRecord = this.records[sourceTabId];
       if (!sourceRecord || this.isClosing(sourceTabId)) return;
-      const sourceController = this.controllers.get(sourceTabId);
       this.records[targetTabId] = {
         ...sourceRecord,
         tabId: targetTabId,
@@ -298,42 +265,41 @@ export const useChatTabStore = defineStore('chat-tab', {
       };
       delete this.records[sourceTabId];
 
-      if (sourceController) this.controllers.set(targetTabId, sourceController);
-      this.controllers.delete(sourceTabId);
       useTabsStore().setTabStatus(sourceTabId, undefined);
       syncTabStatus(targetTabId, sourceRecord.status);
     },
 
     /**
-     * 清理聊天标签的运行时记录和控制器。
+     * 清理聊天标签的运行时记录。
      * @param tabId - 标签 ID
      */
     removeTab(tabId: string): void {
       useTabsStore().setTabStatus(tabId, undefined);
       delete this.records[tabId];
-      this.controllers.delete(tabId);
       this.closingTabIds.delete(tabId);
       this.promotingTabIds.delete(tabId);
     },
 
     /**
-     * 终止目标集合中仍在运行或等待用户的聊天。
-     * @param tabIds - 目标聊天标签 ID
+     * 关闭一个可见聊天标签；活动 Runtime 改为后台记录，终态记录直接清理。
+     * @param tabId - 已关闭的可见标签 ID
      */
-    async abortTabs(tabIds: string[]): Promise<void> {
-      const controllers = tabIds.reduce<ChatTabRuntimeController[]>((result: ChatTabRuntimeController[], tabId: string): ChatTabRuntimeController[] => {
-        const status = this.getStatus(tabId);
-        if (!isActiveRuntimeStatus(status)) return result;
+    closeTab(tabId: string): void {
+      const record = this.records[tabId];
+      if (!record) return;
+      useTabsStore().setTabStatus(tabId, undefined);
+      this.closingTabIds.delete(tabId);
+      this.promotingTabIds.delete(tabId);
 
-        const controller = this.controllers.get(tabId);
-        if (!controller) throw new Error(`未找到聊天标签 Runtime 控制器：${tabId}`);
-        result.push(controller);
-        return result;
-      }, []);
+      if (isActiveRuntimeStatus(record.status) && record.sessionId) {
+        const detachedTabId = `chat:${record.sessionId}`;
+        this.records[detachedTabId] = { ...record, tabId: detachedTabId };
+        if (detachedTabId !== tabId) delete this.records[tabId];
+        useTabsStore().setTabStatus(detachedTabId, undefined);
+        return;
+      }
 
-      const results = await Promise.allSettled(controllers.map((controller: ChatTabRuntimeController): Promise<void> => controller.abort()));
-      const failure = results.find((result: PromiseSettledResult<void>): result is PromiseRejectedResult => result.status === 'rejected');
-      if (failure) throw failure.reason;
+      this.removeTab(tabId);
     }
   }
 });

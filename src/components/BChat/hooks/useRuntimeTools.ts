@@ -2,7 +2,6 @@
  * @file useRuntimeTools.ts
  * @description ChatRuntime 内置工具创建和动态过滤 hook。
  */
-import type { Message } from '../utils/types';
 import type { AIToolExecutor } from 'types/ai';
 import type { ChatRuntimeSkillSnapshot } from 'types/chat-runtime';
 import type { Ref } from 'vue';
@@ -33,23 +32,44 @@ import { useSkillStore } from '@/stores/ai/skill';
 import { useToolSettingsStore } from '@/stores/ai/toolSettings';
 import { useWidgetStore } from '@/stores/ai/widget';
 import { useRecentStore } from '@/stores/workspace/recent';
-import { userChoice } from '../utils/messageHelper';
 import { createRuntimeError } from '../utils/runtimeError';
+
+/** Runtime 工具绑定后不可变的执行身份。 */
+export interface RuntimeToolBinding {
+  /** 持久化会话 ID。 */
+  readonly sessionId: string;
+  /** 主进程 Runtime ID。 */
+  readonly runtimeId: string;
+  /** 请求准备时冻结的工作区根目录。 */
+  readonly workspaceRoot: string | null;
+  /** 请求准备时冻结的文档 ID。 */
+  readonly documentId?: string;
+  /** 请求准备时冻结的 WebView 标签 ID。 */
+  readonly webviewId?: string;
+}
+
+/** 待回答 Question 的最小快照。 */
+interface PendingQuestionSnapshot {
+  /** Question 业务 ID。 */
+  questionId: string;
+  /** 发起 Question 的工具调用 ID。 */
+  toolCallId: string;
+}
 
 /**
  * Runtime 工具 hook 配置。
  */
 interface UseRuntimeToolsOptions {
-  /** 当前消息列表。 */
-  messages: Ref<Message[]>;
-  /** 工具确认适配器。 */
-  confirm: AIToolConfirmationAdapter;
+  /** 按 Runtime 绑定创建工具确认适配器。 */
+  createConfirmationAdapter: (binding?: RuntimeToolBinding) => AIToolConfirmationAdapter;
   /** 获取当前活跃会话 ID。 */
   getSessionId: () => string | undefined;
   /** 当前会话最终生效的工作区根目录。 */
   workspaceRoot: Readonly<Ref<string | null>>;
   /** 同步读取当前会话最终生效的工作区根目录。 */
   getWorkspaceRoot: () => string | null;
+  /** 按会话读取待回答 Question，避免绑定执行器读取可见页面消息。 */
+  getPendingQuestion: (sessionId: string) => PendingQuestionSnapshot | null;
   /** 在内置 WebView 中打开 URL。 */
   openWebview: (url: URL) => void;
 }
@@ -59,7 +79,7 @@ interface UseRuntimeToolsOptions {
  */
 interface UseRuntimeToolsReturn {
   /** 动态获取当前可用工具列表。 */
-  getActiveTools: () => AIToolExecutor[];
+  getActiveTools: (binding?: RuntimeToolBinding) => AIToolExecutor[];
   /** 发送请求前同步 Skill 与 Widget 磁盘定义。 */
   syncAIResources: () => Promise<void>;
   /** 获取当前已启用 Skill 的内容版本。 */
@@ -110,72 +130,83 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
     onConsole: handleWidgetConsole
   };
 
-  const allBuiltinTools = createBuiltinTools({
-    confirm: options.confirm,
-    skillStore,
-    widgetStore,
-    mcpStore: toolSettingsStore,
-    getWorkspaceRoot: options.getWorkspaceRoot,
-    isFileInRecent: (filePath: string) => {
-      return Boolean(recentStore.recentFiles?.some((file) => file.path === filePath));
-    },
-    /**
-     * 通过文件绝对路径查找文件 ID。
-     * 封装 recentStore.getFileByPath。
-     */
-    findFileByPath: async (filePath: string) => {
-      const file = await recentStore.getFileByPath(filePath);
-      return file ? { id: file.id } : null;
-    },
-    /**
-     * 通过文件 ID 获取编辑器上下文。
-     * 封装 editorToolContextRegistry.getContext。
-     */
-    getEditorContext: (documentId: string) => {
-      return editorToolContextRegistry.getContext(documentId);
-    },
-    getWebviewContext: () => webviewToolContextRegistry.getCurrentContext(),
-    openDraft,
-    /**
-     * 通过文件路径打开文件标签页。
-     * 封装 useNavigate().openFileByPath，返回 { id } 或 null。
-     */
-    openFileByPath,
-    /**
-     * 在内置 webview 中打开 URL。
-     * 通过 Vue Router 导航到 webview-web 页面。
-     */
-    openInWebview: (url: string) => {
-      options.openWebview(new URL(url));
-    },
-    /**
-     * 在系统浏览器中打开 URL。
-     * 通过 Electron shell.openExternal 实现。
-     */
-    openExternal: (url: string) => {
-      native.openExternal(url);
-    },
-    getPendingQuestion: () => {
-      const pendingQuestion = userChoice.findPending(options.messages.value);
-      if (!pendingQuestion) return null;
+  /**
+   * 为候选工具创建本次调用专属的内置执行器。
+   * @param binding - 可选的不可变 Runtime 身份；缺省时仅用于请求前工具发现
+   * @returns 新创建的内置工具执行器
+   */
+  function createBoundTools(binding?: RuntimeToolBinding): AIToolExecutor[] {
+    const getSessionId = binding ? (): string => binding.sessionId : options.getSessionId;
+    const getWorkspaceRoot = binding ? (): string | null => binding.workspaceRoot : options.getWorkspaceRoot;
 
-      return {
-        questionId: pendingQuestion.questionId,
-        toolCallId: pendingQuestion.toolCallId
-      };
-    },
-    getSessionId: options.getSessionId
-  });
+    /** @returns Runtime 绑定的 WebView 上下文；未绑定时读取当前上下文。 */
+    function getWebviewContext(): unknown {
+      if (!binding) return webviewToolContextRegistry.getCurrentContext();
+      if (!binding.webviewId) return undefined;
+      return webviewToolContextRegistry.getContext(binding.webviewId);
+    }
+
+    return createBuiltinTools({
+      confirm: options.createConfirmationAdapter(binding),
+      skillStore,
+      widgetStore,
+      mcpStore: toolSettingsStore,
+      getWorkspaceRoot,
+      isFileInRecent: (filePath: string): boolean => {
+        return Boolean(recentStore.recentFiles?.some((file): boolean => file.path === filePath));
+      },
+      /**
+       * 通过文件绝对路径查找文件 ID。
+       * @param filePath - 文件绝对路径
+       * @returns 文件 ID，不存在时返回 null
+       */
+      findFileByPath: async (filePath: string): Promise<{ id: string } | null> => {
+        const file = await recentStore.getFileByPath(filePath);
+        return file ? { id: file.id } : null;
+      },
+      /**
+       * 通过文件 ID 获取编辑器上下文。
+       * @param documentId - 文档 ID
+       * @returns 对应编辑器上下文
+       */
+      getEditorContext: (documentId: string) => {
+        return editorToolContextRegistry.getContext(documentId);
+      },
+      getWebviewContext,
+      openDraft,
+      openFileByPath,
+      /**
+       * 在内置 WebView 中打开 URL。
+       * @param url - 目标 URL
+       */
+      openInWebview: (url: string): void => {
+        options.openWebview(new URL(url));
+      },
+      /**
+       * 在系统浏览器中打开 URL。
+       * @param url - 目标 URL
+       */
+      openExternal: (url: string): void => {
+        native.openExternal(url);
+      },
+      getPendingQuestion: (): PendingQuestionSnapshot | null => {
+        const sessionId = getSessionId();
+        return sessionId ? options.getPendingQuestion(sessionId) : null;
+      },
+      getSessionId
+    });
+  }
 
   /**
    * 动态获取当前可用的工具列表。
    * 每次调用时根据运行时状态（编辑器、MCP、Skill、Widget）过滤条件工具。
    * @returns 当前可用工具列表
    */
-  function getActiveTools(): AIToolExecutor[] {
+  function getActiveTools(binding?: RuntimeToolBinding): AIToolExecutor[] {
+    const allBuiltinTools = createBoundTools(binding);
     const hasActiveEditor = Boolean(editorToolContextRegistry.getCurrentContext());
     const hasActiveWebview = Boolean(webviewToolContextRegistry.getCurrentContext());
-    const hasWorkspace = Boolean(options.workspaceRoot.value);
+    const hasWorkspace = Boolean(binding ? binding.workspaceRoot : options.workspaceRoot.value);
     const enabledWidgets = widgetStore.initialized ? widgetStore.getEnabledWidgets() : [];
     const hasActiveWidgets = widgetStore.initialized && enabledWidgets.length > 0;
     const baseBuiltinTools = hasActiveWidgets
@@ -203,8 +234,10 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
       );
     }
 
-    return [...baseBuiltinTools, ...dynamicTools].filter((tool) => {
+    return [...baseBuiltinTools, ...dynamicTools].filter((tool: AIToolExecutor): boolean => {
       if (!isBuiltinToolName(tool.definition.name)) return false;
+      // 绑定阶段只重建执行器；最终能力严格由准备阶段 allowlist 决定。
+      if (binding) return tool.definition.name !== READ_DIRECTORY_TOOL_NAME || hasWorkspace;
       if (tool.definition.name === 'read_current_document' && !hasActiveEditor) return false;
       if (tool.definition.name === READ_CURRENT_WEBPAGE_TOOL_NAME && !hasActiveWebview) return false;
       if (tool.definition.name === OPERATE_WEBPAGE_TOOL_NAME && !hasActiveWebview) return false;

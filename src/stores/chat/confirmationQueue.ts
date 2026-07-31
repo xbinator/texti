@@ -15,8 +15,12 @@ export type ChatConfirmationQueueItem =
       readonly source: 'runtime';
       /** Renderer 内稳定 confirmation 身份。 */
       readonly confirmationId: string;
-      /** 创建该确认控制器的稳定 owner。 */
-      readonly ownerId: string;
+      /** confirmation 所属会话。 */
+      readonly sessionId: string;
+      /** confirmation 所属 Runtime。 */
+      readonly runtimeId: string;
+      /** 可选的工具调用身份，用于精确处理取消事件。 */
+      readonly toolCallId?: string;
       /** 归一化工具确认请求。 */
       readonly request: AIToolConfirmationRequest;
       /** 请求进入队列的 ISO-8601 时间。 */
@@ -68,6 +72,8 @@ interface ChatConfirmationQueueState {
   selectedId: string | null;
   /** 即使终态项已移除，仍保留其单调 cursor 防止旧事件复活。 */
   agentCursors: Record<string, AgentConfirmationCursor>;
+  /** Agent 终态 cursor 从最旧到最新的淘汰顺序。 */
+  agentTerminalOrder: string[];
 }
 
 /** 风险排序权重；数值越大越优先展示。 */
@@ -77,8 +83,34 @@ const RISK_PRIORITY = {
   dangerous: 3
 } as const;
 
+/** Renderer 最多保留的 Agent 终态 tombstone 数量。 */
+const MAX_AGENT_TERMINAL_CURSORS = 512;
+
 /** 每个 Pinia Store 实例独享的不可序列化 recovery flight。 */
 const AGENT_RECOVERY_FLIGHTS = new WeakMap<object, Promise<void>>();
+
+/**
+ * 写入 Agent cursor，并按最近终态顺序淘汰最旧 tombstone。
+ * @param cursors - 当前 Agent cursor 表
+ * @param terminalOrder - 从最旧到最新的终态 cursor 身份
+ * @param confirmationId - confirmation 身份
+ * @param cursor - 最新单调 cursor
+ */
+function setAgentCursor(
+  cursors: Record<string, AgentConfirmationCursor>,
+  terminalOrder: string[],
+  confirmationId: string,
+  cursor: AgentConfirmationCursor
+): void {
+  const existingOrderIndex = terminalOrder.indexOf(confirmationId);
+  if (existingOrderIndex >= 0) terminalOrder.splice(existingOrderIndex, 1);
+  cursors[confirmationId] = cursor;
+  if (cursor.terminal) terminalOrder.push(confirmationId);
+  while (terminalOrder.length > MAX_AGENT_TERMINAL_CURSORS) {
+    const oldestId = terminalOrder.shift();
+    if (oldestId) delete cursors[oldestId];
+  }
+}
 
 /**
  * 解包 confirmation IPC 信封。
@@ -173,7 +205,8 @@ export const useChatConfirmationQueueStore = defineStore('chat-confirmation-queu
   state: (): ChatConfirmationQueueState => ({
     items: {},
     selectedId: null,
-    agentCursors: {}
+    agentCursors: {},
+    agentTerminalOrder: []
   }),
 
   getters: {
@@ -202,32 +235,16 @@ export const useChatConfirmationQueueStore = defineStore('chat-confirmation-queu
     },
 
     /**
-     * 仅由匹配 owner 删除一个 Runtime confirmation。
+     * 删除一个 Runtime confirmation 投影。
      * @param confirmationId - 目标 confirmation
-     * @param ownerId - 控制器 owner
      * @returns 是否删除成功
      */
-    removeRuntime(confirmationId: string, ownerId: string): boolean {
+    removeRuntime(confirmationId: string): boolean {
       const item = this.items[confirmationId];
-      if (!item || item.source !== 'runtime' || item.ownerId !== ownerId) return false;
+      if (!item || item.source !== 'runtime') return false;
       delete this.items[confirmationId];
       if (this.selectedId === confirmationId) this.selectedId = null;
       return true;
-    },
-
-    /**
-     * 删除一个 controller 拥有的全部 Runtime 项，绝不触碰 Agent 项。
-     * @param ownerId - 稳定 controller owner
-     * @returns 已删除 confirmation IDs
-     */
-    removeOwner(ownerId: string): string[] {
-      const ownedIds = Object.values(this.items)
-        .filter((item): item is ChatRuntimeConfirmationItem => item.source === 'runtime' && item.ownerId === ownerId)
-        .map((item): string => item.confirmationId);
-      ownedIds.forEach((confirmationId): void => {
-        this.removeRuntime(confirmationId, ownerId);
-      });
-      return ownedIds;
     },
 
     /**
@@ -240,12 +257,12 @@ export const useChatConfirmationQueueStore = defineStore('chat-confirmation-queu
       if (currentItem?.source === 'runtime') return;
       const currentCursor = this.agentCursors[snapshot.confirmationId];
       if (!isNewerSnapshot(snapshot, currentCursor)) return;
-      this.agentCursors[snapshot.confirmationId] = {
+      setAgentCursor(this.agentCursors, this.agentTerminalOrder, snapshot.confirmationId, {
         version: snapshot.version,
         updatedAt: snapshot.updatedAt,
         identityKey: createIdentityKey(snapshot),
         terminal: currentCursor?.terminal === true || isTerminalSnapshot(snapshot)
-      };
+      });
       if (snapshot.status !== 'pending') {
         const current = this.items[snapshot.confirmationId];
         if (current?.source === 'agent') delete this.items[snapshot.confirmationId];
@@ -288,11 +305,14 @@ export const useChatConfirmationQueueStore = defineStore('chat-confirmation-queu
           current.snapshot.status !== 'pending' ||
           current.snapshot.version !== entry.version ||
           current.snapshot.updatedAt !== entry.updatedAt ||
-          cursor?.version !== entry.version ||
+          !cursor ||
+          cursor.version !== entry.version ||
           cursor.updatedAt !== entry.updatedAt
         ) {
           return;
         }
+        // Main 权威 pending 列表已确认该请求消失，保留有界终态 fence 防止迟到事件复活。
+        setAgentCursor(this.agentCursors, this.agentTerminalOrder, entry.confirmationId, { ...cursor, terminal: true });
         delete this.items[entry.confirmationId];
         if (this.selectedId === entry.confirmationId) this.selectedId = null;
       });

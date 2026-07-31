@@ -206,8 +206,6 @@ const hasAvailableModels = computed<boolean>((): boolean => providerStore.availa
 const conversationRef = ref<InstanceType<typeof ConversationView>>();
 /** 当前正在创建会话分支的助手消息 ID，用于底层拦截重复请求。 */
 const branchingMessageId = ref<string>();
-/** 确认控制器，管理工具调用的用户确认流程 */
-const confirmationController = createChatConfirmationController();
 /** 应用级 Runtime/Agent confirmation queue。 */
 const confirmationQueue = useChatConfirmationQueueStore();
 /** 订阅 Main 持久化 confirmation 事实并恢复 Renderer 队列。 */
@@ -217,7 +215,6 @@ const workflowLoading = ref<boolean>(false);
 /** 会话 ID、历史消息与自动命名运行时态。 */
 const sessionRuntime = useChatSessionRuntime({
   sessionId: toRef(props, 'sessionId'),
-  disposeConfirmation: confirmationController.dispose,
   focusInput,
   hasPendingUserChoice: (sourceMessages: Message[]): boolean => Boolean(userChoice.findPending(sourceMessages)),
   onSessionCreated: (session: ChatSession): void => emit('session-created', session),
@@ -225,7 +222,10 @@ const sessionRuntime = useChatSessionRuntime({
 });
 const {
   activeSessionId,
+  createdSessionId,
   setLoadedMessages,
+  upsertLiveMessage,
+  removeLiveMessage,
   fetchAllPriorHistory,
   messages,
   ensureActiveSession: ensureSession,
@@ -234,6 +234,8 @@ const {
   captureAutoNameSnapshot,
   scheduleAutoName
 } = sessionRuntime;
+/** 按当前会话投影 application-level Runtime confirmation。 */
+const confirmationController = createChatConfirmationController(activeSessionId);
 /** 当前会话的工作区覆盖、默认回退和目录预检能力。 */
 const { workspaceRoot, workspaceOverride, workspaceLabel, selectWorkspace, clearWorkspace, assertWorkspaceAvailable } = useSessionWorkspace({
   activeSessionId,
@@ -285,11 +287,18 @@ watch(messages, (loadedMessages: Message[]): void => {
 const { currentSessionTodos, todoPanelVisible, todoPanelDismissed, restoreTodoSnapshotsForMessages } = useTodoPanel({ activeSessionId });
 /** Runtime 内置工具能力。 */
 const { getActiveTools, syncAIResources, getSkillContentHashes, resolveSkillSnapshots, openDraft, openFileByPath } = useRuntimeTools({
-  messages,
-  confirm: confirmationController.createAdapter(),
+  createConfirmationAdapter: (binding): ReturnType<typeof confirmationController.createAdapter> => confirmationController.createAdapter(binding),
   getSessionId: (): string | undefined => activeSessionId.value ?? undefined,
   workspaceRoot,
   getWorkspaceRoot: (): string | null => workspaceRoot.value,
+  getPendingQuestion: (sessionId: string): { questionId: string; toolCallId: string } | null => {
+    const pendingInteraction = chatActorSystem.getSession(sessionId)?.getSnapshot().context.pendingInteraction;
+    if (!pendingInteraction || pendingInteraction.type !== 'userChoice' || pendingInteraction.status !== 'pending') return null;
+    return {
+      questionId: pendingInteraction.questionId,
+      toolCallId: pendingInteraction.toolCallId
+    };
+  },
   openWebview
 });
 
@@ -299,7 +308,7 @@ const { getActiveTools, syncAIResources, getSkillContentHashes, resolveSkillSnap
  */
 async function handleConfirmationSheetAction(payload: ConfirmationSheetActionPayload): Promise<void> {
   const confirmation = confirmationQueue.items[payload.confirmationId];
-  const currentConfirmation = confirmationQueue.current;
+  const currentConfirmation = confirmationController.currentConfirmation.value;
   if (
     !confirmation ||
     !currentConfirmation ||
@@ -437,12 +446,13 @@ const { prepareRuntimeRequest, resolveRuntimeRequestConfig } = useRuntimeRequest
   onMissingServiceConfig: showNoModelToast
 });
 
-/** 当前应用级 Runtime Bridge 请求处理器。 */
-const handleRuntimeBridgeRequest = useRuntimeBridgeHandler({ openDraft, openFileByPath, openWebview });
+/** 按不可变 Runtime 身份创建 Bridge 请求处理器。 */
+const createRuntimeBridgeHandler = useRuntimeBridgeHandler({ openDraft, openFileByPath, openWebview });
 /** Session 状态机与 Runtime IPC 工作流。 */
 const workflow = useChatWorkflow({
   messages,
   activeSessionId,
+  isDraftPromotion: (sessionId: string): boolean => createdSessionId.value === sessionId,
   contextWindow,
   workspaceRoot,
   supportsVision,
@@ -451,11 +461,13 @@ const workflow = useChatWorkflow({
   getActiveTools,
   prepareRuntimeRequest,
   resolveRuntimeRequestConfig,
-  handleBridgeRequest: handleRuntimeBridgeRequest,
+  createBridgeHandler: createRuntimeBridgeHandler,
   confirmationController,
   ensureActiveSession,
   fetchAllPriorHistory,
   setLoadedMessages,
+  upsertLiveMessage,
+  removeLiveMessage,
   restoreInput: inputEvents.restoreFromMessage,
   clearInput: inputEvents.clear,
   focusInput,
@@ -467,6 +479,7 @@ const workflow = useChatWorkflow({
   },
   onModelNotFound: showNoModelToast,
   showRuntimeError: (message: string): void => interactionAPI.showToast({ type: 'error', content: message }),
+  onPreparationCancelled: (sessionId: string, status: 'idle' | 'waiting'): void => emit('runtime-status-change', { status, sessionId }),
   restoreTodoSnapshots: restoreTodoSnapshotsForMessages
 });
 
@@ -515,6 +528,7 @@ const rollbackBusy = computed<boolean>((): boolean => chatSessionActor.snapshot.
 /** 页面标签使用的稳定运行状态投影。 */
 const runtimeStatus = computed<BChatRuntimeSourceStatus>((): BChatRuntimeSourceStatus => {
   if (rollbackBusy.value) return 'idle';
+  if (confirmationController.currentConfirmation.value) return 'waiting';
   if (chatSessionActor.waitingForUser.value) return 'waiting';
   if (loading.value) return 'running';
   if (chatSessionActor.snapshot.value?.context.error) return 'error';
@@ -576,17 +590,16 @@ async function handleChatSubmit(): Promise<void> {
   await workflow.submitUserTextMessage(content, inputImages.value);
 }
 
-/** 中止当前页面托管的 Runtime。 */
-async function abortRuntime(): Promise<void> {
-  await handleAbort();
-}
-
 /**
  * 清空输入与消息并进入新的草稿会话。
  * 该能力供顶部草稿标签复用时显式调用。
  */
 async function resetDraft(options: BChatResetDraftOptions = {}): Promise<void> {
-  if (loading.value) return;
+  if (loading.value) {
+    // 新建入口保持可用时，先使尚未进入 Main 的异步预检失效；真实 Runtime 或等待交互仍由领域状态阻止清空。
+    workflow.dispose();
+    if (loading.value) return;
+  }
   inputEvents.clear(options);
   await resetDraftState(options);
 }
@@ -636,7 +649,7 @@ onUnmounted((): void => {
 });
 
 /** 暴露页面宿主管理会话所需的最小控制面。 */
-defineExpose({ abortRuntime, focusInput, resetDraft });
+defineExpose({ focusInput, resetDraft });
 </script>
 
 <style lang="less">

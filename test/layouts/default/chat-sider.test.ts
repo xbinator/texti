@@ -23,6 +23,8 @@ const bChatFocusInputMock = vi.hoisted(() => vi.fn<() => void>());
 const routerPushMock = vi.hoisted(() => vi.fn<(path: string) => Promise<unknown>>());
 const routeFailureMock = vi.hoisted(() => ({ type: 'aborted' }));
 const routeMock = vi.hoisted(() => ({ fullPath: '/welcome' }));
+const removeActorSessionMock = vi.hoisted(() => vi.fn<(sessionId: string) => void>());
+const expireSessionConfirmationsMock = vi.hoisted(() => vi.fn<(sessionId: string) => void>());
 
 vi.mock('vue-router', () => ({
   useRoute: (): typeof routeMock => routeMock,
@@ -31,6 +33,14 @@ vi.mock('vue-router', () => ({
 
 vi.mock('@/router/navigation', () => ({
   isBlockingNavigationFailure: (result: unknown): boolean => result === routeFailureMock
+}));
+
+vi.mock('@/hooks/useChat/useActorSystem', () => ({
+  useActorSystem: () => ({ removeSession: removeActorSessionMock })
+}));
+
+vi.mock('@/components/BChat/utils/confirmationController', () => ({
+  expireSessionConfirmations: expireSessionConfirmationsMock
 }));
 
 vi.mock('@/components/BButton/index.vue', () => ({
@@ -49,7 +59,7 @@ vi.mock('@/components/BChat/index.vue', () => ({
   default: {
     name: 'BChat',
     props: ['sessionId'],
-    emits: ['session-created', 'session-title-persisted', 'new-session', 'loading-change'],
+    emits: ['session-created', 'session-title-persisted', 'new-session', 'loading-change', 'runtime-status-change'],
     setup(
       _props: unknown,
       { expose }: { expose: (exposed: { focusInput: () => void; resetDraft: (options?: { focus?: boolean }) => Promise<void> }) => void }
@@ -67,9 +77,9 @@ vi.mock('@/components/BChat/index.vue', () => ({
 vi.mock('@/components/BChat/components/SessionHistory.vue', () => ({
   default: {
     name: 'SessionHistory',
-    props: ['activeSessionId', 'disabled'],
+    props: ['activeSessionId'],
     emits: ['switch-session', 'delete-session', 'load-more'],
-    template: '<button class="session-history-stub" :disabled="disabled"></button>'
+    template: '<button class="session-history-stub"></button>'
   }
 }));
 
@@ -189,6 +199,8 @@ describe('ChatSider', (): void => {
     bChatFocusInputMock.mockReset();
     routerPushMock.mockReset();
     routerPushMock.mockResolvedValue(undefined);
+    removeActorSessionMock.mockReset();
+    expireSessionConfirmationsMock.mockReset();
     routeMock.fullPath = '/welcome';
   });
 
@@ -228,7 +240,11 @@ describe('ChatSider', (): void => {
     expect(sider.classes()).toContain('chat-sider--visible');
     expect(sider.classes()).not.toContain('chat-sider--motion');
 
-    await wrapper.setProps({ motionEnabled: true });
+    const closeButton = wrapper
+      .findAllComponents({ name: 'BButton' })
+      .find((button) => button.findComponent({ name: 'BIcon' }).attributes('icon') === 'lucide:x');
+    await closeButton?.trigger('click');
+    await nextTick();
     expect(sider.classes()).toContain('chat-sider--motion');
   });
 
@@ -236,7 +252,7 @@ describe('ChatSider', (): void => {
     const rootStyle = chatSiderSource.match(/\.chat-sider \{(?<body>[\s\S]*?)\n\}/u)?.groups?.body ?? '';
     const contentStyle = chatSiderSource.match(/\.chat-sider__content \{(?<body>[\s\S]*?)\n\}/u)?.groups?.body ?? '';
 
-    expect(chatSiderSource).toContain(':class="bem({ motion: props.motionEnabled, visible: settingStore.sidebarVisible })"');
+    expect(chatSiderSource).toContain(':class="bem({ motion: motionEnabled, visible: settingStore.sidebarVisible })"');
     expect(chatSiderSource).toContain('.chat-sider--motion {');
     expect(rootStyle).not.toContain('overflow: hidden;');
     expect(rootStyle).not.toContain('transition:');
@@ -261,7 +277,7 @@ describe('ChatSider', (): void => {
     expect(chatStore.ensureSessions).toHaveBeenCalledTimes(1);
   });
 
-  it('requests animated close only from the internal close button', async (): Promise<void> => {
+  it('uses animated close only for the internal close button', async (): Promise<void> => {
     const settingStore = useSettingStore();
     settingStore.setSidebarVisible(true);
     const wrapper = mountChatSider();
@@ -273,15 +289,19 @@ describe('ChatSider', (): void => {
       .find((button) => button.findComponent({ name: 'BIcon' }).attributes('icon') === 'lucide:x');
     expect(closeButton?.props('tooltip')).toBeUndefined();
     await closeButton?.trigger('click');
+    await nextTick();
 
-    expect(wrapper.emitted('button-close')).toEqual([[]]);
-    expect(settingStore.sidebarVisible).toBe(true);
+    expect(settingStore.sidebarVisible).toBe(false);
+    expect(wrapper.find('.b-panel-splitter').classes()).toContain('chat-sider--motion');
+
+    settingStore.setSidebarVisible(true);
+    await nextTick();
 
     wrapper.findComponent({ name: 'BPanelSplitter' }).vm.$emit('close');
     await nextTick();
 
     expect(settingStore.sidebarVisible).toBe(false);
-    expect(wrapper.emitted('button-close')).toEqual([[]]);
+    expect(wrapper.find('.b-panel-splitter').classes()).not.toContain('chat-sider--motion');
   });
 
   it('loads the next shared session page when history requests more data', async (): Promise<void> => {
@@ -307,6 +327,79 @@ describe('ChatSider', (): void => {
 
     expect(settingStore.chatSidebarActiveSessionId).toBe('session-created');
     expect(wrapper.text()).toContain('首条消息');
+  });
+
+  it('projects a persisted sidebar session runtime without disabling controls', async (): Promise<void> => {
+    const settingStore = useSettingStore();
+    settingStore.setSidebarVisible(true);
+    settingStore.setChatSidebarActiveSessionId('session-running');
+    chatStore.sessions = [createSession('session-running', '运行会话')];
+    const wrapper = mountChatSider();
+    await flushPromises();
+
+    wrapper.findComponent({ name: 'BChat' }).vm.$emit('runtime-status-change', { status: 'running' });
+    await nextTick();
+
+    expect(useChatTabStore().findOwner('session-running')).toMatchObject({
+      tabId: 'chat:session-running',
+      status: 'running'
+    });
+    expect(wrapper.find('[disabled]').exists()).toBe(false);
+  });
+
+  it('binds the first running status after the sidebar creates its session', async (): Promise<void> => {
+    const settingStore = useSettingStore();
+    settingStore.setSidebarVisible(true);
+    const wrapper = mountChatSider();
+    await flushPromises();
+    const createdSession = createSession('session-created', '首条消息');
+    chatStore.sessions = [createdSession];
+
+    wrapper.findComponent({ name: 'BChat' }).vm.$emit('runtime-status-change', { status: 'running' });
+    wrapper.findComponent({ name: 'BChat' }).vm.$emit('session-created', createdSession);
+    await nextTick();
+
+    expect(useChatTabStore().findOwner('session-created')).toMatchObject({
+      tabId: 'chat:session-created',
+      status: 'running'
+    });
+  });
+
+  it('projects completion to the matching background sidebar owner', async (): Promise<void> => {
+    const settingStore = useSettingStore();
+    settingStore.setSidebarVisible(true);
+    settingStore.setChatSidebarActiveSessionId('session-b');
+    chatStore.sessions = [createSession('session-a', '会话 A'), createSession('session-b', '会话 B')];
+    const runtimeStore = useChatTabStore();
+    runtimeStore.ensureTab('chat:session-a', 'session-a');
+    runtimeStore.setStatus('chat:session-a', 'running');
+    const wrapper = mountChatSider();
+    await flushPromises();
+
+    wrapper.findComponent({ name: 'BChat' }).vm.$emit('runtime-status-change', { status: 'completed', sessionId: 'session-a' });
+    await nextTick();
+
+    expect(runtimeStore.getStatus('chat:session-a')).toBe('completed');
+  });
+
+  it('projects an abandoned preparation status to its original background Session', async (): Promise<void> => {
+    const settingStore = useSettingStore();
+    settingStore.setSidebarVisible(true);
+    settingStore.setChatSidebarActiveSessionId('session-b');
+    chatStore.sessions = [createSession('session-a', '会话 A'), createSession('session-b', '会话 B')];
+    const runtimeStore = useChatTabStore();
+    runtimeStore.ensureTab('chat:session-a', 'session-a');
+    runtimeStore.ensureTab('chat:session-b', 'session-b');
+    runtimeStore.setStatus('chat:session-a', 'running');
+    runtimeStore.setStatus('chat:session-b', 'running');
+    const wrapper = mountChatSider();
+    await flushPromises();
+
+    wrapper.findComponent({ name: 'BChat' }).vm.$emit('runtime-status-change', { status: 'idle', sessionId: 'session-a' });
+    await nextTick();
+
+    expect(runtimeStore.getStatus('chat:session-a')).toBe('idle');
+    expect(runtimeStore.getStatus('chat:session-b')).toBe('running');
   });
 
   it('displays the title already synchronized by the shared Store', async (): Promise<void> => {
@@ -401,8 +494,12 @@ describe('ChatSider', (): void => {
     expect(bChatFocusInputMock).not.toHaveBeenCalled();
   });
 
-  it('disables session controls while chat is loading', async (): Promise<void> => {
-    useSettingStore().setSidebarVisible(true);
+  it('keeps every session control enabled while chat and session history are loading', async (): Promise<void> => {
+    const settingStore = useSettingStore();
+    settingStore.setSidebarVisible(true);
+    settingStore.setChatSidebarActiveSessionId('session-running');
+    chatStore.sessions = [createSession('session-running', '运行会话')];
+    chatStore.sessionsLoading = true;
     const wrapper = mountChatSider();
     await flushPromises();
     await nextTick();
@@ -410,13 +507,20 @@ describe('ChatSider', (): void => {
     wrapper.findComponent({ name: 'BChat' }).vm.$emit('loading-change', true);
     await nextTick();
 
-    expect(wrapper.findAllComponents({ name: 'BButton' })[0].attributes('disabled')).toBeDefined();
+    expect(wrapper.findAllComponents({ name: 'BButton' })[0].attributes('disabled')).toBeUndefined();
     expect(wrapper.findAllComponents({ name: 'BButton' })[0].props('tooltip')).toBeUndefined();
-    expect(wrapper.find('.session-history-stub').attributes('disabled')).toBeDefined();
+    expect(wrapper.findComponent({ name: 'SessionHistory' }).props('disabled')).toBeUndefined();
+    expect(wrapper.find('.session-history-stub').attributes('disabled')).toBeUndefined();
     const openButton = wrapper
       .findAllComponents({ name: 'BButton' })
       .find((button) => button.findComponent({ name: 'BIcon' }).attributes('icon') === 'lucide:square-arrow-out-up-right');
-    expect(openButton?.attributes('disabled')).toBeDefined();
+    expect(openButton?.attributes('disabled')).toBeUndefined();
+
+    await wrapper.find('.chat-sider__title').trigger('dblclick');
+    expect(wrapper.find('.chat-sider__title-input').exists()).toBe(true);
+    await wrapper.findAllComponents({ name: 'BButton' })[0].trigger('click');
+    await flushPromises();
+    expect(settingStore.chatSidebarActiveSessionId).toBeNull();
   });
 
   it('opens the side session in a chat tab and resets the side to draft', async (): Promise<void> => {
@@ -560,6 +664,17 @@ describe('ChatSider', (): void => {
 
     expect(tabsStore.tabs).toEqual([]);
     expect(useChatTabStore().records['chat:session-a']).toBeUndefined();
+  });
+
+  it('clears application Runtime ownership after successful session deletion', async (): Promise<void> => {
+    const wrapper = mountChatSider();
+    await flushPromises();
+
+    wrapper.findComponent({ name: 'SessionHistory' }).vm.$emit('delete-session', 'session-a');
+    await flushPromises();
+
+    expect(expireSessionConfirmationsMock).toHaveBeenCalledWith('session-a');
+    expect(removeActorSessionMock).toHaveBeenCalledWith('session-a');
   });
 
   it('removes chat:new when the deleted session is its temporary owner', async (): Promise<void> => {

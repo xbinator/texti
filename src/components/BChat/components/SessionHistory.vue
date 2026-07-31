@@ -3,8 +3,8 @@
   @description 展示共享聊天会话集合，并处理切换、分页请求和删除交互。
 -->
 <template>
-  <BDropdown v-model:open="open" :disabled="isDisabled" :align="{ offset: [-84, 0] }">
-    <BButton square size="small" type="text" :disabled="isDisabled">
+  <BDropdown v-model:open="open" :align="{ offset: [-84, 0] }">
+    <BButton square size="small" type="text">
       <BIcon icon="lucide:history" :size="16" />
     </BButton>
 
@@ -24,10 +24,12 @@
                 @click="handleSwitchSession(session.id)"
               >
                 <span class="session-history__content">
+                  <BIcon v-if="getSessionStatus(session.id) === 'running'" class="session-history__status-icon is-spinning" icon="lucide:loader-2" :size="14" />
+                  <BIcon v-else-if="getSessionStatus(session.id) === 'waiting'" class="session-history__status-icon" icon="lucide:circle-help" :size="14" />
                   <span class="session-history__item-title">{{ session.title }}</span>
                 </span>
-                <span v-if="!activeRuntimeIds.has(session.id)" class="session-history__actions">
-                  <BButton type="text" square danger size="small" :disabled="activeRuntimeIds.has(session.id)" @click.stop="handleDeleteSession(session.id)">
+                <span class="session-history__actions">
+                  <BButton type="text" square danger size="small" @click.stop="handleDeleteSession(session.id)">
                     <BIcon icon="lucide:trash-2" :size="14" />
                   </BButton>
                 </span>
@@ -53,12 +55,13 @@ import { computed, ref } from 'vue';
 import { useInfiniteScroll } from '@vueuse/core';
 import { message } from 'ant-design-vue';
 import dayjs from 'dayjs';
-import { filter, groupBy, map } from 'lodash-es';
+import { groupBy, map } from 'lodash-es';
 import BButton from '@/components/BButton/index.vue';
 import BDropdown from '@/components/BDropdown/index.vue';
 import { useChatSessionStore } from '@/stores/chat/session';
-import { isActiveRuntimeStatus, useChatTabStore } from '@/stores/chat/tab';
+import { type ChatTabRuntimeStatus, useChatTabStore } from '@/stores/chat/tab';
 import { asyncTo } from '@/utils/asyncTo';
+import { Modal } from '@/utils/modal';
 
 /**
  * 组件 Props 定义
@@ -66,9 +69,6 @@ import { asyncTo } from '@/utils/asyncTo';
 interface Props {
   /** 当前选中的会话 ID */
   activeSessionId?: string | null;
-
-  /** 是否禁用历史会话操作 */
-  disabled?: boolean;
 }
 
 /**
@@ -84,14 +84,15 @@ interface SessionGroup {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  activeSessionId: null,
-  disabled: false
+  activeSessionId: null
 });
 
 const open = ref(false);
 const chatStore = useChatSessionStore();
-/** 聊天标签运行时态存储，用于判断每个会话是否处于运行/等待等忙碌状态。 */
+/** 聊天会话运行态投影 Store。 */
 const runtimeStore = useChatTabStore();
+/** 正在确认或删除的会话，避免快速重复点击创建并行事务。 */
+const deletingSessionIds = new Set<string>();
 
 /** 滚动容器引用 */
 const scrollContainer = ref<HTMLElement>();
@@ -101,19 +102,6 @@ const emit = defineEmits<{
   (e: 'delete-session', sessionId: string): void;
   (e: 'load-more'): void;
 }>();
-
-const isDisabled = computed(() => props.disabled);
-/** 忙碌会话 ID 集合：运行、等待或标签身份晋升期间均禁止删除。 */
-const activeRuntimeIds = computed<Set<string>>((): Set<string> => {
-  const busyRecords = filter(
-    Object.values(runtimeStore.records),
-    (record) => record.sessionId && (isActiveRuntimeStatus(record.status) || runtimeStore.isPromoting(record.tabId))
-  );
-
-  const busyIds = map(busyRecords, 'sessionId');
-
-  return new Set(busyIds);
-});
 
 /**
  * 将时间戳转换为日期键（YYYY-MM-DD 格式）
@@ -164,7 +152,6 @@ useInfiniteScroll(
  * @param sessionId - 目标会话 ID
  */
 function handleSwitchSession(sessionId: string): void {
-  if (props.disabled) return;
   if (sessionId === props.activeSessionId) return;
 
   open.value = false;
@@ -173,20 +160,58 @@ function handleSwitchSession(sessionId: string): void {
 }
 
 /**
+ * 获取会话当前的界面运行状态。
+ * @param sessionId - 会话 ID
+ * @returns Runtime Store 中的状态，找不到记录时返回 idle
+ */
+function getSessionStatus(sessionId: string): ChatTabRuntimeStatus {
+  return runtimeStore.findOwner(sessionId)?.status ?? 'idle';
+}
+
+/**
+ * 根据会话状态生成删除确认文案。
+ * @param sessionId - 会话 ID
+ * @returns 对应状态的危险确认文案
+ */
+function getDeleteContent(sessionId: string): string {
+  const session = chatStore.sessions.find((item: ChatSession): boolean => item.id === sessionId);
+  const title = session?.title.trim() || '未命名聊天';
+  const status = getSessionStatus(sessionId);
+  if (status === 'running') {
+    return `确定终止并删除聊天“${title}”吗？当前聊天仍在运行，删除前会先终止所有任务。删除后无法恢复。`;
+  }
+  if (status === 'waiting') {
+    return `确定终止并删除聊天“${title}”吗？当前聊天正在等待你的操作，删除时会取消等待中的交互。删除后无法恢复。`;
+  }
+  return `确定删除聊天“${title}”吗？删除后无法恢复。`;
+}
+
+/**
  * 删除指定会话，保持当前分页状态不变
  * @param sessionId - 要删除的会话 ID
  */
 async function handleDeleteSession(sessionId: string): Promise<void> {
-  if (props.disabled) return;
-  if (chatStore.sessionsLoading) return;
-  if (activeRuntimeIds.value.has(sessionId)) return;
+  if (chatStore.sessionsLoading || deletingSessionIds.has(sessionId)) return;
 
-  const [error] = await asyncTo(chatStore.deleteSession(sessionId));
+  deletingSessionIds.add(sessionId);
+  try {
+    const content = getDeleteContent(sessionId);
+    const [confirmError, result] = await asyncTo(Modal.delete(content));
+    if (confirmError) {
+      message.error(confirmError.message || '打开删除确认失败，请重试');
+      return;
+    }
+    if (!result[1]) return;
 
-  if (!error) {
+    const [deleteError] = await asyncTo(chatStore.deleteSession(sessionId));
+    if (deleteError) {
+      message.error(deleteError.message || '删除会话失败，请重试');
+      return;
+    }
+
     emit('delete-session', sessionId);
-  } else {
-    message.error(error.message || '删除会话失败，请重试');
+  } finally {
+    deletingSessionIds.delete(sessionId);
   }
 }
 </script>
@@ -239,8 +264,14 @@ async function handleDeleteSession(sessionId: string): Promise<void> {
 .session-history__content {
   display: flex;
   flex: 1;
-  flex-direction: column;
+  gap: 6px;
+  align-items: center;
   min-width: 0;
+}
+
+.session-history__status-icon {
+  flex-shrink: 0;
+  color: var(--text-secondary);
 }
 
 .session-history__item-title {

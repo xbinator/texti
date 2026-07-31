@@ -83,7 +83,7 @@ describe('createToolResultMessages', (): void => {
       runtimeId: 'runtime-b'
     });
 
-    expect(execute).toHaveBeenNthCalledWith(1, expect.objectContaining({ commandId: '9:runtime-a:same-call' }), undefined);
-    expect(execute).toHaveBeenNthCalledWith(2, expect.objectContaining({ commandId: '9:runtime-b:same-call' }), undefined);
+    expect(execute).toHaveBeenNthCalledWith(1, expect.objectContaining({ commandId: '9:runtime-a:same-call', toolCallId: 'same-call' }), undefined);
+    expect(execute).toHaveBeenNthCalledWith(2, expect.objectContaining({ commandId: '9:runtime-b:same-call', toolCallId: 'same-call' }), undefined);
   });
 });

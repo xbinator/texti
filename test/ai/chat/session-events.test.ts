@@ -23,8 +23,13 @@ function createDeletedEvent(sessionId: string): ChatRuntimeMessageDeletedEvent {
   };
 }
 
-/** 创建待处理工具确认事件。 */
-function createConfirmationEvent(sessionId: string): ChatRuntimeConfirmationRequestEvent {
+/**
+ * 创建待处理工具确认事件。
+ * @param sessionId - 会话 ID
+ * @param suffix - confirmation 身份后缀
+ * @returns Runtime confirmation 事件
+ */
+function createConfirmationEvent(sessionId: string, suffix = sessionId): ChatRuntimeConfirmationRequestEvent {
   return {
     runtimeId: `runtime-${sessionId}`,
     sessionId,
@@ -32,7 +37,7 @@ function createConfirmationEvent(sessionId: string): ChatRuntimeConfirmationRequ
     clientId: 'bchat',
     agentId: 'primary',
     rootRuntimeId: `runtime-${sessionId}`,
-    confirmationId: `confirmation-${sessionId}`,
+    confirmationId: `confirmation-${suffix}`,
     request: {
       toolName: 'write_file',
       title: '写入文件',
@@ -74,5 +79,24 @@ describe('chat session UI event bus', (): void => {
     const secondListener = vi.fn();
     bus.subscribe('session-a', secondListener);
     expect(secondListener).not.toHaveBeenCalled();
+  });
+
+  it('replays every distinct pending confirmation and clears them independently', (): void => {
+    const bus = createChatSessionEventBus();
+    const first = createConfirmationEvent('session-a', 'first');
+    const second = createConfirmationEvent('session-a', 'second');
+    bus.emit('session-a', { type: 'confirmationRequested', event: first });
+    bus.emit('session-a', { type: 'confirmationRequested', event: second });
+
+    const firstListener = vi.fn();
+    bus.subscribe('session-a', firstListener);
+    expect(firstListener).toHaveBeenCalledWith({ type: 'confirmationRequested', event: first });
+    expect(firstListener).toHaveBeenCalledWith({ type: 'confirmationRequested', event: second });
+
+    bus.clearPendingInteraction('session-a', first.confirmationId);
+    const secondListener = vi.fn();
+    bus.subscribe('session-a', secondListener);
+    expect(secondListener).not.toHaveBeenCalledWith({ type: 'confirmationRequested', event: first });
+    expect(secondListener).toHaveBeenCalledWith({ type: 'confirmationRequested', event: second });
   });
 });

@@ -32,6 +32,8 @@ interface UseChatSubmitterOptions {
   ensureSessionModel: (sessionId: string, model: ChatRuntimeModelSelection) => Promise<void>;
   /** 用户选择开始续跑回调。 */
   onContinueStarted?: (answer: AIUserChoiceAnswerData) => void;
+  /** 判断用户选择续跑是否仍属于原始可见会话。 */
+  isContinuationCurrent?: () => boolean;
   /** 在 IPC 前注册 Runtime 并返回完整地址。 */
   startRuntime?: (prepared: PreparedRuntimeRequest) => ChatRuntimeAddress;
   /** Runtime IPC 返回后的收尾回调。 */
@@ -81,6 +83,7 @@ export function useChatSubmitter(options: UseChatSubmitterOptions): UseChatSubmi
 
       options.onContinueStarted?.(answer);
       const prepared = options.prepareRuntimeRequest ? await options.prepareRuntimeRequest() : undefined;
+      if (options.isContinuationCurrent && !options.isContinuationCurrent()) return;
       const runtimeConfig = options.prepareRuntimeRequest ? prepared?.config ?? null : await options.resolveRuntimeRequestConfig();
       if (!runtimeConfig) {
         options.onContinueFailed?.(new Error('Runtime request configuration is unavailable'));
@@ -92,6 +95,7 @@ export function useChatSubmitter(options: UseChatSubmitterOptions): UseChatSubmi
       }
 
       await options.ensureSessionModel(sessionId, prepared.config.model);
+      if (options.isContinuationCurrent && !options.isContinuationCurrent()) return;
       const runtimeAddress = options.startRuntime(prepared);
       runtimeId = runtimeAddress.runtimeId;
 
@@ -100,6 +104,7 @@ export function useChatSubmitter(options: UseChatSubmitterOptions): UseChatSubmi
         answer,
         ...runtimeConfig
       });
+      if (options.isContinuationCurrent && !options.isContinuationCurrent()) return;
       options.finishRuntimeStart?.(result, runtimeId);
     } catch (error) {
       options.onContinueFailed?.(error, runtimeId);

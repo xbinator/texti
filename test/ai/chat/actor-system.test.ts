@@ -186,6 +186,35 @@ describe('chat actor system', (): void => {
     system.stop();
   });
 
+  it('removes a deleted Session together with Runtime capabilities and UI subscriptions', (): void => {
+    const system = createChatActorSystem();
+    system.start();
+    system.ensureSession('session-deleted');
+    system.registerRuntime(
+      {
+        sessionId: 'session-deleted',
+        turnId: 'turn-deleted',
+        agentId: 'primary',
+        runtimeId: 'runtime-deleted',
+        rootRuntimeId: 'runtime-deleted'
+      },
+      {
+        tools: [],
+        getToolContext: (): undefined => undefined,
+        handleBridgeRequest: async (): Promise<unknown> => undefined
+      }
+    );
+    system.subscribeSessionEvents('session-deleted', (): void => undefined);
+
+    system.removeSession('session-deleted');
+
+    expect(system.getSession('session-deleted')).toBeUndefined();
+    expect(system.actor.getSnapshot().context.runtimeRoutes.has('runtime-deleted')).toBe(false);
+    expect(system.getRuntimeCapabilities('runtime-deleted')).toBeUndefined();
+    expect(system.hasSessionUISubscribers('session-deleted')).toBe(false);
+    system.stop();
+  });
+
   it('does not resurrect an idle Session from a terminal delegation event', (): void => {
     const system = createChatActorSystem();
     system.start();

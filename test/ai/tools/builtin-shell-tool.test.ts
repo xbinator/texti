@@ -128,9 +128,9 @@ describe('builtin ShellTool interaction contract', (): void => {
       findings: [{ severity: 'warning', code: 'READ_OUTSIDE_WORKSPACE', message: '命令可能读取工作区外路径: /Users/zhangbin' }]
     });
 
-    await tool.execute({ shell: 'bash', command: 'find /Users/zhangbin -name widget.json', commandId: 'tool-call-1' });
+    await tool.execute({ shell: 'bash', command: 'find /Users/zhangbin -name widget.json', commandId: 'tool-call-1', toolCallId: 'tool-call-1' });
 
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ toolName: 'run_shell_command', riskLevel: 'dangerous' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ toolCallId: 'tool-call-1', toolName: 'run_shell_command', riskLevel: 'dangerous' }));
     expect(mocks.runShellCommand).toHaveBeenCalledWith(expect.objectContaining({ confirmedSafetyFindingCodes: ['READ_OUTSIDE_WORKSPACE'] }));
     expect(mocks.runShellCommand).toHaveBeenCalledTimes(1);
   });

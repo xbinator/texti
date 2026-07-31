@@ -79,9 +79,13 @@ export interface ChatRuntimeClientSnapshot {
 /** Cloneable renderer capability identity retained by the main-process runtime. */
 export interface ChatRuntimeCapabilityDescriptor {
   /** Renderer tool names exposed when the runtime started. */
-  rendererToolNames: string[];
+  readonly rendererToolNames: readonly string[];
   /** Document id captured when document-scoped tools were registered. */
   documentId?: string;
+  /** Workspace root captured when renderer tool executors were registered. */
+  workspaceRoot?: string;
+  /** WebView tab identity captured when webpage tools were registered. */
+  webviewId?: string;
 }
 
 /** Renderer message snapshot accepted by runtime continuation commands. */

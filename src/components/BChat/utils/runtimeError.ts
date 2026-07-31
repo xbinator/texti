@@ -43,6 +43,8 @@ export interface RuntimeErrorAppendOptions {
   persistMessages: (sessionId: string, messages: Message[]) => Promise<void>;
   /** 刷新当前可见消息。 */
   setLoadedMessages: (messages: Message[]) => void;
+  /** 判断错误所属会话是否仍在当前视图。 */
+  isSessionActive?: (sessionId: string) => boolean;
   /** 可选的视图更新后回调，用于等待 nextTick、滚动到底部等 UI 操作。 */
   afterMessagesUpdated?: () => Promise<void> | void;
 }
@@ -156,6 +158,7 @@ export async function appendRuntimeErrorMessage(options: RuntimeErrorAppendOptio
   visibleMessages.push(create.errorMessage(options.content));
   const historyMessages = await options.fetchAllPriorHistory(options.sessionId);
   await options.persistMessages(options.sessionId, [...historyMessages, ...visibleMessages]);
+  if (options.isSessionActive && !options.isSessionActive(options.sessionId)) return;
   options.setLoadedMessages(visibleMessages);
   await options.afterMessagesUpdated?.();
 }

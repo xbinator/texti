@@ -102,6 +102,8 @@ export interface ChatActorSystem {
   ) => ReturnType<ActorRefFrom<typeof supervisorMachine>['getSnapshot']>['context']['sessions'] extends Map<string, infer TSession>
     ? TSession | undefined
     : never;
+  /** 删除 Session actor、所属 Runtime 能力与 UI 事件缓存。 */
+  removeSession: (sessionId: string) => void;
   /** 向 Supervisor 发送领域事件 */
   send: (event: SupervisorMachineEvent) => void;
   /** 向 Session 发送领域事件 */
@@ -124,6 +126,11 @@ export interface ChatActorSystem {
   hasSessionUISubscribers: (sessionId: string) => boolean;
   /** 清除已处理的 Session 待确认交互 */
   clearSessionPendingInteraction: (sessionId: string, confirmationId: string) => void;
+  /**
+   * 清除 Runtime 或工具调用对应的 Session 待确认交互。
+   * @returns 该 Runtime 是否仍有其他待确认交互
+   */
+  clearRuntimeInteractions: (sessionId: string, runtimeId: string, toolCallId?: string) => boolean;
 }
 
 /**
@@ -155,6 +162,16 @@ export function createChatActorSystem(): ChatActorSystem {
     },
     getSession(sessionId: string) {
       return actor.getSnapshot().context.sessions.get(sessionId);
+    },
+    removeSession(sessionId: string): void {
+      const runtimeIds = [...actor.getSnapshot().context.runtimeRoutes.entries()]
+        .filter(([, address]): boolean => address.sessionId === sessionId)
+        .map(([runtimeId]): string => runtimeId);
+      actor.send({ type: 'supervisor.removeSession', sessionId });
+      runtimeIds.forEach((runtimeId: string): void => {
+        capabilityRegistry.delete(runtimeId);
+      });
+      sessionEventBus.clearSession(sessionId);
     },
     send(event: SupervisorMachineEvent): void {
       actor.send(event);
@@ -270,6 +287,9 @@ export function createChatActorSystem(): ChatActorSystem {
     },
     clearSessionPendingInteraction(sessionId: string, confirmationId: string): void {
       sessionEventBus.clearPendingInteraction(sessionId, confirmationId);
+    },
+    clearRuntimeInteractions(sessionId: string, runtimeId: string, toolCallId?: string): boolean {
+      return sessionEventBus.clearRuntimeInteractions(sessionId, runtimeId, toolCallId);
     }
   };
 }

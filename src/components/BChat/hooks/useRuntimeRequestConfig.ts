@@ -2,6 +2,7 @@
  * @file useRuntimeRequestConfig.ts
  * @description ChatRuntime 请求准备 IO 与纯策略适配 hook。
  */
+import type { RuntimeToolBinding } from './useRuntimeTools';
 import type { Message, ServiceConfig } from '../utils/types';
 import type { AIMCPRequestConfig, AITavilyRuntimeConfig, AIToolExecutor } from 'types/ai';
 import type { ChatRuntimeContext, ChatRuntimeSkillSnapshot, ChatRuntimeUserInputPart } from 'types/chat-runtime';
@@ -26,7 +27,7 @@ interface UseRuntimeRequestConfigOptions {
   /** 同步磁盘 AI 资源 */
   syncAIResources: () => Promise<void>;
   /** 读取当前候选工具 */
-  getActiveTools: () => AIToolExecutor[];
+  getActiveTools: (binding?: RuntimeToolBinding) => AIToolExecutor[];
   /** 读取 Skill 内容版本 */
   getSkillContentHashes: () => Record<string, string>;
   /** 解析显式选择的 Skill 内容快照 */

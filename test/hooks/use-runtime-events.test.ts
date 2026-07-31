@@ -12,17 +12,21 @@ import type {
   ChatRuntimeErrorEvent,
   ChatRuntimeMessageDeletedEvent,
   ChatRuntimeMessageEvent,
+  ChatRuntimeToolCancelledEvent,
   ChatRuntimeToolRequestEvent
 } from 'types/chat-runtime';
 import type { ElectronShellRunEventEnvelope } from 'types/electron-api';
-import { effectScope } from 'vue';
+import { effectScope, ref } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createChatActorSystem } from '@/ai/chat/actorSystem';
 import { createShellCommandId } from '@/ai/tools/shellCommandId';
+import { createChatConfirmationController } from '@/components/BChat/utils/confirmationController';
 import { useRuntimeEvents } from '@/hooks/useChat/useRuntimeEvents';
+import { useChatConfirmationQueueStore } from '@/stores/chat/confirmationQueue';
 import { useChatPermissionStore } from '@/stores/chat/permission';
 import { useChatTabStore } from '@/stores/chat/tab';
+import { useTabsStore } from '@/stores/workspace/tabs';
 
 const runtimeListeners = vi.hoisted(() => ({
   messageCreated: undefined as ((event: ChatRuntimeMessageEvent) => void) | undefined,
@@ -31,6 +35,7 @@ const runtimeListeners = vi.hoisted(() => ({
   contextUsage: undefined as ((event: ChatRuntimeContextUsageEvent) => void) | undefined,
   confirmation: undefined as ((event: ChatRuntimeConfirmationRequestEvent) => void) | undefined,
   toolRequest: undefined as ((event: ChatRuntimeToolRequestEvent) => void) | undefined,
+  toolCancelled: undefined as ((event: ChatRuntimeToolCancelledEvent) => void) | undefined,
   shellRunEvent: undefined as ((event: ElectronShellRunEventEnvelope) => void) | undefined,
   complete: undefined as ((event: ChatRuntimeCompleteEvent) => void) | undefined,
   error: undefined as ((event: ChatRuntimeErrorEvent) => void) | undefined
@@ -63,7 +68,10 @@ vi.mock('@/shared/platform/electron-api', () => ({
       runtimeListeners.toolRequest = listener;
       return vi.fn();
     }),
-    chatRuntimeOnToolCancelled: vi.fn((): (() => void) => vi.fn()),
+    chatRuntimeOnToolCancelled: vi.fn((listener: (event: ChatRuntimeToolCancelledEvent) => void): (() => void) => {
+      runtimeListeners.toolCancelled = listener;
+      return vi.fn();
+    }),
     onShellRunEvent: vi.fn((listener: (event: ElectronShellRunEventEnvelope) => void): (() => void) => {
       runtimeListeners.shellRunEvent = listener;
       return vi.fn();
@@ -162,6 +170,41 @@ describe('useRuntimeEvents', (): void => {
     system.stop();
   });
 
+  it('falls back to a visible confirmation when remembered approval submission fails', async (): Promise<void> => {
+    runtimeCommands.submitConfirmation.mockResolvedValueOnce({ ok: false, error: 'temporary IPC failure', code: 'IPC_FAILED' });
+    const system = createChatActorSystem();
+    system.start();
+    const session = system.ensureSession('session-1');
+    session.send({ type: 'session.submit', input: { messageId: 'user-1', createdAt: '2026-07-11T00:00:00.000Z', content: 'hello', parts: [] } });
+    session.send({ type: 'session.prepared' });
+    const turnId = session.getSnapshot().context.turnRef?.getSnapshot().context.turnId;
+    system.registerRuntime(
+      { sessionId: 'session-1', turnId: turnId as string, agentId: 'primary', runtimeId: 'runtime-1', rootRuntimeId: 'runtime-1' },
+      { tools: [], getToolContext: (): undefined => undefined, handleBridgeRequest: async (): Promise<unknown> => undefined }
+    );
+    system.send({ type: 'runtime.event', runtimeId: 'runtime-1', event: { type: 'runtime.started', runtimeId: 'runtime-1' } });
+    useChatPermissionStore().grantToolPermission('write_file', 'session');
+    useChatTabStore().ensureTab('chat:session-1', 'session-1');
+    const visibleEvents = vi.fn();
+    system.subscribeSessionEvents('session-1', visibleEvents);
+    const scope = effectScope();
+    scope.run((): void => useRuntimeEvents(system));
+
+    runtimeListeners.confirmation?.({
+      ...createEventBase(),
+      confirmationId: 'confirmation-retry',
+      request: { toolName: 'write_file', title: '写入文件', description: '是否写入？', riskLevel: 'write', allowRemember: true }
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(visibleEvents).toHaveBeenCalledWith(expect.objectContaining({ type: 'confirmationRequested' }));
+    expect(session.getSnapshot().matches('waitingForUser')).toBe(true);
+    expect(useChatTabStore().getStatus('chat:session-1')).toBe('waiting');
+    scope.stop();
+    system.stop();
+  });
+
   it('publishes visible events and completes the addressed background Agent', (): void => {
     const system = createChatActorSystem();
     system.start();
@@ -187,6 +230,7 @@ describe('useRuntimeEvents', (): void => {
     const visibleEvents = vi.fn();
     system.subscribeSessionEvents('session-1', visibleEvents);
     const runtimeStore = useChatTabStore();
+    useTabsStore().tabs = [{ id: 'chat:session-1', path: '/chat/session-1', title: '会话 1', cacheKey: 'chat:session-1' }];
     runtimeStore.ensureTab('chat:session-1', 'session-1');
     const completionStatuses: string[] = [];
     system.subscribeSessionEvents('session-1', (event): void => {
@@ -252,6 +296,94 @@ describe('useRuntimeEvents', (): void => {
     const visibleEvents = vi.fn();
     system.subscribeSessionEvents('session-1', visibleEvents);
     expect(visibleEvents).toHaveBeenCalledWith(expect.objectContaining({ type: 'confirmationRequested' }));
+    scope.stop();
+    system.stop();
+  });
+
+  it('clears cached confirmations when their Runtime terminates', (): void => {
+    const system = createChatActorSystem();
+    system.start();
+    const session = system.ensureSession('session-1');
+    session.send({ type: 'session.submit', input: { messageId: 'user-1', createdAt: 'now', content: 'hello', parts: [] } });
+    session.send({ type: 'session.prepared' });
+    const turnId = session.getSnapshot().context.turnRef?.getSnapshot().context.turnId;
+    system.registerRuntime(
+      { sessionId: 'session-1', turnId: turnId as string, agentId: 'primary', runtimeId: 'runtime-1', rootRuntimeId: 'runtime-1' },
+      { tools: [], getToolContext: (): undefined => undefined, handleBridgeRequest: async (): Promise<unknown> => undefined }
+    );
+    system.send({ type: 'runtime.event', runtimeId: 'runtime-1', event: { type: 'runtime.started', runtimeId: 'runtime-1' } });
+    const scope = effectScope();
+    scope.run((): void => useRuntimeEvents(system));
+
+    runtimeListeners.confirmation?.({
+      ...createEventBase(),
+      confirmationId: 'confirmation-stale',
+      request: { toolName: 'write_file', title: '写入文件', description: '是否写入？', riskLevel: 'write' }
+    });
+    runtimeListeners.error?.({ ...createEventBase(), error: { code: 'REQUEST_FAILED', message: 'failed' } });
+    const visibleEvents = vi.fn();
+    system.subscribeSessionEvents('session-1', visibleEvents);
+
+    expect(visibleEvents).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'confirmationRequested' }));
+    scope.stop();
+    system.stop();
+  });
+
+  it('expires only the cancelled tool flight and clears remaining flights on Runtime error', async (): Promise<void> => {
+    const system = createChatActorSystem();
+    system.start();
+    const session = system.ensureSession('session-1');
+    session.send({ type: 'session.submit', input: { messageId: 'user-1', createdAt: 'now', content: 'hello', parts: [] } });
+    session.send({ type: 'session.prepared' });
+    const turnId = session.getSnapshot().context.turnRef?.getSnapshot().context.turnId;
+    system.registerRuntime(
+      { sessionId: 'session-1', turnId: turnId as string, agentId: 'primary', runtimeId: 'runtime-1', rootRuntimeId: 'runtime-1' },
+      { tools: [], getToolContext: () => undefined, handleBridgeRequest: async (): Promise<unknown> => undefined }
+    );
+    system.send({ type: 'runtime.event', runtimeId: 'runtime-1', event: { type: 'runtime.started', runtimeId: 'runtime-1' } });
+    const controller = createChatConfirmationController(ref('session-1'));
+    const firstDecision = controller
+      .createAdapter({ sessionId: 'session-1', runtimeId: 'runtime-1', toolCallId: 'tool-call-1' })
+      .confirm({ toolName: 'write_file', title: '写入一', description: '确认一', riskLevel: 'write' });
+    const secondDecision = controller
+      .createAdapter({ sessionId: 'session-1', runtimeId: 'runtime-1', toolCallId: 'tool-call-2' })
+      .confirm({ toolName: 'write_file', title: '写入二', description: '确认二', riskLevel: 'write' });
+    const scope = effectScope();
+    scope.run((): void => useRuntimeEvents(system));
+
+    runtimeListeners.toolCancelled?.({ ...createEventBase(), toolCallId: 'tool-call-1' });
+    await expect(firstDecision).resolves.toEqual({ approved: false });
+    expect(useChatConfirmationQueueStore().pending).toHaveLength(1);
+
+    runtimeListeners.error?.({ ...createEventBase(), error: { code: 'REQUEST_FAILED', message: 'failed' } });
+    await expect(secondDecision).resolves.toEqual({ approved: false });
+    expect(useChatConfirmationQueueStore().pending).toHaveLength(0);
+    scope.stop();
+    system.stop();
+  });
+
+  it.each(['complete', 'error'] as const)('removes a detached Runtime record on %s', (terminalEvent): void => {
+    const system = createChatActorSystem();
+    system.start();
+    const session = system.ensureSession('session-1');
+    session.send({ type: 'session.submit', input: { messageId: 'user-1', createdAt: 'now', content: 'hello', parts: [] } });
+    session.send({ type: 'session.prepared' });
+    const turnId = session.getSnapshot().context.turnRef?.getSnapshot().context.turnId;
+    system.registerRuntime(
+      { sessionId: 'session-1', turnId: turnId as string, agentId: 'primary', runtimeId: 'runtime-1', rootRuntimeId: 'runtime-1' },
+      { tools: [], getToolContext: () => undefined, handleBridgeRequest: async (): Promise<unknown> => undefined }
+    );
+    system.send({ type: 'runtime.event', runtimeId: 'runtime-1', event: { type: 'runtime.started', runtimeId: 'runtime-1' } });
+    const runtimeStore = useChatTabStore();
+    runtimeStore.ensureTab('chat:session-1', 'session-1');
+    runtimeStore.setStatus('chat:session-1', 'running');
+    const scope = effectScope();
+    scope.run((): void => useRuntimeEvents(system));
+
+    if (terminalEvent === 'complete') runtimeListeners.complete?.({ ...createEventBase(), reason: 'completed' });
+    else runtimeListeners.error?.({ ...createEventBase(), error: { code: 'REQUEST_FAILED', message: 'failed' } });
+
+    expect(runtimeStore.records['chat:session-1']).toBeUndefined();
     scope.stop();
     system.stop();
   });

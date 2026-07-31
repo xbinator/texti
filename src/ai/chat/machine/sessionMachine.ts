@@ -55,6 +55,7 @@ export type SessionMachineEvent =
   | { type: 'session.userChoiceSubmissionFailed'; error: ChatWorkflowError }
   | { type: 'session.prepared' }
   | { type: 'session.preparationFailed'; error: ChatWorkflowError }
+  | { type: 'session.preparationCancelled' }
   | { type: 'session.userChoiceRequired'; interaction?: PendingInteraction }
   | { type: 'session.waitingChildren'; runtimeId: string; checkpointId: string }
   | { type: 'session.resumeStarted'; runtimeId: string; checkpointId: string }
@@ -380,6 +381,17 @@ export const sessionMachine = setup({
           {
             target: 'idle',
             actions: ['assignError', 'notifyTurnFailed', 'clearActiveTurn']
+          }
+        ],
+        'session.preparationCancelled': [
+          {
+            target: 'waitingForUser',
+            guard: 'isContinueIntent',
+            actions: ['restoreTurnWaiting', 'restoreInteractionPending']
+          },
+          {
+            target: 'idle',
+            actions: ['notifyTurnCancel', 'notifyTurnCancelled', 'clearActiveTurn']
           }
         ],
         'session.userChoiceSubmissionFailed': {

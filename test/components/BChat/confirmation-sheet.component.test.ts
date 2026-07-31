@@ -98,7 +98,8 @@ describe('ConfirmationSheet', (): void => {
     const runtimeItem: ChatConfirmationQueueItem = {
       source: 'runtime',
       confirmationId: 'runtime-confirmation-1',
-      ownerId: 'owner-1',
+      sessionId: 'session-1',
+      runtimeId: 'runtime-1',
       request: {
         toolName: 'write_file',
         title: '写入文件',

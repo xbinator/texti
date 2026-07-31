@@ -18,7 +18,19 @@ import type {
   ChatRuntimeSubmitToolResultInput
 } from 'types/chat-runtime';
 import { ipcMain } from 'electron';
+import { chatSessionManager } from '../service.mjs';
+import { ChatRuntimeError } from './errors.mjs';
 import { chatRuntimeService } from './service.mjs';
+
+/**
+ * 拒绝在已经删除的显式 Session 上启动新 Runtime。
+ * 检查与 Runtime 同步取得写锁之间没有 await，可与同步删除 handler 形成完整时序。
+ * @param sessionId - Renderer 请求携带的持久化 Session ID
+ */
+function assertRuntimeSessionExists(sessionId: string | undefined): void {
+  if (!sessionId || chatSessionManager.getSessionById(sessionId)) return;
+  throw new ChatRuntimeError('SESSION_NOT_FOUND', `Session ${sessionId} does not exist`);
+}
 
 /**
  * 从未知错误中读取稳定错误码。
@@ -70,22 +82,38 @@ export function registerChatRuntimeHandlers(): void {
 
   ipcMain.handle(
     'chat:runtime:send',
-    wrapRuntimeHandler((_event, input) => chatRuntimeService.send(input as ChatRuntimeSendInput))
+    wrapRuntimeHandler((_event, input) => {
+      const runtimeInput = input as ChatRuntimeSendInput;
+      assertRuntimeSessionExists(runtimeInput.sessionId);
+      return chatRuntimeService.send(runtimeInput);
+    })
   );
 
   ipcMain.handle(
     'chat:runtime:continue',
-    wrapRuntimeHandler((_event, input) => chatRuntimeService.continue(input as ChatRuntimeContinueInput))
+    wrapRuntimeHandler((_event, input) => {
+      const runtimeInput = input as ChatRuntimeContinueInput;
+      assertRuntimeSessionExists(runtimeInput.sessionId);
+      return chatRuntimeService.continue(runtimeInput);
+    })
   );
 
   ipcMain.handle(
     'chat:runtime:compact',
-    wrapRuntimeHandler((_event, input) => chatRuntimeService.compact(input as ChatRuntimeCompactInput))
+    wrapRuntimeHandler((_event, input) => {
+      const runtimeInput = input as ChatRuntimeCompactInput;
+      assertRuntimeSessionExists(runtimeInput.sessionId);
+      return chatRuntimeService.compact(runtimeInput);
+    })
   );
 
   ipcMain.handle(
     'chat:runtime:submit-user-choice',
-    wrapRuntimeHandler((_event, input) => chatRuntimeService.submitUserChoice(input as ChatRuntimeSubmitUserChoiceInput))
+    wrapRuntimeHandler((_event, input) => {
+      const runtimeInput = input as ChatRuntimeSubmitUserChoiceInput;
+      assertRuntimeSessionExists(runtimeInput.sessionId);
+      return chatRuntimeService.submitUserChoice(runtimeInput);
+    })
   );
 
   ipcMain.handle(

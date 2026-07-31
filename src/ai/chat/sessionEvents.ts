@@ -42,6 +42,11 @@ export interface ChatSessionEventBus {
   hasSubscribers: (sessionId: string) => boolean;
   /** 清除已处理的待确认交互 */
   clearPendingInteraction: (sessionId: string, confirmationId: string) => void;
+  /**
+   * 清除指定 Runtime 或工具调用的待确认交互。
+   * @returns 该 Runtime 是否仍有其他待确认交互
+   */
+  clearRuntimeInteractions: (sessionId: string, runtimeId: string, toolCallId?: string) => boolean;
   /** 清理全部监听器 */
   clear: () => void;
 }
@@ -52,17 +57,15 @@ export interface ChatSessionEventBus {
  */
 export function createChatSessionEventBus(): ChatSessionEventBus {
   const listenersBySession = new Map<string, Set<ChatSessionUIEventListener>>();
-  const pendingInteractionsBySession = new Map<string, Extract<ChatSessionUIEvent, { type: 'confirmationRequested' }>>();
+  const pendingInteractionsBySession = new Map<string, Map<string, Extract<ChatSessionUIEvent, { type: 'confirmationRequested' }>>>();
 
   return {
     subscribe(sessionId: string, listener: ChatSessionUIEventListener): () => void {
       const listeners = listenersBySession.get(sessionId) ?? new Set<ChatSessionUIEventListener>();
       listeners.add(listener);
       listenersBySession.set(sessionId, listeners);
-      const pendingInteraction = pendingInteractionsBySession.get(sessionId);
-      if (pendingInteraction) {
-        listener(pendingInteraction);
-      }
+      const pendingInteractions = pendingInteractionsBySession.get(sessionId);
+      pendingInteractions?.forEach((pendingInteraction): void => listener(pendingInteraction));
 
       return (): void => {
         listeners.delete(listener);
@@ -73,7 +76,9 @@ export function createChatSessionEventBus(): ChatSessionEventBus {
     },
     emit(sessionId: string, event: ChatSessionUIEvent): void {
       if (event.type === 'confirmationRequested') {
-        pendingInteractionsBySession.set(sessionId, event);
+        const pendingInteractions = pendingInteractionsBySession.get(sessionId) ?? new Map();
+        pendingInteractions.set(event.event.confirmationId, event);
+        pendingInteractionsBySession.set(sessionId, pendingInteractions);
       }
       for (const listener of [...(listenersBySession.get(sessionId) ?? [])]) {
         listener(event);
@@ -87,10 +92,24 @@ export function createChatSessionEventBus(): ChatSessionEventBus {
       return (listenersBySession.get(sessionId)?.size ?? 0) > 0;
     },
     clearPendingInteraction(sessionId: string, confirmationId: string): void {
-      const pendingInteraction = pendingInteractionsBySession.get(sessionId);
-      if (pendingInteraction?.event.confirmationId === confirmationId) {
+      const pendingInteractions = pendingInteractionsBySession.get(sessionId);
+      pendingInteractions?.delete(confirmationId);
+      if (pendingInteractions?.size === 0) pendingInteractionsBySession.delete(sessionId);
+    },
+    clearRuntimeInteractions(sessionId: string, runtimeId: string, toolCallId?: string): boolean {
+      const pendingInteractions = pendingInteractionsBySession.get(sessionId);
+      if (!pendingInteractions) return false;
+      pendingInteractions.forEach((interaction, confirmationId): void => {
+        const eventToolCallId = interaction.event.toolCallId ?? interaction.event.request.toolCallId;
+        if (interaction.event.runtimeId === runtimeId && (toolCallId === undefined || eventToolCallId === toolCallId)) {
+          pendingInteractions.delete(confirmationId);
+        }
+      });
+      if (pendingInteractions.size === 0) {
         pendingInteractionsBySession.delete(sessionId);
+        return false;
       }
+      return [...pendingInteractions.values()].some((interaction): boolean => interaction.event.runtimeId === runtimeId);
     },
     clear(): void {
       listenersBySession.clear();

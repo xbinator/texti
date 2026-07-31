@@ -5,7 +5,7 @@
 import type { ChatMessageHistoryCursor, ChatMessageRecord, ChatSession, ChatSessionModelMetadata, ChatSessionType, SessionPaginationParams } from 'types/chat';
 import type { ChatHandlerResult } from 'types/electron-api';
 import { ipcMain } from 'electron';
-import { assertSessionHistoryWritable } from './runtime/infrastructure/locks.mjs';
+import { assertSessionDeletable, assertSessionHistoryWritable } from './runtime/infrastructure/locks.mjs';
 import { chatSessionManager } from './service.mjs';
 
 function wrapHandler<T>(fn: (...args: unknown[]) => T): (...args: unknown[]) => ChatHandlerResult<T> {
@@ -75,7 +75,7 @@ export function registerChatHandlers(): void {
   ipcMain.handle(
     'chat:session:delete',
     wrapHandler((_event, sessionId) => {
-      assertSessionHistoryWritable(sessionId as string);
+      assertSessionDeletable(sessionId as string);
       chatSessionManager.deleteSession(sessionId as string);
     })
   );
@@ -86,7 +86,7 @@ export function registerChatHandlers(): void {
     })
   );
 
-  // ── Message (3 个) ──
+  // ── Message (5 个) ──
   ipcMain.handle(
     'chat:message:list',
     wrapHandler((_event, sessionId, cursor?) => {
@@ -105,6 +105,13 @@ export function registerChatHandlers(): void {
     wrapHandler((_event, message) => {
       assertSessionHistoryWritable((message as ChatMessageRecord).sessionId);
       chatSessionManager.updateMessage(message as ChatMessageRecord);
+    })
+  );
+  ipcMain.handle(
+    'chat:message:delete',
+    wrapHandler((_event, sessionId, messageId) => {
+      assertSessionHistoryWritable(sessionId as string);
+      chatSessionManager.deleteMessage(sessionId as string, messageId as string);
     })
   );
   ipcMain.handle(

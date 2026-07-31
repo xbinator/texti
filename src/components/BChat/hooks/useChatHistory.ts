@@ -27,6 +27,11 @@ export function useChatHistory() {
   const messages = ref<Message[]>([]);
   const hasMoreHistory = ref(false);
   const historyLoading = ref(false);
+  const messageRevision = ref<number>(0);
+  /** 记录每条消息最近一次实时写入所在的 revision。 */
+  const liveMessageRevisions = new Map<string, number>();
+  /** 记录某条消息最近一次实时删除所在的 revision。 */
+  const deletedMessageRevisions = new Map<string, number>();
 
   /**
    * 根据当前已加载消息计算更早历史的加载游标
@@ -46,8 +51,91 @@ export function useChatHistory() {
    * @param loadedMessages - 已加载消息
    */
   function setLoadedMessages(loadedMessages: Message[]): void {
-    messages.value = normalizeLoadedMessages(loadedMessages);
+    const normalizedMessages = normalizeLoadedMessages(loadedMessages);
+    const nextIds = new Set(normalizedMessages.map((message: Message): string => message.id));
+    messageRevision.value += 1;
+
+    // 显式替换也属于本地变更，必须压过此前已发起但尚未返回的历史请求。
+    messages.value.forEach((message: Message): void => {
+      if (!nextIds.has(message.id)) {
+        liveMessageRevisions.delete(message.id);
+        deletedMessageRevisions.set(message.id, messageRevision.value);
+      }
+    });
+    normalizedMessages.forEach((message: Message): void => {
+      liveMessageRevisions.set(message.id, messageRevision.value);
+      deletedMessageRevisions.delete(message.id);
+    });
+    messages.value = normalizedMessages;
     hasMoreHistory.value = loadedMessages.length > 0;
+  }
+
+  /**
+   * 读取当前可见消息的实时 revision。
+   * @returns 单调递增 revision
+   */
+  function getMessageRevision(): number {
+    return messageRevision.value;
+  }
+
+  /**
+   * 合并持久化历史，并让请求发起后收到的实时消息与删除事件胜出。
+   * @param loadedMessages - 持久化层返回的消息快照
+   * @param baselineRevision - 发起历史请求时的实时 revision
+   */
+  function mergeLoadedMessages(loadedMessages: Message[], baselineRevision: number): void {
+    const normalizedMessages = normalizeLoadedMessages(loadedMessages);
+    hasMoreHistory.value = loadedMessages.length > 0;
+    if (messageRevision.value === baselineRevision) {
+      messages.value = normalizedMessages;
+      liveMessageRevisions.clear();
+      deletedMessageRevisions.clear();
+      return;
+    }
+
+    const currentById = new Map(messages.value.map((message: Message): [string, Message] => [message.id, message]));
+    const loadedIds = new Set(normalizedMessages.map((message: Message): string => message.id));
+    const mergedMessages = normalizedMessages
+      .filter((message: Message): boolean => (deletedMessageRevisions.get(message.id) ?? -1) <= baselineRevision)
+      .map((message: Message): Message => ((liveMessageRevisions.get(message.id) ?? -1) > baselineRevision ? currentById.get(message.id) ?? message : message));
+    const appendedLiveMessages = messages.value.filter(
+      (message: Message): boolean => !loadedIds.has(message.id) && (liveMessageRevisions.get(message.id) ?? -1) > baselineRevision
+    );
+    messages.value = [...mergedMessages, ...appendedLiveMessages];
+
+    // 已被本次历史快照吸收的旧 revision 不再参与后续会话合并。
+    [...liveMessageRevisions.entries()].forEach(([messageId, revision]: [string, number]): void => {
+      if (revision <= baselineRevision) liveMessageRevisions.delete(messageId);
+    });
+    [...deletedMessageRevisions.entries()].forEach(([messageId, revision]: [string, number]): void => {
+      if (revision <= baselineRevision) deletedMessageRevisions.delete(messageId);
+    });
+  }
+
+  /**
+   * 新增或合并一条 Runtime 实时消息，并推进 revision。
+   * @param nextMessage - Runtime 最新消息
+   */
+  function upsertLiveMessage(nextMessage: Message): void {
+    messageRevision.value += 1;
+    liveMessageRevisions.set(nextMessage.id, messageRevision.value);
+    deletedMessageRevisions.delete(nextMessage.id);
+    const normalizedMessage = userChoice.normalizePendingState(nextMessage);
+    const index = messages.value.findIndex((message: Message): boolean => message.id === normalizedMessage.id);
+    if (index < 0) messages.value.push(normalizedMessage);
+    else messages.value.splice(index, 1, { ...messages.value[index], ...normalizedMessage });
+  }
+
+  /**
+   * 删除一条 Runtime 实时消息，并记录防止旧历史将其复活的 revision。
+   * @param messageId - 待删除消息 ID
+   */
+  function removeLiveMessage(messageId: string): void {
+    messageRevision.value += 1;
+    liveMessageRevisions.delete(messageId);
+    deletedMessageRevisions.set(messageId, messageRevision.value);
+    const index = messages.value.findIndex((message: Message): boolean => message.id === messageId);
+    if (index >= 0) messages.value.splice(index, 1);
   }
 
   /**
@@ -78,8 +166,9 @@ export function useChatHistory() {
   /**
    * 加载当前会话中更早的一段历史消息
    * @param sessionId - 会话 ID
+   * @param isCurrentSession - 响应返回时判断该会话是否仍在当前视图
    */
-  async function loadHistory(sessionId: string): Promise<void> {
+  async function loadHistory(sessionId: string, isCurrentSession?: (sessionId: string) => boolean): Promise<void> {
     if (historyLoading.value || !hasMoreHistory.value) return;
 
     const cursor = getHistoryCursor();
@@ -89,6 +178,7 @@ export function useChatHistory() {
 
     try {
       const historyMessages = await chatStore.getSessionMessages(sessionId, cursor);
+      if (isCurrentSession && !isCurrentSession(sessionId)) return;
       hasMoreHistory.value = historyMessages.length > 0;
       if (!historyMessages.length) return;
 
@@ -104,6 +194,10 @@ export function useChatHistory() {
     historyLoading,
     getHistoryCursor,
     setLoadedMessages,
+    getMessageRevision,
+    mergeLoadedMessages,
+    upsertLiveMessage,
+    removeLiveMessage,
     fetchAllPriorHistory,
     loadHistory
   };

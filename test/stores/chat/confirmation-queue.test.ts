@@ -90,7 +90,8 @@ describe('chat confirmation queue store', (): void => {
     store.addRuntime({
       source: 'runtime',
       confirmationId: 'read-1',
-      ownerId: 'owner-1',
+      sessionId: 'session-1',
+      runtimeId: 'runtime-1',
       request: {
         toolName: 'read_file',
         title: '读取',
@@ -129,12 +130,14 @@ describe('chat confirmation queue store', (): void => {
     expect(store.current).toBeNull();
   });
 
-  it('keeps Runtime ownership isolated from Agent snapshots and owner disposal', (): void => {
+  it('stores immutable Runtime routing identity without component ownership', (): void => {
     const store = useChatConfirmationQueueStore();
     store.addRuntime({
       source: 'runtime',
       confirmationId: 'runtime-1',
-      ownerId: 'owner-1',
+      sessionId: 'session-1',
+      runtimeId: 'runtime-1',
+      toolCallId: 'tool-call-1',
       request: {
         toolName: 'write_file',
         title: '写入',
@@ -145,8 +148,12 @@ describe('chat confirmation queue store', (): void => {
     });
     store.applySnapshot([confirmation('agent-1', 'dangerous', '2026-07-27T00:00:01.000Z')]);
 
-    expect(store.removeRuntime('runtime-1', 'owner-2')).toBe(false);
-    expect(store.removeOwner('owner-1')).toEqual(['runtime-1']);
+    expect(store.items['runtime-1']).toMatchObject({
+      sessionId: 'session-1',
+      runtimeId: 'runtime-1',
+      toolCallId: 'tool-call-1'
+    });
+    expect(store.removeRuntime('runtime-1')).toBe(true);
     expect(store.pending.map((item): string => item.confirmationId)).toEqual(['agent-1']);
   });
 
@@ -185,7 +192,8 @@ describe('chat confirmation queue store', (): void => {
     store.addRuntime({
       source: 'runtime',
       confirmationId: runtimeId,
-      ownerId: 'owner-1',
+      sessionId: 'session-1',
+      runtimeId,
       request: {
         toolName: 'write_file',
         title: '写入',
@@ -258,6 +266,57 @@ describe('chat confirmation queue store', (): void => {
       updatedAt: '2026-07-27T00:00:03.000Z'
     });
     expect(store.agentCursors.fenced).toMatchObject({ version: 3, terminal: true });
+  });
+
+  it('bounds terminal Agent cursors without evicting pending cursors', (): void => {
+    const store = useChatConfirmationQueueStore();
+    const active = confirmation('active-pending', 'write', '2026-07-27T00:00:00.000Z');
+    store.applyAgent(active);
+
+    for (let index = 0; index < 513; index += 1) {
+      const createdAt = new Date(Date.UTC(2026, 6, 28, 0, 0, index)).toISOString();
+      const pending = confirmation(`terminal-${index}`, 'write', createdAt);
+      store.applyAgent(pending);
+      store.applyAgent({ ...pending, status: 'approved', version: 2, updatedAt: createdAt });
+    }
+
+    const terminalCursors = Object.values(store.agentCursors).filter((cursor): boolean => cursor.terminal);
+    expect(terminalCursors).toHaveLength(512);
+    expect(store.agentCursors['terminal-0']).toBeUndefined();
+    expect(store.agentCursors['terminal-1']).toMatchObject({ terminal: true });
+    expect(store.agentCursors['active-pending']).toMatchObject({ terminal: false });
+  });
+
+  it('refreshes terminal recency before capacity eviction', (): void => {
+    const store = useChatConfirmationQueueStore();
+    for (let index = 0; index < 512; index += 1) {
+      const createdAt = new Date(Date.UTC(2026, 6, 28, 0, 0, index)).toISOString();
+      const pending = confirmation(String(index), 'write', createdAt);
+      store.applyAgent(pending);
+      store.applyAgent({ ...pending, status: 'approved', version: 2, updatedAt: createdAt });
+    }
+
+    const refreshed = confirmation('0', 'write', '2026-07-28T00:00:00.000Z');
+    store.applyAgent({ ...refreshed, status: 'revoked', version: 3, updatedAt: '2026-07-28T00:09:00.000Z' });
+    const newest = confirmation('512', 'write', '2026-07-28T00:09:01.000Z');
+    store.applyAgent(newest);
+    store.applyAgent({ ...newest, status: 'approved', version: 2, updatedAt: newest.updatedAt });
+
+    expect(store.agentCursors['0']).toMatchObject({ version: 3, terminal: true });
+    expect(store.agentCursors['1']).toBeUndefined();
+  });
+
+  it('turns an unchanged recovery-missing cursor into a terminal fence', async (): Promise<void> => {
+    const store = useChatConfirmationQueueStore();
+    const missing = confirmation('missing-terminal', 'write', '2026-07-27T00:00:00.000Z');
+    store.applyAgent(missing);
+    agentAPI.listConfirmations.mockResolvedValue({ ok: true, data: [] });
+
+    await store.recoverAgent();
+    store.applyAgent({ ...missing, version: 99, updatedAt: '2026-07-27T00:01:39.000Z' });
+
+    expect(store.items['missing-terminal']).toBeUndefined();
+    expect(store.agentCursors['missing-terminal']).toMatchObject({ terminal: true });
   });
 
   it('does not revive a terminal event from a recovery response with a forged higher pending version', async (): Promise<void> => {

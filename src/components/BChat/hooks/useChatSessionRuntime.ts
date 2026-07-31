@@ -16,8 +16,6 @@ import { useChatHistory } from './useChatHistory';
 interface UseChatSessionRuntimeOptions {
   /** 父级指定的会话 ID */
   sessionId: Ref<string | null>;
-  /** 释放当前确认请求 */
-  disposeConfirmation: () => void;
   /** 聚焦输入编辑器 */
   focusInput: () => void;
   /** 检查是否存在待回答用户选择 */
@@ -61,10 +59,11 @@ export function useChatSessionRuntime(options: UseChatSessionRuntimeOptions): Us
   const autoNameSession = ref<{ id: string; title: string }>();
   const activeSessionId = computed<string | null>(() => options.sessionId.value ?? createdSessionId.value);
   const history = useChatHistory();
+  /** 最近一次完整会话历史加载序列，用于拒绝 A-B-A 切换后的旧响应。 */
+  let sessionLoadSequence = 0;
 
   /** 重置新会话草稿状态。 */
   async function resetDraftSessionState(resetOptions: BChatResetDraftOptions = {}): Promise<void> {
-    options.disposeConfirmation();
     createdSessionId.value = null;
     autoNameSession.value = undefined;
     history.setLoadedMessages([]);
@@ -75,10 +74,12 @@ export function useChatSessionRuntime(options: UseChatSessionRuntimeOptions): Us
 
   /** 加载指定会话消息。 */
   async function loadSessionMessages(sessionId: string): Promise<void> {
-    options.disposeConfirmation();
+    const requestSequence = ++sessionLoadSequence;
     history.hasMoreHistory.value = false;
+    const baselineRevision = history.getMessageRevision();
     const [, messages] = await Promise.all([chatStore.loadSessionById(sessionId), chatStore.getSessionMessages(sessionId)]);
-    history.setLoadedMessages(messages);
+    if (requestSequence !== sessionLoadSequence || activeSessionId.value !== sessionId) return;
+    history.mergeLoadedMessages(messages, baselineRevision);
   }
 
   watch(
@@ -119,7 +120,7 @@ export function useChatSessionRuntime(options: UseChatSessionRuntimeOptions): Us
   async function handleLoadHistory(): Promise<void> {
     const sessionId = activeSessionId.value;
     if (!sessionId) return;
-    await history.loadHistory(sessionId);
+    await history.loadHistory(sessionId, (requestedSessionId: string): boolean => activeSessionId.value === requestedSessionId);
   }
 
   const { captureSnapshot, scheduleAutoName } = useAutoName({

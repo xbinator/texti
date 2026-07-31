@@ -13,13 +13,16 @@ import type {
   SessionCursor,
   SessionPaginationParams
 } from 'types/chat';
+import type { ChatAgentCheckpointSnapshot } from 'types/chat-agent';
+import type { ChatRuntimeHandlerResult, ChatRuntimeRecoverySnapshot } from 'types/chat-runtime';
 import { toRaw } from 'vue';
 import { defineStore } from 'pinia';
 import dayjs from 'dayjs';
 import { orderBy, uniqBy } from 'lodash-es';
 import { nanoid } from 'nanoid';
-import { recoverInterruptedAssistantDrafts } from '@/components/BChat/utils/interruptedDraftRecovery';
+import { HARD_INTERRUPTED_ASSISTANT_MESSAGE, recoverInterruptedAssistantDrafts } from '@/components/BChat/utils/interruptedDraftRecovery';
 import { is, type PersistableMessage } from '@/components/BChat/utils/messageHelper';
+import { createRuntimeRequestError } from '@/components/BChat/utils/runtimeError';
 import type { Message } from '@/components/BChat/utils/types';
 import { getElectronAPI, unwrap } from '@/shared/platform/electron-api';
 import { createChatRecentId } from '@/shared/storage';
@@ -30,6 +33,8 @@ import { useTodoStore } from './todo';
 
 /** 会话历史分页大小。 */
 const SESSION_PAGE_SIZE = 20;
+/** 硬中断恢复提示相对于 assistant 草稿的确定性 ID 后缀。 */
+const RECOVERED_INTERRUPT_SUFFIX = '-interrupt';
 
 /** 同一会话按 ID 加载时共享的在途请求。 */
 const sessionLoadPromises = new Map<string, Promise<ChatSession | undefined>>();
@@ -164,18 +169,47 @@ function fromRecordMessage(record: ChatMessageRecord): Message {
 }
 
 /**
- * 读取当前会话执行破坏性草稿恢复前的 Agent 门禁。
- * Renderer 重载期间仍存在活动委派 Checkpoint 时必须保留 Runtime A 草稿；
- * Agent IPC 可用但查询失败时按 fail-closed 处理。旧浏览器测试环境没有该 API
+ * 查找活动执行期间由旧恢复逻辑错误写入的硬中断提示。
+ * 只有当前快照仍包含未完成 assistant 草稿时，其确定性关联提示才可判定为伪中断。
+ * @param sourceMessages - 当前持久化消息快照
+ * @param draftIds - 本轮识别出的未完成 assistant 消息 ID
+ * @returns 可安全删除的伪中断消息 ID
+ */
+function findStaleInterrupts(sourceMessages: Message[], draftIds: Set<string>): string[] {
+  return sourceMessages
+    .filter(
+      (message: Message): boolean =>
+        message.role === 'interrupt' &&
+        message.content === HARD_INTERRUPTED_ASSISTANT_MESSAGE &&
+        message.id.endsWith(RECOVERED_INTERRUPT_SUFFIX) &&
+        draftIds.has(message.id.slice(0, -RECOVERED_INTERRUPT_SUFFIX.length))
+    )
+    .map((message: Message): string => message.id);
+}
+
+/**
+ * 读取当前会话执行破坏性草稿恢复前的活动执行门禁。
+ * Renderer 重载或切换会话期间仍存在主 Runtime 或委派 Checkpoint 时必须保留草稿；
+ * 任一可用状态查询失败时按 fail-closed 处理。旧浏览器测试环境没有两类 API
  * 时保持原有恢复行为。
  * @param sessionId - 待恢复消息所属会话
  * @returns legacy 表示保持旧行为，blocked 表示禁止恢复，clear 表示可重新读取
  */
 async function readRecoveryGate(sessionId: string): Promise<'legacy' | 'blocked' | 'clear'> {
-  const listActive = getElectronAPI().chatAgentListActive;
-  if (typeof listActive !== 'function') return 'legacy';
+  const electronAPI = getElectronAPI();
+  const listRuntimes = electronAPI.chatRuntimeListActive;
+  const listAgents = electronAPI.chatAgentListActive;
+  if (typeof listRuntimes !== 'function' && typeof listAgents !== 'function') return 'legacy';
 
-  const [requestError, response] = await asyncTo(listActive());
+  if (typeof listRuntimes === 'function') {
+    const [requestError, response] = await asyncTo(listRuntimes());
+    if (requestError || !response.ok || !response.data) return 'blocked';
+    if (response.data.some((runtime): boolean => runtime.sessionId === sessionId)) return 'blocked';
+  }
+
+  if (typeof listAgents !== 'function') return 'clear';
+
+  const [requestError, response] = await asyncTo(listAgents());
   if (requestError) return 'blocked';
   const [unwrapError, checkpoints] = await asyncTo(Promise.resolve().then(() => unwrap(response)));
   if (unwrapError) return 'blocked';
@@ -195,6 +229,82 @@ async function readMessageRecords(sessionId: string, cursor?: ChatMessageHistory
     const result = await getElectronAPI().chatMessageList(sessionId, plainCursor);
     return unwrap(result);
   });
+}
+
+/**
+ * 解包 Runtime IPC 结果并保留稳定错误信息。
+ * @param result - Runtime handler 结果
+ * @returns 成功数据
+ */
+function unwrapRuntimeResponse<T>(result: ChatRuntimeHandlerResult<T>): T {
+  if (!result.ok || result.data === undefined) throw createRuntimeRequestError(result);
+  return result.data;
+}
+
+/**
+ * 读取指定会话当前由 Main 投影的活动 Runtime。
+ * @param sessionId - 目标会话 ID
+ * @returns 同会话活动 Runtime 快照
+ */
+async function listSessionRuntimes(sessionId: string): Promise<ChatRuntimeRecoverySnapshot[]> {
+  const [error, snapshots] = await asyncTo(
+    getElectronAPI()
+      .chatRuntimeListActive()
+      .then((response): ChatRuntimeRecoverySnapshot[] => unwrapRuntimeResponse(response))
+  );
+  if (error) throw error;
+
+  return snapshots.filter((runtime: ChatRuntimeRecoverySnapshot): boolean => runtime.sessionId === sessionId);
+}
+
+/**
+ * 读取指定会话当前由 Main 投影的活动 Child Checkpoint。
+ * @param sessionId - 目标会话 ID
+ * @returns 同会话活动 Checkpoint 快照
+ */
+async function listSessionCheckpoints(sessionId: string): Promise<ChatAgentCheckpointSnapshot[]> {
+  const [error, snapshots] = await asyncTo(
+    getElectronAPI()
+      .chatAgentListActive()
+      .then((response): ChatAgentCheckpointSnapshot[] => unwrap(response))
+  );
+  if (error) throw error;
+
+  return snapshots.filter((checkpoint: ChatAgentCheckpointSnapshot): boolean => checkpoint.sessionId === sessionId);
+}
+
+/**
+ * 终止指定会话的所有活动执行并验证 Main 状态已经收敛。
+ * @param sessionId - 目标会话 ID
+ */
+async function stopSessionExecutions(sessionId: string): Promise<void> {
+  const electronAPI = getElectronAPI();
+  const runtimes = await listSessionRuntimes(sessionId);
+  const [abortError] = await asyncTo(
+    Promise.all(
+      runtimes.map(async (runtime: ChatRuntimeRecoverySnapshot): Promise<void> => {
+        unwrapRuntimeResponse(await electronAPI.chatRuntimeAbort({ runtimeId: runtime.runtimeId }));
+      })
+    ).then((): void => undefined)
+  );
+  if (abortError) throw abortError;
+
+  // Runtime 收敛后重新读取 Checkpoint，避免取消已经随 Runtime 终态化的陈旧快照。
+  const checkpoints = await listSessionCheckpoints(sessionId);
+  const [cancelError] = await asyncTo(
+    Promise.all(
+      checkpoints.map(async (checkpoint: ChatAgentCheckpointSnapshot): Promise<void> => {
+        unwrap(await electronAPI.chatAgentCancelCheckpoint({ checkpointId: checkpoint.checkpointId }));
+      })
+    ).then((): void => undefined)
+  );
+  if (cancelError) throw cancelError;
+
+  const [checkError, remaining] = await asyncTo(Promise.all([listSessionRuntimes(sessionId), listSessionCheckpoints(sessionId)]));
+  if (checkError) throw checkError;
+
+  const [remainingRuntimes, remainingCheckpoints] = remaining;
+  if (remainingRuntimes.length || remainingCheckpoints.length) throw new Error('会话仍在运行，请稍后重试');
 }
 
 export const useChatSessionStore = defineStore('chat', {
@@ -307,7 +417,18 @@ export const useChatSessionStore = defineStore('chat', {
         if (!initialRecovery.recovered) return initialRecovery.messages;
 
         const recoveryGate = await readRecoveryGate(sessionId);
-        if (recoveryGate === 'blocked') return loadedMessages;
+        if (recoveryGate === 'blocked') {
+          const draftIds = new Set(initialRecovery.recoveredMessages.map((message: Message): string => message.id));
+          const staleInterruptIds = findStaleInterrupts(loadedMessages, draftIds);
+          const deletedInterruptIds = await Promise.all(
+            staleInterruptIds.map(async (messageId: string): Promise<string | null> => {
+              const [deleteError] = await asyncTo(this.deleteSessionMessage(sessionId, messageId));
+              return deleteError ? null : messageId;
+            })
+          );
+          const deletedIdSet = new Set(deletedInterruptIds.filter((messageId: string | null): messageId is string => messageId !== null));
+          return loadedMessages.filter((message: Message): boolean => !deletedIdSet.has(message.id));
+        }
 
         let recoveryResult = initialRecovery;
         if (recoveryGate === 'clear') {
@@ -508,6 +629,21 @@ export const useChatSessionStore = defineStore('chat', {
     },
 
     /**
+     * 删除会话中的单条消息。
+     * 用于精确清理由旧草稿恢复逻辑错误写入的伪中断提示，避免并发替换整段历史。
+     * @param sessionId - 要更新的会话 ID
+     * @param messageId - 要删除的消息 ID
+     */
+    async deleteSessionMessage(sessionId: string | null | undefined, messageId: string): Promise<void> {
+      if (!sessionId) return;
+
+      await retryDuringDatabaseInitialization(async (): Promise<void> => {
+        const result = await getElectronAPI().chatMessageDelete(sessionId, messageId);
+        unwrap(result);
+      });
+    },
+
+    /**
      * 替换会话的所有已持久化消息，并重新计算汇总使用量。
      * DELETE + INSERT + usage/lastMessageAt 在主进程事务内原子完成。
      * @param sessionId - 要更新的会话 ID。
@@ -547,6 +683,8 @@ export const useChatSessionStore = defineStore('chat', {
      * @param sessionId - 要删除的会话 ID。
      */
     async deleteSession(sessionId: string): Promise<void> {
+      await stopSessionExecutions(sessionId);
+
       await retryDuringDatabaseInitialization(async () => {
         const result = await getElectronAPI().chatSessionDelete(sessionId);
         unwrap(result);

@@ -20,7 +20,7 @@
 
 <script setup lang="ts">
 import type { ChatSession } from 'types/chat';
-import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import BChat from '@/components/BChat/index.vue';
 import type { BChatRuntimeStatusChange } from '@/components/BChat/utils/types';
@@ -29,7 +29,6 @@ import { CHAT_DRAFT_TAB_ID, createChatPath, createChatTabId, findChatTab } from 
 import { normalizeRouteParam } from '@/router/routes/helpers/fileRouteTab';
 import { createChatRecentId } from '@/shared/storage';
 import { useChatSessionStore } from '@/stores/chat/session';
-import type { ChatTabRuntimeController } from '@/stores/chat/tab';
 import { useChatTabStore } from '@/stores/chat/tab';
 import { useSettingStore } from '@/stores/ui/setting';
 import { useRecentStore } from '@/stores/workspace/recent';
@@ -63,14 +62,6 @@ let focusInputQueued = false;
 if (initialSessionId && settingStore.chatSidebarActiveSessionId === initialSessionId) {
   settingStore.setChatSidebarActiveSessionId(null);
 }
-
-/** 页面注册到运行态 Store 的终止控制器。 */
-const runtimeController: ChatTabRuntimeController = {
-  abort: async (): Promise<void> => {
-    if (!bChatRef.value) throw new Error('聊天页面尚未准备完成');
-    await bChatRef.value.abortRuntime();
-  }
-};
 
 runtimeStore.ensureTab(ownerTabId.value, initialSessionId ?? undefined);
 runtimeStore.syncStatus(ownerTabId.value);
@@ -288,9 +279,9 @@ function handleRuntimeStatus(event: BChatRuntimeStatusChange): void {
     return;
   }
 
-  const tabId = ownerTabId.value;
+  const tabId = event.sessionId ? runtimeStore.findOwner(event.sessionId)?.tabId ?? createChatTabId(event.sessionId) : ownerTabId.value;
   runtimeStore.setStatus(tabId, event.status);
-  if (event.status === 'idle' && !runtimeStore.isClosing(tabId)) asyncTo(promoteDraft());
+  if (tabId === ownerTabId.value && event.status === 'idle' && !runtimeStore.isClosing(tabId)) asyncTo(promoteDraft());
 }
 
 /** 导航到模型 Provider 设置页。 */
@@ -319,13 +310,8 @@ onActivated((): void => {
 });
 
 onMounted((): void => {
-  runtimeStore.registerController(ownerTabId.value, runtimeController);
   asyncTo(ensureSharedSessions());
   focusChatInput();
-});
-
-onUnmounted((): void => {
-  runtimeStore.unregisterController(ownerTabId.value, runtimeController);
 });
 </script>
 

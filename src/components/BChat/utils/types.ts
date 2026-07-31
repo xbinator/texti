@@ -106,6 +106,8 @@ export type BChatRuntimeStatusChange =
   | {
       /** 当前持续运行状态。 */
       status: BChatRuntimeSourceStatus;
+      /** 状态明确属于后台原会话时携带其 ID。 */
+      sessionId?: string;
     }
   | {
       /** 成功完成状态。 */

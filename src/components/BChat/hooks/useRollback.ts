@@ -14,6 +14,8 @@ export interface UseRollbackOptions {
   messages: Ref<Message[]>;
   /** 获取当前会话 ID */
   getSessionId: () => string | undefined;
+  /** 判断异步回退所属会话是否仍在当前视图。 */
+  isSessionActive: (sessionId: string) => boolean;
   /** 获取已加载的所有历史消息 */
   fetchAllPriorHistory: (sessionId: string) => Promise<Message[]>;
   /** 持久化完整消息列表 */
@@ -42,7 +44,7 @@ export interface UseRollbackReturns {
  * @returns 回退操作和判断方法
  */
 export function useRollback(options: UseRollbackOptions): UseRollbackReturns {
-  const { messages, getSessionId, fetchAllPriorHistory, persistMessages, restoreInput, expireConfirmation, focusInput } = options;
+  const { messages, getSessionId, isSessionActive, fetchAllPriorHistory, persistMessages, restoreInput, expireConfirmation, focusInput } = options;
 
   /**
    * 判断指定消息是否可回退。
@@ -66,7 +68,8 @@ export function useRollback(options: UseRollbackOptions): UseRollbackReturns {
    * @param message - 目标用户消息
    */
   async function rollback(message: Message): Promise<void> {
-    const index = messages.value.findIndex((m) => m.id === message.id);
+    const sourceMessages = [...messages.value];
+    const index = sourceMessages.findIndex((sourceMessage: Message): boolean => sourceMessage.id === message.id);
     if (index === -1) return;
 
     // 1. 获取已加载但不在当前 messages 中的历史消息
@@ -74,14 +77,16 @@ export function useRollback(options: UseRollbackOptions): UseRollbackReturns {
     const historyMessages = sessionId ? await fetchAllPriorHistory(sessionId) : [];
 
     // 2. 截断：保留 index 之前的消息，拼接历史消息
-    const retainedMessages = messages.value.slice(0, index);
+    const retainedMessages = sourceMessages.slice(0, index);
     const fullMessages = [...historyMessages, ...retainedMessages];
-    messages.value.splice(0, messages.value.length, ...fullMessages);
 
     // 3. 持久化截断后的消息列表（DELETE+INSERT 全量替换）
     if (sessionId) {
       await persistMessages(sessionId, fullMessages);
+      if (!isSessionActive(sessionId)) return;
     }
+
+    messages.value.splice(0, messages.value.length, ...fullMessages);
 
     // 4. 过期确认控制器
     expireConfirmation();

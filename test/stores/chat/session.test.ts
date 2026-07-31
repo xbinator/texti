@@ -3,7 +3,8 @@
  * @description 聊天会话 store 消息草稿恢复与单条更新测试。
  */
 import type { ChatMessageRecord, ChatSession, ChatSessionModelMetadata, PaginatedSessionsResult, SessionPaginationParams } from 'types/chat';
-import type { ChatAgentCheckpointSnapshot } from 'types/chat-agent';
+import type { ChatAgentCancelCheckpointInput, ChatAgentCheckpointSnapshot, ChatAgentHandlerResult } from 'types/chat-agent';
+import type { ChatRuntimeAbortInput, ChatRuntimeAbortResult, ChatRuntimeHandlerResult, ChatRuntimeRecoverySnapshot } from 'types/chat-runtime';
 import type { ChatHandlerResult } from 'types/electron-api';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -24,7 +25,11 @@ const mockElectronAPI = vi.hoisted(() => ({
   chatMessageList: vi.fn<(sessionId: string) => Promise<{ ok: true; data: ChatMessageRecord[] }>>(),
   chatMessageAdd: vi.fn<(message: ChatMessageRecord) => Promise<{ ok: true; data: void }>>(),
   chatMessageUpdate: vi.fn<(message: ChatMessageRecord) => Promise<{ ok: true; data: void }>>(),
-  chatAgentListActive: vi.fn<() => Promise<ChatHandlerResult<ChatAgentCheckpointSnapshot[]>>>()
+  chatMessageDelete: vi.fn<(sessionId: string, messageId: string) => Promise<ChatHandlerResult<void>>>(),
+  chatRuntimeListActive: vi.fn<() => Promise<ChatRuntimeHandlerResult<ChatRuntimeRecoverySnapshot[]>>>(),
+  chatRuntimeAbort: vi.fn<(input: ChatRuntimeAbortInput) => Promise<ChatRuntimeHandlerResult<ChatRuntimeAbortResult>>>(),
+  chatAgentListActive: vi.fn<() => Promise<ChatAgentHandlerResult<ChatAgentCheckpointSnapshot[]>>>(),
+  chatAgentCancelCheckpoint: vi.fn<(input: ChatAgentCancelCheckpointInput) => Promise<ChatAgentHandlerResult<ChatAgentCheckpointSnapshot>>>()
 }));
 const recentStoreMock = vi.hoisted(() => ({
   updateChatRecordTitle: vi.fn<(_sessionId: string, _title: string) => Promise<unknown>>(),
@@ -103,6 +108,65 @@ function createInterruptedAssistantRecord(): ChatMessageRecord {
   };
 }
 
+/**
+ * 创建旧逻辑错误持久化的硬中断提示记录。
+ * @returns 与测试 assistant 草稿关联的中断记录
+ */
+function createStaleInterruptRecord(): ChatMessageRecord {
+  return {
+    id: 'assistant-draft-1-interrupt',
+    sessionId: 'session-1',
+    role: 'interrupt',
+    content: HARD_INTERRUPTED_ASSISTANT_MESSAGE,
+    parts: [],
+    createdAt: '2026-06-13T00:00:00.000Z',
+    loading: false,
+    finished: true
+  };
+}
+
+/**
+ * 创建指定会话的活动 Runtime 快照。
+ * @param sessionId - Runtime 所属会话 ID
+ * @param runtimeId - Runtime ID
+ * @returns 活动 Runtime 快照
+ */
+function createRuntimeSnapshot(sessionId: string, runtimeId = 'runtime-active'): ChatRuntimeRecoverySnapshot {
+  return {
+    runtimeId,
+    sessionId,
+    turnId: 'turn-active',
+    clientId: 'bchat',
+    agentId: 'primary',
+    rootRuntimeId: runtimeId,
+    phase: 'streaming',
+    createdAt: 1,
+    pendingRequests: []
+  };
+}
+
+/**
+ * 创建指定会话的活动 Child Checkpoint 快照。
+ * @param sessionId - Checkpoint 所属会话 ID
+ * @param checkpointId - Checkpoint ID
+ * @returns 活动 Checkpoint 快照
+ */
+function createCheckpointSnapshot(sessionId: string, checkpointId = 'checkpoint-active'): ChatAgentCheckpointSnapshot {
+  return {
+    checkpointId,
+    sessionId,
+    turnId: 'turn-active',
+    primaryAgentId: 'primary',
+    rootRuntimeId: 'runtime-root',
+    sourceRuntimeId: 'runtime-source',
+    status: 'waiting_children',
+    version: 1,
+    checkpointSequence: 1,
+    createdAt: '2026-08-01T00:00:00.000Z',
+    updatedAt: '2026-08-01T00:00:00.000Z'
+  };
+}
+
 describe('useChatSessionStore', () => {
   beforeEach((): void => {
     setActivePinia(createPinia());
@@ -115,11 +179,23 @@ describe('useChatSessionStore', () => {
     mockElectronAPI.chatSessionUpdateWorkspace.mockReset();
     mockElectronAPI.chatSessionClearWorkspace.mockReset();
     mockElectronAPI.chatSessionDelete.mockReset();
+    mockElectronAPI.chatSessionDelete.mockResolvedValue({ ok: true, data: undefined });
     mockElectronAPI.chatMessageList.mockReset();
     mockElectronAPI.chatMessageAdd.mockReset();
     mockElectronAPI.chatMessageUpdate.mockReset();
+    mockElectronAPI.chatMessageDelete.mockReset();
+    mockElectronAPI.chatMessageDelete.mockResolvedValue({ ok: true, data: undefined });
+    mockElectronAPI.chatRuntimeListActive.mockReset();
+    mockElectronAPI.chatRuntimeListActive.mockResolvedValue({ ok: true, data: [] });
+    mockElectronAPI.chatRuntimeAbort.mockReset();
+    mockElectronAPI.chatRuntimeAbort.mockResolvedValue({ ok: true, data: {} });
     mockElectronAPI.chatAgentListActive.mockReset();
     mockElectronAPI.chatAgentListActive.mockResolvedValue({ ok: true, data: [] });
+    mockElectronAPI.chatAgentCancelCheckpoint.mockReset();
+    mockElectronAPI.chatAgentCancelCheckpoint.mockImplementation(async ({ checkpointId }: ChatAgentCancelCheckpointInput) => ({
+      ok: true,
+      data: { ...createCheckpointSnapshot('session-a', checkpointId), status: 'cancelled' }
+    }));
     recentStoreMock.updateChatRecordTitle.mockReset();
     recentStoreMock.updateChatRecordTitle.mockResolvedValue(undefined);
     recentStoreMock.removeFile.mockReset();
@@ -227,7 +303,9 @@ describe('useChatSessionStore', () => {
 
   it('clears a persisted workspace only after the persisted session is returned', async (): Promise<void> => {
     const store = useChatSessionStore();
-    const original = createSession('session-a', { metadata: { model: { providerId: 'provider-1', modelId: 'model-1' }, workspaceRoot: '/private/tmp/project' } });
+    const original = createSession('session-a', {
+      metadata: { model: { providerId: 'provider-1', modelId: 'model-1' }, workspaceRoot: '/private/tmp/project' }
+    });
     const cleared = createSession('session-a', { metadata: { model: { providerId: 'provider-1', modelId: 'model-1' } } });
     store.sessions = [original];
     mockElectronAPI.chatSessionClearWorkspace.mockResolvedValue({ ok: true, data: cleared });
@@ -360,6 +438,44 @@ describe('useChatSessionStore', () => {
     expect(mockElectronAPI.chatMessageAdd).not.toHaveBeenCalled();
   });
 
+  it('preserves a streaming assistant when its main-process Runtime remains active', async (): Promise<void> => {
+    const store = useChatSessionStore();
+    const assistant = createInterruptedAssistantRecord();
+    mockElectronAPI.chatMessageList.mockResolvedValue({ ok: true, data: [assistant] });
+    mockElectronAPI.chatMessageAdd.mockResolvedValue({ ok: true, data: undefined });
+    mockElectronAPI.chatMessageUpdate.mockResolvedValue({ ok: true, data: undefined });
+    mockElectronAPI.chatRuntimeListActive.mockResolvedValue({ ok: true, data: [createRuntimeSnapshot('session-1')] });
+
+    await expect(store.getSessionMessages('session-1')).resolves.toEqual([
+      expect.objectContaining({
+        id: assistant.id,
+        loading: true,
+        finished: false
+      })
+    ]);
+    expect(mockElectronAPI.chatAgentListActive).not.toHaveBeenCalled();
+    expect(mockElectronAPI.chatMessageUpdate).not.toHaveBeenCalled();
+    expect(mockElectronAPI.chatMessageAdd).not.toHaveBeenCalled();
+  });
+
+  it('removes a stale hard-interruption marker while the owning Runtime remains active', async (): Promise<void> => {
+    const store = useChatSessionStore();
+    const assistant = createInterruptedAssistantRecord();
+    mockElectronAPI.chatMessageList.mockResolvedValue({ ok: true, data: [assistant, createStaleInterruptRecord()] });
+    mockElectronAPI.chatRuntimeListActive.mockResolvedValue({ ok: true, data: [createRuntimeSnapshot('session-1')] });
+
+    await expect(store.getSessionMessages('session-1')).resolves.toEqual([
+      expect.objectContaining({
+        id: assistant.id,
+        loading: true,
+        finished: false
+      })
+    ]);
+    expect(mockElectronAPI.chatMessageDelete).toHaveBeenCalledWith('session-1', 'assistant-draft-1-interrupt');
+    expect(mockElectronAPI.chatMessageUpdate).not.toHaveBeenCalled();
+    expect(mockElectronAPI.chatMessageAdd).not.toHaveBeenCalled();
+  });
+
   it('fails closed when active delegation status cannot be read during renderer reload', async (): Promise<void> => {
     const store = useChatSessionStore();
     mockElectronAPI.chatMessageList.mockResolvedValue({ ok: true, data: [createInterruptedAssistantRecord()] });
@@ -372,6 +488,23 @@ describe('useChatSessionStore', () => {
     const messages = await store.getSessionMessages('session-1');
 
     expect(messages[0]).toMatchObject({ loading: true, finished: false });
+    expect(mockElectronAPI.chatMessageUpdate).not.toHaveBeenCalled();
+    expect(mockElectronAPI.chatMessageAdd).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when active Runtime status cannot be read during renderer reload', async (): Promise<void> => {
+    const store = useChatSessionStore();
+    mockElectronAPI.chatMessageList.mockResolvedValue({ ok: true, data: [createInterruptedAssistantRecord()] });
+    mockElectronAPI.chatRuntimeListActive.mockResolvedValue({
+      ok: false,
+      error: 'Runtime status unavailable',
+      code: 'RUNTIME_STATUS_UNAVAILABLE'
+    });
+
+    const messages = await store.getSessionMessages('session-1');
+
+    expect(messages[0]).toMatchObject({ loading: true, finished: false });
+    expect(mockElectronAPI.chatAgentListActive).not.toHaveBeenCalled();
     expect(mockElectronAPI.chatMessageUpdate).not.toHaveBeenCalled();
     expect(mockElectronAPI.chatMessageAdd).not.toHaveBeenCalled();
   });
@@ -466,6 +599,68 @@ describe('useChatSessionStore', () => {
     await store.deleteSession('session-a');
 
     expect(store.findSession('session-a')).toBeUndefined();
+  });
+
+  it('aborts only matching active Runtimes before deleting the session', async (): Promise<void> => {
+    const store = useChatSessionStore();
+    store.sessions = [createSession('session-a')];
+    mockElectronAPI.chatRuntimeListActive
+      .mockResolvedValueOnce({
+        ok: true,
+        data: [createRuntimeSnapshot('session-a', 'runtime-target'), createRuntimeSnapshot('session-b', 'runtime-other')]
+      })
+      .mockResolvedValueOnce({ ok: true, data: [] });
+    mockElectronAPI.chatSessionDelete.mockResolvedValue({ ok: true, data: undefined });
+
+    await store.deleteSession('session-a');
+
+    expect(mockElectronAPI.chatRuntimeAbort).toHaveBeenCalledOnce();
+    expect(mockElectronAPI.chatRuntimeAbort).toHaveBeenCalledWith({ runtimeId: 'runtime-target' });
+    expect(mockElectronAPI.chatRuntimeAbort.mock.invocationCallOrder[0]).toBeLessThan(mockElectronAPI.chatSessionDelete.mock.invocationCallOrder[0]);
+    expect(store.findSession('session-a')).toBeUndefined();
+  });
+
+  it('cancels only matching Child Checkpoints before deleting the session', async (): Promise<void> => {
+    const store = useChatSessionStore();
+    store.sessions = [createSession('session-a')];
+    mockElectronAPI.chatAgentListActive
+      .mockResolvedValueOnce({
+        ok: true,
+        data: [createCheckpointSnapshot('session-a', 'checkpoint-target'), createCheckpointSnapshot('session-b', 'checkpoint-other')]
+      })
+      .mockResolvedValueOnce({ ok: true, data: [] });
+    mockElectronAPI.chatSessionDelete.mockResolvedValue({ ok: true, data: undefined });
+
+    await store.deleteSession('session-a');
+
+    expect(mockElectronAPI.chatAgentCancelCheckpoint).toHaveBeenCalledOnce();
+    expect(mockElectronAPI.chatAgentCancelCheckpoint).toHaveBeenCalledWith({ checkpointId: 'checkpoint-target' });
+    expect(mockElectronAPI.chatAgentCancelCheckpoint.mock.invocationCallOrder[0]).toBeLessThan(mockElectronAPI.chatSessionDelete.mock.invocationCallOrder[0]);
+  });
+
+  it('keeps the session when authoritative recheck still reports active execution', async (): Promise<void> => {
+    const store = useChatSessionStore();
+    store.sessions = [createSession('session-a')];
+    mockElectronAPI.chatRuntimeListActive
+      .mockResolvedValueOnce({ ok: true, data: [createRuntimeSnapshot('session-a', 'runtime-target')] })
+      .mockResolvedValueOnce({ ok: true, data: [createRuntimeSnapshot('session-a', 'runtime-new')] });
+
+    await expect(store.deleteSession('session-a')).rejects.toThrow('会话仍在运行，请稍后重试');
+
+    expect(mockElectronAPI.chatSessionDelete).not.toHaveBeenCalled();
+    expect(store.findSession('session-a')).toBeDefined();
+  });
+
+  it('keeps the session when Runtime termination fails', async (): Promise<void> => {
+    const store = useChatSessionStore();
+    store.sessions = [createSession('session-a')];
+    mockElectronAPI.chatRuntimeListActive.mockResolvedValueOnce({ ok: true, data: [createRuntimeSnapshot('session-a', 'runtime-target')] });
+    mockElectronAPI.chatRuntimeAbort.mockResolvedValue({ ok: false, error: 'Runtime 终止失败', code: 'RUNTIME_ABORT_FAILED' });
+
+    await expect(store.deleteSession('session-a')).rejects.toThrow('Runtime 终止失败');
+
+    expect(mockElectronAPI.chatSessionDelete).not.toHaveBeenCalled();
+    expect(store.findSession('session-a')).toBeDefined();
   });
 
   it('removes the matching chat recent record after session deletion succeeds', async (): Promise<void> => {

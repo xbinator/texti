@@ -25,7 +25,6 @@ const routerMocks = vi.hoisted(() => ({
 }));
 
 const routeFailureMock = vi.hoisted(() => ({ type: 'aborted' }));
-const abortRuntimeMock = vi.hoisted(() => vi.fn<() => Promise<void>>());
 const resetDraftMock = vi.hoisted(() => vi.fn<() => Promise<void>>());
 const focusInputMock = vi.hoisted(() => vi.fn<() => void>());
 const ensureSessionsMock = vi.hoisted(() => vi.fn<() => Promise<void>>());
@@ -79,11 +78,8 @@ vi.mock('@/components/BChat/index.vue', () => ({
       }
     },
     emits: ['session-created', 'session-title-persisted', 'new-session', 'runtime-status-change', 'navigate-to-provider'],
-    setup(
-      _props: unknown,
-      { expose }: { expose: (value: { abortRuntime: () => Promise<void>; focusInput: () => void; resetDraft: () => Promise<void> }) => void }
-    ) {
-      expose({ abortRuntime: abortRuntimeMock, focusInput: focusInputMock, resetDraft: resetDraftMock });
+    setup(_props: unknown, { expose }: { expose: (value: { focusInput: () => void; resetDraft: () => Promise<void> }) => void }) {
+      expose({ focusInput: focusInputMock, resetDraft: resetDraftMock });
       return {};
     },
     template: '<div class="b-chat-page-stub"></div>'
@@ -157,8 +153,6 @@ describe('chat page', (): void => {
     routerMocks.route.path = '/chat';
     routerMocks.route.fullPath = '/chat';
     routerMocks.route.params = {};
-    abortRuntimeMock.mockReset();
-    abortRuntimeMock.mockResolvedValue();
     resetDraftMock.mockReset();
     resetDraftMock.mockResolvedValue();
     focusInputMock.mockReset();
@@ -557,13 +551,14 @@ describe('chat page', (): void => {
     expect(runtimeStore.getStatus('chat:session-a')).toBe('idle');
   });
 
-  it('registers a controller that aborts through the mounted BChat instance', async (): Promise<void> => {
+  it('keeps a running Runtime record after the page instance unmounts', async (): Promise<void> => {
     const runtimeStore = useChatTabStore();
-    mountPage('session-a');
-    runtimeStore.setStatus('chat:session-a', 'running');
+    const wrapper = mountPage('session-a');
+    findBChat(wrapper).$emit('runtime-status-change', { status: 'running' });
+    await flushPromises();
 
-    await runtimeStore.abortTabs(['chat:session-a']);
+    wrapper.unmount();
 
-    expect(abortRuntimeMock).toHaveBeenCalledTimes(1);
+    expect(runtimeStore.records['chat:session-a']).toMatchObject({ sessionId: 'session-a', status: 'running' });
   });
 });

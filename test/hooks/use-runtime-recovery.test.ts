@@ -84,16 +84,101 @@ describe('recoverRuntimes', (): void => {
     );
     const runtimeStore = useChatTabStore();
     expect(runtimeStore.getStatus('chat:session-1')).toBe('waiting');
-    expect(runtimeStore.controllers.has('chat:session-1')).toBe(true);
-
-    await runtimeStore.abortTabs(['chat:session-1']);
-    expect(electronAPIMock.chatRuntimeAbort).toHaveBeenCalledWith({ runtimeId: 'runtime-1' });
-    expect(system.getSession('session-1')?.getSnapshot().matches('idle')).toBe(true);
-    expect(system.getRuntimeCapabilities('runtime-1')).toBeUndefined();
     const confirmationListener = vi.fn();
     system.subscribeSessionEvents('session-1', confirmationListener);
     expect(confirmationListener).toHaveBeenCalledWith(expect.objectContaining({ type: 'confirmationRequested' }));
     system.stop();
+  });
+
+  it('retries a still-pending renderer request on the authoritative second snapshot', async (): Promise<void> => {
+    const snapshot = createSnapshot();
+    electronAPIMock.chatRuntimeListActive.mockResolvedValue({ ok: true, data: [snapshot] });
+    electronAPIMock.chatRuntimeSubmitToolResult
+      .mockResolvedValueOnce({ ok: false, error: 'temporary failure', code: 'IPC_FAILED' })
+      .mockResolvedValueOnce({ ok: true });
+    electronAPIMock.chatRuntimeSubmitBridgeResponse.mockResolvedValue({ ok: true });
+    const system = createChatActorSystem();
+    system.start();
+
+    await recoverRuntimes(system);
+
+    expect(electronAPIMock.chatRuntimeSubmitToolResult).toHaveBeenCalledTimes(2);
+    expect(electronAPIMock.chatRuntimeSubmitToolResult.mock.invocationCallOrder[1]).toBeLessThan(
+      electronAPIMock.chatRuntimeSubmitBridgeResponse.mock.invocationCallOrder[0]
+    );
+    system.stop();
+  });
+
+  it('backs off twice before replaying later requests in order', async (): Promise<void> => {
+    vi.useFakeTimers();
+    const snapshot = createSnapshot();
+    electronAPIMock.chatRuntimeListActive.mockResolvedValue({ ok: true, data: [snapshot] });
+    electronAPIMock.chatRuntimeSubmitToolResult
+      .mockResolvedValueOnce({ ok: false, error: 'first', code: 'IPC_FAILED' })
+      .mockResolvedValueOnce({ ok: false, error: 'second', code: 'IPC_FAILED' })
+      .mockResolvedValueOnce({ ok: false, error: 'third', code: 'IPC_FAILED' })
+      .mockResolvedValueOnce({ ok: true });
+    electronAPIMock.chatRuntimeSubmitBridgeResponse.mockResolvedValue({ ok: true });
+    const system = createChatActorSystem();
+    system.start();
+    const recoveryOutcome = recoverRuntimes(system).then(
+      (): { error: null } => ({ error: null }),
+      (error: unknown): { error: unknown } => ({ error })
+    );
+
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(electronAPIMock.chatRuntimeSubmitToolResult).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(49);
+      expect(electronAPIMock.chatRuntimeSubmitToolResult).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(electronAPIMock.chatRuntimeSubmitToolResult).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(99);
+      expect(electronAPIMock.chatRuntimeSubmitToolResult).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect((await recoveryOutcome).error).toBeNull();
+      expect(electronAPIMock.chatRuntimeSubmitToolResult).toHaveBeenCalledTimes(4);
+      expect(electronAPIMock.chatRuntimeSubmitToolResult.mock.invocationCallOrder[3]).toBeLessThan(
+        electronAPIMock.chatRuntimeSubmitBridgeResponse.mock.invocationCallOrder[0]
+      );
+    } finally {
+      system.stop();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects after bounded replay retries without executing later requests', async (): Promise<void> => {
+    vi.useFakeTimers();
+    const snapshot = createSnapshot();
+    electronAPIMock.chatRuntimeListActive.mockResolvedValue({ ok: true, data: [snapshot] });
+    electronAPIMock.chatRuntimeSubmitToolResult
+      .mockResolvedValueOnce({ ok: false, error: 'first', code: 'IPC_FAILED' })
+      .mockResolvedValueOnce({ ok: false, error: 'second', code: 'IPC_FAILED' })
+      .mockResolvedValueOnce({ ok: false, error: 'third', code: 'IPC_FAILED' })
+      .mockResolvedValueOnce({ ok: false, error: 'fourth', code: 'IPC_FAILED' });
+    electronAPIMock.chatRuntimeSubmitBridgeResponse.mockResolvedValue({ ok: true });
+    const system = createChatActorSystem();
+    system.start();
+    const recoveryOutcome = recoverRuntimes(system).then(
+      (): { error: null } => ({ error: null }),
+      (error: unknown): { error: unknown } => ({ error })
+    );
+
+    try {
+      await vi.advanceTimersByTimeAsync(150);
+      const { error } = await recoveryOutcome;
+
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe('fourth');
+      expect(electronAPIMock.chatRuntimeSubmitToolResult).toHaveBeenCalledTimes(4);
+      expect(electronAPIMock.chatRuntimeSubmitBridgeResponse).not.toHaveBeenCalled();
+    } finally {
+      system.stop();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
   });
 
   it('removes a runtime that completes between recovery queries', async (): Promise<void> => {
@@ -110,7 +195,6 @@ describe('recoverRuntimes', (): void => {
     expect(system.actor.getSnapshot().context.runtimeRoutes.has('runtime-1')).toBe(false);
     expect(system.getSession('session-1')?.getSnapshot().matches('idle')).toBe(true);
     expect(useChatTabStore().getStatus('chat:session-1')).toBe('completed');
-    expect(useChatTabStore().controllers.has('chat:session-1')).toBe(false);
     system.stop();
   });
 
@@ -129,7 +213,7 @@ describe('recoverRuntimes', (): void => {
     system.stop();
   });
 
-  it('does not recreate a top-tab binding closed between recovery queries', async (): Promise<void> => {
+  it('keeps a detached background binding when its top tab closes between recovery queries', async (): Promise<void> => {
     const snapshot = createSnapshot();
     const tabsStore = useTabsStore();
     const runtimeStore = useChatTabStore();
@@ -148,8 +232,7 @@ describe('recoverRuntimes', (): void => {
 
     await recoverRuntimes(system);
 
-    expect(runtimeStore.records['chat:session-1']).toBeUndefined();
-    expect(runtimeStore.controllers.has('chat:session-1')).toBe(false);
+    expect(runtimeStore.records['chat:session-1']).toMatchObject({ sessionId: 'session-1', status: 'waiting' });
     system.stop();
   });
 
@@ -171,7 +254,7 @@ describe('recoverRuntimes', (): void => {
     system.stop();
   });
 
-  it('keeps a recovered ChatSider runtime out of the top-tab registry', async (): Promise<void> => {
+  it('restores a recovered ChatSider runtime as a detached background record', async (): Promise<void> => {
     const snapshot = createSnapshot();
     useSettingStore().setChatSidebarActiveSessionId('session-1');
     electronAPIMock.chatRuntimeListActive.mockResolvedValue({ ok: true, data: [snapshot] });
@@ -183,9 +266,8 @@ describe('recoverRuntimes', (): void => {
     await recoverRuntimes(system);
 
     const runtimeStore = useChatTabStore();
-    expect(runtimeStore.findOwner('session-1')).toBeUndefined();
-    expect(runtimeStore.records['chat:session-1']).toBeUndefined();
-    expect(runtimeStore.controllers.has('chat:session-1')).toBe(false);
+    expect(runtimeStore.findOwner('session-1')?.tabId).toBe('chat:session-1');
+    expect(runtimeStore.records['chat:session-1']).toMatchObject({ sessionId: 'session-1', status: 'waiting' });
     expect(system.getSession('session-1')?.getSnapshot().matches('waitingForUser')).toBe(true);
     system.stop();
   });

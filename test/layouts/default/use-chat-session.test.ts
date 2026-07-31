@@ -30,21 +30,21 @@ describe('useChatSession', (): void => {
     setActivePinia(createPinia());
   });
 
-  it('refuses to switch sessions while chat runtime is loading', async (): Promise<void> => {
+  it('switches sessions without a chat-loading guard', async (): Promise<void> => {
     const settingStore = useSettingStore();
     settingStore.setChatSidebarActiveSessionId('session-a');
-    const session = useChatSession({ isChatLoading: () => true });
+    const session = useChatSession();
 
     await session.switchSession('session-b');
 
-    expect(settingStore.chatSidebarActiveSessionId).toBe('session-a');
+    expect(settingStore.chatSidebarActiveSessionId).toBe('session-b');
     expect('currentSession' in session).toBe(true);
   });
 
   it('clears the active session id when the active session is deleted', (): void => {
     const settingStore = useSettingStore();
     settingStore.setChatSidebarActiveSessionId('session-deleted');
-    const session = useChatSession({ isChatLoading: () => false });
+    const session = useChatSession();
 
     session.handleDeletedSession('session-deleted');
 
@@ -59,7 +59,7 @@ describe('useChatSession', (): void => {
     chatStore.sessions = [currentSession];
     settingStore.setChatSidebarActiveSessionId(currentSession.id);
 
-    const session = useChatSession({ isChatLoading: () => false });
+    const session = useChatSession();
 
     expect(session.currentSession.value).toEqual(currentSession);
   });

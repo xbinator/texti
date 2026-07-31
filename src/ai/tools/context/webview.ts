@@ -433,6 +433,17 @@ export interface WebviewToolContextRegistry {
    */
   clearCurrent(id: string): void;
   /**
+   * 获取当前激活 WebView 的稳定标识。
+   * @returns 当前 WebView 标识或 null
+   */
+  getCurrentId(): string | null;
+  /**
+   * 按稳定标识获取 WebView 上下文。
+   * @param id - WebView 标签页标识
+   * @returns 对应上下文或 undefined
+   */
+  getContext(id: string): WebviewToolContext | undefined;
+  /**
    * 获取当前激活 WebView 上下文。
    * @returns 当前上下文或 undefined
    */
@@ -468,6 +479,12 @@ export function createWebviewToolContextRegistry(): WebviewToolContextRegistry {
       if (currentId === id) {
         currentId = null;
       }
+    },
+    getCurrentId(): string | null {
+      return currentId;
+    },
+    getContext(id: string): WebviewToolContext | undefined {
+      return contexts.get(id);
     },
     getCurrentContext(): WebviewToolContext | undefined {
       return currentId ? contexts.get(currentId) : undefined;

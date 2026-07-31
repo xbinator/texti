@@ -39,6 +39,8 @@ const AUTO_DEFAULT_VERIFICATION_VERSION = 'v1';
 export interface RunShellCommandInput {
   /** 内部命令 ID，通常来自 toolCallId。 */
   commandId?: unknown;
+  /** Runtime 注入的原始工具调用 ID，不进入模型 schema。 */
+  toolCallId?: unknown;
   /** Shell 类型。 */
   shell?: unknown;
   /** 命令文本。 */
@@ -376,6 +378,7 @@ export function createBuiltinShellCommandTool(options: CreateBuiltinShellCommand
 
       if (hasSafetyFindings) {
         confirmationRequest = {
+          toolCallId: typeof input.toolCallId === 'string' && input.toolCallId.trim().length > 0 ? input.toolCallId.trim() : undefined,
           toolName: RUN_SHELL_COMMAND_TOOL_NAME,
           title: 'AI 想要执行 Shell 命令',
           description: formatConfirmationDescription(input.shell, cwd, timeoutMs, safety),

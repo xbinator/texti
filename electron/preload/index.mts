@@ -305,6 +305,7 @@ const electronAPI: ElectronAPI = {
   chatMessageList: (sessionId, cursor?) => ipcRenderer.invoke('chat:message:list', sessionId, cursor),
   chatMessageAdd: (message) => ipcRenderer.invoke('chat:message:add', message),
   chatMessageUpdate: (message) => ipcRenderer.invoke('chat:message:update', message),
+  chatMessageDelete: (sessionId, messageId) => ipcRenderer.invoke('chat:message:delete', sessionId, messageId),
   chatMessageSetAll: (sessionId, messages) => ipcRenderer.invoke('chat:message:setAll', sessionId, messages),
 
   // ==================== 安全存储操作 ====================

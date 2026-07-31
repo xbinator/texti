@@ -44,7 +44,6 @@ function createTab(id: string, path: string): Tab {
 const switchSessionMock = vi.fn<(sessionId: string) => Promise<void>>();
 const openDraftSessionMock = vi.fn<() => Promise<void>>();
 const syncDeletedSessionMock = vi.fn<(sessionId: string) => void>();
-const disabledMock = vi.fn<() => boolean>();
 
 /**
  * 创建测试用聊天路由 API。
@@ -52,7 +51,6 @@ const disabledMock = vi.fn<() => boolean>();
  */
 function createRouteApi(): ReturnType<typeof useChatRoute> {
   return useChatRoute({
-    isSessionActionDisabled: disabledMock,
     openDraftSession: openDraftSessionMock,
     switchSession: switchSessionMock,
     syncDeletedSession: syncDeletedSessionMock
@@ -69,8 +67,6 @@ describe('useChatRoute', (): void => {
     openDraftSessionMock.mockReset();
     openDraftSessionMock.mockResolvedValue();
     syncDeletedSessionMock.mockReset();
-    disabledMock.mockReset();
-    disabledMock.mockReturnValue(false);
     removeRecentMock.mockReset();
     removeRecentMock.mockResolvedValue(undefined);
     routeMock.fullPath = '/welcome';
@@ -97,14 +93,10 @@ describe('useChatRoute', (): void => {
     });
   });
 
-  it('provides a fallback path when a runtime owner has no visible tab', (): void => {
+  it('does not treat a detached runtime record as a visible page owner', (): void => {
     useChatTabStore().ensureTab('chat:session-a', 'session-a');
 
-    expect(createRouteApi().resolveRoute('session-a')).toEqual({
-      tabId: 'chat:session-a',
-      path: '/chat/session-a',
-      sessionId: 'session-a'
-    });
+    expect(createRouteApi().resolveRoute('session-a')).toBeUndefined();
   });
 
   it('finds the unique blank draft without inventing a session id', (): void => {
@@ -179,6 +171,17 @@ describe('useChatRoute', (): void => {
     expect(switchSessionMock).toHaveBeenCalledWith('session-a');
   });
 
+  it('switches a detached running session into ChatSider instead of navigating', async (): Promise<void> => {
+    const runtimeStore = useChatTabStore();
+    runtimeStore.ensureTab('chat:session-a', 'session-a');
+    runtimeStore.setStatus('chat:session-a', 'running');
+
+    await createRouteApi().handleSwitchSession('session-a');
+
+    expect(routerPushMock).not.toHaveBeenCalled();
+    expect(switchSessionMock).toHaveBeenCalledWith('session-a');
+  });
+
   it('syncs deleted side state and closes the owning chat tab', async (): Promise<void> => {
     routeMock.fullPath = '/chat/session-a';
     const tabsStore = useTabsStore();
@@ -200,7 +203,16 @@ describe('useChatRoute', (): void => {
     expect(syncDeletedSessionMock).toHaveBeenCalledWith('session-a');
   });
 
-  it('keeps the active deleted-session tab when fallback navigation is blocked', async (): Promise<void> => {
+  it('removes a sidebar-only runtime owner after deleting a session', async (): Promise<void> => {
+    const runtimeStore = useChatTabStore();
+    runtimeStore.ensureTab('chat:session-a', 'session-a');
+
+    await createRouteApi().handleDeletedSession('session-a');
+
+    expect(runtimeStore.findOwner('session-a')).toBeUndefined();
+  });
+
+  it('clears the deleted-session tab and Runtime owner when fallback navigation is blocked', async (): Promise<void> => {
     routeMock.fullPath = '/chat/session-a';
     const tabsStore = useTabsStore();
     const runtimeStore = useChatTabStore();
@@ -211,7 +223,8 @@ describe('useChatRoute', (): void => {
     await createRouteApi().handleDeletedSession('session-a');
 
     expect(syncDeletedSessionMock).toHaveBeenCalledWith('session-a');
-    expect(tabsStore.tabs).toHaveLength(1);
-    expect(runtimeStore.records['chat:session-a']).toBeDefined();
+    expect(routerPushMock).toHaveBeenCalledWith('/welcome');
+    expect(tabsStore.tabs).toHaveLength(0);
+    expect(runtimeStore.records['chat:session-a']).toBeUndefined();
   });
 });

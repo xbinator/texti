@@ -19,7 +19,6 @@ const routeMock = vi.hoisted(() => ({ fullPath: '/welcome' }));
 const routerPushMock = vi.hoisted(() => vi.fn<(path: string) => Promise<unknown>>());
 const routeFailureMock = vi.hoisted(() => ({ type: 'aborted' }));
 const modalConfirmMock = vi.hoisted(() => vi.fn<() => Promise<[boolean, boolean]>>());
-const messageErrorMock = vi.hoisted(() => vi.fn());
 
 vi.mock('vue-router', () => ({
   useRoute: (): typeof routeMock => routeMock,
@@ -35,12 +34,6 @@ vi.mock('@iconify/vue', () => ({
     name: 'Icon',
     props: ['icon', 'width', 'height'],
     template: '<i class="icon-stub" :data-icon="icon"></i>'
-  }
-}));
-
-vi.mock('ant-design-vue', () => ({
-  message: {
-    error: messageErrorMock
   }
 }));
 
@@ -123,7 +116,6 @@ describe('HeaderTabs chat status', (): void => {
     routerPushMock.mockResolvedValue(undefined);
     modalConfirmMock.mockReset();
     modalConfirmMock.mockResolvedValue([false, true]);
-    messageErrorMock.mockReset();
   });
 
   it('renders running, waiting, error and completed chat states', (): void => {
@@ -162,47 +154,36 @@ describe('HeaderTabs chat status', (): void => {
     wrapper.unmount();
   });
 
-  it('confirms and aborts a running chat before closing it', async (): Promise<void> => {
+  it('closes a running chat without Runtime confirmation and retains its background record', async (): Promise<void> => {
     const tabsStore = useTabsStore();
     tabsStore.tabs = [createTab('chat:session-a', '/chat/session-a')];
-    const abort = vi.fn<() => Promise<void>>().mockResolvedValue();
     const runtimeStore = useChatTabStore();
     runtimeStore.ensureTab('chat:session-a', 'session-a');
-    runtimeStore.registerController('chat:session-a', { abort });
     runtimeStore.setStatus('chat:session-a', 'running');
     const wrapper = mountTabs();
 
     await getTabElement(wrapper, 'chat:session-a').find('.header-tab__close').trigger('click');
     await flushPromises();
 
-    expect(modalConfirmMock).toHaveBeenCalledTimes(1);
-    expect(abort).toHaveBeenCalledTimes(1);
+    expect(modalConfirmMock).not.toHaveBeenCalled();
     expect(tabsStore.tabs).toEqual([]);
-    expect(runtimeStore.records['chat:session-a']).toBeUndefined();
-    expect(runtimeStore.controllers.has('chat:session-a')).toBe(false);
+    expect(runtimeStore.records['chat:session-a']).toMatchObject({ sessionId: 'session-a', status: 'running' });
   });
 
-  it('keeps a running chat when close is cancelled or abort fails', async (): Promise<void> => {
+  it('still keeps a dirty running chat when the dirty-content confirmation is cancelled', async (): Promise<void> => {
     const tabsStore = useTabsStore();
     tabsStore.tabs = [createTab('chat:session-a', '/chat/session-a')];
-    const abort = vi.fn<() => Promise<void>>().mockRejectedValue(new Error('abort failed'));
+    tabsStore.dirtyById['chat:session-a'] = true;
     const runtimeStore = useChatTabStore();
     runtimeStore.ensureTab('chat:session-a', 'session-a');
-    runtimeStore.registerController('chat:session-a', { abort });
     runtimeStore.setStatus('chat:session-a', 'running');
     const cancelledWrapper = mountTabs();
     modalConfirmMock.mockResolvedValueOnce([true, false]);
 
     await cancelledWrapper.find('.header-tab__close').trigger('click');
     await flushPromises();
-    expect(abort).not.toHaveBeenCalled();
     expect(tabsStore.tabs).toHaveLength(1);
-
-    await cancelledWrapper.find('.header-tab__close').trigger('click');
-    await flushPromises();
-    expect(abort).toHaveBeenCalledTimes(1);
-    expect(tabsStore.tabs).toHaveLength(1);
-    expect(messageErrorMock).toHaveBeenCalledWith('终止聊天失败：abort failed');
+    expect(runtimeStore.records['chat:session-a']).toMatchObject({ status: 'running' });
   });
 
   it('retains the existing dirty confirmation for ordinary tabs', async (): Promise<void> => {
@@ -215,7 +196,6 @@ describe('HeaderTabs chat status', (): void => {
     await flushPromises();
 
     expect(modalConfirmMock).toHaveBeenCalledTimes(1);
-    expect(useChatTabStore().controllers.size).toBe(0);
     expect(tabsStore.tabs).toEqual([]);
   });
 

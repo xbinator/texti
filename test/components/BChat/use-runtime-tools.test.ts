@@ -7,10 +7,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createOpenWidgetTool, type OpenWidgetRuntimeState, type OpenWidgetToolOptions } from '@/ai/tools/builtin/WidgetTool';
 import type { WebviewToolContext } from '@/ai/tools/context/webview';
 import { useRuntimeTools } from '@/components/BChat/hooks/useRuntimeTools';
-import type { Message } from '@/components/BChat/utils/types';
 import { getToolNamesByExposure, getToolRegistryEntry } from '../../../shared/ai/tools/index.js';
 
 const builtinMockState = vi.hoisted(() => {
+  /** 内置工具工厂测试选项。 */
+  interface BuiltinToolOptionsFixture {
+    /** 读取绑定的会话 ID。 */
+    getSessionId?: () => string | undefined;
+    /** 读取绑定的工作区根目录。 */
+    getWorkspaceRoot?: () => string | null;
+    /** 读取绑定的 WebView 上下文。 */
+    getWebviewContext?: () => unknown;
+  }
+
   /**
    * 创建最小工具执行器夹具。
    * @param name - 工具名称
@@ -40,7 +49,7 @@ const builtinMockState = vi.hoisted(() => {
 
   return {
     createExecutor,
-    createBuiltinTools: vi.fn(() => [
+    createBuiltinTools: vi.fn<(options?: BuiltinToolOptionsFixture) => ReturnType<typeof createExecutor>[]>(() => [
       createExecutor('read_current_webpage'),
       createExecutor('operate_webpage'),
       createExecutor('open_resource'),
@@ -55,7 +64,8 @@ const registryMockState = vi.hoisted(() => ({
     getContext: vi.fn(() => undefined)
   },
   webviewToolContextRegistry: {
-    getCurrentContext: vi.fn((): unknown => undefined)
+    getCurrentContext: vi.fn((): unknown => undefined),
+    getContext: vi.fn<(id: string) => unknown>()
   }
 }));
 
@@ -203,14 +213,14 @@ vi.mock('@/stores/workspace/recent', () => ({
  * 创建 Runtime 工具 hook。
  * @returns Runtime 工具 hook 返回值
  */
-function createRuntimeTools(workspaceRoot = ref<string | null>('/workspace')): ReturnType<typeof useRuntimeTools> {
+function createRuntimeTools(workspaceRoot = ref<string | null>('/workspace'), sessionId = ref<string>('session-1')): ReturnType<typeof useRuntimeTools> {
   return useRuntimeTools({
-    messages: ref<Message[]>([]),
-    confirm: { confirm: vi.fn(async (): Promise<true> => true) },
-    getSessionId: (): string => 'session-1',
+    createConfirmationAdapter: () => ({ confirm: vi.fn(async (): Promise<true> => true) }),
+    getSessionId: (): string => sessionId.value,
     openWebview: vi.fn(),
     workspaceRoot,
-    getWorkspaceRoot: (): string | null => workspaceRoot.value
+    getWorkspaceRoot: (): string | null => workspaceRoot.value,
+    getPendingQuestion: (): null => null
   });
 }
 
@@ -251,6 +261,7 @@ describe('useRuntimeTools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     registryMockState.webviewToolContextRegistry.getCurrentContext.mockReturnValue(undefined);
+    registryMockState.webviewToolContextRegistry.getContext.mockReturnValue(undefined);
     storeMockState.skillStore.initialized = false;
     storeMockState.skillStore.getEnabledSkills.mockReturnValue([]);
     storeMockState.skillStore.resolveLatestSkill.mockReset();
@@ -289,6 +300,48 @@ describe('useRuntimeTools', () => {
     workspaceRoot.value = '/private/tmp/project';
 
     expect(readActiveToolNames(runtimeTools.getActiveTools)).toContain('read_directory');
+  });
+
+  it('binds builtin callbacks to the immutable Runtime session and workspace', (): void => {
+    const workspaceRoot = ref<string | null>('/workspace-a');
+    const sessionId = ref<string>('session-a');
+    const runtimeTools = createRuntimeTools(workspaceRoot, sessionId);
+
+    runtimeTools.getActiveTools({
+      sessionId: 'session-a',
+      runtimeId: 'runtime-a',
+      workspaceRoot: '/workspace-a'
+    });
+    sessionId.value = 'session-b';
+    workspaceRoot.value = '/workspace-b';
+
+    const boundOptions = builtinMockState.createBuiltinTools.mock.calls.at(-1)?.[0];
+    expect(boundOptions?.getSessionId?.()).toBe('session-a');
+    expect(boundOptions?.getWorkspaceRoot?.()).toBe('/workspace-a');
+  });
+
+  it('binds WebView callbacks to the immutable Runtime resource', (): void => {
+    const webviewA: WebviewToolContext = {
+      readPageSnapshot: vi.fn(),
+      operatePage: vi.fn()
+    };
+    const webviewB: WebviewToolContext = {
+      readPageSnapshot: vi.fn(),
+      operatePage: vi.fn()
+    };
+    registryMockState.webviewToolContextRegistry.getCurrentContext.mockReturnValue(webviewB);
+    registryMockState.webviewToolContextRegistry.getContext.mockImplementation((id: string): unknown => (id === 'webview-a' ? webviewA : undefined));
+    const runtimeTools = createRuntimeTools();
+
+    runtimeTools.getActiveTools({
+      sessionId: 'session-a',
+      runtimeId: 'runtime-a',
+      workspaceRoot: '/workspace-a',
+      webviewId: 'webview-a'
+    });
+
+    const boundOptions = builtinMockState.createBuiltinTools.mock.calls.at(-1)?.[0];
+    expect(boundOptions?.getWebviewContext?.()).toBe(webviewA);
   });
 
   it('dynamically exposes widget tools after widget store is initialized', (): void => {

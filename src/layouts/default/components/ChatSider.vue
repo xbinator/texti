@@ -27,19 +27,18 @@
         />
         <div v-else :class="[bem('title'), 'truncate']" title="双击修改标题" @dblclick="startTitleEdit">{{ currentTitle }}</div>
         <!-- 新建会话 -->
-        <BButton square size="small" type="text" :disabled="isSessionActionDisabled" @click="handleCreateDraftSession">
+        <BButton square size="small" type="text" @click="handleCreateDraftSession">
           <BIcon icon="lucide:message-circle-plus" :size="16" />
         </BButton>
 
         <SessionHistory
           :active-session-id="settingStore.chatSidebarActiveSessionId"
-          :disabled="isSessionActionDisabled"
           @switch-session="handleSwitchSession"
           @delete-session="handleDeletedSession"
           @load-more="loadMoreSessions"
         />
         <!-- 打开聊天页面 -->
-        <BButton square size="small" type="text" :disabled="isSessionActionDisabled" @click="openChatPage">
+        <BButton square size="small" type="text" @click="openChatPage">
           <BIcon icon="lucide:square-arrow-out-up-right" :size="16" />
         </BButton>
 
@@ -53,8 +52,8 @@
         ref="bChatRef"
         :session-id="settingStore.chatSidebarActiveSessionId"
         @new-session="handleCreateDraftSession"
+        @runtime-status-change="handleRuntimeStatus"
         @session-created="handleSessionCreated"
-        @loading-change="handleChatLoadingChange"
       />
     </div>
   </BPanelSplitter>
@@ -67,9 +66,15 @@ import { computed, defineAsyncComponent, onMounted, reactive, ref, watch } from 
 import { Input as AInput, message } from 'ant-design-vue';
 import BButton from '@/components/BButton/index.vue';
 import SessionHistory from '@/components/BChat/components/SessionHistory.vue';
+import { expireSessionConfirmations } from '@/components/BChat/utils/confirmationController';
+import type { BChatRuntimeSourceStatus, BChatRuntimeStatusChange } from '@/components/BChat/utils/types';
 import { vFocus } from '@/directives/focus';
+import { useActorSystem } from '@/hooks/useChat/useActorSystem';
 import { useIntentMotion } from '@/hooks/useIntentMotion';
+import { createChatTabId } from '@/router/routes/helpers/chatRouteTab';
 import { useChatSessionStore } from '@/stores/chat/session';
+import type { ChatTabRuntimeRecord } from '@/stores/chat/tab';
+import { useChatTabStore } from '@/stores/chat/tab';
 import { useSettingStore } from '@/stores/ui/setting';
 import { asyncTo } from '@/utils/asyncTo';
 import { createNamespace } from '@/utils/namespace';
@@ -92,25 +97,22 @@ type ChatSiderStyle = CSSProperties & {
 const settingStore = useSettingStore();
 /** 聊天会话持久化存储。 */
 const chatStore = useChatSessionStore();
+/** 聊天标签运行时投影 Store。 */
+const runtimeStore = useChatTabStore();
+/** 应用级 Chat Actor system，用于删除成功后的 Renderer 事实清理。 */
+const actorSystem = useActorSystem();
+/** BChat 最近一次持续运行状态，用于首轮会话创建后补齐投影。 */
+const sideRuntimeStatus = ref<BChatRuntimeSourceStatus>('idle');
 
 /** ChatSider 只在按钮动作与真实状态目标一致时保留显隐动画。 */
 const { motionEnabled, startMotion, syncState, cancelMotion } = useIntentMotion<boolean>();
 
 /** 监听侧栏显隐状态，当外部状态与动画目标冲突时取消动画。 */
 watch((): boolean => settingStore.sidebarVisible, syncState);
-/** 聊天运行时是否忙碌。 */
-const chatLoading = ref(false);
 /** 会话标题编辑状态。 */
 const titleEditor = reactive({ editing: false, draft: '', saving: false });
 
-const {
-  currentSession,
-  switchSession: switchSideSession,
-  createDraftSession,
-  handleDeletedSession: syncDeletedSession
-} = useChatSession({
-  isChatLoading: () => chatLoading.value
-});
+const { currentSession, switchSession: switchSideSession, createDraftSession, handleDeletedSession: syncDeletedSession } = useChatSession();
 
 /** BChat 组件实例引用，用于调用聚焦输入框等方法。 */
 const bChatRef = ref<InstanceType<typeof BChat>>();
@@ -122,9 +124,6 @@ const siderStyle = computed<ChatSiderStyle>(
     '--chat-sider-width': `${settingStore.sidebarWidth}px`
   })
 );
-/** 是否禁用会话切换、新会话和删除操作。 */
-const isSessionActionDisabled = computed<boolean>(() => chatLoading.value || chatStore.sessionsLoading);
-
 /**
  * 确保共享会话集合完成首次加载。
  */
@@ -150,7 +149,7 @@ onMounted((): void => {
  */
 function startTitleEdit(): void {
   const session = currentSession.value;
-  if (!session || isSessionActionDisabled.value || titleEditor.saving) return;
+  if (!session || titleEditor.saving) return;
 
   titleEditor.draft = session.title;
   titleEditor.editing = true;
@@ -192,18 +191,58 @@ function requestButtonClose(): void {
  * 进入新会话草稿态。
  */
 async function handleCreateDraftSession(): Promise<void> {
-  if (isSessionActionDisabled.value) return;
   await createDraftSession();
   await asyncTo(bChatRef.value?.resetDraft({ focus: false }) ?? Promise.resolve());
 }
 
 /** 聊天页路由与已打开标签同步能力。 */
-const { openChatPage, handleSwitchSession, handleDeletedSession } = useChatRoute({
-  isSessionActionDisabled: (): boolean => isSessionActionDisabled.value,
+const {
+  openChatPage,
+  handleSwitchSession,
+  handleDeletedSession: syncDeletedRoute
+} = useChatRoute({
   openDraftSession: handleCreateDraftSession,
   switchSession: switchSideSession,
   syncDeletedSession
 });
+
+/**
+ * 清理成功删除会话的应用级 Runtime 事实，再同步侧栏与顶部标签。
+ * @param sessionId - 已删除会话 ID
+ */
+async function handleDeletedSession(sessionId: string): Promise<void> {
+  expireSessionConfirmations(sessionId);
+  actorSystem.removeSession(sessionId);
+  const [error] = await asyncTo(syncDeletedRoute(sessionId));
+  if (error) message.error(error.message || '清理已删除会话页面失败');
+}
+
+/**
+ * 确保侧边栏会话拥有唯一运行态记录。
+ * @param sessionId - 持久化会话 ID
+ * @returns 运行态 owner
+ */
+function ensureRuntimeOwner(sessionId: string): ChatTabRuntimeRecord {
+  return runtimeStore.findOwner(sessionId) ?? runtimeStore.ensureTab(createChatTabId(sessionId), sessionId);
+}
+
+/**
+ * 同步侧边栏 BChat 的运行状态。
+ * @param event - BChat 状态事件
+ */
+function handleRuntimeStatus(event: BChatRuntimeStatusChange): void {
+  if (event.status === 'completed') {
+    const owner = ensureRuntimeOwner(event.sessionId);
+    const active = settingStore.sidebarVisible && settingStore.chatSidebarActiveSessionId === event.sessionId;
+    runtimeStore.markCompleted(owner.tabId, active);
+    return;
+  }
+
+  const activeSessionId = settingStore.chatSidebarActiveSessionId;
+  if (!event.sessionId || event.sessionId === activeSessionId) sideRuntimeStatus.value = event.status;
+  const sessionId = event.sessionId ?? activeSessionId;
+  if (sessionId) runtimeStore.setStatus(ensureRuntimeOwner(sessionId).tabId, event.status);
+}
 
 /**
  * 同步 BChat 内部创建的新会话。
@@ -211,14 +250,7 @@ const { openChatPage, handleSwitchSession, handleDeletedSession } = useChatRoute
  */
 function handleSessionCreated(session: ChatSession): void {
   settingStore.setChatSidebarActiveSessionId(session.id);
-}
-
-/**
- * 同步聊天运行时状态。
- * @param loading - 是否存在正在运行的聊天、压缩或流式任务
- */
-function handleChatLoadingChange(loading: boolean): void {
-  chatLoading.value = loading;
+  runtimeStore.setStatus(ensureRuntimeOwner(session.id).tabId, sideRuntimeStatus.value);
 }
 
 /** 暴露 startMotion 供父组件通过 ref 调用（如布局头部切换按钮）。 */

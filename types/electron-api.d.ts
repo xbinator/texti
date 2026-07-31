@@ -586,6 +586,7 @@ export interface ElectronAPI {
   chatMessageList: (sessionId: string, cursor?: ChatMessageHistoryCursor) => Promise<ChatHandlerResult<ChatMessageRecord[]>>;
   chatMessageAdd: (message: ChatMessageRecord) => Promise<ChatHandlerResult<void>>;
   chatMessageUpdate: (message: ChatMessageRecord) => Promise<ChatHandlerResult<void>>;
+  chatMessageDelete: (sessionId: string, messageId: string) => Promise<ChatHandlerResult<void>>;
   chatMessageSetAll: (sessionId: string, messages: ChatMessageRecord[]) => Promise<ChatHandlerResult<void>>;
 
   // 安全存储操作

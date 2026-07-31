@@ -4,7 +4,7 @@
  */
 import { useRoute, useRouter } from 'vue-router';
 import { isBlockingNavigationFailure } from '@/router/navigation';
-import { CHAT_DRAFT_TAB_ID, createChatPath, createChatTabId, findChatTab } from '@/router/routes/helpers/chatRouteTab';
+import { createChatPath, createChatTabId, findChatTab } from '@/router/routes/helpers/chatRouteTab';
 import { createChatRecentId } from '@/shared/storage';
 import { useChatTabStore } from '@/stores/chat/tab';
 import { useSettingStore } from '@/stores/ui/setting';
@@ -29,8 +29,6 @@ export interface ChatRouteTarget {
  * ChatSider 会话路由依赖项。
  */
 interface UseChatRouteOptions {
-  /** 判断侧栏会话操作是否禁用。 */
-  isSessionActionDisabled: () => boolean;
   /** 侧栏进入草稿会话。 */
   openDraftSession: () => Promise<void>;
   /** 切换侧栏当前会话。 */
@@ -90,8 +88,7 @@ export function useChatRoute(options: UseChatRouteOptions): ChatRouteApi {
     const runtimeOwner = sessionId ? runtimeStore.findOwner(sessionId) : undefined;
     if (runtimeOwner) {
       const ownerTab = tabsStore.tabs.find((tab: Tab): boolean => tab.id === runtimeOwner.tabId);
-      const ownerPath = ownerTab?.path ?? (runtimeOwner.tabId === CHAT_DRAFT_TAB_ID ? createChatPath() : createChatPath(sessionId));
-      return createRouteTarget(runtimeOwner.tabId, ownerPath, runtimeOwner.sessionId);
+      if (ownerTab) return createRouteTarget(runtimeOwner.tabId, ownerTab.path, runtimeOwner.sessionId);
     }
 
     const ownerTab = findChatTab(tabsStore.tabs, sessionId);
@@ -102,8 +99,6 @@ export function useChatRoute(options: UseChatRouteOptions): ChatRouteApi {
    * 打开当前侧栏会话对应的聊天页，成功后侧栏进入草稿态。
    */
   async function openChatPage(): Promise<void> {
-    if (options.isSessionActionDisabled()) return;
-
     const sessionId = settingStore.chatSidebarActiveSessionId;
     const target = resolveRoute(sessionId);
     const [navigationError, navigationResult] = await asyncTo(router.push(target?.path ?? createChatPath(sessionId)));
@@ -133,10 +128,14 @@ export function useChatRoute(options: UseChatRouteOptions): ChatRouteApi {
    * @param sessionId - 已删除会话 ID
    */
   async function handleDeletedSession(sessionId: string): Promise<void> {
+    const runtimeOwner = runtimeStore.findOwner(sessionId);
     const target = resolveRoute(sessionId);
     await asyncTo(recentStore.removeFile(createChatRecentId(sessionId)));
     options.syncDeletedSession(sessionId);
-    if (!target) return;
+    if (!target) {
+      if (runtimeOwner) runtimeStore.removeTab(runtimeOwner.tabId);
+      return;
+    }
 
     const plan = tabsStore.getClosePlan('close', {
       anchorTabId: target.tabId,
@@ -145,12 +144,12 @@ export function useChatRoute(options: UseChatRouteOptions): ChatRouteApi {
     });
 
     if (plan.requiresNavigation) {
-      const [navigationError, navigationResult] = await asyncTo(router.push(plan.nextActivePath ?? '/welcome'));
-      if (navigationError || isBlockingNavigationFailure(navigationResult)) return;
+      await asyncTo(router.push(plan.nextActivePath ?? '/welcome'));
     }
 
     tabsStore.applyClosePlan(plan);
     runtimeStore.removeTab(target.tabId);
+    if (runtimeOwner && runtimeOwner.tabId !== target.tabId) runtimeStore.removeTab(runtimeOwner.tabId);
   }
 
   return {

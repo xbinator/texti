@@ -2,10 +2,12 @@
  * @file confirmation-controller.test.ts
  * @description BChat 确认控制器测试。
  */
+import { ref } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { AIToolConfirmationRequest } from '@/ai/tools/confirmation';
-import { createChatConfirmationController } from '@/components/BChat/utils/confirmationController';
+import type { RuntimeConfirmationBinding, RuntimeConfirmationRequest } from '@/components/BChat/utils/confirmationController';
+import { createChatConfirmationController, expireSessionConfirmations } from '@/components/BChat/utils/confirmationController';
 import { useChatConfirmationQueueStore } from '@/stores/chat/confirmationQueue';
 
 /**
@@ -23,15 +25,29 @@ function createRequest(toolName: string): AIToolConfirmationRequest {
   };
 }
 
+/**
+ * 创建 Runtime confirmation 绑定。
+ * @param patch - 可覆盖的绑定字段
+ * @returns 不可变 Runtime 绑定
+ */
+function createBinding(patch: Partial<RuntimeConfirmationBinding> = {}): RuntimeConfirmationBinding {
+  return {
+    sessionId: 'session-1',
+    runtimeId: 'runtime-1',
+    toolCallId: 'tool-call-1',
+    ...patch
+  };
+}
+
 describe('createChatConfirmationController', (): void => {
   beforeEach((): void => {
     setActivePinia(createPinia());
   });
 
   it('adds default remember scopes for non-dangerous confirmations', async (): Promise<void> => {
-    const controller = createChatConfirmationController();
+    const controller = createChatConfirmationController(ref('session-1'));
 
-    const confirmationPromise = controller.requestConfirmation({ ...createRequest('write_file'), riskLevel: 'write' });
+    const confirmationPromise = controller.createAdapter(createBinding()).confirm({ ...createRequest('write_file'), riskLevel: 'write' });
 
     expect(controller.currentConfirmationRequest.value).toEqual(
       expect.objectContaining({
@@ -45,9 +61,9 @@ describe('createChatConfirmationController', (): void => {
   });
 
   it('does not add remember scopes for dangerous confirmations', async (): Promise<void> => {
-    const controller = createChatConfirmationController();
+    const controller = createChatConfirmationController(ref('session-1'));
 
-    const confirmationPromise = controller.requestConfirmation({ ...createRequest('run_shell_command'), riskLevel: 'dangerous' });
+    const confirmationPromise = controller.createAdapter(createBinding()).confirm({ ...createRequest('run_shell_command'), riskLevel: 'dangerous' });
 
     expect(controller.currentConfirmationRequest.value).toEqual(
       expect.objectContaining({
@@ -61,9 +77,9 @@ describe('createChatConfirmationController', (): void => {
   });
 
   it('preserves explicitly narrowed remember scopes', async (): Promise<void> => {
-    const controller = createChatConfirmationController();
+    const controller = createChatConfirmationController(ref('session-1'));
 
-    const confirmationPromise = controller.requestConfirmation({
+    const confirmationPromise = controller.createAdapter(createBinding()).confirm({
       ...createRequest('read_file'),
       allowRemember: true,
       rememberScopes: ['session']
@@ -81,15 +97,16 @@ describe('createChatConfirmationController', (): void => {
   });
 
   it('prioritizes higher-risk confirmations without cancelling an earlier waiter', async (): Promise<void> => {
-    const controller = createChatConfirmationController();
-    const firstPromise = controller.requestConfirmation(createRequest('read_file'));
+    const controller = createChatConfirmationController(ref('session-1'));
+    const adapter = controller.createAdapter(createBinding());
+    const firstPromise = adapter.confirm(createRequest('read_file'));
     const firstConfirmationId = controller.currentConfirmationId.value;
     let firstSettled = false;
     firstPromise.then(() => {
       firstSettled = true;
     });
 
-    const secondPromise = controller.requestConfirmation({ ...createRequest('run_shell_command'), riskLevel: 'dangerous' });
+    const secondPromise = adapter.confirm({ ...createRequest('run_shell_command'), riskLevel: 'dangerous' });
     await Promise.resolve();
 
     expect(firstSettled).toBe(false);
@@ -106,7 +123,7 @@ describe('createChatConfirmationController', (): void => {
     await expect(firstPromise).resolves.toEqual({ approved: true });
   });
 
-  it('disposes only Runtime confirmations owned by the controller', async (): Promise<void> => {
+  it('keeps a Runtime confirmation alive across controller disposal and session-matched takeover', async (): Promise<void> => {
     const store = useChatConfirmationQueueStore();
     store.applySnapshot([
       {
@@ -133,12 +150,103 @@ describe('createChatConfirmationController', (): void => {
         updatedAt: '2026-07-27T00:00:00.000Z'
       }
     ]);
-    const controller = createChatConfirmationController();
-    const runtimeConfirmation = controller.requestConfirmation(createRequest('read_file'));
+    const controller = createChatConfirmationController(ref('session-1'));
+    const runtimeConfirmation = controller.createAdapter(createBinding()).confirm(createRequest('read_file'));
+    const runtimeConfirmationId = controller.currentConfirmationId.value;
 
     controller.dispose();
+    const resumedController = createChatConfirmationController(ref('session-1'));
+    expect(resumedController.currentConfirmationId.value).toBe(runtimeConfirmationId);
+    resumedController.approveConfirmation(runtimeConfirmationId ?? '');
 
-    await expect(runtimeConfirmation).resolves.toEqual({ approved: false });
+    await expect(runtimeConfirmation).resolves.toEqual({ approved: true });
     expect(store.pending.map((item): string => item.confirmationId)).toEqual(['agent-confirmation-1']);
+  });
+
+  it('projects only confirmations owned by the active session', async (): Promise<void> => {
+    const controllerA = createChatConfirmationController(ref('session-a'));
+    const controllerB = createChatConfirmationController(ref('session-b'));
+    const decision = controllerA.createAdapter(createBinding({ sessionId: 'session-a', runtimeId: 'runtime-a' })).confirm(createRequest('read_file'));
+
+    expect(controllerA.currentConfirmationRequest.value?.toolName).toBe('read_file');
+    expect(controllerB.currentConfirmation.value).toBeNull();
+
+    controllerA.cancelConfirmation(controllerA.currentConfirmationId.value ?? '');
+    await expect(decision).resolves.toEqual({ approved: false });
+  });
+
+  it('rejects only Runtime confirmation flights owned by a deleted Session', async (): Promise<void> => {
+    const controllerA = createChatConfirmationController(ref('session-a'));
+    const controllerB = createChatConfirmationController(ref('session-b'));
+    const decisionA = controllerA.createAdapter(createBinding({ sessionId: 'session-a', runtimeId: 'runtime-a' })).confirm(createRequest('read_file'));
+    const decisionB = controllerB.createAdapter(createBinding({ sessionId: 'session-b', runtimeId: 'runtime-b' })).confirm(createRequest('write_file'));
+    let sessionBSettled = false;
+    decisionB.then((): void => {
+      sessionBSettled = true;
+    });
+
+    expireSessionConfirmations('session-a');
+    await expect(decisionA).resolves.toEqual({ approved: false });
+    await Promise.resolve();
+
+    expect(sessionBSettled).toBe(false);
+    expect(controllerA.currentConfirmation.value).toBeNull();
+    expect(controllerB.currentConfirmation.value).not.toBeNull();
+    controllerB.cancelConfirmation(controllerB.currentConfirmationId.value ?? '');
+    await expect(decisionB).resolves.toEqual({ approved: false });
+  });
+
+  it('deduplicates a replayed Main confirmation identity into one decision flight', async (): Promise<void> => {
+    const controller = createChatConfirmationController(ref('session-1'));
+    const binding = createBinding();
+    const request = createRequest('write_file');
+
+    const first = controller.requestConfirmation(request, binding, 'main-confirmation-1');
+    const replay = controller.requestConfirmation(request, binding, 'main-confirmation-1');
+
+    expect(first.created).toBe(true);
+    expect(replay.created).toBe(false);
+    expect(replay.decision).toBe(first.decision);
+    controller.approveConfirmation('main-confirmation-1');
+    await expect(first.decision).resolves.toEqual({ approved: true });
+  });
+
+  it('rejects a replay that changes the immutable Main confirmation request', async (): Promise<void> => {
+    const controller = createChatConfirmationController(ref('session-1'));
+    const binding = createBinding();
+    const first = controller.requestConfirmation(createRequest('read_file'), binding, 'main-confirmation-1');
+
+    expect(
+      (): RuntimeConfirmationRequest => controller.requestConfirmation({ ...createRequest('write_file'), riskLevel: 'write' }, binding, 'main-confirmation-1')
+    ).toThrow('confirmation_identity_conflict');
+
+    controller.cancelConfirmation('main-confirmation-1');
+    await expect(first.decision).resolves.toEqual({ approved: false });
+  });
+
+  it('does not retain a flight when the serializable queue identity conflicts', async (): Promise<void> => {
+    const store = useChatConfirmationQueueStore();
+    const controller = createChatConfirmationController(ref('session-1'));
+    const binding = createBinding();
+    const request = createRequest('read_file');
+
+    store.addRuntime({
+      source: 'runtime',
+      confirmationId: 'conflicting-confirmation',
+      sessionId: 'session-other',
+      runtimeId: 'runtime-other',
+      request,
+      createdAt: '2026-07-31T00:00:00.000Z'
+    });
+
+    expect((): RuntimeConfirmationRequest => controller.requestConfirmation(request, binding, 'conflicting-confirmation')).toThrow(
+      'confirmation_identity_conflict'
+    );
+    store.removeRuntime('conflicting-confirmation');
+
+    const retry = controller.requestConfirmation(request, binding, 'conflicting-confirmation');
+    expect(retry.created).toBe(true);
+    controller.cancelConfirmation('conflicting-confirmation');
+    await expect(retry.decision).resolves.toEqual({ approved: false });
   });
 });
