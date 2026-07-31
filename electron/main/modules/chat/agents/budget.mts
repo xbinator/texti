@@ -4,13 +4,7 @@
  */
 import type { AgentStoreDatabase } from './types.mjs';
 import type { AgentBudgetSnapshot, AgentTaskError, AgentTaskErrorPhase, AgentUsageAccounting } from 'types/chat-agent';
-import {
-  hashAgentPayload,
-  normalizeUsage,
-  validateChatAgentResult,
-  validatePreAttemptCancellation,
-  validatePreAttemptFailure
-} from './contracts.mjs';
+import { hashAgentPayload, normalizeUsage, validateChatAgentResult, validatePreAttemptCancellation, validatePreAttemptFailure } from './contracts.mjs';
 
 /** 预算账本可稳定判断的错误码。 */
 export type AgentBudgetErrorCode = 'budget_exceeded' | 'protocol_error';
@@ -665,12 +659,7 @@ export function createAgentBudgetLedger(dependencies: AgentBudgetLedgerDependenc
    * @param agentId - 已验证 Child Actor 身份
    * @param resultValue - 已校验 hash 的结果值
    */
-  function recoverAttempt(
-    row: TerminalReservationRow,
-    taskId: string,
-    agentId: string,
-    resultValue: unknown
-  ): void {
+  function recoverAttempt(row: TerminalReservationRow, taskId: string, agentId: string, resultValue: unknown): void {
     const attemptId = requireIdentity(row.current_attempt_id, 'budget_recovery_attempt_invalid');
     const attempt = dependencies.database.select<TerminalAttemptRow>(
       `SELECT attempt_id, task_id, status, usage_snapshot_json, usage_complete
@@ -710,12 +699,7 @@ export function createAgentBudgetLedger(dependencies: AgentBudgetLedgerDependenc
    * @param agentId - 已验证 Child Actor 身份
    * @param resultValue - 已校验 hash 的结果值
    */
-  function recoverPreAttempt(
-    row: TerminalReservationRow,
-    taskId: string,
-    agentId: string,
-    resultValue: unknown
-  ): void {
+  function recoverPreAttempt(row: TerminalReservationRow, taskId: string, agentId: string, resultValue: unknown): void {
     const failure = validatePreAttemptFailure(resultValue);
     const cancellation = validatePreAttemptCancellation(resultValue);
     const result = failure.ok ? failure.result : cancellation.ok ? cancellation.result : null;

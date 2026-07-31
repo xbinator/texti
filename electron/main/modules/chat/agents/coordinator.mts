@@ -827,12 +827,10 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
    */
   function runCleanupSweep(taskId: string, actions?: readonly TaskCleanupAction[], complete: () => void = (): void => undefined): Promise<void> {
     const existing = cleanupSweeps.get(taskId);
-    const sweep: TaskCleanupSweep =
-      existing ??
-      {
-        actions: actions ?? [],
-        complete
-      };
+    const sweep: TaskCleanupSweep = existing ?? {
+      actions: actions ?? [],
+      complete
+    };
     if (!existing) cleanupSweeps.set(taskId, sweep);
     if (sweep.flight) return sweep.flight;
     const execution = executeCleanup(sweep.actions).then((): void => {
@@ -1334,12 +1332,7 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
         const cancellationProjection = { task: cancellation, attempt: prepared.attempt };
         deferredCancellation = {
           projection: cancellationProjection,
-          result: createFailureResult(
-            cancellationProjection,
-            handoffAbort?.status ?? 'cancelled',
-            cancellationError,
-            prepared.draft.usage
-          )
+          result: createFailureResult(cancellationProjection, handoffAbort?.status ?? 'cancelled', cancellationError, prepared.draft.usage)
         };
         return;
       }
@@ -1405,12 +1398,7 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
       if (overlayCleanup.status === 'rejected') {
         await commitTaskResult(
           deferredCancellation.projection.task,
-          createFailureResult(
-            deferredCancellation.projection,
-            'failed',
-            createCleanupError(prepared.attempt.currentRuntimeId),
-            prepared.draft.usage
-          )
+          createFailureResult(deferredCancellation.projection, 'failed', createCleanupError(prepared.attempt.currentRuntimeId), prepared.draft.usage)
         );
       } else {
         await commitTaskResult(deferredCancellation.projection.task, deferredCancellation.result);

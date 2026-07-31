@@ -19,9 +19,7 @@ type NewTabUrlSender = (url: string) => void;
  * @param send - 合法 URL 转发函数
  * @returns Electron 新窗口处理器
  */
-export function createWindowOpenHandler(
-  send: NewTabUrlSender
-): (details: Pick<Electron.HandlerDetails, 'url'>) => Electron.WindowOpenHandlerResponse {
+export function createWindowOpenHandler(send: NewTabUrlSender): (details: Pick<Electron.HandlerDetails, 'url'>) => Electron.WindowOpenHandlerResponse {
   return ({ url }): Electron.WindowOpenHandlerResponse => {
     try {
       const targetUrl = new URL(url);

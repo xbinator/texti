@@ -1355,10 +1355,7 @@ export function createChatRuntimeService(
       ) {
         throw new ChatRuntimeError('INVALID_CONTINUATION', 'Primary continuation snapshot failed integrity validation');
       }
-      const cancellationPolicy = createCancellationPolicy(
-        checkpoint.continuationSnapshot.orderedToolCalls,
-        checkpoint.terminalResults
-      );
+      const cancellationPolicy = createCancellationPolicy(checkpoint.continuationSnapshot.orderedToolCalls, checkpoint.terminalResults);
       assertRuntimeIdAvailable(input.runtimeId);
       const lock = locks.acquireContinuationWritingLock({
         sessionId: checkpoint.sessionId,

@@ -188,10 +188,7 @@ function findLatestToolPartId(messages: ChatMessageRecord[], activeUserIndex: nu
  * @param mode - 是否尽量保留最新完整工具结果
  * @returns 不修改输入的高压投影 clone
  */
-export function pruneActiveTurnToolOutputs(
-  messages: ChatMessageRecord[],
-  mode: ActiveTurnToolPruneMode = 'preserve-latest'
-): ChatMessageRecord[] {
+export function pruneActiveTurnToolOutputs(messages: ChatMessageRecord[], mode: ActiveTurnToolPruneMode = 'preserve-latest'): ChatMessageRecord[] {
   let activeUserIndex = -1;
   for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
     if (messages[messageIndex].role !== 'user') continue;

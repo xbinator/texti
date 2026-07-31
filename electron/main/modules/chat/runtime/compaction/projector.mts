@@ -6,11 +6,7 @@ import type { AITransportTool } from 'types/ai';
 import type { ChatMessageCompactionPart, ChatMessagePart, ChatMessageRecord } from 'types/chat';
 import { invalidateStaleSkillToolResults } from '../context/model-message.mjs';
 import type { ActiveTurnToolPruneMode } from '../context/tool-output-prune.mjs';
-import {
-  findToolOutputPruneProtectedStartIndex,
-  pruneActiveTurnToolOutputs,
-  pruneMessageToolOutputs
-} from '../context/tool-output-prune.mjs';
+import { findToolOutputPruneProtectedStartIndex, pruneActiveTurnToolOutputs, pruneMessageToolOutputs } from '../context/tool-output-prune.mjs';
 import { estimateRequestTokens } from './token-estimator.mjs';
 import { indexMessageParts, validatePartTopology } from './topology.mjs';
 
@@ -197,9 +193,7 @@ export function projectContext(input: ContextProjectionInput): ContextProjection
   const rawMessages = located && boundary ? [createSummaryMessage(located), ...createRawTail(input.messages, boundary)] : createRawProjection(input.messages);
   const skillProjectedMessages = invalidateStaleSkillToolResults(rawMessages, input.skillContentHashes);
   const oldToolPrunedMessages = pruneProjection(skillProjectedMessages);
-  const messages = input.activeTurnToolPruneMode
-    ? pruneActiveTurnToolOutputs(oldToolPrunedMessages, input.activeTurnToolPruneMode)
-    : oldToolPrunedMessages;
+  const messages = input.activeTurnToolPruneMode ? pruneActiveTurnToolOutputs(oldToolPrunedMessages, input.activeTurnToolPruneMode) : oldToolPrunedMessages;
   const estimatedTokens = estimateRequestTokens({
     messages,
     system: input.system,

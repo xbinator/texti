@@ -69,13 +69,13 @@ export function createCancellationPolicy(
   const rules = ['Main-owned delegated task cancellation policy:'];
   if (requiredTasks.length > 0) {
     rules.push(
-      `- required cancelled tasks: ${requiredTasks.join(', ')}. Do not claim these requirements were completed; the final answer must explicitly state that they could not be satisfied.`
+      `- required cancelled tasks: ${requiredTasks.join(
+        ', '
+      )}. Do not claim these requirements were completed; the final answer must explicitly state that they could not be satisfied.`
     );
   }
   if (optionalTasks.length > 0) {
-    rules.push(
-      `- optional cancelled tasks: ${optionalTasks.join(', ')}. You may continue, but identify the information gap whenever it affects the answer.`
-    );
+    rules.push(`- optional cancelled tasks: ${optionalTasks.join(', ')}. You may continue, but identify the information gap whenever it affects the answer.`);
   }
   return rules.join('\n');
 }
