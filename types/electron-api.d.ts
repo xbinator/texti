@@ -520,6 +520,8 @@ export interface ElectronAPI {
   getPathStatus: (targetPath: string) => Promise<ElectronFilePathStatus>;
 
   // 文件对话框操作
+  /** 打开原生目录选择框；取消时返回 null。 */
+  openDirectory: () => Promise<string | null>;
   openFile: (options?: ElectronOpenFileOptions) => Promise<ElectronFileResult>;
 
   saveFile: (content: string, filePath?: string, options?: ElectronSaveFileOptions) => Promise<string | null>;
@@ -575,6 +577,8 @@ export interface ElectronAPI {
   chatSessionBranch: (sourceSessionId: string, targetMessageId: string) => Promise<ChatHandlerResult<ChatSession>>;
   chatSessionUpdateTitle: (sessionId: string, title: string) => Promise<ChatHandlerResult<void>>;
   chatSessionUpdateModel: (sessionId: string, model: ChatSessionModelMetadata) => Promise<ChatHandlerResult<ChatSession>>;
+  chatSessionUpdateWorkspace: (sessionId: string, workspaceRoot: string) => Promise<ChatHandlerResult<ChatSession>>;
+  chatSessionClearWorkspace: (sessionId: string) => Promise<ChatHandlerResult<ChatSession>>;
   chatSessionDelete: (sessionId: string) => Promise<ChatHandlerResult<void>>;
   chatSessionUsageGet: (sessionId: string) => Promise<ChatHandlerResult<AIUsage | undefined>>;
 

@@ -97,6 +97,12 @@ const electronAPI: ElectronAPI = {
   // ==================== 文件对话框操作 ====================
 
   /**
+   * 打开目录选择对话框。
+   * @returns 规范化后的本地目录路径；取消时返回 null
+   */
+  openDirectory: () => ipcRenderer.invoke('dialog:openDirectory'),
+
+  /**
    * 打开文件对话框
    * @param options 文件过滤选项
    * @returns 选择的文件信息（路径、内容、文件名等）
@@ -289,6 +295,8 @@ const electronAPI: ElectronAPI = {
   chatSessionBranch: (sourceSessionId, targetMessageId) => ipcRenderer.invoke('chat:session:branch', sourceSessionId, targetMessageId),
   chatSessionUpdateTitle: (sessionId, title) => ipcRenderer.invoke('chat:session:updateTitle', sessionId, title),
   chatSessionUpdateModel: (sessionId, model) => ipcRenderer.invoke('chat:session:updateModel', sessionId, model),
+  chatSessionUpdateWorkspace: (sessionId, workspaceRoot) => ipcRenderer.invoke('chat:session:updateWorkspace', sessionId, workspaceRoot),
+  chatSessionClearWorkspace: (sessionId) => ipcRenderer.invoke('chat:session:clearWorkspace', sessionId),
   chatSessionDelete: (sessionId) => ipcRenderer.invoke('chat:session:delete', sessionId),
   chatSessionUsageGet: (sessionId) => ipcRenderer.invoke('chat:session:usage:get', sessionId),
 

@@ -39,7 +39,7 @@ interface UseChatSessionRuntimeReturn extends ReturnType<typeof useChatHistory> 
   /** 用于自动命名的会话镜像 */
   autoNameSession: Ref<{ id: string; title: string } | undefined>;
   /** 确保存在可持久化会话 */
-  ensureActiveSession: (title: string, model: ChatSessionModelMetadata) => Promise<string>;
+  ensureActiveSession: (title: string, model: ChatSessionModelMetadata, workspaceRoot?: string) => Promise<string>;
   /** 重置内部草稿状态，但不触发外部导航事件。 */
   resetDraftState: (resetOptions?: BChatResetDraftOptions) => Promise<void>;
   /** 加载当前会话更多历史 */
@@ -101,14 +101,14 @@ export function useChatSessionRuntime(options: UseChatSessionRuntimeOptions): Us
   );
 
   /** 确保当前发送动作存在可持久化会话。 */
-  async function ensureActiveSession(title: string, model: ChatSessionModelMetadata): Promise<string> {
+  async function ensureActiveSession(title: string, model: ChatSessionModelMetadata, workspaceRoot?: string): Promise<string> {
     const sessionId = activeSessionId.value;
     if (sessionId) {
       await chatStore.ensureSessionModel(sessionId, model);
       return sessionId;
     }
 
-    const session = await chatStore.createSession('assistant', { title, model });
+    const session = await chatStore.createSession('assistant', { title, model, workspaceRoot });
     createdSessionId.value = session.id;
     autoNameSession.value = session;
     options.onSessionCreated(session);

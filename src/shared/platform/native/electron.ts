@@ -72,6 +72,14 @@ export class ElectronNative implements Native {
     return getElectronAPI().readWorkspaceDirectory(options);
   }
 
+  /**
+   * 打开原生目录选择框。
+   * @returns 规范化后的目录路径；取消时返回 null
+   */
+  async selectDirectory(): Promise<string | null> {
+    return getElectronAPI().openDirectory();
+  }
+
   async openFile(options?: OpenFileOptions) {
     const filters = options?.filters || [OPEN_FILE_FILTER];
     const result = await getElectronAPI().openFile({ filters });

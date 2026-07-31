@@ -4,6 +4,22 @@
 -->
 <template>
   <div class="chat-input-toolbar">
+    <div v-if="showWorkspaceControl" :class="['chat-input-toolbar__workspace', { 'is-overridden': hasWorkspaceOverride }]">
+      <button class="chat-input-toolbar__workspace-select" type="button" :disabled="workspaceDisabled" @click="$emit('workspace-select')">
+        <BIcon class="chat-input-toolbar__workspace-folder" icon="lucide:folder-closed" :size="16" />
+        <span class="chat-input-toolbar__workspace-label">{{ workspaceLabel }}</span>
+      </button>
+      <button
+        v-if="hasWorkspaceOverride"
+        class="chat-input-toolbar__workspace-clear"
+        type="button"
+        :disabled="workspaceDisabled"
+        @click="$emit('workspace-clear')"
+      >
+        <BIcon icon="lucide:x" :size="16" />
+      </button>
+    </div>
+
     <BUpload v-if="supportsVision" accept="image/*" @change="handleImageInputChange">
       <BButton size="small" type="text" square>
         <BIcon icon="lucide:image-plus" :size="16" />
@@ -57,6 +73,14 @@ interface Props {
   supportsVision: boolean;
   /** 当前是否允许提交。 */
   canSubmit: boolean;
+  /** 当前工作区的简短显示名称。 */
+  workspaceLabel: string;
+  /** 当前会话是否存在临时工作区覆盖。 */
+  hasWorkspaceOverride: boolean;
+  /** 是否禁止在当前状态切换工作区。 */
+  workspaceDisabled: boolean;
+  /** 是否显示工作区选择与恢复入口。 */
+  showWorkspaceControl: boolean;
 }
 
 withDefaults(defineProps<Props>(), {
@@ -64,7 +88,11 @@ withDefaults(defineProps<Props>(), {
   contextUsedTokens: 0,
   contextWindow: 200_000,
   supportsVision: false,
-  canSubmit: false
+  canSubmit: false,
+  workspaceLabel: '默认工作区',
+  hasWorkspaceOverride: false,
+  workspaceDisabled: false,
+  showWorkspaceControl: false
 });
 
 const emit = defineEmits<{
@@ -72,6 +100,8 @@ const emit = defineEmits<{
   (e: 'abort'): void;
   (e: 'model-change', model: { providerId: string; modelId: string }): void;
   (e: 'image-select', files: File[]): void;
+  (e: 'workspace-select'): void;
+  (e: 'workspace-clear'): void;
 }>();
 
 /**
@@ -122,6 +152,77 @@ defineExpose({
   flex: 1;
 }
 
+.chat-input-toolbar__workspace {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 28px;
+  overflow: hidden;
+  border-radius: 18px;
+
+  &:hover,
+  &:focus-within {
+    background: var(--bg-secondary);
+  }
+
+  &.is-overridden:hover .chat-input-toolbar__workspace-folder,
+  &.is-overridden:focus-within .chat-input-toolbar__workspace-folder {
+    opacity: 0;
+  }
+
+  &.is-overridden:hover .chat-input-toolbar__workspace-clear,
+  &.is-overridden:focus-within .chat-input-toolbar__workspace-clear {
+    pointer-events: auto;
+    opacity: 1;
+  }
+}
+
+.chat-input-toolbar__workspace-select,
+.chat-input-toolbar__workspace-clear {
+  font: inherit;
+  color: var(--text-primary);
+  appearance: none;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+}
+
+.chat-input-toolbar__workspace-select {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  height: 28px;
+  padding: 0 14px 0 8px;
+}
+
+.chat-input-toolbar__workspace-clear {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.16s ease;
+}
+
+.chat-input-toolbar__workspace-folder {
+  flex: 0 0 16px;
+  transition: opacity 0.16s ease;
+}
+
 .action-buttons {
   display: flex;
   gap: 8px;
@@ -135,5 +236,13 @@ defineExpose({
 .loading-icon {
   width: 16px;
   height: 16px;
+}
+
+.chat-input-toolbar__workspace-label {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  white-space: nowrap;
 }
 </style>

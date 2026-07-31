@@ -42,6 +42,8 @@ interface CreateSessionOptions {
   title?: string;
   /** 首次 Runtime 已冻结的模型。 */
   model?: ChatSessionModelMetadata;
+  /** 首次 Runtime 使用的会话工作区覆盖目录。 */
+  workspaceRoot?: string;
 }
 
 /**
@@ -358,8 +360,12 @@ export const useChatSessionStore = defineStore('chat', {
      * @param options - 可选的会话元数据。
      * @returns 创建的会话记录。
      */
-    async createSession(type: ChatSessionType, { title = '新会话', model }: CreateSessionOptions = {}): Promise<ChatSession> {
+    async createSession(type: ChatSessionType, { title = '新会话', model, workspaceRoot }: CreateSessionOptions = {}): Promise<ChatSession> {
       const now = dayjs().toISOString();
+      const metadata = {
+        ...(model ? { model: toCloneableData(model) } : {}),
+        ...(workspaceRoot ? { workspaceRoot } : {})
+      };
       const session: ChatSession = {
         id: nanoid(),
         type,
@@ -367,7 +373,7 @@ export const useChatSessionStore = defineStore('chat', {
         createdAt: now,
         updatedAt: now,
         lastMessageAt: now,
-        metadata: model ? { model: toCloneableData(model) } : undefined
+        metadata: Object.keys(metadata).length > 0 ? metadata : undefined
       };
 
       await retryDuringDatabaseInitialization(async () => {
@@ -390,6 +396,45 @@ export const useChatSessionStore = defineStore('chat', {
       const [error, session] = await asyncTo(
         retryDuringDatabaseInitialization(async (): Promise<ChatSession> => {
           const result = await getElectronAPI().chatSessionUpdateModel(sessionId, toCloneableData(model));
+          return unwrap(result);
+        })
+      );
+      if (error) throw error;
+
+      this.sessions = mergeSessions([session], this.sessions);
+      return session;
+    },
+
+    /**
+     * 持久化会话工作区，并以主进程返回的完整会话更新本地集合。
+     * @param sessionId - 会话 ID
+     * @param workspaceRoot - 已规范化的工作区根目录
+     * @returns 已持久化的完整会话
+     */
+    async updateSessionWorkspace(sessionId: string, workspaceRoot: string): Promise<ChatSession> {
+      await this.loadSessionById(sessionId);
+      const [error, session] = await asyncTo(
+        retryDuringDatabaseInitialization(async (): Promise<ChatSession> => {
+          const result = await getElectronAPI().chatSessionUpdateWorkspace(sessionId, workspaceRoot);
+          return unwrap(result);
+        })
+      );
+      if (error) throw error;
+
+      this.sessions = mergeSessions([session], this.sessions);
+      return session;
+    },
+
+    /**
+     * 清除会话工作区覆盖，并以主进程返回的完整会话更新本地集合。
+     * @param sessionId - 会话 ID
+     * @returns 已恢复默认工作区的完整会话
+     */
+    async clearSessionWorkspace(sessionId: string): Promise<ChatSession> {
+      await this.loadSessionById(sessionId);
+      const [error, session] = await asyncTo(
+        retryDuringDatabaseInitialization(async (): Promise<ChatSession> => {
+          const result = await getElectronAPI().chatSessionClearWorkspace(sessionId);
           return unwrap(result);
         })
       );

@@ -19,6 +19,8 @@ interface UseRuntimeRequestConfigOptions {
   contextWindow: Ref<number>;
   /** 当前工作区根目录 */
   workspaceRoot: Readonly<Ref<string | null>>;
+  /** 校验当前会话覆盖目录在本次 Runtime 请求前仍可用。 */
+  assertWorkspaceAvailable?: () => Promise<void>;
   /** 解析 Provider 服务配置 */
   resolveServiceConfig: () => Promise<ServiceConfig | undefined>;
   /** 同步磁盘 AI 资源 */
@@ -93,6 +95,7 @@ export function useRuntimeRequestConfig(options: UseRuntimeRequestConfigOptions)
       return null;
     }
 
+    await options.assertWorkspaceAvailable?.();
     await options.syncAIResources();
     const resolvedSkills = await options.resolveSkillSnapshots(collectSkillNames(selectionSource, selectionParts));
     const runtimeContext: ChatRuntimeContext | undefined =

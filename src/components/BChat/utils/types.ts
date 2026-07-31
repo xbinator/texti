@@ -77,6 +77,8 @@ export interface Message {
 export interface BChatProps {
   /** 当前聊天会话 ID，空值表示新会话草稿态 */
   sessionId?: string | null;
+  /** 是否显示当前会话的工作区选择与恢复入口。 */
+  workspaceControlEnabled?: boolean;
 }
 
 /**

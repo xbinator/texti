@@ -43,7 +43,9 @@ import { useSettingStore } from '@/stores/ui/setting';
 import { emitRuntimeEvent, resetRuntimeEventListeners, type RuntimeEventListeners } from './runtime-event-test-utils';
 
 const chatStoreMock = vi.hoisted(() => ({
-  createSession: vi.fn<(type: 'assistant', options: { title: string; model?: { providerId: string; modelId: string } }) => Promise<ChatSession>>(),
+  createSession: vi.fn<
+    (type: 'assistant', options: { title: string; model?: { providerId: string; modelId: string }; workspaceRoot?: string }) => Promise<ChatSession>
+  >(),
   branchSession: vi.fn<(sourceSessionId: string, targetMessageId: string) => Promise<ChatSession>>(),
   addSessionMessage: vi.fn<(sessionId: string | null, message: Message) => Promise<void>>(),
   updateSessionMessage: vi.fn<(sessionId: string | null | undefined, message: Message) => Promise<void>>(),
@@ -52,6 +54,8 @@ const chatStoreMock = vi.hoisted(() => ({
   loadSessionById: vi.fn<(sessionId: string) => Promise<ChatSession | undefined>>(),
   findSession: vi.fn<(sessionId?: string | null) => ChatSession | undefined>(),
   updateSessionModel: vi.fn<(sessionId: string, model: { providerId: string; modelId: string }) => Promise<ChatSession>>(),
+  updateSessionWorkspace: vi.fn<(sessionId: string, workspaceRoot: string) => Promise<ChatSession>>(),
+  clearSessionWorkspace: vi.fn<(sessionId: string) => Promise<ChatSession>>(),
   ensureSessionModel: vi.fn<(sessionId: string, model: { providerId: string; modelId: string }) => Promise<ChatSession>>(),
   getSessions: vi.fn()
 }));
@@ -305,6 +309,7 @@ vi.mock('@/shared/platform', () => ({
     readFile: vi.fn(() => ({ content: '' })),
     readWorkspaceDirectory: vi.fn(() => []),
     getPathStatus: vi.fn(),
+    selectDirectory: vi.fn(),
     trashFile: vi.fn(),
     watchDirectory: vi.fn(),
     unwatchDirectory: vi.fn(),
@@ -444,9 +449,25 @@ const InputToolbarStub = defineComponent({
     contextWindow: {
       type: Number,
       default: 0
+    },
+    workspaceLabel: {
+      type: String,
+      default: ''
+    },
+    hasWorkspaceOverride: {
+      type: Boolean,
+      default: false
+    },
+    workspaceDisabled: {
+      type: Boolean,
+      default: false
+    },
+    showWorkspaceControl: {
+      type: Boolean,
+      default: false
     }
   },
-  emits: ['submit', 'abort', 'image-select', 'model-change'],
+  emits: ['submit', 'abort', 'image-select', 'model-change', 'workspace-select', 'workspace-clear'],
   setup(_props, { emit }) {
     return () =>
       h(
@@ -677,11 +698,12 @@ function createStoredFile(overrides: Partial<StoredFile> = {}): StoredFile {
 /**
  * 挂载 BChat。
  * @param sessionId - 当前会话 ID
+ * @param workspaceControlEnabled - 页面是否允许新会话选择工作区
  * @returns 组件包装器
  */
-function mountBChat(sessionId: string | null = null): ReturnType<typeof shallowMount> {
+function mountBChat(sessionId: string | null = null, workspaceControlEnabled = false): ReturnType<typeof shallowMount> {
   return shallowMount(BChat, {
-    props: { sessionId },
+    props: { sessionId, workspaceControlEnabled },
     global: {
       stubs: {
         BIcon: true,
@@ -730,6 +752,8 @@ describe('BChat sessionId runtime', (): void => {
     chatStoreMock.loadSessionById.mockReset();
     chatStoreMock.findSession.mockReset();
     chatStoreMock.updateSessionModel.mockReset();
+    chatStoreMock.updateSessionWorkspace.mockReset();
+    chatStoreMock.clearSessionWorkspace.mockReset();
     chatStoreMock.ensureSessionModel.mockReset();
     chatStoreMock.getSessions.mockReset();
     electronAPIMock.chatRuntimeSend.mockReset();
@@ -764,6 +788,9 @@ describe('BChat sessionId runtime', (): void => {
     promptEditorMockState.replaceTextRange.mockReset();
     getPathForFileMock.mockReset();
     getPathForFileMock.mockReturnValue('/workspace/My Notes/note.md');
+    vi.mocked(native.selectDirectory).mockReset();
+    vi.mocked(native.getPathStatus).mockReset();
+    vi.mocked(native.getPathStatus).mockResolvedValue({ exists: true, isFile: false, isDirectory: true });
     vi.mocked(native.watchDirectory).mockClear();
     todoStoreMock.todosBySession.clear();
     todoStoreMock.clearTodos.mockReset();
@@ -807,7 +834,7 @@ describe('BChat sessionId runtime', (): void => {
     agentTaskEventMockState.listener = undefined;
     agentTaskEventMockState.dispose.mockReset();
     chatStoreMock.getSessionMessages.mockResolvedValue([]);
-    chatStoreMock.loadSessionById.mockResolvedValue(undefined);
+    chatStoreMock.loadSessionById.mockResolvedValue(createSession('session-active', 'Session'));
     chatStoreMock.findSession.mockReturnValue(undefined);
     chatStoreMock.getSessions.mockResolvedValue({ items: [], hasMore: false });
     chatStoreMock.addSessionMessage.mockResolvedValue();
@@ -873,6 +900,17 @@ describe('BChat sessionId runtime', (): void => {
     expect(chatStoreMock.loadSessionById).toHaveBeenCalledWith('session-active');
     expect(chatStoreMock.loadSessionById.mock.invocationCallOrder[0]).toBeLessThan(getModelToolSupportMock.mock.invocationCallOrder[0]);
     wrapper.unmount();
+  });
+
+  it('shows workspace controls only for a new draft on the page host', async (): Promise<void> => {
+    const draftWrapper = mountBChat(null, true);
+    const persistedWrapper = mountBChat('session-active', true);
+    await flushPromises();
+
+    expect(draftWrapper.findComponent(InputToolbarStub).props('showWorkspaceControl')).toBe(true);
+    expect(persistedWrapper.findComponent(InputToolbarStub).props('showWorkspaceControl')).toBe(false);
+    draftWrapper.unmount();
+    persistedWrapper.unmount();
   });
 
   it('passes only markdown recent files to prompt editor file mentions', async (): Promise<void> => {
@@ -941,6 +979,29 @@ describe('BChat sessionId runtime', (): void => {
     expect(electronAPIMock.chatRuntimeSend).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'session-created', content: 'hello' }));
     expect(wrapper.findComponent(ConversationViewStub).props('sessionId')).toBe('session-created');
     expect(wrapper.emitted('loading-change')).toContainEqual([true]);
+  });
+
+  it('persists a selected draft workspace with the first Runtime request', async (): Promise<void> => {
+    const selectedWorkspace = '/private/tmp/project';
+    const createdSession = createSession('session-created', 'hello');
+    chatStoreMock.createSession.mockResolvedValue(createdSession);
+    vi.mocked(native.selectDirectory).mockResolvedValue(selectedWorkspace);
+    const wrapper = mountBChat(null, true);
+    await flushPromises();
+
+    wrapper.findComponent(InputToolbarStub).vm.$emit('workspace-select');
+    await flushPromises();
+    wrapper.findComponent(BSmartEditorStub).vm.$emit('update:value', 'hello');
+    wrapper.findComponent(InputToolbarStub).vm.$emit('submit');
+    await flushPromises();
+
+    expect(chatStoreMock.createSession).toHaveBeenCalledWith('assistant', {
+      title: 'hello',
+      model: { providerId: 'provider-1', modelId: 'model-1' },
+      workspaceRoot: selectedWorkspace
+    });
+    expect(electronAPIMock.chatRuntimeSend).toHaveBeenCalledWith(expect.objectContaining({ workspaceRoot: selectedWorkspace }));
+    wrapper.unmount();
   });
 
   it('recovers Child Tasks with the authoritative internally-created activeSessionId', async (): Promise<void> => {

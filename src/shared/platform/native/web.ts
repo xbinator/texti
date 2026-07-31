@@ -43,6 +43,14 @@ export class WebNative {
     throw error;
   }
 
+  /**
+   * Web 平台不能访问用户目录，固定返回空选择结果。
+   * @returns 固定返回 null
+   */
+  async selectDirectory(): Promise<string | null> {
+    return null;
+  }
+
   async openFile(options?: OpenFileOptions) {
     return new Promise<File>((resolve) => {
       const input = document.createElement('input');

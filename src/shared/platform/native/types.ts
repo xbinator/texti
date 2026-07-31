@@ -145,6 +145,9 @@ export interface Native {
 
   readWorkspaceDirectory(options: ReadWorkspaceDirectoryOptions): Promise<ReadWorkspaceDirectoryResult>;
 
+  /** 打开原生目录选择框；取消或平台不支持时返回 null。 */
+  selectDirectory(): Promise<string | null>;
+
   openFile(options?: OpenFileOptions): Promise<File>;
 
   saveFile(content: string, path?: string, options?: SaveFileOptions): Promise<string | null>;

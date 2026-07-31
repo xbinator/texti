@@ -203,12 +203,14 @@ vi.mock('@/stores/workspace/recent', () => ({
  * 创建 Runtime 工具 hook。
  * @returns Runtime 工具 hook 返回值
  */
-function createRuntimeTools(): ReturnType<typeof useRuntimeTools> {
+function createRuntimeTools(workspaceRoot = ref<string | null>('/workspace')): ReturnType<typeof useRuntimeTools> {
   return useRuntimeTools({
     messages: ref<Message[]>([]),
     confirm: { confirm: vi.fn(async (): Promise<true> => true) },
     getSessionId: (): string => 'session-1',
-    openWebview: vi.fn()
+    openWebview: vi.fn(),
+    workspaceRoot,
+    getWorkspaceRoot: (): string | null => workspaceRoot.value
   });
 }
 
@@ -276,6 +278,17 @@ describe('useRuntimeTools', () => {
     const activeToolNames = readActiveToolNames(runtimeTools.getActiveTools);
     expect(activeToolNames).toEqual(expect.arrayContaining(['read_current_webpage', 'operate_webpage']));
     expect(activeToolNames).not.toContain('open_resource');
+  });
+
+  it('uses the injected session workspace when exposing directory tools', (): void => {
+    const workspaceRoot = ref<string | null>(null);
+    const runtimeTools = createRuntimeTools(workspaceRoot);
+
+    expect(readActiveToolNames(runtimeTools.getActiveTools)).not.toContain('read_directory');
+
+    workspaceRoot.value = '/private/tmp/project';
+
+    expect(readActiveToolNames(runtimeTools.getActiveTools)).toContain('read_directory');
   });
 
   it('dynamically exposes widget tools after widget store is initialized', (): void => {

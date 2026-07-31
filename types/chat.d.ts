@@ -610,6 +610,8 @@ export interface ChatSessionModelMetadata {
 export interface ChatSessionMetadata {
   /** 会话后续 Runtime 使用的模型。 */
   model?: ChatSessionModelMetadata;
+  /** 当前会话覆盖默认工作区的真实目录路径。 */
+  workspaceRoot?: string;
   /** 主进程更新模型时需要保留的其他元数据字段。 */
   [key: string]: unknown;
 }

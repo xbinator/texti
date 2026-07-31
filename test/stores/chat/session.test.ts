@@ -18,6 +18,8 @@ const mockElectronAPI = vi.hoisted(() => ({
   chatSessionBranch: vi.fn<(sourceSessionId: string, targetMessageId: string) => Promise<ChatHandlerResult<ChatSession>>>(),
   chatSessionUpdateTitle: vi.fn<(sessionId: string, title: string) => Promise<ChatHandlerResult<void>>>(),
   chatSessionUpdateModel: vi.fn<(sessionId: string, model: ChatSessionModelMetadata) => Promise<ChatHandlerResult<ChatSession>>>(),
+  chatSessionUpdateWorkspace: vi.fn<(sessionId: string, workspaceRoot: string) => Promise<ChatHandlerResult<ChatSession>>>(),
+  chatSessionClearWorkspace: vi.fn<(sessionId: string) => Promise<ChatHandlerResult<ChatSession>>>(),
   chatSessionDelete: vi.fn<(sessionId: string) => Promise<ChatHandlerResult<void>>>(),
   chatMessageList: vi.fn<(sessionId: string) => Promise<{ ok: true; data: ChatMessageRecord[] }>>(),
   chatMessageAdd: vi.fn<(message: ChatMessageRecord) => Promise<{ ok: true; data: void }>>(),
@@ -110,6 +112,8 @@ describe('useChatSessionStore', () => {
     mockElectronAPI.chatSessionBranch.mockReset();
     mockElectronAPI.chatSessionUpdateTitle.mockReset();
     mockElectronAPI.chatSessionUpdateModel.mockReset();
+    mockElectronAPI.chatSessionUpdateWorkspace.mockReset();
+    mockElectronAPI.chatSessionClearWorkspace.mockReset();
     mockElectronAPI.chatSessionDelete.mockReset();
     mockElectronAPI.chatMessageList.mockReset();
     mockElectronAPI.chatMessageAdd.mockReset();
@@ -185,15 +189,52 @@ describe('useChatSessionStore', () => {
     expect(store.findSession('session-old')?.metadata?.model).toEqual(model);
   });
 
-  it('creates a session with the first runtime model', async (): Promise<void> => {
+  it('creates a session with the first runtime model and selected workspace', async (): Promise<void> => {
     const model: ChatSessionModelMetadata = { providerId: 'provider-1', modelId: 'model-2' };
+    const workspaceRoot = '/private/tmp/project';
     mockElectronAPI.chatSessionCreate.mockResolvedValue({ ok: true, data: undefined });
     const store = useChatSessionStore();
 
-    const session = await store.createSession('assistant', { title: 'Hello', model });
+    const session = await store.createSession('assistant', { title: 'Hello', model, workspaceRoot });
 
     expect(session.metadata?.model).toEqual(model);
-    expect(mockElectronAPI.chatSessionCreate).toHaveBeenCalledWith(expect.objectContaining({ metadata: { model } }));
+    expect(session.metadata?.workspaceRoot).toBe(workspaceRoot);
+    expect(mockElectronAPI.chatSessionCreate).toHaveBeenCalledWith(expect.objectContaining({ metadata: { model, workspaceRoot } }));
+  });
+
+  it('updates workspace only after the persisted session is returned', async (): Promise<void> => {
+    const workspaceRoot = '/private/tmp/project';
+    const store = useChatSessionStore();
+    const original = createSession('session-a', { metadata: { model: { providerId: 'provider-1', modelId: 'model-1' } } });
+    const updated = createSession('session-a', { metadata: { model: { providerId: 'provider-1', modelId: 'model-1' }, workspaceRoot } });
+    store.sessions = [original];
+    mockElectronAPI.chatSessionUpdateWorkspace.mockResolvedValue({ ok: true, data: updated });
+
+    await expect(store.updateSessionWorkspace('session-a', workspaceRoot)).resolves.toEqual(updated);
+    expect(mockElectronAPI.chatSessionUpdateWorkspace).toHaveBeenCalledWith('session-a', workspaceRoot);
+    expect(store.findSession('session-a')).toEqual(updated);
+  });
+
+  it('keeps the previous session when a workspace update fails', async (): Promise<void> => {
+    const store = useChatSessionStore();
+    const original = createSession('session-a', { metadata: { workspaceRoot: '/private/tmp/original' } });
+    store.sessions = [original];
+    mockElectronAPI.chatSessionUpdateWorkspace.mockResolvedValue({ ok: false, error: '工作区写入失败', code: 'SQLITE_ERROR' });
+
+    await expect(store.updateSessionWorkspace('session-a', '/private/tmp/project')).rejects.toThrow('工作区写入失败');
+    expect(store.findSession('session-a')).toEqual(original);
+  });
+
+  it('clears a persisted workspace only after the persisted session is returned', async (): Promise<void> => {
+    const store = useChatSessionStore();
+    const original = createSession('session-a', { metadata: { model: { providerId: 'provider-1', modelId: 'model-1' }, workspaceRoot: '/private/tmp/project' } });
+    const cleared = createSession('session-a', { metadata: { model: { providerId: 'provider-1', modelId: 'model-1' } } });
+    store.sessions = [original];
+    mockElectronAPI.chatSessionClearWorkspace.mockResolvedValue({ ok: true, data: cleared });
+
+    await expect(store.clearSessionWorkspace('session-a')).resolves.toEqual(cleared);
+    expect(mockElectronAPI.chatSessionClearWorkspace).toHaveBeenCalledWith('session-a');
+    expect(store.findSession('session-a')).toEqual(cleared);
   });
 
   it('persists a missing model once and preserves an existing model', async (): Promise<void> => {

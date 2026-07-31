@@ -17,6 +17,7 @@ import type {
   SessionCursor,
   SessionPaginationParams
 } from 'types/chat';
+import { realpathSync, statSync } from 'node:fs';
 import dayjs from 'dayjs';
 import { nanoid } from 'nanoid';
 import { dbExecute, dbSelect, transaction } from '../database/service.mjs';
@@ -242,6 +243,42 @@ function isSessionModelMetadata(value: unknown): value is ChatSessionModelMetada
 }
 
 /**
+ * 判断未知值是否为有效的会话工作区路径。
+ * @param value - 待验证的元数据字段
+ * @returns 非空字符串时返回 true
+ */
+function isSessionWorkspaceRoot(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+/**
+ * 规范化并验证将要写入会话元数据的工作区目录。
+ * @param workspaceRoot - Renderer 传入的候选工作区路径
+ * @returns 真实且存在的本地目录路径
+ */
+function normalizeWorkspaceRoot(workspaceRoot: unknown): string {
+  if (!isSessionWorkspaceRoot(workspaceRoot)) throw new Error('会话工作区格式无效');
+
+  try {
+    const normalizedWorkspaceRoot = realpathSync(workspaceRoot.trim());
+    if (!statSync(normalizedWorkspaceRoot).isDirectory()) throw new Error('工作区不是目录');
+    return normalizedWorkspaceRoot;
+  } catch {
+    throw new Error('会话工作区不可用');
+  }
+}
+
+/**
+ * 规范化会话创建请求中的可选工作区元数据。
+ * @param metadata - Renderer 传入的会话元数据
+ * @returns 保留其他字段并规范化工作区后的元数据
+ */
+function normalizeSessionMetadata(metadata: ChatSessionMetadata | undefined): ChatSessionMetadata | undefined {
+  if (!metadata || metadata.workspaceRoot === undefined) return metadata;
+  return { ...metadata, workspaceRoot: normalizeWorkspaceRoot(metadata.workspaceRoot) };
+}
+
+/**
  * 防御性解析会话元数据，损坏的模型字段按缺失元数据处理。
  * @param json - 数据库存储的元数据 JSON
  * @returns 合法元数据；JSON 或模型结构无效时返回 undefined
@@ -250,6 +287,7 @@ function parseSessionMetadata(json: string | null): ChatSessionMetadata | undefi
   const value = parseJson<unknown>(json);
   if (!isRecordValue(value)) return undefined;
   if (value.model !== undefined && !isSessionModelMetadata(value.model)) return undefined;
+  if (value.workspaceRoot !== undefined && !isSessionWorkspaceRoot(value.workspaceRoot)) return undefined;
   return value as ChatSessionMetadata;
 }
 
@@ -509,6 +547,7 @@ class ChatSessionManager {
   }
 
   createSession(session: ChatSession): void {
+    const metadata = normalizeSessionMetadata(session.metadata);
     dbExecute(UPSERT_SESSION_SQL, [
       session.id,
       session.type,
@@ -517,7 +556,7 @@ class ChatSessionManager {
       session.updatedAt,
       session.lastMessageAt,
       stringifyJson(session.usage),
-      stringifyJson(session.metadata)
+      stringifyJson(metadata)
     ]);
   }
 
@@ -548,6 +587,45 @@ class ChatSessionManager {
       const metadata: ChatSessionMetadata = { ...(session.metadata ?? {}), model };
       dbExecute(UPDATE_SESSION_METADATA_SQL, [stringifyJson(metadata), updatedAt, sessionId]);
       return { ...session, metadata, updatedAt };
+    });
+  }
+
+  /**
+   * 原子合并并持久化单个会话的工作区元数据。
+   * @param sessionId - 会话 ID
+   * @param workspaceRoot - 已由目录选择器规范化的工作区根目录
+   * @returns 已更新的完整会话
+   */
+  updateSessionWorkspace(sessionId: string, workspaceRoot: unknown): ChatSession {
+    const normalizedWorkspaceRoot = normalizeWorkspaceRoot(workspaceRoot);
+
+    return transaction((): ChatSession => {
+      const session = this.getSessionById(sessionId);
+      if (!session) throw new Error('找不到聊天会话');
+
+      const updatedAt = dayjs().toISOString();
+      const metadata: ChatSessionMetadata = { ...(session.metadata ?? {}), workspaceRoot: normalizedWorkspaceRoot };
+      dbExecute(UPDATE_SESSION_METADATA_SQL, [stringifyJson(metadata), updatedAt, sessionId]);
+      return { ...session, metadata, updatedAt };
+    });
+  }
+
+  /**
+   * 原子清除单个会话的工作区覆盖，并保留其余元数据。
+   * @param sessionId - 会话 ID
+   * @returns 已更新的完整会话
+   */
+  clearSessionWorkspace(sessionId: string): ChatSession {
+    return transaction((): ChatSession => {
+      const session = this.getSessionById(sessionId);
+      if (!session) throw new Error('找不到聊天会话');
+
+      const metadata: ChatSessionMetadata = { ...(session.metadata ?? {}) };
+      delete metadata.workspaceRoot;
+      const nextMetadata = Object.keys(metadata).length ? metadata : undefined;
+      const updatedAt = dayjs().toISOString();
+      dbExecute(UPDATE_SESSION_METADATA_SQL, [stringifyJson(nextMetadata), updatedAt, sessionId]);
+      return { ...session, metadata: nextMetadata, updatedAt };
     });
   }
 
