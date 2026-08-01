@@ -66,7 +66,7 @@ export type CodeHighlightRenderNode = CodeHighlightElementNode | CodeHighlightTe
  * Markdown 代码围栏语言别名。
  */
 const LANGUAGE_ALIASES: Readonly<Record<string, string>> = {
-  bash: 'shell',
+  bash: 'bash',
   cjs: 'javascript',
   htm: 'xml',
   html: 'xml',
@@ -77,13 +77,14 @@ const LANGUAGE_ALIASES: Readonly<Record<string, string>> = {
   py: 'python',
   rb: 'ruby',
   rs: 'rust',
-  sh: 'shell',
-  shellscript: 'shell',
+  sh: 'bash',
+  shellscript: 'bash',
   text: 'plaintext',
   ts: 'typescript',
   tsx: 'typescript',
   vue: 'xml',
-  yml: 'yaml'
+  yml: 'yaml',
+  zsh: 'bash'
 };
 
 const lowlight = createLowlight(common);
@@ -127,6 +128,39 @@ function textToHighlightNodes(text: string): CodeHighlightRenderNode[] {
 }
 
 /**
+ * 归一化代码块声明语言。
+ * @param rawLanguage - 原始语言名
+ * @returns lowlight 语言名
+ */
+function normalizeLanguage(rawLanguage: string): string {
+  const language = rawLanguage.trim().toLowerCase();
+  return LANGUAGE_ALIASES[language] ?? language;
+}
+
+/**
+ * 查找 Markdown 文件头部 YAML frontmatter 的结束位置。
+ * @param code - Markdown 源码
+ * @returns frontmatter 片段结束下标，未找到时返回 -1
+ */
+function findFrontmatterEnd(code: string): number {
+  let openingLength = -1;
+  if (code.startsWith('---\r\n')) {
+    openingLength = 5;
+  } else if (code.startsWith('---\n')) {
+    openingLength = 4;
+  }
+
+  if (openingLength === -1) return -1;
+
+  // closing delimiter 必须独占一行，避免普通 Markdown 分隔线被当成 frontmatter。
+  const closingPattern = /\r?\n---(?:\r?\n|$)/g;
+  closingPattern.lastIndex = openingLength - 1;
+  const match = closingPattern.exec(code);
+
+  return match ? match.index + match[0].length : -1;
+}
+
+/**
  * 读取 Lowlight 元素节点的安全类名。
  * @param node - Lowlight 元素节点
  * @returns 安全类名
@@ -159,6 +193,37 @@ function lowlightNodeToHighlightNodes(node: LowlightNode): CodeHighlightRenderNo
 }
 
 /**
+ * 使用已注册的 lowlight 语言执行高亮。
+ * @param language - lowlight 语言名
+ * @param code - 代码文本
+ * @returns 安全高亮节点
+ */
+function highlightRegistered(language: string, code: string): CodeHighlightRenderNode[] {
+  if (!lowlight.registered(language)) return textToHighlightNodes(code);
+
+  try {
+    return lowlightNodeToHighlightNodes(lowlight.highlight(language, code) as LowlightNode);
+  } catch {
+    return textToHighlightNodes(code);
+  }
+}
+
+/**
+ * 高亮带可选 YAML frontmatter 的 Markdown 文本。
+ * @param code - Markdown 源码
+ * @returns 安全高亮节点
+ */
+function highlightMarkdown(code: string): CodeHighlightRenderNode[] {
+  const frontmatterEnd = findFrontmatterEnd(code);
+  if (frontmatterEnd === -1 || !lowlight.registered('yaml')) return highlightRegistered('markdown', code);
+
+  const frontmatterNodes = highlightRegistered('yaml', code.slice(0, frontmatterEnd));
+  const markdownNodes = highlightRegistered('markdown', code.slice(frontmatterEnd));
+
+  return [...frontmatterNodes, ...markdownNodes];
+}
+
+/**
  * 高亮 BMessage 代码块。
  * @param rawLanguage - Markdown 原始语言
  * @param code - 代码文本
@@ -168,18 +233,14 @@ function lowlightNodeToHighlightNodes(node: LowlightNode): CodeHighlightRenderNo
 export function highlightMessageCode(rawLanguage: string, code: string, complete: boolean): CodeHighlightRenderNode[] {
   if (!complete) return textToHighlightNodes(code);
 
-  const language = LANGUAGE_ALIASES[rawLanguage] ?? rawLanguage;
+  const language = normalizeLanguage(rawLanguage);
   if (!language || !lowlight.registered(language)) return textToHighlightNodes(code);
 
   const cacheKey = `${language}\u0000${code}`;
   const cached = getCachedHighlight(cacheKey);
   if (cached) return cached;
 
-  try {
-    const nodes = lowlightNodeToHighlightNodes(lowlight.highlight(language, code) as LowlightNode);
-    cacheHighlight(cacheKey, nodes);
-    return nodes;
-  } catch {
-    return textToHighlightNodes(code);
-  }
+  const nodes = language === 'markdown' ? highlightMarkdown(code) : highlightRegistered(language, code);
+  cacheHighlight(cacheKey, nodes);
+  return nodes;
 }

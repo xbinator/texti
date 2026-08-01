@@ -77,4 +77,23 @@ describe('BMessage markdown style', () => {
     expect(preRule).toMatch(/overflow:\s*auto;/);
     expect(codeRule).not.toMatch(/overflow-x:\s*auto;/);
   });
+
+  it('covers common lowlight token scopes used by skill previews', (): void => {
+    const style = readMarkdownStyle();
+    const requiredScopes = [
+      'hljs-addition',
+      'hljs-attribute',
+      'hljs-deletion',
+      'hljs-literal',
+      'hljs-meta',
+      'hljs-punctuation',
+      'hljs-selector-class',
+      'hljs-symbol',
+      'hljs-type'
+    ];
+
+    requiredScopes.forEach((scope: string): void => {
+      expect(style).toContain(`.${scope}`);
+    });
+  });
 });

@@ -12,7 +12,9 @@ describe('detectLanguage', (): void => {
     expect(detectLanguage('main.js')).toBe('javascript');
     expect(detectLanguage('App.vue')).toBe('xml');
     expect(detectLanguage('config.json')).toBe('json');
-    expect(detectLanguage('script.sh')).toBe('shell');
+    expect(detectLanguage('script.sh')).toBe('bash');
+    expect(detectLanguage('install.bash')).toBe('bash');
+    expect(detectLanguage('profile.zsh')).toBe('bash');
     expect(detectLanguage('README.md')).toBe('markdown');
     expect(detectLanguage('style.css')).toBe('css');
     expect(detectLanguage('app.py')).toBe('python');
@@ -24,7 +26,7 @@ describe('detectLanguage', (): void => {
   it('is case-insensitive on extensions', (): void => {
     expect(detectLanguage('INDEX.TS')).toBe('typescript');
     expect(detectLanguage('App.VUE')).toBe('xml');
-    expect(detectLanguage('Script.SH')).toBe('shell');
+    expect(detectLanguage('Script.SH')).toBe('bash');
   });
 
   it('returns empty string for unknown extensions', (): void => {
