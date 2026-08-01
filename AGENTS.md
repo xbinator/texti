@@ -71,6 +71,13 @@ import type { DefineComponent } from 'vue'
 - ✅ 推荐写法：`src/components/BChatSidebar/components/InputToolbar.vue`
 - 如果需要 Markdown 链接，链接目标也使用相对路径
 
+### 代码与测试路径规范
+- 所有源码、测试代码、注释中**禁止硬编码本机绝对路径**（如 `/Users/<用户名>/...`、`C:\Users\<用户名>\...`）
+- ❌ 反例：`find /Users/<用户名> -name widget.json`、`cat /Users/<用户名>/.ssh/config`
+- ✅ 正例：使用 POSIX 通用路径 `/home/user/...`、`os.homedir()`、`os.tmpdir()`、`process.cwd()`、临时 fixture 目录或仓库相对路径
+- 测试用例需要「工作区外路径」做越权读取测试时，统一使用 `/home/user/...`（macOS/Linux 通用）而非本机真实家目录
+- 需要可执行的真实文件系统操作时，使用 `os.tmpdir()` 拼接临时目录，并在测试结束后清理
+
 ### 组件引入规范
 - **B 开头的组件**已通过 `unplugin-vue-components` 全局自动引入，无需手动 import
 - 手动引入场景：类型定义、动态导入、编辑器内置组件

@@ -2334,8 +2334,8 @@ describe('BChat sessionId runtime', (): void => {
   });
 
   it('renders a send startup error as a conversation error message', async (): Promise<void> => {
-    const createdSession = createSession('session-created', 'read {{@/Users/zhangbin/Desktop/Markdown 语法全量渲染测试.md}}');
-    const missingFilePath = '/Users/zhangbin/Desktop/Markdown 语法全量渲染测试.md';
+    const createdSession = createSession('session-created', 'read {{@/home/user/Desktop/Markdown 语法全量渲染测试.md}}');
+    const missingFilePath = '/home/user/Desktop/Markdown 语法全量渲染测试.md';
     chatStoreMock.createSession.mockResolvedValue(createdSession);
     electronAPIMock.chatRuntimeSend.mockResolvedValueOnce({
       ok: false,

@@ -125,10 +125,10 @@ describe('builtin ShellTool interaction contract', (): void => {
     const tool = createTool((): typeof ENABLED_CAPABILITY => ENABLED_CAPABILITY, confirm);
     mocks.analyzeShellCommand.mockResolvedValue({
       ...SAFE_REPORT,
-      findings: [{ severity: 'warning', code: 'READ_OUTSIDE_WORKSPACE', message: '命令可能读取工作区外路径: /Users/zhangbin' }]
+      findings: [{ severity: 'warning', code: 'READ_OUTSIDE_WORKSPACE', message: '命令可能读取工作区外路径: /home/user' }]
     });
 
-    await tool.execute({ shell: 'bash', command: 'find /Users/zhangbin -name widget.json', commandId: 'tool-call-1', toolCallId: 'tool-call-1' });
+    await tool.execute({ shell: 'bash', command: 'find /home/user -name widget.json', commandId: 'tool-call-1', toolCallId: 'tool-call-1' });
 
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ toolCallId: 'tool-call-1', toolName: 'run_shell_command', riskLevel: 'dangerous' }));
     expect(mocks.runShellCommand).toHaveBeenCalledWith(expect.objectContaining({ confirmedSafetyFindingCodes: ['READ_OUTSIDE_WORKSPACE'] }));
@@ -140,10 +140,10 @@ describe('builtin ShellTool interaction contract', (): void => {
     const tool = createTool((): typeof ENABLED_CAPABILITY => ENABLED_CAPABILITY, confirm);
     mocks.analyzeShellCommand.mockResolvedValue({
       ...SAFE_REPORT,
-      findings: [{ severity: 'warning', code: 'READ_OUTSIDE_WORKSPACE', message: '命令可能读取工作区外路径: /Users/zhangbin' }]
+      findings: [{ severity: 'warning', code: 'READ_OUTSIDE_WORKSPACE', message: '命令可能读取工作区外路径: /home/user' }]
     });
 
-    const result = await tool.execute({ shell: 'bash', command: 'find /Users/zhangbin -name widget.json', commandId: 'tool-call-1' });
+    const result = await tool.execute({ shell: 'bash', command: 'find /home/user -name widget.json', commandId: 'tool-call-1' });
 
     expect(result).toMatchObject({ status: 'failure', error: { code: 'USER_CANCELLED' } });
     expect(mocks.runShellCommand).not.toHaveBeenCalled();

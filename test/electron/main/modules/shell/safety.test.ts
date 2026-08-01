@@ -76,21 +76,21 @@ const CONFIRMATION_CASES: SafetyMatrixCase[] = [
   {
     name: 'bash find outside workspace',
     shell: 'bash',
-    command: 'find /Users/zhangbin -path "*/aether-weather/widget.json" 2>/dev/null | head -5',
+    command: 'find /home/user -path "*/aether-weather/widget.json" 2>/dev/null | head -5',
     status: 'allowed',
     codes: ['READ_OUTSIDE_WORKSPACE']
   },
   {
     name: 'bash reads file outside workspace',
     shell: 'bash',
-    command: 'cat /Users/zhangbin/.ssh/config',
+    command: 'cat /home/user/.ssh/config',
     status: 'allowed',
     codes: ['READ_OUTSIDE_WORKSPACE']
   },
   {
     name: 'bash reads tilde user path outside workspace',
     shell: 'bash',
-    command: 'cat ~zhangbin/.ssh/config',
+    command: 'cat ~user/.ssh/config',
     status: 'allowed',
     codes: ['READ_OUTSIDE_WORKSPACE']
   },
@@ -111,14 +111,14 @@ const CONFIRMATION_CASES: SafetyMatrixCase[] = [
   {
     name: 'powershell reads file outside workspace',
     shell: 'powershell',
-    command: 'Get-Content /Users/zhangbin/.ssh/config',
+    command: 'Get-Content /home/user/.ssh/config',
     status: 'allowed',
     codes: ['READ_OUTSIDE_WORKSPACE']
   },
   {
     name: 'bash python reads embedded path outside workspace',
     shell: 'bash',
-    command: 'python -c \'open("/Users/zhangbin/.ssh/config").read()\'',
+    command: 'python -c \'open("/home/user/.ssh/config").read()\'',
     status: 'allowed',
     codes: ['READ_OUTSIDE_WORKSPACE']
   },
@@ -126,7 +126,7 @@ const CONFIRMATION_CASES: SafetyMatrixCase[] = [
     name: 'bash python heredoc reads embedded path outside workspace',
     shell: 'bash',
     command: `python <<'PY'
-open("/Users/zhangbin/.ssh/config").read()
+open("/home/user/.ssh/config").read()
 PY`,
     status: 'allowed',
     codes: ['READ_OUTSIDE_WORKSPACE']
@@ -134,7 +134,7 @@ PY`,
   {
     name: 'bash node reads embedded path outside workspace',
     shell: 'bash',
-    command: "node -e \"require('fs').readFileSync('/Users/zhangbin/.ssh/config', 'utf8')\"",
+    command: "node -e \"require('fs').readFileSync('/home/user/.ssh/config', 'utf8')\"",
     status: 'allowed',
     codes: ['READ_OUTSIDE_WORKSPACE']
   },

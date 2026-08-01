@@ -88,7 +88,7 @@ describe('BubblePartUserInput', (): void => {
         part: {
           id: 'text-file-spaces',
           type: 'text',
-          text: 'read {{@/Users/zhangbin/Desktop/Markdown 语法全量渲染测试.md}}'
+          text: 'read {{@/home/user/Desktop/Markdown 语法全量渲染测试.md}}'
         }
       },
       global: {

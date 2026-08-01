@@ -26,10 +26,10 @@ describe('runtimeError', (): void => {
   it('localizes missing file errors with the original path', (): void => {
     const message = localizeRuntimeErrorMessage({
       code: 'ENOENT',
-      message: "ENOENT: no such file or directory, stat '/Users/zhangbin/Desktop/Markdown 语法全量渲染测试.md'"
+      message: "ENOENT: no such file or directory, stat '/home/user/Desktop/Markdown 语法全量渲染测试.md'"
     });
 
-    expect(message).toBe('文件不存在或已被移动：/Users/zhangbin/Desktop/Markdown 语法全量渲染测试.md');
+    expect(message).toBe('文件不存在或已被移动：/home/user/Desktop/Markdown 语法全量渲染测试.md');
   });
 
   it('preserves unknown runtime errors', (): void => {

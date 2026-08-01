@@ -32,12 +32,12 @@ beforeEach((): void => {
 
 describe('parseFileReferenceToken', (): void => {
   it('parses whole-file references with raw paths that include spaces', (): void => {
-    const parsed = parseFileReferenceToken('@/Users/zhangbin/Desktop/Markdown 语法全量渲染测试.md');
+    const parsed = parseFileReferenceToken('@/home/user/Desktop/Markdown 语法全量渲染测试.md');
 
     expect(parsed).toEqual(
       expect.objectContaining({
-        rawPath: '/Users/zhangbin/Desktop/Markdown 语法全量渲染测试.md',
-        filePath: '/Users/zhangbin/Desktop/Markdown 语法全量渲染测试.md',
+        rawPath: '/home/user/Desktop/Markdown 语法全量渲染测试.md',
+        filePath: '/home/user/Desktop/Markdown 语法全量渲染测试.md',
         fileName: 'Markdown 语法全量渲染测试.md',
         startLine: 0,
         endLine: 0
@@ -128,16 +128,16 @@ describe('findFileReferenceTokens', (): void => {
   });
 
   it('returns unencoded file references with spaces from message text', (): void => {
-    const content = '读一下 {{@/Users/zhangbin/Desktop/Markdown 语法全量渲染测试.md}}';
+    const content = '读一下 {{@/home/user/Desktop/Markdown 语法全量渲染测试.md}}';
     const tokens = findFileReferenceTokens(content);
 
     expect(tokens).toEqual([
       {
-        token: '{{@/Users/zhangbin/Desktop/Markdown 语法全量渲染测试.md}}',
+        token: '{{@/home/user/Desktop/Markdown 语法全量渲染测试.md}}',
         start: 4,
         end: content.length,
         reference: expect.objectContaining({
-          rawPath: '/Users/zhangbin/Desktop/Markdown 语法全量渲染测试.md',
+          rawPath: '/home/user/Desktop/Markdown 语法全量渲染测试.md',
           fileName: 'Markdown 语法全量渲染测试.md',
           startLine: 0,
           endLine: 0
@@ -147,11 +147,11 @@ describe('findFileReferenceTokens', (): void => {
   });
 
   it('matches file references in message text with the shared pattern', (): void => {
-    const content = '引用 {{@/Users/zhangbin/Desktop/Markdown 语法全量渲染测试.md#L3-L8}} 继续';
+    const content = '引用 {{@/home/user/Desktop/Markdown 语法全量渲染测试.md#L3-L8}} 继续';
     const matches = [...content.matchAll(FILE_REFERENCE_MESSAGE_TOKEN_PATTERN)];
 
     expect(matches).toHaveLength(1);
-    expect(matches[0]?.[1]).toBe('@/Users/zhangbin/Desktop/Markdown 语法全量渲染测试.md#L3-L8');
+    expect(matches[0]?.[1]).toBe('@/home/user/Desktop/Markdown 语法全量渲染测试.md#L3-L8');
   });
 
   it('ignores legacy message references', (): void => {
