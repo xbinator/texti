@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const PANEL_BORDER_RULE = 'border: 1px solid var(--border-primary);';
+const PANEL_BORDER_RULE_PATTERN = /border: (?:1px|var\(--surface-border-width\)) solid var\(--border-primary\);/u;
 
 /**
  * 需要统一内描边的容器目标。
@@ -91,7 +91,7 @@ describe('panel border styles', (): void => {
       const source = readSource(target.filePath);
       const ruleBody = readRuleBody(source, target.selector);
 
-      expect(ruleBody, `${target.filePath} ${target.selector}`).toContain(PANEL_BORDER_RULE);
+      expect(ruleBody, `${target.filePath} ${target.selector}`).toMatch(PANEL_BORDER_RULE_PATTERN);
       expect(source, `${target.filePath} ${target.selector}`).not.toContain(`${target.selector}::after`);
     }
   });
@@ -100,6 +100,6 @@ describe('panel border styles', (): void => {
     const source = readSource(WIDGET_CANVAS_BORDER_TARGET.filePath);
     const ruleBody = readRuleBody(source, WIDGET_CANVAS_BORDER_TARGET.selector);
 
-    expect(ruleBody, `${WIDGET_CANVAS_BORDER_TARGET.filePath} ${WIDGET_CANVAS_BORDER_TARGET.selector}`).not.toContain(PANEL_BORDER_RULE);
+    expect(ruleBody, `${WIDGET_CANVAS_BORDER_TARGET.filePath} ${WIDGET_CANVAS_BORDER_TARGET.selector}`).not.toMatch(PANEL_BORDER_RULE_PATTERN);
   });
 });

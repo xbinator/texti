@@ -295,6 +295,7 @@ defineExpose({ startMotion });
 
 .chat-sider--visible {
   width: var(--chat-sider-width);
+  margin-left: 6px;
   pointer-events: auto;
   opacity: 1;
   transform: translateX(0);
@@ -305,7 +306,6 @@ defineExpose({ startMotion });
   flex-shrink: 0;
   flex-direction: column;
   height: 100%;
-  margin-left: 6px;
   overflow: hidden;
   background: var(--bg-primary);
   border: var(--surface-border-width) solid var(--border-primary);

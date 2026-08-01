@@ -28,7 +28,8 @@ const SETTING_DETAIL_DESCRIPTIONS: Record<SupportedSettingKey, SettingDescriptio
   },
   themePreset: {
     summary: '主题预设（整套界面色彩氛围）',
-    value: '为整套界面色彩预设 ID，取值 default=暖米白/棕色、graphite=白/浅灰/黑灰、manga-ink=纸白/墨黑/高反差灰阶、shonen=暖白/朱红/金黄/红黑'
+    value:
+      '为整套界面色彩预设 ID，取值 default=暖米白/棕色、graphite=白/浅灰/黑灰、manga-ink=纸白/墨黑/高反差灰阶、shonen=暖白/朱红/金黄/红黑、overworld=纸面/钴蓝天空/墨线像素边/苔藓绿'
   },
   sourceMode: {
     summary: '源码模式',

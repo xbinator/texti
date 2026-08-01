@@ -65,10 +65,10 @@ describe('theme input token styles', (): void => {
     expect(sidebarSearchSource).toContain('class="sidebar-search"');
     expect(sidebarSearchSource).toContain('allow-clear');
     expect(sidebarSearchSource).toContain('<template #prefix>');
-    expect(resetSource).toContain('body .ant-input.ant-input');
-    expect(resetSource).toContain('body .ant-input-affix-wrapper.ant-input-affix-wrapper');
-    expect(resetSource).toContain('body .ant-input-affix-wrapper.ant-input-affix-wrapper .ant-input.ant-input');
-    expect(resetSource).toContain('body .ant-input-affix-wrapper.ant-input-affix-wrapper-focused .ant-input.ant-input');
+    expect(resetSource).toMatch(/body\s*\{[\s\S]*?\.ant-input\.ant-input/u);
+    expect(resetSource).toMatch(/body\s*\{[\s\S]*?\.ant-input-affix-wrapper\.ant-input-affix-wrapper/u);
+    expect(resetSource).toMatch(/body\s*\{[\s\S]*?\.ant-input-affix-wrapper\.ant-input-affix-wrapper \.ant-input\.ant-input/u);
+    expect(resetSource).toMatch(/body\s*\{[\s\S]*?\.ant-input-affix-wrapper\.ant-input-affix-wrapper-focused \.ant-input\.ant-input/u);
     expect(resetSource).toContain('border: 0;');
     expect(modelListSource).toContain('class="search-input"');
     expect(modelListSource).toContain('border-radius: var(--input-radius);');

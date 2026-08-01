@@ -275,8 +275,8 @@ describe('ChatSider', (): void => {
     const visibleStyle = chatSiderSource.match(/\.chat-sider--visible \{(?<body>[\s\S]*?)\n\}/u)?.groups?.body ?? '';
     const contentStyle = chatSiderSource.match(/\.chat-sider__content \{(?<body>[\s\S]*?)\n\}/u)?.groups?.body ?? '';
 
-    expect(visibleStyle).not.toContain('margin-left: 6px;');
-    expect(contentStyle).toContain('margin-left: 6px;');
+    expect(visibleStyle).toContain('margin-left: 6px;');
+    expect(contentStyle).not.toContain('margin-left: 6px;');
   });
 
   it('renders BChat with the active session id and displays the SessionHistory current session', async (): Promise<void> => {

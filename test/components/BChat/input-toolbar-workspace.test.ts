@@ -101,7 +101,7 @@ describe('InputToolbar workspace selector', (): void => {
     expect(workspaceStyle).toContain('height: 28px;');
     expect(inputToolbarSource).toContain('overflow: hidden;');
     expect(workspaceStyle.split('&:hover')[0]).not.toContain('background: var(--bg-secondary);');
-    expect(inputToolbarSource).toContain('border-radius: 18px;');
+    expect(inputToolbarSource).toContain('border-radius: var(--control-radius);');
     expect(inputToolbarSource).toMatch(/&:hover,\s*&:focus-within\s*\{\s*background: var\(--bg-secondary\);/u);
     expect(inputToolbarSource).not.toContain('margin-left: 2px;');
     expect(selector.text()).toContain('project');
