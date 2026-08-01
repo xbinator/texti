@@ -116,6 +116,16 @@ const { currentSession, switchSession: switchSideSession, createDraftSession, ha
 
 /** BChat 组件实例引用，用于调用聚焦输入框等方法。 */
 const bChatRef = ref<InstanceType<typeof BChat>>();
+
+/** 侧栏展开后聚焦 BChat 输入框，便于用户立即继续对话。 */
+watch(
+  (): boolean => settingStore.sidebarVisible,
+  (visible: boolean): void => {
+    if (!visible) return;
+    bChatRef.value?.focusInput();
+  },
+  { flush: 'post' }
+);
 /** 当前标题。 */
 const currentTitle = computed<string>(() => currentSession.value?.title || '新会话');
 /** 根元素样式变量，隐藏态宽度归零，显示态恢复用户拖拽宽度。 */
