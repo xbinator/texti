@@ -43,8 +43,8 @@ withDefaults(defineProps<Props>(), {
   overflow: hidden;
   user-select: text;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 14px;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
   box-shadow: var(--shadow-sm);
 
   + .settings-section {

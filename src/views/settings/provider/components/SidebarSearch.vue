@@ -8,7 +8,6 @@
       :value="modelValue"
       class="sidebar-search"
       placeholder="搜索模型平台"
-      :bordered="false"
       allow-clear
       @update:value="emit('update:modelValue', $event ?? '')"
     >
@@ -47,23 +46,5 @@ const emit = defineEmits<{
 .sidebar-search {
   flex: 1;
   min-width: 0;
-  background: var(--bg-secondary);
-  border: 1px solid transparent;
-  border-radius: 6px;
-  transition: border-color 0.15s;
-
-  &:focus-within,
-  &.ant-input-affix-wrapper-focused {
-    border-color: var(--color-primary);
-  }
-
-  :deep(.ant-input) {
-    font-size: 12px;
-    background: transparent;
-  }
-
-  :deep(.ant-input-prefix) {
-    color: var(--text-tertiary);
-  }
 }
 </style>

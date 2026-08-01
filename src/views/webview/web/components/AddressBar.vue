@@ -232,30 +232,40 @@ function handleCopy(): void {
   height: 28px;
   padding: 0 10px;
   color: var(--text-primary);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-radius: 6px;
+  background: var(--input-bg);
+  border: var(--input-border-width) solid var(--input-border);
+  border-radius: var(--input-radius);
+  box-shadow: var(--input-shadow);
+  transition: border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard);
 
   &:focus-within {
-    border-color: var(--color-primary);
+    border-color: var(--input-focus-border);
+    box-shadow: var(--input-active-shadow);
   }
 }
 
 .address-input__control {
   width: 100%;
   min-width: 0;
+  font-family: var(--input-font-family);
+  color: var(--text-primary);
   outline: none;
   background: transparent;
   border: none;
+
+  &::placeholder {
+    color: var(--input-placeholder-color);
+    opacity: 1;
+  }
 }
 
 .address-input__icon {
   flex-shrink: 0;
   margin-left: 6px;
-  color: var(--text-tertiary);
+  color: var(--input-icon-color);
   cursor: pointer;
   opacity: 0;
-  transition: color 0.2s, opacity 0.2s;
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), opacity var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover {
     color: var(--text-secondary);

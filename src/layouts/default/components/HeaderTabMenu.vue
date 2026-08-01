@@ -493,9 +493,9 @@ defineExpose({
   padding: 4px;
   line-height: 32px;
   background: var(--dropdown-bg);
-  border: 1px solid var(--dropdown-border);
-  border-radius: 6px;
-  box-shadow: 0 12px 32px rgb(15 23 42 / 16%);
+  border: var(--overlay-border-width) solid var(--dropdown-border);
+  border-radius: var(--overlay-radius);
+  box-shadow: var(--shadow-lg);
   transform-origin: top left;
   animation: header-tab-menu-enter 120ms ease-out;
   will-change: opacity, transform;
@@ -513,7 +513,7 @@ defineExpose({
   cursor: pointer;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
 
   &:disabled {
     cursor: default;

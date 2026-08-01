@@ -311,8 +311,8 @@ function handleRollbackCancel(): void {
   overflow: hidden;
   cursor: pointer;
   object-fit: cover;
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
 
   &.message-bubble__image--single {
     max-width: 200px;
@@ -341,8 +341,8 @@ function handleRollbackCancel(): void {
   font-size: 12px;
   color: var(--text-secondary);
   background: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-radius: 999px;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--radius-full);
 }
 
 .message-bubble__file-name {
@@ -366,7 +366,7 @@ function handleRollbackCancel(): void {
   &.message-bubble__toolbar--right {
     justify-content: flex-end;
     opacity: 0;
-    transition: opacity 0.15s ease;
+    transition: opacity var(--motion-duration-fast) var(--motion-easing-standard);
   }
 }
 
@@ -385,8 +385,8 @@ function handleRollbackCancel(): void {
   font-size: 12px;
   color: var(--text-secondary);
   background: var(--bg-secondary);
-  border-radius: 8px;
-  box-shadow: 0 0 0 1px var(--border-primary);
+  border-radius: var(--surface-radius);
+  box-shadow: 0 0 0 var(--surface-border-width) var(--border-primary);
 }
 
 .message-bubble__rollback-confirm-title {

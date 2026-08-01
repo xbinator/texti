@@ -335,11 +335,12 @@ onBeforeUnmount((): void => {
 }
 
 .widget-sidebar--expand-motion {
-  transition: width 0.36s ease, right 0.36s ease, opacity 0.36s ease;
+  transition: width var(--motion-duration-slow) var(--motion-easing-standard), right var(--motion-duration-slow) var(--motion-easing-standard),
+    opacity var(--motion-duration-slow) var(--motion-easing-standard);
   will-change: width, right;
 
   .widget-sidebar__splitter {
-    transition: width 0.36s ease, opacity 0.36s ease;
+    transition: width var(--motion-duration-slow) var(--motion-easing-standard), opacity var(--motion-duration-slow) var(--motion-easing-standard);
   }
 }
 

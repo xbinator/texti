@@ -90,15 +90,15 @@ watch(
   container-name: api-config;
   container-type: inline-size;
   background: var(--bg-secondary);
-  border-radius: 10px;
+  border-radius: var(--surface-radius);
 }
 
 .config-section :deep(.ant-form) {
   padding: 20px;
   margin-bottom: 24px;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
 }
 
 .config-section :deep(.ant-form-item) {

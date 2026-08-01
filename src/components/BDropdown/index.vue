@@ -32,7 +32,7 @@ withDefaults(defineProps<BDropdownProps>(), {
   padding: 4px;
   outline: none;
   background: var(--dropdown-bg);
-  border: 1px solid var(--dropdown-border);
-  border-radius: 8px;
+  border: var(--overlay-border-width) solid var(--dropdown-border);
+  border-radius: var(--overlay-radius);
 }
 </style>

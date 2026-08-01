@@ -164,7 +164,7 @@ nextTick(updateButtons);
   color: #fff;
   cursor: pointer;
   background: rgb(46 50 56 / 30%);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   backdrop-filter: blur(6px);
 }
 

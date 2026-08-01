@@ -845,7 +845,7 @@ const hasObjectActionColumn = computed<boolean>(() => schemaRows.value.some((row
     &.is-description-expanded {
       padding: 6px;
       background: var(--bg-secondary);
-      border-radius: 6px;
+      border-radius: var(--control-radius);
     }
   }
 
@@ -956,8 +956,8 @@ const hasObjectActionColumn = computed<boolean>(() => schemaRows.value.some((row
     padding: 8px 10px;
     color: var(--text-tertiary);
     background: var(--bg-secondary);
-    border: 1px dashed var(--border-primary);
-    border-radius: 6px;
+    border: var(--surface-border-width) dashed var(--border-primary);
+    border-radius: var(--surface-radius);
   }
 
   .schema-editor__empty-text {

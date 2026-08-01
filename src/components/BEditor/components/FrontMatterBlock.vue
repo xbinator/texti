@@ -430,9 +430,10 @@ function confirmComplexEditInline(): void {
 .b-markdown-frontmatter {
   margin-bottom: 25px;
   background: var(--frontmatter-bg);
-  border: 1px solid var(--frontmatter-border);
-  border-radius: 8px;
-  transition: all 0.2s ease;
+  border: var(--surface-border-width) solid var(--frontmatter-border);
+  border-radius: var(--surface-radius);
+  transition: border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard),
+    background var(--motion-duration-base) var(--motion-easing-standard);
 }
 
 .b-markdown-frontmatter__header {
@@ -469,8 +470,8 @@ function confirmComplexEditInline(): void {
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 4px;
-  transition: all 0.2s;
+  border-radius: var(--control-radius);
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover {
     color: var(--tag-text);
@@ -480,7 +481,7 @@ function confirmComplexEditInline(): void {
 
 .b-markdown-frontmatter__content {
   padding: 8px 14px;
-  border-top: 1px solid var(--frontmatter-border);
+  border-top: var(--surface-border-width) solid var(--frontmatter-border);
 }
 
 .b-markdown-frontmatter__item {
@@ -497,16 +498,16 @@ function confirmComplexEditInline(): void {
   max-width: 150px;
   height: 28px;
   padding: 0 8px;
-  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 500;
   line-height: 28px;
   color: var(--color-purple);
   cursor: pointer;
   background: var(--color-purple-bg);
-  border: 1px solid transparent;
-  border-radius: 4px;
-  transition: border-color 0.2s;
+  border: var(--control-border-width) solid transparent;
+  border-radius: var(--control-radius);
+  transition: border-color var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover {
     border-color: var(--color-purple-border);
@@ -535,16 +536,16 @@ function confirmComplexEditInline(): void {
   color: var(--frontmatter-value-text);
   outline: none;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 4px;
-  transition: border-color 0.2s;
+  border: var(--control-border-width) solid var(--border-primary);
+  border-radius: var(--control-radius);
+  transition: border-color var(--motion-duration-base) var(--motion-easing-standard);
 
   &:focus {
     border-color: var(--color-purple);
   }
 
   &--complex {
-    font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     line-height: 28px;
     color: var(--tag-secondary-text);
@@ -570,9 +571,10 @@ function confirmComplexEditInline(): void {
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--control-radius);
   opacity: 0;
-  transition: all 0.2s;
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard),
+    opacity var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover {
     color: var(--color-error);
@@ -590,7 +592,7 @@ function confirmComplexEditInline(): void {
   align-items: center;
   padding: 8px 0 0;
   margin-top: 8px;
-  border-top: 1px dashed var(--frontmatter-divider);
+  border-top: var(--surface-border-width) dashed var(--frontmatter-divider);
 
   &:first-child {
     padding-top: 0;
@@ -601,7 +603,7 @@ function confirmComplexEditInline(): void {
 
 .b-markdown-frontmatter__new-key {
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
+  border: var(--control-border-width) solid var(--border-primary);
 }
 
 .b-markdown-frontmatter__new-value {

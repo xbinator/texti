@@ -127,7 +127,7 @@ onBeforeUnmount(async () => {
   height: 100%;
   overflow: hidden;
   background: var(--bg-primary);
-  border-radius: 8px;
+  border-radius: var(--surface-radius);
 }
 
 .webview-content {
@@ -136,7 +136,7 @@ onBeforeUnmount(async () => {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: var(--surface-radius);
 }
 
 .loading-bar {
@@ -147,6 +147,6 @@ onBeforeUnmount(async () => {
 .loading-progress {
   height: 100%;
   background: var(--color-primary);
-  transition: width 0.2s ease;
+  transition: width var(--motion-duration-base) var(--motion-easing-standard);
 }
 </style>

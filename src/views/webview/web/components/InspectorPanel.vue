@@ -215,12 +215,12 @@ function copyText(value: string): void {
   min-width: 0;
   min-height: 28px;
   padding: 4px 6px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   overflow-wrap: anywhere;
   user-select: text;
   background: var(--bg-tertiary);
-  border-radius: 6px;
+  border-radius: var(--control-radius);
 }
 
 .inspector-panel__content {
@@ -242,14 +242,14 @@ function copyText(value: string): void {
   padding: 8px;
   user-select: text;
   background: var(--bg-tertiary);
-  border-radius: 6px;
+  border-radius: var(--control-radius);
 }
 
 .inspector-panel__style-entry {
   display: flex;
   gap: 6px;
   align-items: flex-start;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
@@ -280,7 +280,7 @@ function copyText(value: string): void {
   padding: 4px 0;
   font-size: 12px;
   overflow-wrap: anywhere;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
 }
 
 .inspector-panel__tree-item--active {
@@ -291,13 +291,13 @@ function copyText(value: string): void {
   flex-shrink: 0;
   height: max-content;
   padding: 1px 5px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   line-height: 16px;
   color: var(--text-secondary);
   text-transform: lowercase;
   background: var(--bg-hover);
-  border-radius: 4px;
+  border-radius: var(--control-radius);
 }
 
 .inspector-panel__tree-item--active .inspector-panel__tree-tag {
@@ -307,7 +307,7 @@ function copyText(value: string): void {
 
 .inspector-panel__tree-selector {
   min-width: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
@@ -330,7 +330,7 @@ function copyText(value: string): void {
   height: 48px;
   color: var(--text-tertiary);
   background: var(--bg-tertiary);
-  border-radius: 12px;
+  border-radius: var(--control-radius);
 }
 
 .inspector-panel__empty-text {

@@ -283,8 +283,8 @@ const providerDropdownOptionsMap = computed<Map<string, DropdownOptionItem[]>>((
   height: 100%;
   padding: 16px 12px;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
 }
 
 .provider-sidebar {
@@ -292,7 +292,7 @@ const providerDropdownOptionsMap = computed<Map<string, DropdownOptionItem[]>>((
   flex-shrink: 0;
   flex-direction: column;
   width: 220px;
-  transition: width 0.25s ease;
+  transition: width var(--motion-duration-slow) var(--motion-easing-standard);
 
   .provider-layout.sidebar-collapsed & {
     width: 36px;
@@ -337,9 +337,10 @@ const providerDropdownOptionsMap = computed<Map<string, DropdownOptionItem[]>>((
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--control-radius);
   opacity: 0;
-  transition: all 0.15s;
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard), background var(--motion-duration-fast) var(--motion-easing-standard),
+    opacity var(--motion-duration-fast) var(--motion-easing-standard);
 
   &:hover {
     color: var(--text-primary);

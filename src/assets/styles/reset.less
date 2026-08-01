@@ -1,3 +1,54 @@
+/**
+ * @file reset.less
+ * @description Applies global app resets plus theme font and Ant Design input chrome normalization.
+ */
+
+html,
+body,
+#app {
+  font-family: var(--font-sans);
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--font-mono);
+}
+
+body {
+  .ant-input.ant-input:not(.ant-input-borderless),
+  .ant-input-affix-wrapper.ant-input-affix-wrapper:not(.ant-input-affix-wrapper-borderless),
+  .ant-input-number.ant-input-number:not(.ant-input-number-borderless),
+  .ant-picker.ant-picker:not(.ant-picker-borderless),
+  .ant-select.ant-select:not(.ant-select-customize-input, .ant-select-borderless) .ant-select-selector.ant-select-selector {
+    outline: none;
+    box-shadow: var(--input-shadow);
+    transition: border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard),
+      background var(--motion-duration-base) var(--motion-easing-standard);
+  }
+
+  .ant-input.ant-input:not(.ant-input-borderless):focus,
+  .ant-input.ant-input-focused:not(.ant-input-borderless),
+  .ant-input-affix-wrapper.ant-input-affix-wrapper-focused:not(.ant-input-affix-wrapper-borderless),
+  .ant-input-number.ant-input-number-focused:not(.ant-input-number-borderless),
+  .ant-picker.ant-picker-focused:not(.ant-picker-borderless),
+  .ant-select.ant-select.ant-select-focused:not(.ant-select-customize-input, .ant-select-borderless) .ant-select-selector.ant-select-selector,
+  .ant-select.ant-select.ant-select-open:not(.ant-select-customize-input, .ant-select-borderless) .ant-select-selector.ant-select-selector {
+    outline: none;
+    border-color: var(--input-focus-border);
+    box-shadow: var(--input-active-shadow);
+  }
+
+  .ant-input-affix-wrapper.ant-input-affix-wrapper .ant-input.ant-input,
+  .ant-input-affix-wrapper.ant-input-affix-wrapper-focused .ant-input.ant-input,
+  .ant-input-number.ant-input-number .ant-input-number-input {
+    outline: none;
+    border: 0;
+    box-shadow: none;
+  }
+}
+
 .ant-message-notice-content {
   user-select: text;
 }

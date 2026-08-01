@@ -94,8 +94,8 @@ const shouldShowSelectedCheckColumn = computed<boolean>(
   color: var(--text-secondary);
   white-space: nowrap;
   background: var(--bg-hover);
-  border: 1px solid var(--border-primary);
-  border-radius: 4px;
+  border: var(--control-border-width) solid var(--border-primary);
+  border-radius: var(--control-radius);
 }
 
 // 参考 CurrentBlockMenu 的样式
@@ -109,10 +109,11 @@ const shouldShowSelectedCheckColumn = computed<boolean>(
   color: var(--text-secondary);
   cursor: pointer;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border: var(--control-border-width) solid var(--border-primary);
+  border-radius: var(--control-radius);
   box-shadow: var(--shadow-dropdown);
-  transition: all 0.15s ease;
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard), background var(--motion-duration-fast) var(--motion-easing-standard),
+    border-color var(--motion-duration-fast) var(--motion-easing-standard), transform var(--motion-duration-fast) var(--motion-easing-press);
 
   &:hover,
   &.is-active {
@@ -126,8 +127,8 @@ const shouldShowSelectedCheckColumn = computed<boolean>(
   min-width: 172px;
   padding: 6px;
   background: var(--dropdown-bg);
-  border: 1px solid var(--dropdown-border);
-  border-radius: 10px;
+  border: var(--overlay-border-width) solid var(--dropdown-border);
+  border-radius: var(--overlay-radius);
   box-shadow: var(--shadow-lg);
 }
 
@@ -143,8 +144,8 @@ const shouldShowSelectedCheckColumn = computed<boolean>(
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 8px;
-  transition: background 0.15s ease;
+  border-radius: var(--control-radius);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
 
   &:hover {
     background: var(--bg-hover);

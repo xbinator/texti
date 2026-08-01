@@ -563,17 +563,18 @@ defineExpose<BSmartEditorExpose>({
 .b-smart-editor {
   width: 100%;
   min-height: 80px;
-  padding: 4px 12px;
+  padding: var(--input-padding-block) var(--input-padding-inline);
   overflow-y: auto;
+  font-family: var(--input-font-family);
   font-size: 14px;
   line-height: 1.6;
   word-break: break-all;
   overflow-wrap: break-word;
   white-space: pre-wrap;
   outline: none;
-  border: 1px solid var(--input-border);
-  border-radius: 6px;
-  transition: all 0.2s;
+  border: var(--input-border-width) solid var(--input-border);
+  border-radius: var(--input-radius);
+  transition: border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover {
     border-color: var(--border-hover);
@@ -581,7 +582,7 @@ defineExpose<BSmartEditorExpose>({
 
   &:focus-within {
     border-color: var(--input-focus-border);
-    box-shadow: 0 0 0 2px var(--input-focus-shadow);
+    box-shadow: var(--input-active-shadow);
   }
 
   .scrollbar-style();
@@ -616,6 +617,10 @@ defineExpose<BSmartEditorExpose>({
 
   .cm-line {
     white-space: pre-wrap;
+  }
+
+  .cm-placeholder {
+    color: var(--input-placeholder-color);
   }
 }
 </style>

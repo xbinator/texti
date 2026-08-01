@@ -92,7 +92,7 @@ function openActionHelp(): void {
 .action-help-icon {
   color: var(--text-tertiary);
   cursor: pointer;
-  transition: color 0.15s ease;
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .action-help-icon:hover,

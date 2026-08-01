@@ -48,7 +48,7 @@ const props = withDefaults(defineProps<Props>(), {
   close: undefined,
   afterClose: undefined,
   keyboard: true,
-  borderRadius: 8
+  borderRadius: undefined
 });
 
 const emit = defineEmits(['update:open', 'close']);
@@ -63,7 +63,7 @@ const visible = defineModel<boolean>('open');
 
 const modalWidth = computed(() => addCssUnit(props.width));
 const modalRadius = computed(() => addCssUnit(props.borderRadius));
-const modalStyle = computed(() => (props.borderRadius != null ? { borderRadius: modalRadius.value } : undefined));
+const modalStyle = computed(() => ({ borderRadius: props.borderRadius != null ? modalRadius.value : 'var(--overlay-radius)' }));
 
 function handleClosable(): void {
   emit('close');
@@ -101,7 +101,7 @@ function handleClosable(): void {
   font-size: 18px;
   color: var(--modal-text);
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
 
   &:hover {
     background: var(--modal-header-bg);

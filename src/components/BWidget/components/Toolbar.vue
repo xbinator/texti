@@ -118,8 +118,8 @@ const canZoomIn = computed<boolean>(() => props.zoom < WIDGET_MAX_ZOOM);
   padding: 4px;
   pointer-events: auto;
   background: color-mix(in srgb, var(--bg-primary) 70%, transparent);
-  border: 1px solid var(--border-secondary);
-  border-radius: 8px;
+  border: var(--overlay-border-width) solid var(--border-secondary);
+  border-radius: var(--overlay-radius);
   box-shadow: var(--shadow-md);
   backdrop-filter: blur(12px);
 }
@@ -166,7 +166,7 @@ const canZoomIn = computed<boolean>(() => props.zoom < WIDGET_MAX_ZOOM);
   user-select: none;
   background: transparent;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--control-radius);
 
   &:hover,
   &:focus-visible {

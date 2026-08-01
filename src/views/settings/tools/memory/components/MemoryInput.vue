@@ -105,19 +105,20 @@ defineExpose({ focus, clear });
 
 .memory-input__field {
   flex: 1;
-  font-family: inherit;
+  font-family: var(--input-font-family);
   color: var(--text-primary);
   resize: vertical;
   outline: none;
   background: transparent;
-  transition: border-color 0.2s ease;
+  transition: border-color var(--motion-duration-base) var(--motion-easing-standard);
 
   &:focus {
     border-color: var(--color-primary);
   }
 
   &::placeholder {
-    color: var(--text-tertiary);
+    color: var(--input-placeholder-color);
+    opacity: 1;
   }
 
   &:disabled {
@@ -135,8 +136,9 @@ defineExpose({ focus, clear });
   height: 36px;
   font-size: 18px;
   cursor: pointer;
-  border-radius: 50%;
-  transition: all 0.2s ease;
+  border-radius: var(--radius-full);
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard),
+    opacity var(--motion-duration-base) var(--motion-easing-standard);
 
   &.disabled {
     color: var(--text-tertiary);

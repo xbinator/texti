@@ -86,7 +86,7 @@ const state = computed<StatusView>((): StatusView => {
   line-height: 1;
   color: var(--text-tertiary);
   background: var(--bg-hover);
-  border: 1px solid var(--border-primary);
-  border-radius: 999px;
+  border: var(--control-border-width) solid var(--border-primary);
+  border-radius: var(--radius-full);
 }
 </style>

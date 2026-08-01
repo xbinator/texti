@@ -34,7 +34,7 @@ const isErrorMessage = computed(() => props.part.type === 'error');
   font-size: 12px;
   color: var(--color-error);
   background: var(--color-error-bg);
-  border: 1px solid var(--color-error);
-  border-radius: 8px;
+  border: var(--surface-border-width) solid var(--color-error);
+  border-radius: var(--surface-radius);
 }
 </style>

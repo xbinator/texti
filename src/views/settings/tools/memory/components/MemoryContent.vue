@@ -94,15 +94,15 @@ async function handleReset(): Promise<void> {
 .memory-settings__pre {
   padding: 12px 16px;
   margin: 0;
-  font-family: 'Fira Code', 'JetBrains Mono', Consolas, Monaco, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
   color: var(--text-primary);
   word-break: break-all;
   white-space: pre-wrap;
   background: var(--bg-secondary);
-  border: 1px solid var(--border-secondary);
-  border-radius: 8px;
+  border: var(--surface-border-width) solid var(--border-secondary);
+  border-radius: var(--surface-radius);
 }
 
 .memory-content__actions {
@@ -113,7 +113,7 @@ async function handleReset(): Promise<void> {
   gap: 4px;
   align-items: center;
   opacity: 0;
-  transition: opacity 0.2s ease;
+  transition: opacity var(--motion-duration-base) var(--motion-easing-standard);
 
   // 容器悬停时显示操作按钮组
   .memory-content:hover & {
@@ -130,8 +130,8 @@ async function handleReset(): Promise<void> {
   font-size: 12px;
   color: var(--text-tertiary);
   cursor: pointer;
-  border-radius: 6px;
-  transition: all 0.2s ease;
+  border-radius: var(--control-radius);
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover {
     color: var(--color-danger);

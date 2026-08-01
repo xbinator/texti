@@ -203,8 +203,8 @@ function handleAction(action: ChatMessageConfirmationAction): void {
   pointer-events: auto;
   user-select: text;
   background: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
 }
 
 .confirm-bottom-sheet__title {
@@ -267,7 +267,7 @@ function handleAction(action: ChatMessageConfirmationAction): void {
   line-height: 1.5;
   white-space: pre-wrap;
   background: var(--bg-primary);
-  border-radius: 6px;
+  border-radius: var(--control-radius);
 }
 
 .confirm-bottom-sheet__code--diff {

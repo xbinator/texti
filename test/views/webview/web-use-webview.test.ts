@@ -570,7 +570,10 @@ describe('useWebView', () => {
         border: '#789abc',
         toolbarText: '#123456',
         toolbarBackground: '#eaf2ff',
-        toolbarHoverText: '#0f2f55'
+        toolbarHoverText: '#0f2f55',
+        borderWidth: '2px',
+        surfaceRadius: '0px',
+        controlRadius: '0px'
       })
     ).runInContext(scriptContext);
     item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -607,9 +610,11 @@ describe('useWebView', () => {
     expect(toolbarStyle).toContain('color:#123456;');
     expect(toolbarStyle).toContain('background:#eaf2ff;');
     expect(toolbarStyle).not.toContain('border:1px solid #123456;');
+    expect(toolbarStyle).toContain('border:2px solid #789abc;');
     expect(toolbarStyle).toContain('height:20px;');
     expect(toolbarStyle).toContain('font-size:12px;');
-    expect(toolbarStyle).toContain('border-radius:3px;');
+    expect(toolbarStyle).toContain('border-radius:0px;');
+    expect(toolbarStyle).not.toContain('border-radius:3px;');
     expect(toolbarStyle).toContain('animation:tibis-element-picker-toolbar-enter 120ms ease-out;');
     expect(toolbarStyle).toContain('transition:color 120ms ease,transform 120ms ease;');
     expect(toolbarStyle).toContain('.tibis-element-picker-toolbar__action:hover{color:#0f2f55;}');

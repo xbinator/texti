@@ -312,9 +312,9 @@ async function handleInstall(): Promise<void> {
   color: var(--text-secondary);
   cursor: pointer;
   background: var(--bg-secondary);
-  border: 1.5px dashed var(--border-secondary);
-  border-radius: 12px;
-  transition: border-color 0.2s, background 0.2s;
+  border: var(--surface-border-width) dashed var(--border-secondary);
+  border-radius: var(--surface-radius);
+  transition: border-color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover,
   &--active {
@@ -329,7 +329,7 @@ async function handleInstall(): Promise<void> {
 
 .skill-creator__dropzone-icon {
   color: var(--text-tertiary);
-  transition: color 0.2s, transform 0.2s;
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), transform var(--motion-duration-base) var(--motion-easing-standard);
 }
 
 .skill-creator__dropzone-title {
@@ -345,11 +345,11 @@ async function handleInstall(): Promise<void> {
 
 .skill-creator__badge {
   padding: 2px 8px;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--color-primary);
   background: var(--color-primary-bg, rgb(var(--color-primary-rgb) / 8%));
-  border-radius: 4px;
+  border-radius: var(--control-radius);
 }
 
 /* ── 文件要求 ── */
@@ -406,8 +406,8 @@ async function handleInstall(): Promise<void> {
   gap: 10px;
   padding: 12px 14px;
   background: var(--bg-secondary);
-  border: 1px solid var(--border-tertiary);
-  border-radius: 10px;
+  border: var(--surface-border-width) solid var(--border-tertiary);
+  border-radius: var(--surface-radius);
 }
 
 .skill-creator__divider {
@@ -449,7 +449,7 @@ async function handleInstall(): Promise<void> {
   padding: 8px 12px;
   font-size: 12px;
   border-left: 3px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--surface-radius);
 
   &--warning {
     color: var(--color-warning, #faad14);

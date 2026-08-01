@@ -122,9 +122,10 @@ function handleToolPointerdown(schema: WidgetElementSchema, event: PointerEvent)
   cursor: grab;
   user-select: none;
   background: var(--bg-secondary);
-  border: 1px solid transparent;
-  border-radius: 6px;
-  transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+  border: var(--control-border-width) solid transparent;
+  border-radius: var(--control-radius);
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard), background var(--motion-duration-fast) var(--motion-easing-standard),
+    border-color var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .sidebar-tools__tool-item:hover {

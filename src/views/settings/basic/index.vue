@@ -238,10 +238,10 @@ function handleClearAlwaysToolPermissions(): void {
   justify-content: space-between;
   min-height: 56px;
   padding: 0 16px;
-  transition: background 0.2s ease;
+  transition: background var(--motion-duration-base) var(--motion-easing-standard);
 
   & + & {
-    border-top: 1px solid var(--border-tertiary);
+    border-top: var(--surface-border-width) solid var(--border-tertiary);
   }
 
   &:hover {
@@ -289,15 +289,15 @@ function handleClearAlwaysToolPermissions(): void {
   font-size: 12px;
   color: var(--text-tertiary);
   background: var(--bg-secondary);
-  border: 1px dashed var(--border-primary);
-  border-radius: 6px;
+  border: var(--surface-border-width) dashed var(--border-primary);
+  border-radius: var(--surface-radius);
 }
 
 .basic-settings__permission-list {
   margin-top: 8px;
   overflow: hidden;
-  border: 1px solid var(--border-tertiary);
-  border-radius: 6px;
+  border: var(--surface-border-width) solid var(--border-tertiary);
+  border-radius: var(--surface-radius);
 }
 
 .basic-settings__permission-row {

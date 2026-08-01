@@ -257,8 +257,8 @@ registerShortcut({
   height: 32px;
   padding: 0 6px 0 8px;
   background: var(--bg-primary);
-  border: 1px solid var(--border-secondary);
-  border-radius: 8px;
+  border: var(--overlay-border-width) solid var(--border-secondary);
+  border-radius: var(--overlay-radius);
   box-shadow: var(--shadow-sm);
 }
 
@@ -272,6 +272,7 @@ registerShortcut({
   min-width: 0;
   height: 24px;
   padding: 0;
+  font-family: var(--input-font-family);
   font-size: 12px;
   line-height: 24px;
   color: var(--text-primary);
@@ -283,7 +284,8 @@ registerShortcut({
 }
 
 .b-markdown-findbar__input::placeholder {
-  color: var(--text-placeholder);
+  color: var(--input-placeholder-color);
+  opacity: 1;
 }
 
 .b-markdown-findbar__result {
@@ -314,8 +316,8 @@ registerShortcut({
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 4px;
-  transition: background 0.15s ease, color 0.15s ease;
+  border-radius: var(--control-radius);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard), color var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .b-markdown-findbar__btn:hover:not(:disabled) {

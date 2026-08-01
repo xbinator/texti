@@ -87,8 +87,8 @@ watch(
   margin: 0 12px 6px;
   color: var(--text-secondary);
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border: var(--surface-border-width) solid var(--border-color);
+  border-radius: var(--surface-radius);
 }
 
 .b-agent-task-projection-notice button {
@@ -97,8 +97,8 @@ watch(
   color: var(--text-primary);
   cursor: pointer;
   background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border: var(--control-border-width) solid var(--border-color);
+  border-radius: var(--control-radius);
 }
 
 .b-agent-task-projection-notice button:disabled {

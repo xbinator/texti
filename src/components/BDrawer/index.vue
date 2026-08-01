@@ -166,7 +166,7 @@ function handleClose(): void {
 
 .b-drawer__root {
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: var(--overlay-radius);
 }
 
 .b-drawer__header {
@@ -194,7 +194,7 @@ function handleClose(): void {
   font-size: 18px;
   color: var(--text-secondary);
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   transform: translateY(-50%);
 
   &:hover {

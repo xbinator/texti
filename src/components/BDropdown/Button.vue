@@ -91,12 +91,17 @@ watch(
   align-items: center;
   height: 28px;
   padding: 0 8px;
+  font-family: var(--font-display);
   font-size: 14px;
   cursor: pointer;
   user-select: none;
   background: transparent;
-  border-radius: 6px;
-  transition: all 0.3s;
+  border: var(--button-border-width) solid var(--button-border);
+  border-radius: var(--control-radius);
+  box-shadow: var(--button-shadow);
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard),
+    border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard),
+    transform var(--motion-duration-fast) var(--motion-easing-press);
 }
 
 .b-dropdown-button:hover {
@@ -107,6 +112,13 @@ watch(
 .b-dropdown-button.is-active {
   color: var(--text-primary);
   background: var(--bg-active);
+  box-shadow: var(--button-pressed-shadow);
+  transform: translate(var(--interaction-press-offset), var(--interaction-press-offset));
+}
+
+.b-dropdown-button:active {
+  box-shadow: var(--button-pressed-shadow);
+  transform: translate(var(--interaction-press-offset), var(--interaction-press-offset));
 }
 
 .b-dropdown-button.is-small {
@@ -114,7 +126,7 @@ watch(
 }
 
 .b-dropdown-button.is-bordered {
-  border: 1px solid var(--input-border);
+  border: var(--control-border-width) solid var(--input-border);
 }
 
 .b-dropdown-button-content {

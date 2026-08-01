@@ -548,8 +548,36 @@ onBeforeUnmount((): void => {
   min-width: 0;
 }
 
+.b-smart-input__control {
+  font-family: var(--input-font-family);
+  background: var(--input-bg);
+  border: var(--input-border-width) solid var(--input-border);
+  border-radius: var(--input-radius);
+  box-shadow: var(--input-shadow);
+  transition: border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard);
+
+  &:hover {
+    border-color: var(--border-hover);
+  }
+
+  &.ant-input-affix-wrapper-focused {
+    border-color: var(--input-focus-border);
+    box-shadow: var(--input-active-shadow);
+  }
+
+  :deep(.ant-input) {
+    font-family: var(--input-font-family);
+    background: transparent;
+  }
+
+  :deep(.ant-input::placeholder) {
+    color: var(--input-placeholder-color);
+    opacity: 1;
+  }
+}
+
 .b-smart-input__variable {
-  color: var(--text-tertiary);
+  color: var(--input-icon-color);
   cursor: pointer;
 
   &:hover {

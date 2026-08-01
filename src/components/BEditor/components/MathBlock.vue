@@ -109,10 +109,11 @@ function handleLatexInput(event: Event): void {
   margin: 0.75em 0;
   overflow: hidden;
   background: var(--code-bg);
-  border: 1px solid var(--code-border);
-  border-radius: 6px;
+  border: var(--surface-border-width) solid var(--code-border);
+  border-radius: var(--surface-radius);
   box-shadow: var(--shadow-sm);
-  transition: all 0.2s ease;
+  transition: border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard),
+    background var(--motion-duration-base) var(--motion-easing-standard);
 }
 
 .b-markdown-mathblock__header {
@@ -126,7 +127,7 @@ function handleLatexInput(event: Event): void {
 }
 
 .b-markdown-mathblock__label {
-  font-family: 'Fira Code', 'JetBrains Mono', Consolas, Monaco, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--code-line-number);
 }
@@ -142,8 +143,8 @@ function handleLatexInput(event: Event): void {
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 4px;
-  transition: all 0.2s ease;
+  border-radius: var(--control-radius);
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover {
     color: var(--code-text);
@@ -161,7 +162,7 @@ function handleLatexInput(event: Event): void {
   padding: 20px;
   overflow-x: auto;
   background: var(--bg-primary);
-  border-top: 1px solid var(--code-border);
+  border-top: var(--surface-border-width) solid var(--code-border);
 }
 
 .b-markdown-mathblock__preview-inner {
@@ -178,7 +179,7 @@ function handleLatexInput(event: Event): void {
   width: 100%;
   min-height: 120px;
   padding: 14px 16px;
-  font-family: 'Fira Code', 'JetBrains Mono', Consolas, Monaco, monospace;
+  font-family: var(--font-mono);
   font-size: 14px;
   line-height: 1.6;
   color: var(--code-text);
@@ -186,6 +187,6 @@ function handleLatexInput(event: Event): void {
   outline: none;
   background: var(--code-bg);
   border: 0;
-  border-top: 1px solid var(--code-border);
+  border-top: var(--surface-border-width) solid var(--code-border);
 }
 </style>

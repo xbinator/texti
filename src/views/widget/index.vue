@@ -111,8 +111,8 @@ const { onMultiCommand, onElementCommand, onMultiLayoutChange, onMultiStyleChang
   min-height: 0;
   overflow: hidden;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
 }
 
 .widget-page__canvas {
@@ -142,8 +142,8 @@ const { onMultiCommand, onElementCommand, onMultiLayoutChange, onMultiStyleChang
   color: var(--text-primary);
   cursor: pointer;
   background: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-radius: 6px;
+  border: var(--control-border-width) solid var(--border-primary);
+  border-radius: var(--control-radius);
 
   &:hover {
     background: var(--bg-tertiary);

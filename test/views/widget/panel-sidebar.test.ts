@@ -25,10 +25,7 @@ const sidebarActionSource = readFileSync('src/views/widget/components/SidebarAct
 function readStyleRuleBody(source: string, selector: string, indentation = ''): string {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
   const escapedIndentation = indentation.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-  const match = new RegExp(
-    `(?:^|\\n)${escapedIndentation}${escapedSelector}\\s*\\{(?<body>[\\s\\S]*?)\\n${escapedIndentation}\\}`,
-    'u'
-  ).exec(source);
+  const match = new RegExp(`(?:^|\\n)${escapedIndentation}${escapedSelector}\\s*\\{(?<body>[\\s\\S]*?)\\n${escapedIndentation}\\}`, 'u').exec(source);
 
   return match?.groups?.body ?? '';
 }
@@ -339,9 +336,12 @@ describe('PanelSidebar', (): void => {
     expect(sidebarRuleBody).not.toContain('overflow: hidden;');
     expect(splitterRuleBody).not.toContain('overflow: hidden;');
     expect(splitterRuleBody).not.toContain('transition:');
-    expect(expandMotionRuleBody).toContain('transition: width 0.36s ease, right 0.36s ease, opacity 0.36s ease;');
+    expect(expandMotionRuleBody).toContain('transition: width var(--motion-duration-slow) var(--motion-easing-standard)');
+    expect(expandMotionRuleBody).toContain('right var(--motion-duration-slow) var(--motion-easing-standard)');
+    expect(expandMotionRuleBody).toContain('opacity var(--motion-duration-slow) var(--motion-easing-standard)');
     expect(expandMotionRuleBody).toContain('will-change: width, right;');
-    expect(expandMotionSplitterRuleBody).toContain('transition: width 0.36s ease, opacity 0.36s ease;');
+    expect(expandMotionSplitterRuleBody).toContain('transition: width var(--motion-duration-slow) var(--motion-easing-standard)');
+    expect(expandMotionSplitterRuleBody).toContain('opacity var(--motion-duration-slow) var(--motion-easing-standard)');
     expect(panelSidebarSource).toContain('@media (prefers-reduced-motion: reduce)');
     expect(panelSidebarSource).not.toContain('action-motion');
     expect(sidebarActionSource).toContain(":icon=\"isExpanded ? 'lucide:minimize-2' : 'lucide:maximize-2'\"");

@@ -229,7 +229,7 @@ const dropdownOptions = computed<DropdownOption[]>(() => {
 <style scoped lang="less">
 .server-card {
   padding: 12px 16px;
-  border-top: 1px solid var(--border-tertiary);
+  border-top: var(--surface-border-width) solid var(--border-tertiary);
 }
 
 .server-card__row {
@@ -249,7 +249,7 @@ const dropdownOptions = computed<DropdownOption[]>(() => {
   font-weight: 600;
   color: var(--text-primary);
   background: var(--bg-tertiary);
-  border-radius: 6px;
+  border-radius: var(--control-radius);
 }
 
 .server-card__info {
@@ -310,8 +310,8 @@ const dropdownOptions = computed<DropdownOption[]>(() => {
   cursor: pointer;
   background: none;
   border: none;
-  border-radius: 4px;
-  transition: background 0.2s, color 0.2s;
+  border-radius: var(--control-radius);
+  transition: background var(--motion-duration-base) var(--motion-easing-standard), color var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover {
     color: var(--text-primary);
@@ -323,8 +323,8 @@ const dropdownOptions = computed<DropdownOption[]>(() => {
   padding: 12px;
   margin-top: 12px;
   background: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-radius: 6px;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
 }
 
 .server-card__tools-title {
@@ -353,7 +353,7 @@ const dropdownOptions = computed<DropdownOption[]>(() => {
 
 .server-card__tools-arrow {
   flex-shrink: 0;
-  transition: transform 0.2s ease;
+  transition: transform var(--motion-duration-base) var(--motion-easing-standard);
 }
 
 .server-card__tools-body {
@@ -362,8 +362,8 @@ const dropdownOptions = computed<DropdownOption[]>(() => {
 
 .server-card__tool-item {
   padding: 6px 8px;
-  border-radius: 4px;
-  transition: background 0.15s;
+  border-radius: var(--control-radius);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
 
   + .server-card__tool-item {
     margin-top: 4px;
@@ -375,7 +375,7 @@ const dropdownOptions = computed<DropdownOption[]>(() => {
 }
 
 .server-card__tool-name {
-  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   color: var(--text-primary);
 }

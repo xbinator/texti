@@ -19,6 +19,11 @@ interface AntdThemeToken {
   colorPrimaryBg: string;
   colorPrimaryBorder: string;
   controlOutline: string;
+  borderRadius: number;
+  borderRadiusLG: number;
+  borderRadiusSM: number;
+  lineWidth: number;
+  fontFamily: string;
 }
 
 /**
@@ -26,7 +31,7 @@ interface AntdThemeToken {
  * 每个键对应一个 Ant Design 组件名，值为该组件的 token 覆盖。
  */
 interface AntdComponentTokens {
-  [component: string]: Record<string, string>;
+  [component: string]: Record<string, string | number>;
 }
 
 /**
@@ -45,11 +50,22 @@ interface AntdThemeConfig {
 const INPUT_COMPONENTS = ['Input', 'InputNumber', 'Select', 'DatePicker', 'TimePicker', 'Cascader', 'TreeSelect', 'AutoComplete', 'Mentions'] as const;
 
 /**
+ * 文本输入类 Ant Design 组件列表。
+ * 这些组件额外映射 input 专属 Token，以支持 Overworld 等高风格输入框。
+ */
+const TEXT_INPUT_COMPONENTS = ['Input', 'InputNumber', 'Mentions'] as const;
+
+/**
  * 带下拉弹出层的 Ant Design 组件列表。
  * 这些组件的弹出层背景色应映射到 tokens.dropdown.bg，
  * 以保持下拉面板与主题 dropdown 语义一致。
  */
 const DROPDOWN_COMPONENTS = ['Select', 'Cascader', 'TreeSelect', 'AutoComplete'] as const;
+
+/**
+ * Ant Design 接收无单位 px 数值；相对单位在主题层按 CSS 默认字号归一化。
+ */
+const CSS_RELATIVE_UNIT_BASE_PX = 16;
 
 /**
  * camelCase 转 kebab-case。
@@ -58,6 +74,32 @@ const DROPDOWN_COMPONENTS = ['Select', 'Cascader', 'TreeSelect', 'AutoComplete']
  */
 function toKebab(s: string): string {
   return s.replace(/[A-Z]/g, (m: string): string => `-${m.toLowerCase()}`);
+}
+
+/**
+ * 解析 CSS 尺寸值为 Ant Design 需要的 px number。
+ * @param value - CSS 尺寸值
+ * @param fallback - 解析失败时使用的兜底值
+ * @returns Ant Design number token
+ */
+function parseDimension(value: string, fallback: number): number {
+  const trimmed = value.trim();
+  if (trimmed === '0') {
+    return 0;
+  }
+
+  const match = /^(-?\d+(?:\.\d+)?)(px|rem|em)$/u.exec(trimmed);
+  if (!match) {
+    return fallback;
+  }
+
+  const parsed = Number.parseFloat(match[1] ?? '');
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  const unit = match[2];
+  return unit === 'px' ? parsed : parsed * CSS_RELATIVE_UNIT_BASE_PX;
 }
 
 /**
@@ -103,10 +145,36 @@ export function toCssVars(tokens: ThemeTokens): Record<string, string> {
  */
 export function toAntdToken(tokens: ThemeTokens): AntdThemeConfig {
   const inputComponentTokens: AntdComponentTokens = {};
+  const controlRadius = parseDimension(tokens.control.radius, 6);
+  const surfaceRadius = parseDimension(tokens.surface.radius, 8);
+  const overlayRadius = parseDimension(tokens.overlay.radius, 8);
+  const controlLineWidth = parseDimension(tokens.control.borderWidth, 1);
+  const overlayLineWidth = parseDimension(tokens.overlay.borderWidth, 1);
+  const inputRadius = parseDimension(tokens.input.radius, controlRadius);
+  const inputLineWidth = parseDimension(tokens.input.borderWidth, controlLineWidth);
+  const inputPaddingInline = parseDimension(tokens.input.paddingInline, 12);
 
   for (const component of INPUT_COMPONENTS) {
     inputComponentTokens[component] = {
-      colorBgContainer: tokens.bg.primary
+      colorBgContainer: tokens.bg.primary,
+      borderRadius: controlRadius,
+      lineWidth: controlLineWidth
+    };
+  }
+
+  for (const component of TEXT_INPUT_COMPONENTS) {
+    inputComponentTokens[component] = {
+      ...inputComponentTokens[component],
+      colorBgContainer: tokens.input.bg,
+      colorBorder: tokens.input.border,
+      activeBorderColor: tokens.input.focusBorder,
+      hoverBorderColor: tokens.border.hover,
+      colorTextPlaceholder: tokens.input.placeholderColor,
+      activeShadow: tokens.input.activeShadow,
+      borderRadius: inputRadius,
+      lineWidth: inputLineWidth,
+      paddingInline: inputPaddingInline,
+      fontFamily: tokens.input.fontFamily
     };
   }
 
@@ -120,7 +188,27 @@ export function toAntdToken(tokens: ThemeTokens): AntdThemeConfig {
 
   // Drawer 背景使用 bg.primary，使其与页面主背景保持一致。
   inputComponentTokens.Drawer = {
-    colorBgElevated: tokens.bg.primary
+    colorBgElevated: tokens.bg.primary,
+    borderRadiusLG: overlayRadius
+  };
+
+  inputComponentTokens.Button = {
+    borderRadius: controlRadius,
+    lineWidth: controlLineWidth,
+    fontFamily: tokens.font.display
+  };
+  inputComponentTokens.Modal = {
+    borderRadiusLG: overlayRadius
+  };
+  inputComponentTokens.Dropdown = {
+    borderRadiusLG: overlayRadius,
+    lineWidth: overlayLineWidth
+  };
+  inputComponentTokens.Segmented = {
+    borderRadius: controlRadius
+  };
+  inputComponentTokens.Tooltip = {
+    borderRadius: surfaceRadius
   };
 
   return {
@@ -134,7 +222,12 @@ export function toAntdToken(tokens: ThemeTokens): AntdThemeConfig {
       colorPrimary: tokens.color.primary,
       colorPrimaryBg: tokens.color.primaryBg,
       colorPrimaryBorder: tokens.color.primaryBorder,
-      controlOutline: tokens.color.controlOutline
+      controlOutline: tokens.color.controlOutline,
+      borderRadius: controlRadius,
+      borderRadiusLG: surfaceRadius,
+      borderRadiusSM: parseDimension(tokens.radius.xs, 4),
+      lineWidth: controlLineWidth,
+      fontFamily: tokens.font.sans
     },
     components: inputComponentTokens
   };

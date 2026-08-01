@@ -25,7 +25,16 @@
           <div class="b-layout-header__divider"></div>
         </template>
         <div class="b-layout-header__center">
-          <BButton icon="lucide:blocks" :type="welcomeButtonType" size="small" square @click="handleOpenWelcome" />
+          <button
+            type="button"
+            class="b-layout-welcome-tab"
+            :class="{ 'is-active': isWelcomeRoutePath(currentRoute.fullPath) }"
+            aria-label="打开欢迎页"
+            title="欢迎"
+            @click="handleOpenWelcome"
+          >
+            <Icon icon="lucide:blocks" width="14" height="14" />
+          </button>
           <HeaderTabs />
         </div>
         <div class="b-layout-header__right">
@@ -153,9 +162,6 @@ function isWelcomeRoutePath(path: string): boolean {
   return routePath === WELCOME_ROUTE_PATH;
 }
 
-/** 欢迎页按钮类型，当前页激活时使用柔和态。 */
-const welcomeButtonType = computed<'soft' | 'secondary'>((): 'soft' | 'secondary' => (isWelcomeRoutePath(currentRoute.fullPath) ? 'soft' : 'secondary'));
-
 /**
  * 判断路径是否位于设置页内。
  * @param path - 待判断的完整路由路径
@@ -256,6 +262,7 @@ useEventListener(window, 'resize', validateWindowState);
   display: flex;
   flex-direction: column;
   height: 100%;
+  overflow: hidden;
   background: var(--bg-secondary);
 }
 
@@ -276,12 +283,15 @@ useEventListener(window, 'resize', validateWindowState);
   position: relative;
   display: flex;
   flex: 1;
+  min-width: 0;
   height: 0;
   margin: 0 6px 6px;
+  overflow-x: clip;
 
   .b-layout__content__main {
     flex: 1;
     width: 0;
+    min-width: 0;
   }
 }
 
@@ -316,6 +326,38 @@ useEventListener(window, 'resize', validateWindowState);
   -webkit-app-region: drag;
 }
 
+.b-layout-welcome-tab {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--text-primary);
+  cursor: pointer;
+  background: var(--bg-secondary);
+  border: var(--button-border-width) solid var(--button-border);
+  border-radius: var(--control-radius);
+  box-shadow: var(--button-shadow);
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard),
+    border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard),
+    transform var(--motion-duration-fast) var(--motion-easing-press);
+  -webkit-app-region: no-drag;
+}
+
+.b-layout-welcome-tab:hover,
+.b-layout-welcome-tab.is-active {
+  background: var(--bg-hover);
+  border-color: var(--input-focus-border);
+  box-shadow: var(--button-active-shadow);
+}
+
+.b-layout-welcome-tab:active {
+  box-shadow: var(--button-pressed-shadow);
+  transform: translate(var(--interaction-press-offset), var(--interaction-press-offset));
+}
+
 .b-layout-header__divider {
   width: 1px;
   height: 16px;
@@ -336,7 +378,7 @@ useEventListener(window, 'resize', validateWindowState);
   outline: none;
   background: transparent;
   border: none;
-  transition: background 0.2s;
+  transition: background var(--motion-duration-base) var(--motion-easing-standard);
 }
 
 .b-layout-header__button:hover {

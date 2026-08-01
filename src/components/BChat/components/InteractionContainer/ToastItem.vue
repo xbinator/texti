@@ -154,9 +154,9 @@ onUnmounted(() => {
   font-size: 13px;
   color: var(--text-primary);
   background: var(--bg-tertiary);
-  border: 1px solid var(--border-secondary);
-  border-radius: 6px;
-  transition: all 0.3s ease;
+  border: var(--surface-border-width) solid var(--border-secondary);
+  border-radius: var(--surface-radius);
+  transition: background var(--motion-duration-slow) var(--motion-easing-standard), border-color var(--motion-duration-slow) var(--motion-easing-standard);
 
   &--shake {
     animation: shake 0.3s ease;
@@ -224,9 +224,9 @@ onUnmounted(() => {
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--control-radius);
   opacity: 0.6;
-  transition: opacity 0.2s;
+  transition: opacity var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover {
     opacity: 1;

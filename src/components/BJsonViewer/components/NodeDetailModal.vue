@@ -181,8 +181,8 @@ function copyPath(): void {
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 4px;
-  transition: color 0.2s;
+  border-radius: var(--control-radius);
+  transition: color var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover {
     color: var(--text-primary);
@@ -190,11 +190,11 @@ function copyPath(): void {
 }
 
 .b-json-viewer-node-detail__content {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.6;
   background: var(--bg-secondary);
-  border-radius: 8px;
+  border-radius: var(--surface-radius);
 }
 
 .b-json-viewer-node-detail__code {

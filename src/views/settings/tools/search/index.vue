@@ -58,10 +58,10 @@ async function handleApiKeyChange(value: string): Promise<void> {
   justify-content: space-between;
   min-height: 56px;
   padding: 0 16px;
-  transition: background 0.2s ease;
+  transition: background var(--motion-duration-base) var(--motion-easing-standard);
 
   & + & {
-    border-top: 1px solid var(--border-tertiary);
+    border-top: var(--surface-border-width) solid var(--border-tertiary);
   }
 
   &:hover,

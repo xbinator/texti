@@ -41,8 +41,8 @@ withDefaults(defineProps<Props>(), {
   flex-direction: column;
   height: 100%;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
 }
 
 .settings-page__header {

@@ -255,8 +255,8 @@ async function handleSubmit(): Promise<void> {
   font-size: 12px;
   color: var(--text-primary);
   background: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-radius: 10px;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
 }
 
 .choice-card__step {
@@ -300,9 +300,11 @@ async function handleSubmit(): Promise<void> {
   text-align: left;
   cursor: pointer;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
-  transition: background 0.15s, border-color 0.15s;
+  border: var(--control-border-width) solid var(--border-primary);
+  border-radius: var(--control-radius);
+  box-shadow: var(--interaction-raised-shadow);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard), border-color var(--motion-duration-fast) var(--motion-easing-standard),
+    box-shadow var(--motion-duration-fast) var(--motion-easing-standard), transform var(--motion-duration-fast) var(--motion-easing-press);
 
   &:hover:not(:disabled) {
     background: var(--bg-hover);
@@ -311,6 +313,11 @@ async function handleSubmit(): Promise<void> {
   &:disabled {
     cursor: not-allowed;
     opacity: 0.5;
+  }
+
+  &:active:not(:disabled) {
+    box-shadow: var(--interaction-pressed-shadow);
+    transform: translate(var(--interaction-press-offset), var(--interaction-press-offset));
   }
 
   &--selected {
@@ -337,8 +344,8 @@ async function handleSubmit(): Promise<void> {
   color: var(--text-primary);
   outline: none;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 6px;
+  border: var(--control-border-width) solid var(--border-primary);
+  border-radius: var(--control-radius);
 }
 
 .choice-card__footer {

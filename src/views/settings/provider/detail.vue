@@ -128,7 +128,7 @@ async function handleRefreshModels(): Promise<void> {
   height: 100%;
   overflow: auto;
   background: var(--bg-primary);
-  border-radius: 8px;
+  border-radius: var(--surface-radius);
   view-transition-name: provider-hero;
 }
 

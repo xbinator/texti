@@ -61,18 +61,18 @@ async function handleClick(): Promise<void> {
   padding: 16px;
   cursor: pointer;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 10px;
-  transition: all 0.15s;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
+  transition: border-color var(--motion-duration-fast) var(--motion-easing-standard), box-shadow var(--motion-duration-fast) var(--motion-easing-standard),
+    transform var(--motion-duration-fast) var(--motion-easing-press);
 
   &:hover {
     border-color: var(--color-primary-border, rgb(0 0 0 / 8%));
-    box-shadow: 0 2px 8px rgb(0 0 0 / 6%);
+    box-shadow: var(--shadow-sm);
   }
 
   &:active {
     transform: scale(0.98);
-    transition: transform 0.1s;
   }
 }
 
@@ -90,14 +90,14 @@ async function handleClick(): Promise<void> {
   width: 40px;
   height: 40px;
   background: var(--bg-secondary);
-  border-radius: 10px;
+  border-radius: var(--surface-radius);
 }
 
 .provider-logo-img {
   width: 28px;
   height: 28px;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
 }
 
 .card-body {

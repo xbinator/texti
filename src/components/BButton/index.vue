@@ -141,15 +141,19 @@ export default defineComponent({
   align-items: center;
   justify-content: center;
   padding: 0 16px;
+  font-family: var(--font-display);
   font-size: 14px;
   color: #fff;
   white-space: nowrap;
   cursor: pointer;
   user-select: none;
   background: var(--color-primary);
-  border: none;
-  border-radius: 6px;
-  transition: all 0.3s ease;
+  border: var(--button-border-width) solid var(--button-border);
+  border-radius: var(--control-radius);
+  box-shadow: var(--button-shadow);
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard),
+    border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard),
+    transform var(--motion-duration-fast) var(--motion-easing-press);
 
   &:hover:not(.b-button--disabled, .b-button--loading) {
     background: var(--color-primary-hover);
@@ -157,6 +161,8 @@ export default defineComponent({
 
   &:active:not(.b-button--disabled, .b-button--loading) {
     background: var(--color-primary-active);
+    box-shadow: var(--button-pressed-shadow);
+    transform: translate(var(--interaction-press-offset), var(--interaction-press-offset));
   }
 
   &--disabled {
@@ -175,7 +181,7 @@ export default defineComponent({
   }
 
   &--rounded {
-    border-radius: 9999px;
+    border-radius: var(--radius-full);
   }
 
   // 尺寸
@@ -224,6 +230,7 @@ export default defineComponent({
   &--primary {
     color: #fff;
     background: var(--color-primary);
+    border-color: var(--button-border);
 
     &:hover:not(.b-button--disabled, .b-button--loading) {
       background: var(--color-primary-hover);
@@ -237,6 +244,7 @@ export default defineComponent({
   &--secondary {
     color: var(--text-primary);
     background: var(--bg-secondary);
+    border-color: var(--button-border);
 
     &:hover:not(.b-button--disabled, .b-button--loading) {
       background: var(--bg-active);
@@ -250,7 +258,7 @@ export default defineComponent({
   &--outline {
     color: var(--color-primary);
     background: transparent;
-    border: 1px solid var(--color-primary-border);
+    border: var(--control-border-width) solid var(--color-primary-border);
 
     &:hover:not(.b-button--disabled, .b-button--loading) {
       background: var(--color-primary-bg);
@@ -265,10 +273,12 @@ export default defineComponent({
     padding: 0 8px;
     color: var(--color-primary);
     background: transparent;
+    border-color: var(--button-border);
 
     &:hover:not(.b-button--disabled, .b-button--loading) {
       color: var(--text-primary);
       background: var(--color-primary-bg);
+      border-color: var(--button-border);
     }
 
     &:active:not(.b-button--disabled, .b-button--loading) {
@@ -280,10 +290,12 @@ export default defineComponent({
   &--ghost {
     color: var(--text-secondary);
     background: transparent;
+    border-color: var(--button-border);
 
     &:hover:not(.b-button--disabled, .b-button--loading) {
       color: var(--text-primary);
       background: var(--color-primary-bg);
+      border-color: var(--button-border);
     }
 
     &:active:not(.b-button--disabled, .b-button--loading) {
@@ -297,6 +309,7 @@ export default defineComponent({
     &.b-button--primary {
       color: #fff;
       background: var(--color-danger);
+      border-color: var(--button-border);
 
       &:hover:not(.b-button--disabled, .b-button--loading) {
         background: var(--color-danger-hover);
@@ -310,6 +323,7 @@ export default defineComponent({
     &.b-button--secondary {
       color: var(--color-danger);
       background: var(--bg-secondary);
+      border-color: var(--button-border);
 
       &:hover:not(.b-button--disabled, .b-button--loading) {
         background: var(--bg-active);
@@ -323,7 +337,7 @@ export default defineComponent({
     &.b-button--outline {
       color: var(--color-danger);
       background: transparent;
-      border: 1px solid var(--color-danger-border);
+      border: var(--control-border-width) solid var(--color-danger-border);
 
       &:hover:not(.b-button--disabled, .b-button--loading) {
         background: var(--color-danger-bg);
@@ -339,10 +353,12 @@ export default defineComponent({
       padding: 0 8px;
       color: var(--color-danger);
       background: transparent;
+      border-color: var(--button-border);
 
       &:hover:not(.b-button--disabled, .b-button--loading) {
         color: var(--color-danger-hover);
         background: var(--color-primary-bg);
+        border-color: var(--button-border);
       }
 
       &:active:not(.b-button--disabled, .b-button--loading) {
@@ -354,11 +370,13 @@ export default defineComponent({
     &.b-button--ghost {
       color: var(--color-danger);
       background: transparent;
+      border-color: var(--button-border);
       transition: color 0.15s ease;
 
       &:hover:not(.b-button--disabled, .b-button--loading) {
         color: var(--color-danger-hover);
         background: transparent;
+        border-color: var(--button-border);
       }
 
       &:active:not(.b-button--disabled, .b-button--loading) {
@@ -421,7 +439,7 @@ export default defineComponent({
     align-items: center;
     justify-content: center;
     padding: 0;
-    border-radius: 6px;
+    border-radius: var(--control-radius);
 
     &.b-button--mini {
       width: 24px;
@@ -448,6 +466,7 @@ export default defineComponent({
 .b-button--soft {
   color: var(--color-primary);
   background: var(--color-primary-bg);
+  border-color: var(--button-border);
 
   &:hover:not(.b-button--disabled, .b-button--loading) {
     background: var(--color-primary-bg-hover);
@@ -466,6 +485,7 @@ export default defineComponent({
 .b-button--danger.b-button--soft {
   color: var(--color-danger);
   background: var(--color-danger-bg);
+  border-color: var(--button-border);
 
   &:hover:not(.b-button--disabled, .b-button--loading) {
     color: var(--color-danger-hover);

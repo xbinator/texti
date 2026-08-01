@@ -59,4 +59,24 @@ describe('BButton', (): void => {
     expectRuleToContainDeclarations(source, '.b-button--soft', ['color: var(--color-primary);', 'background: var(--color-primary-bg);']);
     expectRuleToContainDeclarations(source, '.b-button--danger.b-button--soft', ['color: var(--color-danger);', 'background: var(--color-danger-bg);']);
   });
+
+  it('使用主题设计 Token 控制基础圆角与动效', (): void => {
+    const source = readButtonComponentSource();
+
+    expectRuleToContainDeclarations(source, '.b-button', [
+      'border: var(--button-border-width) solid var(--button-border);',
+      'border-radius: var(--control-radius);',
+      'box-shadow: var(--button-shadow);'
+    ]);
+    expectRuleToContainDeclarations(source, '&:active:not(.b-button--disabled, .b-button--loading)', [
+      'box-shadow: var(--button-pressed-shadow);',
+      'transform: translate(var(--interaction-press-offset), var(--interaction-press-offset));'
+    ]);
+    expect(source).toContain('var(--motion-duration-base)');
+    expect(source).toContain('var(--motion-duration-fast)');
+    expect(source).toContain('var(--motion-easing-standard)');
+    expect(source).toContain('var(--motion-easing-press)');
+    expectRuleToContainDeclarations(source, '&--rounded', ['border-radius: var(--radius-full);']);
+    expectRuleToContainDeclarations(source, '&--square', ['border-radius: var(--control-radius);']);
+  });
 });

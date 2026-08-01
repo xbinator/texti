@@ -153,7 +153,7 @@ async function handleDeleteModel(modelId: string): Promise<void> {
   container-name: model-section;
   container-type: inline-size;
   background: var(--bg-secondary);
-  border-radius: 10px;
+  border-radius: var(--surface-radius);
 }
 
 .section-header {
@@ -184,6 +184,17 @@ async function handleDeleteModel(modelId: string): Promise<void> {
 
 .search-input {
   width: 200px;
+  font-family: var(--input-font-family);
+  border-radius: var(--input-radius);
+}
+
+.search-input :deep(.ant-input) {
+  font-family: var(--input-font-family);
+}
+
+.search-input :deep(.ant-input::placeholder) {
+  color: var(--input-placeholder-color);
+  opacity: 1;
 }
 
 .model-categories {
@@ -210,9 +221,9 @@ async function handleDeleteModel(modelId: string): Promise<void> {
   justify-content: space-between;
   padding: 12px 16px;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
-  transition: all 0.15s;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard), border-color var(--motion-duration-fast) var(--motion-easing-standard);
 
   &:hover {
     background: var(--bg-active);
@@ -227,7 +238,7 @@ async function handleDeleteModel(modelId: string): Promise<void> {
     height: 40px;
     margin-right: 12px;
     overflow: hidden;
-    border-radius: 6px;
+    border-radius: var(--control-radius);
 
     img {
       width: 100%;
@@ -243,7 +254,7 @@ async function handleDeleteModel(modelId: string): Promise<void> {
 
     .b-button {
       opacity: 0;
-      transition: opacity 0.15s;
+      transition: opacity var(--motion-duration-fast) var(--motion-easing-standard);
     }
   }
 }
@@ -271,13 +282,13 @@ async function handleDeleteModel(modelId: string): Promise<void> {
   margin: 0 0 6px;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: 'SF Mono', Monaco, Inconsolata, 'Fira Code', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-secondary);
   white-space: nowrap;
   user-select: text;
   background: var(--bg-secondary);
-  border-radius: 4px;
+  border-radius: var(--control-radius);
 }
 
 .model-tags {
@@ -291,8 +302,8 @@ async function handleDeleteModel(modelId: string): Promise<void> {
   font-size: 10px;
   color: var(--text-secondary);
   background: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-radius: 4px;
+  border: var(--control-border-width) solid var(--border-primary);
+  border-radius: var(--control-radius);
 }
 
 .empty-models {

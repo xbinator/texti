@@ -768,8 +768,8 @@ defineExpose({
   width: 0;
   min-width: 0;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
 
   .b-markdown-main__outline-toggle {
     position: absolute;

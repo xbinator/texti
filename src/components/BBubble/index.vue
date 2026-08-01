@@ -87,7 +87,7 @@ const shouldShowCollapseButton = computed(() => props.placement === 'left' && co
 }
 
 .b-bubble--left .b-bubble__container {
-  border-radius: 2px 12px 12px;
+  border-radius: var(--control-radius) var(--surface-radius) var(--surface-radius);
 }
 
 .b-bubble--right {
@@ -98,7 +98,7 @@ const shouldShowCollapseButton = computed(() => props.placement === 'left' && co
   padding: 10px 14px;
   color: var(--text-primary);
   background: var(--color-primary-bg);
-  border-radius: 12px 2px 12px 12px;
+  border-radius: var(--surface-radius) var(--control-radius) var(--surface-radius) var(--surface-radius);
 }
 
 .b-bubble--right .b-bubble__avatar {

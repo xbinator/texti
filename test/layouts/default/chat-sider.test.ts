@@ -257,8 +257,26 @@ describe('ChatSider', (): void => {
     expect(rootStyle).not.toContain('overflow: hidden;');
     expect(rootStyle).not.toContain('transition:');
     expect(contentStyle).toContain('overflow: hidden;');
-    expect(chatSiderSource).toContain('transition: width 0.36s ease, opacity 0.24s ease, transform 0.36s ease;');
+    expect(chatSiderSource).toContain('transition: width var(--motion-duration-slow) var(--motion-easing-standard)');
+    expect(chatSiderSource).toContain('opacity var(--motion-duration-base) var(--motion-easing-standard)');
+    expect(chatSiderSource).toContain('transform var(--motion-duration-slow) var(--motion-easing-standard)');
     expect(chatSiderSource).toContain('@media (prefers-reduced-motion: reduce)');
+  });
+
+  it('removes hidden idle splitter overflow sources from horizontal layout', (): void => {
+    expect(chatSiderSource).toContain('.chat-sider:not(.chat-sider--visible, .chat-sider--motion) {');
+    expect(chatSiderSource).toContain('transform: none;');
+    expect(chatSiderSource).toContain('.chat-sider:not(.chat-sider--visible, .chat-sider--motion) .b-panel-splitter__section,');
+    expect(chatSiderSource).toContain('.chat-sider:not(.chat-sider--visible, .chat-sider--motion) .b-panel-splitter__line {');
+    expect(chatSiderSource).toContain('display: none;');
+  });
+
+  it('keeps the visible sidebar gap inside the panel width', (): void => {
+    const visibleStyle = chatSiderSource.match(/\.chat-sider--visible \{(?<body>[\s\S]*?)\n\}/u)?.groups?.body ?? '';
+    const contentStyle = chatSiderSource.match(/\.chat-sider__content \{(?<body>[\s\S]*?)\n\}/u)?.groups?.body ?? '';
+
+    expect(visibleStyle).not.toContain('margin-left: 6px;');
+    expect(contentStyle).toContain('margin-left: 6px;');
   });
 
   it('renders BChat with the active session id and displays the SessionHistory current session', async (): Promise<void> => {

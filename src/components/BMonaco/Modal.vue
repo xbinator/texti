@@ -276,9 +276,9 @@ watch(
   min-height: 320px;
   padding: 1px;
   background: var(--input-bg);
-  border: 1px solid var(--input-border);
-  border-radius: 6px;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  border: var(--input-border-width) solid var(--input-border);
+  border-radius: var(--input-radius);
+  transition: border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard);
 }
 
 .b-monaco-modal__host:hover {
@@ -287,7 +287,7 @@ watch(
 
 .b-monaco-modal__host:focus-within {
   border-color: var(--input-focus-border);
-  box-shadow: 0 0 0 2px var(--input-focus-shadow);
+  box-shadow: var(--input-active-shadow);
 }
 
 .b-monaco-modal__host :deep(.b-editor-monaco),
@@ -306,7 +306,7 @@ watch(
 }
 
 .b-monaco-modal__host :deep(.monaco-editor .view-lines) {
-  font-family: var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace);
+  font-family: var(--font-mono);
 }
 
 .b-monaco-modal__error {

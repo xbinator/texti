@@ -168,8 +168,8 @@ function handleMouseEnter(index: number): void {
   padding: 8px 0;
   overflow: auto;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border: var(--overlay-border-width) solid var(--border-primary);
+  border-radius: var(--overlay-radius);
   box-shadow: 0 6px 16px rgb(0 0 0 / 8%), 0 3px 6px -4px rgb(0 0 0 / 12%), 0 9px 28px 8px rgb(0 0 0 / 5%);
 }
 
@@ -196,8 +196,8 @@ function handleMouseEnter(index: number): void {
   padding: 2px 8px;
   margin: 0 6px;
   cursor: pointer;
-  border-radius: 4px;
-  transition: background 0.2s;
+  border-radius: var(--control-radius);
+  transition: background var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover,
   &.active {

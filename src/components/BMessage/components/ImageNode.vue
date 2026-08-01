@@ -131,9 +131,10 @@ function handleImageMouseDown(event: MouseEvent): void {
   color: var(--text-secondary);
   cursor: pointer;
   background: var(--bg-primary);
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   opacity: 0;
-  transition: opacity 0.16s ease, color 0.16s ease, background 0.16s ease;
+  transition: opacity var(--motion-duration-fast) var(--motion-easing-standard), color var(--motion-duration-fast) var(--motion-easing-standard),
+    background var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .b-message__image-copy:hover,

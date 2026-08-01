@@ -236,8 +236,8 @@ describe('BEditor TableView controls', (): void => {
     expect(toolbarRuleBody).toContain('gap: 2px;');
     expect(toolbarRuleBody).toContain('padding: 4px;');
     expect(toolbarRuleBody).toContain('background: var(--bg-primary);');
-    expect(toolbarRuleBody).toContain('border: 1px solid var(--border-primary);');
-    expect(toolbarRuleBody).toContain('border-radius: 8px;');
+    expect(toolbarRuleBody).toContain('border: var(--overlay-border-width) solid var(--border-primary);');
+    expect(toolbarRuleBody).toContain('border-radius: var(--overlay-radius);');
     expect(toolbarRuleBody).toContain('box-shadow: var(--shadow-lg);');
     expect(toolbarButtonRuleBody).toContain('width: 28px;');
     expect(toolbarButtonRuleBody).toContain('height: 28px;');
@@ -245,7 +245,7 @@ describe('BEditor TableView controls', (): void => {
     expect(toolbarButtonRuleBody).toContain('color: var(--text-secondary);');
     expect(toolbarButtonRuleBody).toContain('background: transparent;');
     expect(toolbarButtonRuleBody).toContain('border: none;');
-    expect(toolbarButtonRuleBody).toContain('border-radius: 6px;');
+    expect(toolbarButtonRuleBody).toContain('border-radius: var(--control-radius);');
     expect(toolbarButtonRuleBody).toContain('background: var(--bg-hover);');
     expect(dividerRuleBody).toContain('width: 1px;');
     expect(dividerRuleBody).toContain('height: 16px;');

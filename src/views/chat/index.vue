@@ -323,8 +323,8 @@ onMounted((): void => {
   min-height: 0;
   overflow: hidden;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
 }
 
 .chat-container {

@@ -187,13 +187,37 @@ export interface ThemeTokens {
     headerBg: string;
   };
   input: {
+    radius: string;
+    borderWidth: string;
+    paddingInline: string;
+    paddingBlock: string;
+    gap: string;
+    fontFamily: string;
     bg: string;
     border: string;
     focusBorder: string;
     focusShadow: string;
+    placeholderColor: string;
+    iconColor: string;
+    shadow: string;
+    activeShadow: string;
+    keycapSize: string;
+    keycapRadius: string;
+    keycapBorderWidth: string;
+    keycapBg: string;
+    keycapColor: string;
+    keycapShadow: string;
     errorText: string;
     errorBorder: string;
     errorShadow: string;
+  };
+  /** 按钮级语义 Token */
+  button: {
+    border: string;
+    borderWidth: string;
+    shadow: string;
+    activeShadow: string;
+    pressedShadow: string;
   };
   tag: {
     bg: string;
@@ -227,5 +251,57 @@ export interface ThemeTokens {
     null: string;
     edge: string;
     edgeLabel: string;
+  };
+  /** 基础圆角刻度 */
+  radius: {
+    none: string;
+    xs: string;
+    sm: string;
+    md: string;
+    lg: string;
+    xl: string;
+    full: string;
+  };
+  /** 基础边框宽度刻度 */
+  borderWidth: {
+    hairline: string;
+    thin: string;
+    strong: string;
+  };
+  /** 字体栈 */
+  font: {
+    sans: string;
+    mono: string;
+    display: string;
+  };
+  /** 动效时长和缓动 */
+  motion: {
+    durationFast: string;
+    durationBase: string;
+    durationSlow: string;
+    easingStandard: string;
+    easingPress: string;
+  };
+  /** 控件级语义 Token */
+  control: {
+    radius: string;
+    borderWidth: string;
+    focusRingWidth: string;
+  };
+  /** 表面级语义 Token */
+  surface: {
+    radius: string;
+    borderWidth: string;
+  };
+  /** 弹层级语义 Token */
+  overlay: {
+    radius: string;
+    borderWidth: string;
+  };
+  /** 交互效果语义 Token */
+  interaction: {
+    pressOffset: string;
+    raisedShadow: string;
+    pressedShadow: string;
   };
 }

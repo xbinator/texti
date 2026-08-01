@@ -79,7 +79,7 @@ function navigateTo(item: MenuItem): void {
   height: 100%;
   padding: 16px 8px 12px 2px;
   overflow-y: auto;
-  transition: width 0.3s ease;
+  transition: width var(--motion-duration-slow) var(--motion-easing-standard);
   -webkit-user-drag: none;
 
   &--collapsed {
@@ -107,7 +107,7 @@ function navigateTo(item: MenuItem): void {
   font-weight: 600;
   color: var(--text-primary);
   cursor: pointer;
-  transition: color 0.15s;
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard);
 
   &:hover {
     color: var(--color-primary);
@@ -125,29 +125,45 @@ function navigateTo(item: MenuItem): void {
 }
 
 .sidebar-item {
+  box-sizing: border-box;
   display: flex;
   gap: 12px;
   align-items: center;
   justify-content: flex-start;
+  width: 100%;
   height: 32px;
   padding: 0 14px;
   margin-bottom: 8px;
+  font-family: var(--font-display);
   font-size: 14px;
   color: var(--text-primary);
   text-decoration: none;
   cursor: pointer;
   user-select: none;
+  background: var(--bg-secondary);
+  border: var(--button-border-width) solid var(--button-border);
   -webkit-user-drag: none;
-  border-radius: 6px;
-  transition: all 0.15s;
+  border-radius: var(--control-radius);
+  box-shadow: var(--button-shadow);
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard),
+    border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard),
+    transform var(--motion-duration-fast) var(--motion-easing-press);
 
   &:hover {
     color: var(--text-primary);
     background: var(--bg-hover);
+    border-color: var(--button-border);
   }
 
   &.active {
     background: var(--color-primary-bg);
+    border-color: var(--button-border);
+    box-shadow: var(--button-active-shadow);
+  }
+
+  &:active {
+    box-shadow: var(--button-pressed-shadow);
+    transform: translate(var(--interaction-press-offset), var(--interaction-press-offset));
   }
 }
 
@@ -160,10 +176,11 @@ function navigateTo(item: MenuItem): void {
 .sidebar-item__label {
   overflow: hidden;
   white-space: nowrap;
-  transition: opacity 0.3s ease, width 0.3s ease;
+  transition: opacity var(--motion-duration-slow) var(--motion-easing-standard), width var(--motion-duration-slow) var(--motion-easing-standard);
 }
 
 .sidebar-collapse-btn {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -172,14 +189,23 @@ function navigateTo(item: MenuItem): void {
   margin-top: auto;
   color: var(--text-secondary);
   cursor: pointer;
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  transition: all 0.15s;
+  background: var(--bg-secondary);
+  border: var(--button-border-width) solid var(--button-border);
+  border-radius: var(--control-radius);
+  box-shadow: var(--button-shadow);
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard),
+    border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard),
+    transform var(--motion-duration-fast) var(--motion-easing-press);
 
   &:hover {
     color: var(--text-primary);
     background: var(--bg-hover);
+    border-color: var(--button-border);
+  }
+
+  &:active {
+    box-shadow: var(--button-pressed-shadow);
+    transform: translate(var(--interaction-press-offset), var(--interaction-press-offset));
   }
 }
 

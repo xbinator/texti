@@ -221,7 +221,7 @@ async function handleDeleteSession(sessionId: string): Promise<void> {
   width: 200px;
   padding: 6px;
   background: var(--dropdown-bg);
-  border-radius: 8px;
+  border-radius: var(--overlay-radius);
   box-shadow: var(--shadow-dropdown);
 }
 
@@ -252,8 +252,8 @@ async function handleDeleteSession(sessionId: string): Promise<void> {
   text-align: left;
   cursor: pointer;
   border: none;
-  border-radius: 8px;
-  transition: background 0.2s ease;
+  border-radius: var(--control-radius);
+  transition: background var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover,
   &.is-active {
@@ -285,7 +285,7 @@ async function handleDeleteSession(sessionId: string): Promise<void> {
   display: none;
   flex-shrink: 0;
   gap: 4px;
-  transition: opacity 0.2s ease;
+  transition: opacity var(--motion-duration-base) var(--motion-easing-standard);
 }
 
 .session-history__item:hover .session-history__actions {

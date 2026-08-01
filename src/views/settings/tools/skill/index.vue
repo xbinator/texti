@@ -103,7 +103,7 @@ watch(
     padding: 1px 4px;
     font-size: 11px;
     background: var(--bg-tertiary);
-    border-radius: 3px;
+    border-radius: var(--control-radius);
   }
 }
 

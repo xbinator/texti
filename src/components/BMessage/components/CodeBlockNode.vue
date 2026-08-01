@@ -197,8 +197,8 @@ onUnmounted(() => {
   margin: 0.6em 0;
   overflow: hidden;
   background: var(--bg-primary);
-  border: 1px solid var(--border-secondary);
-  border-radius: 6px;
+  border: var(--surface-border-width) solid var(--border-secondary);
+  border-radius: var(--surface-radius);
 }
 
 .b-message__code-header {
@@ -209,7 +209,7 @@ onUnmounted(() => {
   padding: 6px 8px 6px 12px;
   color: var(--text-secondary);
   background: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border-secondary);
+  border-bottom: var(--surface-border-width) solid var(--border-secondary);
 }
 
 .b-message__code-language {
@@ -229,8 +229,8 @@ onUnmounted(() => {
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 4px;
-  transition: all 0.2s ease;
+  border-radius: var(--control-radius);
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard);
 }
 
 .b-message__code-copy:hover,

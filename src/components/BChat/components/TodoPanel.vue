@@ -75,8 +75,8 @@ const currentTask = computed<TodoItem | undefined>(() => props.todos.find((t) =>
   margin-bottom: 8px;
   overflow: hidden;
   background: var(--bg-tertiary);
-  border: 1px solid var(--border-secondary);
-  border-radius: 6px;
+  border: var(--surface-border-width) solid var(--border-secondary);
+  border-radius: var(--surface-radius);
 }
 
 .todo-panel__list {
@@ -113,8 +113,8 @@ const currentTask = computed<TodoItem | undefined>(() => props.todos.find((t) =>
   align-items: center;
   padding: 4px 12px;
   background: var(--bg-tertiary);
-  border: 1px solid var(--border-secondary);
-  border-radius: 6px;
+  border: var(--surface-border-width) solid var(--border-secondary);
+  border-radius: var(--surface-radius);
 }
 
 .todo-panel__current-task {

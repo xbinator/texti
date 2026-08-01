@@ -177,7 +177,7 @@ const dropdownOptions = computed<DropdownOption[]>(() => [
   font-weight: 600;
   color: var(--text-primary);
   background: var(--bg-tertiary);
-  border-radius: 6px;
+  border-radius: var(--control-radius);
 }
 
 .skill-settings__item-info {

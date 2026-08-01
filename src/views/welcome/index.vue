@@ -118,8 +118,8 @@ function handleShowShortcuts(): void {
   width: 100%;
   height: 100%;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
 }
 
 .welcome-container {
@@ -146,8 +146,8 @@ function handleShowShortcuts(): void {
   cursor: pointer;
   user-select: none;
   background: var(--bg-secondary);
-  border-radius: 6px;
-  transition: background 0.2s ease;
+  border-radius: var(--control-radius);
+  transition: background var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover {
     background: var(--bg-active);
@@ -160,7 +160,7 @@ function handleShowShortcuts(): void {
     justify-content: center;
     width: 32px;
     height: 32px;
-    border-radius: 8px;
+    border-radius: var(--control-radius);
   }
 
   .action-label {
@@ -199,8 +199,8 @@ function handleShowShortcuts(): void {
   cursor: pointer;
   user-select: none;
   background: var(--bg-secondary);
-  border-radius: 6px;
-  transition: background 0.2s ease;
+  border-radius: var(--control-radius);
+  transition: background var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover {
     background: var(--bg-active);
@@ -214,7 +214,7 @@ function handleShowShortcuts(): void {
     width: 24px;
     height: 24px;
     color: var(--text-secondary);
-    border-radius: 6px;
+    border-radius: var(--control-radius);
   }
 
   .recent-file-info {
@@ -250,8 +250,8 @@ function handleShowShortcuts(): void {
   cursor: pointer;
   user-select: none;
   background: var(--bg-secondary);
-  border-radius: 6px;
-  transition: background 0.2s ease, color 0.2s ease;
+  border-radius: var(--control-radius);
+  transition: background var(--motion-duration-base) var(--motion-easing-standard), color var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover {
     color: var(--text-primary);

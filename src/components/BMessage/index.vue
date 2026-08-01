@@ -305,8 +305,8 @@ onScopeDispose(() => {
   padding: 8px 10px;
   color: var(--text-secondary);
   background: var(--bg-tertiary);
-  border: 1px solid var(--border-secondary);
-  border-radius: 6px;
+  border: var(--surface-border-width) solid var(--border-secondary);
+  border-radius: var(--surface-radius);
 }
 
 @keyframes b-stream-cursor-blink {

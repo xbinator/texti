@@ -129,9 +129,25 @@ function handleDropdownVisibleChange(open: boolean): void {
 
 <style lang="less" scoped>
 .b-select {
-  :deep(.ant-select-selector) {
+  :deep(.ant-select-selector.ant-select-selector) {
     height: auto;
-    transition: all 0.2s ease;
+    font-family: var(--input-font-family);
+    outline: none;
+    background: var(--input-bg);
+    border: var(--input-border-width) solid var(--input-border);
+    border-radius: var(--input-radius);
+    box-shadow: var(--input-shadow);
+    transition: border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard),
+      background var(--motion-duration-base) var(--motion-easing-standard);
+  }
+
+  &.ant-select.ant-select-focused:not(.ant-select-customize-input),
+  &.ant-select.ant-select-open:not(.ant-select-customize-input) {
+    :deep(.ant-select-selector.ant-select-selector) {
+      outline: none;
+      border-color: var(--input-focus-border);
+      box-shadow: var(--input-active-shadow);
+    }
   }
 
   &.is-fill-color {
@@ -164,7 +180,7 @@ function handleDropdownVisibleChange(open: boolean): void {
   color: var(--text-secondary);
   background: var(--dropdown-bg);
   border-top: 1px solid var(--border-primary);
-  border-radius: 0 0 8px 8px;
+  border-radius: 0 0 var(--control-radius) var(--control-radius);
 }
 
 @keyframes spin {

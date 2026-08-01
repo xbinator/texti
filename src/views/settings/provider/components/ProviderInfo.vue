@@ -58,7 +58,7 @@ function handleToggle(enabled: boolean): void {
 .info-section {
   padding: 20px;
   background: var(--bg-secondary);
-  border-radius: 10px;
+  border-radius: var(--surface-radius);
 }
 
 .section-header {
@@ -75,14 +75,14 @@ function handleToggle(enabled: boolean): void {
   width: 50px;
   height: 50px;
   background: var(--bg-primary);
-  border-radius: 12px;
+  border-radius: var(--surface-radius);
 }
 
 .provider-logo-img {
   width: 32px;
   height: 32px;
   object-fit: cover;
-  border-radius: 8px;
+  border-radius: var(--control-radius);
 }
 
 .provider-meta {
@@ -118,7 +118,7 @@ function handleToggle(enabled: boolean): void {
   font-size: 12px;
   color: var(--text-secondary);
   background: var(--bg-primary);
-  border-radius: 4px;
+  border-radius: var(--control-radius);
 }
 
 .provider-actions {
@@ -136,8 +136,8 @@ function handleToggle(enabled: boolean): void {
   height: 28px;
   color: var(--text-secondary);
   cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.2s ease;
+  border-radius: var(--control-radius);
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard);
 }
 
 .edit-btn:hover {

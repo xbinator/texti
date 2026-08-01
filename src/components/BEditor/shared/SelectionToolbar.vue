@@ -89,8 +89,8 @@ checkModelAvailability();
   align-items: center;
   padding: 4px;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border: var(--overlay-border-width) solid var(--border-primary);
+  border-radius: var(--overlay-radius);
   box-shadow: var(--shadow-lg);
 }
 
@@ -105,8 +105,8 @@ checkModelAvailability();
   white-space: nowrap;
   cursor: pointer;
   border: none;
-  border-radius: 6px;
-  transition: background 0.15s ease;
+  border-radius: var(--control-radius);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
 
   &:hover {
     background: var(--color-primary-bg-hover);
@@ -124,8 +124,8 @@ checkModelAvailability();
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 6px;
-  transition: background 0.15s ease, color 0.15s ease;
+  border-radius: var(--control-radius);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard), color var(--motion-duration-fast) var(--motion-easing-standard);
 
   &:hover {
     color: var(--text-primary);

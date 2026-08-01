@@ -82,8 +82,8 @@ function handleCopyPath(): void {
   min-height: 0;
   user-select: text;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
 }
 
 .skill-page__header {
@@ -91,7 +91,7 @@ function handleCopyPath(): void {
   flex-direction: column;
   gap: 8px;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--border-tertiary);
+  border-bottom: var(--surface-border-width) solid var(--border-tertiary);
 }
 
 .skill-page__title-row {
@@ -135,7 +135,7 @@ function handleCopyPath(): void {
   font-size: 12px;
   color: var(--color-danger, #ff4d4f);
   background: var(--color-danger-bg, #fff2f0);
-  border-radius: 6px;
+  border-radius: var(--surface-radius);
 }
 
 .skill-page__path {
@@ -145,13 +145,13 @@ function handleCopyPath(): void {
   padding: 4px 4px 4px 8px;
   overflow: hidden;
   background: var(--bg-secondary);
-  border: 1px solid var(--border-tertiary);
-  border-radius: 6px;
+  border: var(--control-border-width) solid var(--border-tertiary);
+  border-radius: var(--control-radius);
 
   // 复制按钮默认隐藏，hover 时显示
   .b-button {
     opacity: 0;
-    transition: opacity 0.15s ease;
+    transition: opacity var(--motion-duration-fast) var(--motion-easing-standard);
   }
 
   &:hover .b-button {

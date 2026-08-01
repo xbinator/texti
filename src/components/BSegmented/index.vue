@@ -237,8 +237,8 @@ useResizeObserver(trackRef, (entries: ResizeObserverEntry[]): void => {
   height: 32px;
   padding: 2px;
   overflow: hidden;
-  border: 1px solid var(--border-primary);
-  border-radius: 6px;
+  border: var(--control-border-width) solid var(--border-primary);
+  border-radius: var(--control-radius);
 }
 
 .b-segmented__tab {
@@ -257,8 +257,8 @@ useResizeObserver(trackRef, (entries: ResizeObserverEntry[]): void => {
   cursor: pointer;
   background: transparent;
   border: 0;
-  border-radius: 4px;
-  transition: color 0.2s ease;
+  border-radius: var(--control-radius);
+  transition: color var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover:not(.is-disabled, .is-active) {
     color: var(--text-primary);
@@ -289,8 +289,8 @@ useResizeObserver(trackRef, (entries: ResizeObserverEntry[]): void => {
   height: 26px;
   pointer-events: none;
   background: var(--bg-secondary);
-  border-radius: 4px;
-  transition: width 0.2s ease, transform 0.2s ease;
+  border-radius: var(--control-radius);
+  transition: width var(--motion-duration-base) var(--motion-easing-standard), transform var(--motion-duration-base) var(--motion-easing-standard);
 }
 
 .b-segmented__main {

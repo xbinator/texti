@@ -92,7 +92,7 @@ function handleNodeClick(event: NodeMouseEvent): void {
 .b-json-viewer__flow {
   width: 100%;
   height: 100%;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   background: transparent;
 }
 
@@ -102,7 +102,7 @@ function handleNodeClick(event: NodeMouseEvent): void {
 }
 
 .b-json-viewer .vue-flow__edge-text {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 20px;
   fill: var(--json-viewer-edge);
 }

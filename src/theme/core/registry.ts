@@ -2,7 +2,9 @@
  * @file core/registry.ts
  * @description 主题预设注册表，提供注册、查询和 fallback 功能。
  */
+import type { CustomThemeConfig } from '../types/custom';
 import type { ThemeTokens } from '../types/tokens';
+import { createThemeTokensFromBase } from './factory';
 
 /**
  * 主题预设——注册到注册表的基本单元。
@@ -74,4 +76,24 @@ export function getResolvedTokens(presetId: string, mode: 'light' | 'dark'): The
   }
 
   return mode === 'light' ? preset.light : preset.dark;
+}
+
+/**
+ * 注册用户自定义主题配置。
+ * @param config - 自定义主题配置
+ */
+export function registerCustomTheme(config: CustomThemeConfig): void {
+  if (config.schemaVersion !== 1) {
+    throw new Error(`[theme-registry] Unsupported custom theme schema version: ${config.schemaVersion}`);
+  }
+
+  const defaultLight = getResolvedTokens('default', 'light');
+  const defaultDark = getResolvedTokens('default', 'dark');
+
+  registerPreset({
+    id: config.id,
+    label: config.label,
+    light: createThemeTokensFromBase(defaultLight, config.light),
+    dark: createThemeTokensFromBase(defaultDark, config.dark)
+  });
 }

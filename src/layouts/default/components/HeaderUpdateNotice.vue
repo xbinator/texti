@@ -109,8 +109,8 @@ onBeforeUnmount(() => {
   height: 22px;
   color: var(--color-primary);
   background: color-mix(in srgb, var(--color-primary-bg) 72%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-primary-border) 82%, transparent);
-  border-radius: 999px;
+  border: var(--control-border-width) solid color-mix(in srgb, var(--color-primary-border) 82%, transparent);
+  border-radius: var(--radius-full);
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 28%);
   -webkit-app-region: no-drag;
 }
@@ -132,7 +132,7 @@ onBeforeUnmount(() => {
   outline: none;
   background: transparent;
   border: 0;
-  transition: background 0.16s ease;
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .header-update-notice__link {
@@ -140,7 +140,7 @@ onBeforeUnmount(() => {
   min-width: 0;
   max-width: 142px;
   padding: 0 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
 }
 
 .header-update-notice__link:hover {
@@ -164,11 +164,12 @@ onBeforeUnmount(() => {
   color: var(--text-tertiary);
   pointer-events: none;
   background: var(--bg-primary);
-  border-radius: 999px;
-  box-shadow: 0 1px 4px rgb(0 0 0 / 16%);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-sm);
   opacity: 0;
   transform: scale(0.82) translate(2px, -2px);
-  transition: color 0.16s ease, opacity 0.16s ease, transform 0.16s ease, background 0.16s ease;
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard), opacity var(--motion-duration-fast) var(--motion-easing-standard),
+    transform var(--motion-duration-fast) var(--motion-easing-standard), background var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .header-update-notice:hover .header-update-notice__close {

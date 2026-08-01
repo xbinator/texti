@@ -126,7 +126,7 @@ function toggleExpanded(): void {
 }
 
 .log-timeline__time {
-  font-family: 'SF Mono', Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   font-weight: 600;
   line-height: 1.2;
@@ -173,7 +173,7 @@ function toggleExpanded(): void {
   height: 16px;
   background: var(--color-primary-border);
   border: 4px solid var(--bg-primary);
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   transform: translateY(8px);
 }
 
@@ -199,8 +199,8 @@ function toggleExpanded(): void {
   gap: 12px;
   padding: 18px 20px;
   background: var(--bg-elevated);
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
 }
 
 .log-timeline__card-header {
@@ -211,7 +211,7 @@ function toggleExpanded(): void {
 
 .log-timeline__message {
   padding: 8px 12px;
-  font-family: 'SF Mono', Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 14px;
   line-height: 1.6;
   color: var(--text-primary);
@@ -219,7 +219,7 @@ function toggleExpanded(): void {
   white-space: pre-wrap;
   user-select: text;
   background: var(--bg-secondary);
-  border-radius: 4px;
+  border-radius: var(--control-radius);
 }
 
 .log-timeline__message--collapsed {

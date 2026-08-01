@@ -183,9 +183,9 @@ watch(
   min-height: 320px;
   padding: 1px;
   background: var(--input-bg);
-  border: 1px solid var(--input-border);
-  border-radius: 6px;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  border: var(--input-border-width) solid var(--input-border);
+  border-radius: var(--input-radius);
+  transition: border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard);
 }
 
 .server-editor-modal__editor:hover {
@@ -194,7 +194,7 @@ watch(
 
 .server-editor-modal__editor:focus-within {
   border-color: var(--input-focus-border);
-  box-shadow: 0 0 0 2px var(--input-focus-shadow);
+  box-shadow: var(--input-active-shadow);
 }
 
 .server-editor-modal__editor :deep(.b-editor-monaco),
@@ -213,6 +213,6 @@ watch(
 }
 
 .server-editor-modal__editor :deep(.monaco-editor .view-lines) {
-  font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+  font-family: var(--font-mono);
 }
 </style>

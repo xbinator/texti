@@ -46,8 +46,8 @@ withDefaults(defineProps<Props>(), {
   color: var(--hover-indicator-text);
   pointer-events: none;
   background: var(--hover-indicator-bg);
-  border: 1px solid var(--hover-indicator-border);
-  border-radius: 6px;
+  border: var(--control-border-width) solid var(--hover-indicator-border);
+  border-radius: var(--control-radius);
   transform: translateY(-50%);
 
   &.is-heading {
@@ -58,7 +58,7 @@ withDefaults(defineProps<Props>(), {
 
 .b-markdown-hover-fade-enter-active,
 .b-markdown-hover-fade-leave-active {
-  transition: all 0.2s ease;
+  transition: opacity var(--motion-duration-base) var(--motion-easing-standard), transform var(--motion-duration-base) var(--motion-easing-standard);
 }
 
 .b-markdown-hover-fade-enter-from,

@@ -706,15 +706,17 @@ defineExpose({ focusInput, resetDraft });
   max-width: var(--b-chat-max-width, 800px);
   padding: 12px;
   margin: 0 auto;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 6px;
-  transition: background 0.3s ease-in-out, border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+  background: var(--input-bg);
+  border: var(--input-border-width) solid var(--input-border);
+  border-radius: var(--input-radius);
+  box-shadow: var(--input-shadow);
+  transition: background var(--motion-duration-slow) var(--motion-easing-standard), border-color var(--motion-duration-base) var(--motion-easing-standard),
+    box-shadow var(--motion-duration-base) var(--motion-easing-standard);
 
   &.b-chat__input-container--dragover {
     background: var(--color-primary-bg);
     border-color: var(--input-focus-border);
-    box-shadow: inset 0 0 0 1px var(--color-control-outline);
+    box-shadow: var(--input-active-shadow);
   }
 }
 

@@ -236,6 +236,15 @@ function getBButtonByIcon(wrapper: VueWrapper, icon: string): ReturnType<VueWrap
 }
 
 /**
+ * 读取欢迎页原生标签按钮。
+ * @param wrapper - 默认布局 wrapper
+ * @returns 欢迎按钮 wrapper
+ */
+function getWelcomeButton(wrapper: VueWrapper): ReturnType<VueWrapper['get']> {
+  return wrapper.get('.b-layout-welcome-tab');
+}
+
+/**
  * 读取辅助工具侧边栏切换按钮。
  * @param wrapper - 默认布局 wrapper
  * @returns 侧边栏切换按钮 wrapper
@@ -258,6 +267,15 @@ function getSidebarButton(wrapper: VueWrapper): VueWrapper {
  */
 async function clickLayoutButton(wrapper: VueWrapper, icon: string): Promise<void> {
   await getBButtonByIcon(wrapper, icon).trigger('click');
+  await nextTick();
+}
+
+/**
+ * 点击欢迎页标签按钮。
+ * @param wrapper - 默认布局 wrapper
+ */
+async function clickWelcomeButton(wrapper: VueWrapper): Promise<void> {
+  await getWelcomeButton(wrapper).trigger('click');
   await nextTick();
 }
 
@@ -291,25 +309,26 @@ describe('Default layout settings button', (): void => {
     expect(routerPushMock).not.toHaveBeenCalled();
   });
 
-  it('marks the welcome button soft while the welcome route is active', (): void => {
+  it('marks the native welcome tab button active while the welcome route is active', (): void => {
     routeMock.fullPath = '/welcome';
 
     const wrapper = mountDefaultLayout();
-    const welcomeButton = getBButtonByIcon(wrapper, 'lucide:blocks');
+    const welcomeButton = getWelcomeButton(wrapper);
 
-    expect(welcomeButton.attributes('data-type')).toBe('soft');
+    expect(welcomeButton.classes()).toContain('is-active');
+    expect(wrapper.findAll('.b-button-stub').some((button): boolean => button.attributes('data-icon') === 'lucide:blocks')).toBe(false);
   });
 
   it('opens the welcome page from the dashboard button in the tab bar', async (): Promise<void> => {
     routeMock.fullPath = '/settings/provider';
 
     const wrapper = mountDefaultLayout();
-    const welcomeButton = getBButtonByIcon(wrapper, 'lucide:blocks');
+    const welcomeButton = getWelcomeButton(wrapper);
 
-    expect(welcomeButton.attributes('data-icon')).toBe('lucide:blocks');
-    expect(welcomeButton.attributes('data-type')).toBe('secondary');
+    expect(welcomeButton.classes()).not.toContain('is-active');
+    expect(wrapper.findAll('.b-button-stub').some((button): boolean => button.attributes('data-icon') === 'lucide:blocks')).toBe(false);
 
-    await clickLayoutButton(wrapper, 'lucide:blocks');
+    await clickWelcomeButton(wrapper);
 
     expect(routerPushMock).toHaveBeenCalledTimes(1);
     expect(routerPushMock).toHaveBeenCalledWith('/welcome');

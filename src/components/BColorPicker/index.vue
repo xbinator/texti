@@ -490,9 +490,9 @@ watch(
   width: 16px;
   height: 16px;
   cursor: pointer;
-  border: 1px solid var(--border-primary, #d9d9d9);
-  border-radius: 3px;
-  transition: transform 0.15s;
+  border: var(--control-border-width) solid var(--border-primary, #d9d9d9);
+  border-radius: var(--control-radius);
+  transition: transform var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .b-color-picker__preset-item:hover {
@@ -502,8 +502,8 @@ watch(
 .b-color-picker__panel {
   padding: 10px;
   background: var(--dropdown-bg);
-  border: 1px solid var(--border-primary);
-  border-radius: 4px;
+  border: var(--overlay-border-width) solid var(--border-primary);
+  border-radius: var(--overlay-radius);
   box-shadow: var(--shadow-md);
 }
 
@@ -541,7 +541,7 @@ watch(
 .b-color-picker__sv-cursor div {
   width: 4px;
   height: 4px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   box-shadow: 0 0 0 1.5px #fff, inset 0 0 1px 1px #0000004d, 0 0 1px 2px #0006;
   transform: translate(-2px, -2px);
 }
@@ -562,7 +562,7 @@ watch(
   height: 4px;
   cursor: pointer;
   background: #fff;
-  border: 1px solid #f0f0f0;
+  border: var(--control-border-width) solid var(--border-primary);
   box-shadow: 0 0 2px #0009;
   transform: translateY(-50%);
 }
@@ -585,7 +585,7 @@ watch(
   height: 100%;
   cursor: pointer;
   background: #fff;
-  border: 1px solid #f0f0f0;
+  border: var(--control-border-width) solid var(--border-primary);
   box-shadow: 0 0 2px #0009;
   transform: translateX(-50%);
 }
@@ -597,7 +597,7 @@ watch(
 .b-color-picker__color-trigger {
   width: 14px;
   height: 14px;
-  border: 1px solid var(--border-primary);
-  border-radius: 3px;
+  border: var(--control-border-width) solid var(--border-primary);
+  border-radius: var(--control-radius);
 }
 </style>

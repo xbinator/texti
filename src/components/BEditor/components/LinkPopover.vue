@@ -130,8 +130,8 @@ onBeforeUnmount((): void => {
   align-items: center;
   padding: 6px;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border: var(--overlay-border-width) solid var(--border-primary);
+  border-radius: var(--overlay-radius);
   box-shadow: var(--shadow-lg);
 }
 
@@ -143,8 +143,8 @@ onBeforeUnmount((): void => {
   color: var(--text-primary);
   outline: none;
   background: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-radius: 6px;
+  border: var(--control-border-width) solid var(--border-primary);
+  border-radius: var(--control-radius);
 
   &::placeholder {
     color: var(--text-tertiary);

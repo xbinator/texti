@@ -3,6 +3,7 @@
  * @description 预设工厂函数，从 BasePalette 基础色板派生完整的 ThemeTokens。
  */
 import type { ThemeTokens } from '../types/tokens';
+import { merge } from 'lodash-es';
 
 /**
  * 主题基础色板——预设作者唯一需要填写的结构。
@@ -47,6 +48,25 @@ export interface BasePalette {
 }
 
 /**
+ * 深度可选类型，用于主题预设只覆盖少量 Token。
+ */
+type PartialDeep<T> = T extends object
+  ? {
+      [K in keyof T]?: PartialDeep<T[K]>;
+    }
+  : T;
+
+/**
+ * 主题 Token 覆盖结构。
+ */
+export type ThemeTokenOverrides = PartialDeep<ThemeTokens>;
+
+/**
+ * 非颜色设计 Token 集合。
+ */
+type DesignTokens = Pick<ThemeTokens, 'radius' | 'borderWidth' | 'font' | 'motion' | 'control' | 'surface' | 'overlay' | 'interaction' | 'button'>;
+
+/**
  * 主题不变色——所有预设共享的常量。
  */
 const SHARED = {
@@ -57,6 +77,66 @@ const SHARED = {
   scrollbarLightActive: 'rgb(255 255 255 / 30%)',
   inputErrorText: '#f87171'
 } as const;
+
+/**
+ * 创建现代默认设计 Token。
+ * @returns 设计 Token 集合
+ */
+export function createDefaultDesignTokens(): DesignTokens {
+  return {
+    radius: {
+      none: '0',
+      xs: '4px',
+      sm: '6px',
+      md: '8px',
+      lg: '12px',
+      xl: '16px',
+      full: '9999px'
+    },
+    borderWidth: {
+      hairline: '1px',
+      thin: '1px',
+      strong: '2px'
+    },
+    font: {
+      sans: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      mono: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+      display: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+    },
+    motion: {
+      durationFast: '150ms',
+      durationBase: '200ms',
+      durationSlow: '300ms',
+      easingStandard: 'ease',
+      easingPress: 'ease'
+    },
+    control: {
+      radius: '6px',
+      borderWidth: '1px',
+      focusRingWidth: '2px'
+    },
+    surface: {
+      radius: '8px',
+      borderWidth: '1px'
+    },
+    overlay: {
+      radius: '8px',
+      borderWidth: '1px'
+    },
+    interaction: {
+      pressOffset: '0px',
+      raisedShadow: 'none',
+      pressedShadow: 'none'
+    },
+    button: {
+      border: 'transparent',
+      borderWidth: '0px',
+      shadow: 'none',
+      activeShadow: 'none',
+      pressedShadow: 'none'
+    }
+  };
+}
 
 /**
  * 生成透明叠加色值。
@@ -98,14 +178,15 @@ function overlay(hex: string, alpha: number): string {
  * @param mode - 明暗模式，影响透明叠加方向
  * @returns 完整的 ThemeTokens 对象
  */
-export function createThemeTokens(palette: BasePalette, mode: 'light' | 'dark'): ThemeTokens {
+export function createThemeTokens(palette: BasePalette, mode: 'light' | 'dark', overrides?: ThemeTokenOverrides): ThemeTokens {
   const isDark = mode === 'dark';
+  const designTokens = createDefaultDesignTokens();
   const fgOverlay = (a: number) => overlay(palette.fg0, a);
   const accentOverlay = (a: number) => overlay(palette.accent, a);
   const borderOverlay = (a: number) => overlay(palette.border, a);
   const bgOverlay = (a: number) => overlay(palette.bg0, a);
 
-  return {
+  const tokens: ThemeTokens = {
     bg: {
       primary: palette.bg0,
       secondary: palette.bg1,
@@ -282,10 +363,26 @@ export function createThemeTokens(palette: BasePalette, mode: 'light' | 'dark'):
       headerBg: palette.bg2
     },
     input: {
+      radius: designTokens.control.radius,
+      borderWidth: designTokens.control.borderWidth,
+      paddingInline: '12px',
+      paddingBlock: '4px',
+      gap: '8px',
+      fontFamily: designTokens.font.sans,
       bg: palette.bg2,
       border: palette.border,
       focusBorder: palette.accent,
       focusShadow: accentOverlay(isDark ? 0.12 : 0.2),
+      placeholderColor: fgOverlay(isDark ? 0.4 : 0.42),
+      iconColor: palette.fg2,
+      shadow: 'none',
+      activeShadow: `0 0 0 ${designTokens.control.focusRingWidth} ${accentOverlay(isDark ? 0.12 : 0.2)}`,
+      keycapSize: '24px',
+      keycapRadius: designTokens.radius.xs,
+      keycapBorderWidth: designTokens.borderWidth.hairline,
+      keycapBg: palette.bg0,
+      keycapColor: palette.fg1,
+      keycapShadow: 'none',
       errorText: SHARED.inputErrorText,
       errorBorder: palette.yellow,
       errorShadow: overlay(palette.yellow, 0.2)
@@ -322,6 +419,19 @@ export function createThemeTokens(palette: BasePalette, mode: 'light' | 'dark'):
       null: palette.fg2,
       edge: accentOverlay(0.82),
       edgeLabel: palette.fg0
-    }
+    },
+    ...designTokens
   };
+
+  return merge({}, tokens, overrides ?? {}) as ThemeTokens;
+}
+
+/**
+ * Creates a theme token object by applying partial overrides to an existing token object.
+ * @param baseTokens - Base theme tokens
+ * @param overrides - Partial token overrides
+ * @returns Merged theme tokens
+ */
+export function createThemeTokensFromBase(baseTokens: ThemeTokens, overrides?: ThemeTokenOverrides): ThemeTokens {
+  return merge({}, baseTokens, overrides ?? {}) as ThemeTokens;
 }

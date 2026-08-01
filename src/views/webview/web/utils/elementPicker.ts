@@ -23,6 +23,12 @@ export interface WebviewElementPickerTheme {
   toolbarHoverText?: string;
   /** 工具条阴影 */
   toolbarShadow?: string;
+  /** 高亮边框宽度 */
+  borderWidth?: string;
+  /** 选区面层圆角 */
+  surfaceRadius?: string;
+  /** 工具条控件圆角 */
+  controlRadius?: string;
 }
 
 /**
@@ -159,8 +165,13 @@ export function createElementSelectionScript(theme: WebviewElementPickerTheme = 
   const toolbarBackground = theme.toolbarBackground || pickerColor;
   const toolbarHoverText = theme.toolbarHoverText || 'rgba(255,255,255,.72)';
   const toolbarShadow = theme.toolbarShadow || 'none';
-  const borderStyle = JSON.stringify(`border:2px solid ${pickerBorder};`);
+  const pickerBorderWidth = theme.borderWidth || '2px';
+  const surfaceRadius = theme.surfaceRadius || '4px';
+  const controlRadius = theme.controlRadius || '3px';
+  const borderStyle = JSON.stringify(`border:${pickerBorderWidth} solid ${pickerBorder};`);
   const backgroundStyle = JSON.stringify(`background:${pickerBackground};`);
+  const surfaceRadiusStyle = JSON.stringify(`border-radius:${surfaceRadius};`);
+  const controlRadiusStyle = JSON.stringify(`border-radius:${controlRadius};`);
   const toolbarTextStyle = JSON.stringify(`color:${toolbarText};`);
   const toolbarBackgroundStyle = JSON.stringify(`background:${toolbarBackground};`);
   const toolbarHoverTextStyle = JSON.stringify(`color:${toolbarHoverText};`);
@@ -185,7 +196,7 @@ export function createElementSelectionScript(theme: WebviewElementPickerTheme = 
     ${borderStyle},
     ${backgroundStyle},
     'box-sizing:border-box;',
-    'border-radius:4px;',
+    ${surfaceRadiusStyle},
     '}',
     '.tibis-element-picker-selected{',
     'position:fixed;',
@@ -194,7 +205,7 @@ export function createElementSelectionScript(theme: WebviewElementPickerTheme = 
     ${borderStyle},
     'background:transparent;',
     'box-sizing:border-box;',
-    'border-radius:4px;',
+    ${surfaceRadiusStyle},
     '}',
     '.tibis-element-picker-toolbar{',
     'position:absolute;',
@@ -229,7 +240,7 @@ export function createElementSelectionScript(theme: WebviewElementPickerTheme = 
     'white-space:nowrap;',
     ${toolbarBackgroundStyle},
     ${toolbarShadowStyle},
-    'border-radius:3px;',
+    ${controlRadiusStyle},
     '}',
     '.tibis-element-picker-toolbar__actions{',
     'display:flex;',
@@ -241,7 +252,7 @@ export function createElementSelectionScript(theme: WebviewElementPickerTheme = 
     'box-sizing:border-box;',
     ${toolbarBackgroundStyle},
     ${toolbarShadowStyle},
-    'border-radius:3px;',
+    ${controlRadiusStyle},
     '}',
     '.tibis-element-picker-toolbar__action{',
     'display:inline-flex;',
@@ -260,7 +271,7 @@ export function createElementSelectionScript(theme: WebviewElementPickerTheme = 
     'cursor:pointer;',
     'background:transparent;',
     'border:0;',
-    'border-radius:3px;',
+    ${controlRadiusStyle},
     'transition:color 120ms ease,transform 120ms ease;',
     '}',
     '.tibis-element-picker-toolbar__action:active{',

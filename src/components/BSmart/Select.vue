@@ -224,9 +224,10 @@ watch(modelValue, (value: BSmartSelectValue): void => {
   color: var(--text-secondary);
   cursor: pointer;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 6px;
-  transition: all 0.2s ease;
+  border: var(--control-border-width) solid var(--border-primary);
+  border-radius: var(--control-radius);
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard),
+    border-color var(--motion-duration-base) var(--motion-easing-standard);
 }
 
 .b-smart-select__variable-button:hover,

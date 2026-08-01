@@ -1550,8 +1550,8 @@ onBeforeUnmount(() => {
   table-layout: fixed;
   border-spacing: 0;
   border-collapse: separate;
-  border: 1px solid var(--editor-table-border);
-  border-radius: 8px;
+  border: var(--surface-border-width) solid var(--editor-table-border);
+  border-radius: var(--surface-radius);
 }
 
 .b-markdown-table__table colgroup,
@@ -1597,7 +1597,7 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
   border: none;
   border-radius: 0;
-  transition: background 0.16s ease;
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .b-markdown-table__corner-control {
@@ -1607,15 +1607,15 @@ onBeforeUnmount(() => {
   pointer-events: none;
   background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
   border: none;
-  border-top-left-radius: 6px;
+  border-top-left-radius: var(--surface-radius);
 }
 
 .b-markdown-table__column-control.is-last {
-  border-top-right-radius: 6px;
+  border-top-right-radius: var(--surface-radius);
 }
 
 .b-markdown-table__row-control.is-last {
-  border-bottom-left-radius: 6px;
+  border-bottom-left-radius: var(--surface-radius);
 }
 
 .b-markdown-table__column-control:hover,
@@ -1638,7 +1638,7 @@ onBeforeUnmount(() => {
   z-index: 3;
   pointer-events: none;
   background: var(--color-primary);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary) 18%, transparent);
 }
 
@@ -1652,8 +1652,8 @@ onBeforeUnmount(() => {
   padding: 4px;
   pointer-events: auto;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border: var(--overlay-border-width) solid var(--border-primary);
+  border-radius: var(--overlay-radius);
   box-shadow: var(--shadow-lg);
 }
 
@@ -1680,9 +1680,10 @@ onBeforeUnmount(() => {
   background-position: center;
   background-size: 100% 100%;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   transform: translate(-50%, -50%);
-  transition: background 0.16s ease, background-image 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard), background-image var(--motion-duration-fast) var(--motion-easing-standard),
+    box-shadow var(--motion-duration-fast) var(--motion-easing-standard), transform var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .b-markdown-table__insert-point .b-markdown-table__button-icon {
@@ -1690,7 +1691,7 @@ onBeforeUnmount(() => {
   height: 14px;
   opacity: 0;
   transform: scale(0.78);
-  transition: opacity 0.16s ease, transform 0.16s ease;
+  transition: opacity var(--motion-duration-fast) var(--motion-easing-standard), transform var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .b-markdown-table__insert-point:hover,
@@ -1720,8 +1721,9 @@ onBeforeUnmount(() => {
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 6px;
-  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  border-radius: var(--control-radius);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard), color var(--motion-duration-fast) var(--motion-easing-standard),
+    transform var(--motion-duration-fast) var(--motion-easing-standard);
 
   &:hover,
   &.is-active {

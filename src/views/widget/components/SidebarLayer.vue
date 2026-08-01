@@ -610,7 +610,7 @@ function handleDraggableMove(event: BDraggableMoveEvent<SidebarLayerEntry>): voi
   margin-bottom: 4px;
   color: var(--text-quaternary);
   background: var(--bg-tertiary);
-  border-radius: 12px;
+  border-radius: var(--control-radius);
 }
 
 .sidebar-panel__layer-empty-text {
@@ -674,9 +674,10 @@ function handleDraggableMove(event: BDraggableMoveEvent<SidebarLayerEntry>): voi
   height: 32px;
   color: var(--text-secondary);
   background: var(--bg-secondary);
-  border: 1px solid transparent;
-  border-radius: 6px;
-  transition: all 0.16s ease;
+  border: var(--control-border-width) solid transparent;
+  border-radius: var(--control-radius);
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard), background var(--motion-duration-fast) var(--motion-easing-standard),
+    border-color var(--motion-duration-fast) var(--motion-easing-standard);
 
   &.is-active {
     color: var(--color-primary);
@@ -695,7 +696,7 @@ function handleDraggableMove(event: BDraggableMoveEvent<SidebarLayerEntry>): voi
   height: 2px;
   content: '';
   background: var(--color-primary);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
 }
 
 .sidebar-panel__layer-row.is-drop-before::before {
@@ -721,7 +722,7 @@ function handleDraggableMove(event: BDraggableMoveEvent<SidebarLayerEntry>): voi
   background: transparent;
   border: 0;
   opacity: 0.72;
-  transition: all 0.16s ease;
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard), opacity var(--motion-duration-fast) var(--motion-easing-standard);
 
   &:hover,
   &:focus-visible {
@@ -806,6 +807,6 @@ function handleDraggableMove(event: BDraggableMoveEvent<SidebarLayerEntry>): voi
   padding-right: 4px;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.16s ease;
+  transition: opacity var(--motion-duration-fast) var(--motion-easing-standard);
 }
 </style>

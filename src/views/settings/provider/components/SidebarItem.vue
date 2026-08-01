@@ -64,8 +64,8 @@ watch(
   font-size: 13px;
   color: var(--text-secondary);
   cursor: pointer;
-  border-radius: 6px;
-  transition: all 0.15s;
+  border-radius: var(--control-radius);
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard), background var(--motion-duration-fast) var(--motion-easing-standard);
 
   &:hover {
     color: var(--text-primary);
@@ -97,7 +97,7 @@ watch(
   width: 16px;
   height: 16px;
   object-fit: cover;
-  border-radius: 4px;
+  border-radius: var(--control-radius);
 }
 
 .item-label {
@@ -110,6 +110,6 @@ watch(
   font-size: 11px;
   color: var(--text-tertiary);
   background: var(--bg-secondary);
-  border-radius: 8px;
+  border-radius: var(--control-radius);
 }
 </style>

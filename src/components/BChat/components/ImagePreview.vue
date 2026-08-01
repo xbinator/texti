@@ -85,8 +85,8 @@ function handleRemoveImage(imageId: string): void {
   width: 60px;
   height: 60px;
   // overflow: hidden;
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
 
   &:hover {
     .image-preview-remove {
@@ -100,7 +100,7 @@ function handleRemoveImage(imageId: string): void {
   height: 100%;
   cursor: pointer;
   object-fit: cover;
-  border-radius: 8px;
+  border-radius: var(--surface-radius);
 }
 
 .image-preview-remove {
@@ -117,7 +117,7 @@ function handleRemoveImage(imageId: string): void {
   background: var(--color-primary);
   border-radius: 50%;
   opacity: 0;
-  transition: opacity 0.2s ease;
+  transition: opacity var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover {
     background: var(--color-primary-hover);

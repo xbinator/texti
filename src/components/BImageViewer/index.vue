@@ -459,7 +459,7 @@ onBeforeUnmount(() => {
   color: #fff;
   cursor: pointer;
   background: rgb(46 50 56 / 5%);
-  border-radius: 8px;
+  border-radius: var(--control-radius);
 }
 
 .b-image-viewer__button:hover {
@@ -487,7 +487,7 @@ onBeforeUnmount(() => {
 
 .b-image-viewer__fade-scale-enter-active,
 .b-image-viewer__fade-scale-leave-active {
-  transition: all 0.3s ease;
+  transition: opacity var(--motion-duration-slow) var(--motion-easing-standard), transform var(--motion-duration-slow) var(--motion-easing-standard);
 }
 
 .b-image-viewer__fade-scale-enter-from,

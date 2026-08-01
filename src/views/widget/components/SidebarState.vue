@@ -159,7 +159,7 @@ function handleSchemaModeChange(value: string | number): void {
 .schema-help-icon {
   color: var(--text-tertiary);
   cursor: pointer;
-  transition: color 0.15s ease;
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .schema-help-icon:hover,

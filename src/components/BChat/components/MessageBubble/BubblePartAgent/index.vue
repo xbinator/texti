@@ -768,8 +768,8 @@ onScopeDispose((): void => {
   font-size: 12px;
   color: var(--text-secondary);
   background: var(--bg-secondary);
-  border: 1px dashed var(--border-primary);
-  border-radius: 8px;
+  border: var(--surface-border-width) dashed var(--border-primary);
+  border-radius: var(--surface-radius);
 }
 
 .b-agent-task-card__protocol-error {

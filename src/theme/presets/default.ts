@@ -3,6 +3,7 @@
  * @description 默认主题预设，从原 tokens.ts 迁移 light/dark 色值。
  */
 import type { ThemeTokens } from '../types/tokens';
+import { createDefaultDesignTokens } from '../core/factory';
 import { registerPreset } from '../core/registry';
 
 /**
@@ -197,10 +198,26 @@ const defaultLight: ThemeTokens = {
     headerBg: '#f8f9fa'
   },
   input: {
+    radius: '6px',
+    borderWidth: '1px',
+    paddingInline: '12px',
+    paddingBlock: '4px',
+    gap: '8px',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     bg: '#fffdf8',
     border: '#d8d0c2',
     focusBorder: '#8a6f5a',
     focusShadow: 'rgb(138 111 90 / 20%)',
+    placeholderColor: '#938b84',
+    iconColor: '#8a837d',
+    shadow: 'none',
+    activeShadow: '0 0 0 2px rgb(138 111 90 / 20%)',
+    keycapSize: '24px',
+    keycapRadius: '4px',
+    keycapBorderWidth: '1px',
+    keycapBg: '#fffdf8',
+    keycapColor: '#6b6560',
+    keycapShadow: 'none',
     errorText: SHARED.inputErrorText,
     errorBorder: '#f59e0b',
     errorShadow: 'rgb(245 158 11 / 20%)'
@@ -237,7 +254,8 @@ const defaultLight: ThemeTokens = {
     null: '#8a837d',
     edge: 'rgb(138 111 90 / 82%)',
     edgeLabel: '#1a1a1a'
-  }
+  },
+  ...createDefaultDesignTokens()
 };
 
 /**
@@ -419,10 +437,26 @@ const defaultDark: ThemeTokens = {
     headerBg: '#232323'
   },
   input: {
+    radius: '6px',
+    borderWidth: '1px',
+    paddingInline: '12px',
+    paddingBlock: '4px',
+    gap: '8px',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     bg: '#0d0f12',
     border: '#2a303d',
     focusBorder: '#c8a98b',
     focusShadow: 'rgb(200 169 139 / 12%)',
+    placeholderColor: '#4a5264',
+    iconColor: '#5a6272',
+    shadow: 'none',
+    activeShadow: '0 0 0 2px rgb(200 169 139 / 12%)',
+    keycapSize: '24px',
+    keycapRadius: '4px',
+    keycapBorderWidth: '1px',
+    keycapBg: '#13151a',
+    keycapColor: '#7a8494',
+    keycapShadow: 'none',
     errorText: SHARED.inputErrorText,
     errorBorder: '#f59e0b',
     errorShadow: 'rgb(245 158 11 / 20%)'
@@ -459,7 +493,8 @@ const defaultDark: ThemeTokens = {
     null: '#9ca3af',
     edge: 'rgb(200 169 139 / 82%)',
     edgeLabel: '#f3efe8'
-  }
+  },
+  ...createDefaultDesignTokens()
 };
 
 /**

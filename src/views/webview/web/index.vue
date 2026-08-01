@@ -88,6 +88,18 @@ const webview = useWebView(webviewElementRef);
 const deviceMode = useDeviceMode();
 const cacheControl = useCacheControl(webviewElementRef);
 
+/**
+ * 读取当前主题 CSS 变量。
+ * @param style - 当前根元素计算样式
+ * @param name - CSS 变量名
+ * @param fallback - 变量不存在时的兜底值
+ * @returns CSS 变量值
+ */
+function readThemeVariable(style: CSSStyleDeclaration, name: string, fallback: string): string {
+  const value = style.getPropertyValue(name).trim();
+  return value || fallback;
+}
+
 webviewToolContextRegistry.register(routeFullPath, {
   readPageSnapshot: webview.readPageSnapshot,
   operatePage: webview.operatePage
@@ -281,6 +293,8 @@ function handleSelectDevicePreset(presetKey: WebviewDevicePresetKey): void {
  */
 function resolveElementPickerTheme(): WebviewElementPickerTheme {
   const colors = resolveRuntimeThemeColors();
+  const style = getComputedStyle(document.documentElement);
+
   return {
     color: colors.primary,
     background: colors.primaryBg,
@@ -288,7 +302,10 @@ function resolveElementPickerTheme(): WebviewElementPickerTheme {
     toolbarText: colors.primary,
     toolbarBackground: colors.primarySolidBg,
     toolbarHoverText: colors.primaryHover,
-    toolbarShadow: 'none'
+    toolbarShadow: 'none',
+    borderWidth: readThemeVariable(style, '--overlay-border-width', '2px'),
+    surfaceRadius: readThemeVariable(style, '--surface-radius', '4px'),
+    controlRadius: readThemeVariable(style, '--control-radius', '3px')
   };
 }
 
@@ -433,7 +450,8 @@ onBeforeUnmount(() => {
   height: 100%;
   overflow: hidden;
   background: var(--bg-primary);
-  border-radius: 8px;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
 }
 
 .webview-main {
@@ -471,7 +489,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   background: var(--bg-primary);
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--surface-radius);
 }
 
 .webview-content--framed .webview-viewport {
@@ -490,16 +508,20 @@ onBeforeUnmount(() => {
   padding: 12px;
   pointer-events: none;
   border-radius: inherit;
+
+  --webview-agent-ring-shadow: 0 0 0 var(--overlay-border-width)
+      color-mix(in srgb, var(--color-warning-border, var(--color-warning, var(--color-primary))) 48%, transparent),
+    0 0 22px color-mix(in srgb, var(--color-warning, var(--color-primary)) 42%, transparent);
+  --webview-agent-dot-shadow: 0 0 0 calc(var(--overlay-border-width) * 2) color-mix(in srgb, var(--color-warning, var(--color-primary)) 18%, transparent);
 }
 
 .webview-agent-activity::before {
   position: absolute;
   inset: 0;
   content: '';
-  border: 2px solid var(--color-warning, var(--color-primary));
+  border: var(--overlay-border-width) solid var(--color-warning, var(--color-primary));
   border-radius: inherit;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-warning-border, var(--color-warning, var(--color-primary))) 48%, transparent),
-    0 0 22px color-mix(in srgb, var(--color-warning, var(--color-primary)) 42%, transparent);
+  box-shadow: var(--webview-agent-ring-shadow);
   animation: webview-agent-activity-breathe 1.6s ease-in-out infinite;
 }
 
@@ -516,9 +538,9 @@ onBeforeUnmount(() => {
   line-height: 18px;
   color: var(--color-warning, var(--color-primary));
   background: color-mix(in srgb, var(--color-warning-bg, var(--color-primary-bg)) 82%, var(--bg-primary));
-  border: 1px solid color-mix(in srgb, var(--color-warning-border, var(--color-warning, var(--color-primary))) 78%, transparent);
-  border-radius: 8px;
-  box-shadow: 0 10px 26px rgb(0 0 0 / 12%);
+  border: var(--overlay-border-width) solid color-mix(in srgb, var(--color-warning-border, var(--color-warning, var(--color-primary))) 78%, transparent);
+  border-radius: var(--overlay-radius);
+  box-shadow: var(--shadow-lg);
   backdrop-filter: blur(10px);
 }
 
@@ -527,8 +549,8 @@ onBeforeUnmount(() => {
   width: 8px;
   height: 8px;
   background: var(--color-warning, var(--color-primary));
-  border-radius: 50%;
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-warning, var(--color-primary)) 18%, transparent);
+  border-radius: var(--radius-full);
+  box-shadow: var(--webview-agent-dot-shadow);
   animation: webview-agent-activity-dot 1.2s ease-in-out infinite;
 }
 
@@ -541,8 +563,10 @@ onBeforeUnmount(() => {
 
 .webview-agent-activity--success::before {
   border-color: var(--color-success, var(--color-primary));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-success, var(--color-primary)) 48%, transparent),
+
+  --webview-agent-ring-shadow: 0 0 0 var(--overlay-border-width) color-mix(in srgb, var(--color-success, var(--color-primary)) 48%, transparent),
     0 0 22px color-mix(in srgb, var(--color-success, var(--color-primary)) 42%, transparent);
+
   animation-duration: 900ms;
 }
 
@@ -554,13 +578,17 @@ onBeforeUnmount(() => {
 
 .webview-agent-activity--success .webview-agent-activity__dot {
   background: var(--color-success, var(--color-primary));
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-success, var(--color-primary)) 18%, transparent);
+
+  --webview-agent-dot-shadow: 0 0 0 calc(var(--overlay-border-width) * 2) color-mix(in srgb, var(--color-success, var(--color-primary)) 18%, transparent);
+
   animation-duration: 900ms;
 }
 
 .webview-agent-activity--error::before {
   border-color: var(--color-error, var(--color-danger));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-danger, var(--color-error, var(--color-primary))) 48%, transparent),
+
+  --webview-agent-ring-shadow: 0 0 0 var(--overlay-border-width)
+      color-mix(in srgb, var(--color-danger, var(--color-error, var(--color-primary))) 48%, transparent),
     0 0 22px color-mix(in srgb, var(--color-error, var(--color-danger)) 42%, transparent);
 }
 
@@ -572,7 +600,8 @@ onBeforeUnmount(() => {
 
 .webview-agent-activity--error .webview-agent-activity__dot {
   background: var(--color-error, var(--color-danger));
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-error, var(--color-danger)) 18%, transparent);
+
+  --webview-agent-dot-shadow: 0 0 0 calc(var(--overlay-border-width) * 2) color-mix(in srgb, var(--color-error, var(--color-danger)) 18%, transparent);
 }
 
 @keyframes webview-agent-activity-breathe {

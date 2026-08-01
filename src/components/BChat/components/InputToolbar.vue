@@ -159,7 +159,8 @@ defineExpose({
   min-width: 0;
   height: 28px;
   overflow: hidden;
-  border-radius: 18px;
+  border-radius: var(--control-radius);
+  transition: background var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover,
   &:focus-within {
@@ -215,12 +216,12 @@ defineExpose({
   padding: 0;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.16s ease;
+  transition: opacity var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .chat-input-toolbar__workspace-folder {
   flex: 0 0 16px;
-  transition: opacity 0.16s ease;
+  transition: opacity var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .action-buttons {

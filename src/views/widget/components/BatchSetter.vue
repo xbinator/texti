@@ -373,7 +373,7 @@ function emitCommand(command: MultiSelectCommand): void {
   line-height: 1.5;
   color: var(--text-secondary);
   background: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-radius: 6px;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
 }
 </style>

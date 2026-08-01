@@ -418,9 +418,10 @@ watch(
   color: var(--text-secondary);
   cursor: pointer;
   background: var(--bg-secondary);
-  border: 1px dashed var(--border-secondary);
-  border-radius: 8px;
-  transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+  border: var(--surface-border-width) dashed var(--border-secondary);
+  border-radius: var(--surface-radius);
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard),
+    border-color var(--motion-duration-base) var(--motion-easing-standard);
 }
 
 .widget-creator__dropzone:hover,
@@ -452,10 +453,10 @@ watch(
 
 .widget-creator__badge {
   padding: 2px 8px;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--color-primary);
   background: var(--color-primary-bg, rgb(var(--color-primary-rgb) / 8%));
-  border-radius: 4px;
+  border-radius: var(--control-radius);
 }
 </style>

@@ -3,6 +3,7 @@
  * @description Graphite 柔和黑白主题预设，模拟白色工作区与浅灰产品外壳的界面层级。
  */
 import type { ThemeTokens } from '../types/tokens';
+import { createDefaultDesignTokens } from '../core/factory';
 import { registerPreset } from '../core/registry';
 
 /**
@@ -196,10 +197,26 @@ const graphiteLight: ThemeTokens = {
     headerBg: '#f7f7f7'
   },
   input: {
+    radius: '6px',
+    borderWidth: '1px',
+    paddingInline: '12px',
+    paddingBlock: '4px',
+    gap: '8px',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     bg: '#ffffff',
     border: '#d6d6d6',
     focusBorder: '#1f1f1f',
     focusShadow: 'rgb(31 31 31 / 14%)',
+    placeholderColor: '#ababab',
+    iconColor: '#8a8a8a',
+    shadow: 'none',
+    activeShadow: '0 0 0 2px rgb(31 31 31 / 14%)',
+    keycapSize: '24px',
+    keycapRadius: '4px',
+    keycapBorderWidth: '1px',
+    keycapBg: '#ffffff',
+    keycapColor: '#5f5f5f',
+    keycapShadow: 'none',
     errorText: SHARED.inputErrorText,
     errorBorder: '#9a6b1f',
     errorShadow: 'rgb(154 107 31 / 18%)'
@@ -236,7 +253,8 @@ const graphiteLight: ThemeTokens = {
     null: '#8a8a8a',
     edge: 'rgb(31 31 31 / 72%)',
     edgeLabel: '#262626'
-  }
+  },
+  ...createDefaultDesignTokens()
 };
 
 /**
@@ -419,10 +437,26 @@ const graphiteDark: ThemeTokens = {
     headerBg: '#222222'
   },
   input: {
+    radius: '6px',
+    borderWidth: '1px',
+    paddingInline: '12px',
+    paddingBlock: '4px',
+    gap: '8px',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     bg: '#1f1f1f',
     border: '#3a3a3a',
     focusBorder: '#f5f5f5',
     focusShadow: 'rgb(245 245 245 / 14%)',
+    placeholderColor: '#777777',
+    iconColor: '#8f8f8f',
+    shadow: 'none',
+    activeShadow: '0 0 0 2px rgb(245 245 245 / 14%)',
+    keycapSize: '24px',
+    keycapRadius: '4px',
+    keycapBorderWidth: '1px',
+    keycapBg: '#121212',
+    keycapColor: '#c6c6c6',
+    keycapShadow: 'none',
     errorText: SHARED.inputErrorText,
     errorBorder: '#d2b36d',
     errorShadow: 'rgb(210 179 109 / 20%)'
@@ -459,7 +493,8 @@ const graphiteDark: ThemeTokens = {
     null: '#8f8f8f',
     edge: 'rgb(245 245 245 / 72%)',
     edgeLabel: '#e8e8e8'
-  }
+  },
+  ...createDefaultDesignTokens()
 };
 
 /**

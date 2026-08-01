@@ -89,7 +89,7 @@ function handleTitleClick(): void {
 
 .collapse-icon {
   color: var(--text-tertiary);
-  transition: transform 0.2s ease;
+  transition: transform var(--motion-duration-base) var(--motion-easing-standard);
 }
 
 .section-title {
@@ -120,8 +120,8 @@ function handleTitleClick(): void {
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 4px;
-  transition: all 0.15s;
+  border-radius: var(--control-radius);
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard), background var(--motion-duration-fast) var(--motion-easing-standard);
 
   &:hover {
     color: var(--text-primary);

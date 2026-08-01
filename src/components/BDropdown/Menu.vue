@@ -164,8 +164,8 @@ export default Menu;
   padding: 4px;
   line-height: 32px;
   background: var(--dropdown-bg);
-  border: 1px solid var(--dropdown-border);
-  border-radius: 6px;
+  border: var(--overlay-border-width) solid var(--dropdown-border);
+  border-radius: var(--overlay-radius);
 }
 
 .b-dropdown-menu-item {
@@ -174,7 +174,7 @@ export default Menu;
   padding: 0 8px;
   color: var(--text-primary);
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
 }
 
 .b-dropdown-menu-item:hover {

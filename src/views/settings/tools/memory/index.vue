@@ -105,7 +105,7 @@ function startEdit(): void {
   justify-content: space-between;
   min-height: 56px;
   padding: 0 16px;
-  transition: background 0.2s ease;
+  transition: background var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover,
   &:focus-within {

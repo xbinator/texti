@@ -281,9 +281,10 @@ function handleTargetValueUpdate(target: ControlPanelTarget, value: ValueType): 
   color: var(--text-secondary);
   cursor: pointer;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 4px;
-  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+  border: var(--control-border-width) solid var(--border-primary);
+  border-radius: var(--control-radius);
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard), background var(--motion-duration-fast) var(--motion-easing-standard),
+    border-color var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .control-panel__toggle:hover,

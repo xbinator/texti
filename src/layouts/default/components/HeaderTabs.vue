@@ -209,6 +209,17 @@ function handleWheel(event: WheelEvent): void {
   -webkit-app-region: no-drag;
 }
 
+.header-tabs :deep(.header-tab) {
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard),
+    border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard),
+    opacity var(--motion-duration-base) var(--motion-easing-standard), transform var(--motion-duration-fast) var(--motion-easing-press);
+}
+
+.header-tabs :deep(.header-tab:active:not(.is-dragging)) {
+  box-shadow: var(--button-pressed-shadow);
+  transform: translate(var(--interaction-press-offset), var(--interaction-press-offset));
+}
+
 .header-tabs :deep(.b-draggable__indicator--horizontal) {
   top: 4px;
   bottom: 4px;

@@ -141,7 +141,7 @@ defineExpose({
   padding: 6px;
   overflow-y: auto;
   background: var(--dropdown-bg);
-  border-radius: 8px;
+  border-radius: var(--overlay-radius);
   box-shadow: var(--shadow-dropdown);
 }
 
@@ -171,8 +171,8 @@ defineExpose({
   height: 32px;
   padding: 0 8px;
   cursor: pointer;
-  border-radius: 6px;
-  transition: background 0.15s ease;
+  border-radius: var(--control-radius);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
 
   &:hover {
     background: var(--bg-hover);

@@ -48,6 +48,15 @@ describe('HeaderTabs drag region structure', (): void => {
     expect(getStyleBlock(headerTabSource, '.header-tab')).not.toContain('margin-right: 4px;');
   });
 
+  it('adds pressed motion to rendered HeaderTab items', (): void => {
+    const tabRule = getStyleBlock(headerTabsSource, '.header-tabs :deep(.header-tab)');
+    const pressedRule = getStyleBlock(headerTabsSource, '.header-tabs :deep(.header-tab:active:not(.is-dragging))');
+
+    expect(tabRule).toContain('transform var(--motion-duration-fast) var(--motion-easing-press)');
+    expect(pressedRule).toContain('box-shadow: var(--button-pressed-shadow);');
+    expect(pressedRule).toContain('transform: translate(var(--interaction-press-offset), var(--interaction-press-offset));');
+  });
+
   it('uses a single HeaderTabMenu instead of per-tab dropdown wrappers', (): void => {
     expect(headerTabsSource).toContain('HeaderTabMenu');
     expect(headerTabsSource).not.toContain('<BDropdown');

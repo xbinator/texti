@@ -93,7 +93,7 @@ async function handleImageCopyClick(event: MouseEvent): Promise<void> {
   margin: 0.75em 0;
   line-height: 0;
   vertical-align: top;
-  border-radius: 4px;
+  border-radius: var(--surface-radius);
 }
 
 .b-markdown-image__img {
@@ -102,7 +102,7 @@ async function handleImageCopyClick(event: MouseEvent): Promise<void> {
   cursor: zoom-in;
   user-select: none;
   -webkit-user-drag: none;
-  border-radius: 4px;
+  border-radius: var(--surface-radius);
 }
 
 .b-markdown-image__copy {
@@ -119,9 +119,10 @@ async function handleImageCopyClick(event: MouseEvent): Promise<void> {
   cursor: pointer;
   background: var(--bg-primary);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   opacity: 0;
-  transition: opacity 0.16s ease, color 0.16s ease, background 0.16s ease;
+  transition: opacity var(--motion-duration-fast) var(--motion-easing-standard), color var(--motion-duration-fast) var(--motion-easing-standard),
+    background var(--motion-duration-fast) var(--motion-easing-standard);
 
   &:hover,
   &:focus-visible {
@@ -146,8 +147,8 @@ async function handleImageCopyClick(event: MouseEvent): Promise<void> {
   font-size: 13px;
   color: var(--text-tertiary);
   background: var(--bg-tertiary);
-  border: 1px dashed var(--border-secondary);
-  border-radius: 4px;
+  border: var(--surface-border-width) dashed var(--border-secondary);
+  border-radius: var(--surface-radius);
 }
 
 .b-markdown-image.is-selected {

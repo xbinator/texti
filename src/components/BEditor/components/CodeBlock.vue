@@ -513,10 +513,11 @@ onUnmounted(() => {
   margin: 0.75em 0;
   overflow: hidden;
   background: var(--code-bg);
-  border: 1px solid var(--code-border);
-  border-radius: 6px;
+  border: var(--surface-border-width) solid var(--code-border);
+  border-radius: var(--surface-radius);
   box-shadow: var(--shadow-sm);
-  transition: all 0.2s ease;
+  transition: border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard),
+    background var(--motion-duration-base) var(--motion-easing-standard);
 
   &.is-collapsed {
     .b-markdown-codeblock__body-wrapper {
@@ -554,8 +555,8 @@ onUnmounted(() => {
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 4px;
-  transition: all 0.2s ease;
+  border-radius: var(--control-radius);
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover {
     color: var(--code-text);
@@ -596,8 +597,8 @@ onUnmounted(() => {
   color: var(--code-text);
   cursor: pointer;
   background: transparent;
-  border-radius: 4px;
-  transition: all 0.2s ease;
+  border-radius: var(--control-radius);
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover {
     background: var(--code-line-bg);

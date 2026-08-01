@@ -136,8 +136,8 @@ function formatShortcutAriaLabel(shortcut: string): string {
   height: 28px;
   color: var(--color-primary);
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 6px;
+  border: var(--control-border-width) solid var(--border-primary);
+  border-radius: var(--control-radius);
 }
 
 .shortcuts-help__group {
@@ -177,8 +177,8 @@ function formatShortcutAriaLabel(shortcut: string): string {
 .shortcuts-help__list {
   overflow: hidden;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border: var(--overlay-border-width) solid var(--border-primary);
+  border-radius: var(--overlay-radius);
 }
 
 .shortcuts-help__item {
@@ -189,8 +189,8 @@ function formatShortcutAriaLabel(shortcut: string): string {
   min-height: 40px;
   padding: 8px 10px 8px 12px;
   outline: none;
-  border-bottom: 1px solid var(--border-secondary);
-  transition: background 0.15s ease, box-shadow 0.15s ease;
+  border-bottom: var(--overlay-border-width) solid var(--border-secondary);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard), box-shadow var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .shortcuts-help__item:last-child {
@@ -231,17 +231,17 @@ function formatShortcutAriaLabel(shortcut: string): string {
   min-width: 25px;
   height: 23px;
   padding: 0 7px;
-  font-family: 'Fira Code', 'JetBrains Mono', Consolas, Monaco, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 650;
   line-height: 1;
   color: var(--text-primary);
   letter-spacing: 0;
   background: linear-gradient(180deg, var(--bg-primary), var(--bg-secondary));
-  border: 1px solid var(--border-primary);
+  border: var(--control-border-width) solid var(--border-primary);
   border-bottom-color: color-mix(in srgb, var(--border-primary) 65%, var(--text-tertiary));
-  border-bottom-width: 2px;
-  border-radius: 5px;
+  border-bottom-width: var(--control-border-width);
+  border-radius: var(--control-radius);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 8%), 0 1px 1px rgb(0 0 0 / 6%);
 }
 </style>

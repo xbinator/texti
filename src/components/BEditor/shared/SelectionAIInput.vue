@@ -450,10 +450,10 @@ onBeforeUnmount(() => {
 // ---- 预览确认区 ----
 .b-markdown-selai__preview {
   background: var(--bg-primary);
-  border: 1px solid var(--border-secondary);
-  border-radius: 8px;
+  border: var(--overlay-border-width) solid var(--border-secondary);
+  border-radius: var(--overlay-radius);
   box-shadow: var(--shadow-lg);
-  transition: border-color 0.2s;
+  transition: border-color var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover {
     border-color: var(--border-primary);

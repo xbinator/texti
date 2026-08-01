@@ -6,7 +6,11 @@
   <BModal v-model:open="visible" :mask-closable="true" :width="560" :main-style="{ padding: '10px 0 0 10px' }" @close="closePanel">
     <div :class="bem()">
       <div ref="inputRef" :class="bem('toolbar')">
-        <AInput v-model:value="keyword" placeholder="搜索..." @keydown="handleKeydown" />
+        <div :class="bem('search-shell')">
+          <BIcon :class="bem('search-icon')" icon="lucide:search" :size="20" />
+          <AInput v-model:value="keyword" :bordered="false" :class="bem('search-input')" placeholder="搜索..." @keydown="handleKeydown" />
+          <span :class="bem('search-keycap')" aria-hidden="true">/</span>
+        </div>
       </div>
 
       <BScrollbar max-height="420px" inset="vertical">
@@ -446,10 +450,72 @@ watch([visible, scope], ([nextVisible]): void => {
   padding-right: 10px;
 }
 
-.b-command-panel__toolbar :deep(.ant-input) {
+.b-command-panel__search-shell {
+  display: flex;
+  flex: 1;
+  gap: var(--input-gap);
+  align-items: center;
+  min-width: 0;
   min-height: 36px;
-  padding: 6px 10px;
-  border-radius: 8px;
+  padding: var(--input-padding-block) var(--input-padding-inline);
+  color: var(--text-primary);
+  background: var(--input-bg);
+  border: var(--input-border-width) solid var(--input-border);
+  border-radius: var(--input-radius);
+  box-shadow: var(--input-shadow);
+  transition: border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard),
+    background var(--motion-duration-base) var(--motion-easing-standard);
+}
+
+.b-command-panel__search-shell:focus-within {
+  border-color: var(--input-focus-border);
+  box-shadow: var(--input-active-shadow);
+}
+
+.b-command-panel__search-icon {
+  flex-shrink: 0;
+  color: var(--input-icon-color);
+}
+
+.b-command-panel__search-input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--input-font-family);
+}
+
+.b-command-panel__search-shell :deep(.ant-input) {
+  min-height: 0;
+  padding: 0;
+  font-family: var(--input-font-family);
+  font-size: 16px;
+  color: var(--text-primary);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.b-command-panel__search-shell :deep(.ant-input::placeholder) {
+  color: var(--input-placeholder-color);
+  opacity: 1;
+}
+
+.b-command-panel__search-keycap {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--input-keycap-size);
+  height: var(--input-keycap-size);
+  padding: 0 8px;
+  font-family: var(--input-font-family);
+  font-size: 18px;
+  line-height: 1;
+  color: var(--input-keycap-color);
+  background: var(--input-keycap-bg);
+  border: var(--input-keycap-border-width) solid var(--input-border);
+  border-radius: var(--input-keycap-radius);
+  box-shadow: var(--input-keycap-shadow);
 }
 
 .b-command-panel__list {
@@ -480,8 +546,8 @@ watch([visible, scope], ([nextVisible]): void => {
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 8px;
-  transition: background 0.15s, border-color 0.15s;
+  border-radius: var(--control-radius);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard), border-color var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .b-command-panel__item:hover,
@@ -555,8 +621,8 @@ watch([visible, scope], ([nextVisible]): void => {
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 4px;
-  transition: background 0.15s, color 0.15s;
+  border-radius: var(--control-radius);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard), color var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .b-command-panel__item-delete:hover {

@@ -96,21 +96,30 @@ const statusVisual = computed<StatusVisual | undefined>(() => (props.status ? ST
   align-items: center;
   height: 28px;
   padding: 0 4px 0 10px;
+  color: var(--text-primary);
   cursor: pointer;
-  background: transparent;
-  border-radius: 6px;
-  transition: background 0.2s, opacity 0.2s;
+  background: var(--bg-secondary);
+  border: var(--button-border-width) solid var(--button-border);
+  border-radius: var(--control-radius);
+  box-shadow: var(--button-shadow);
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard),
+    border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard),
+    opacity var(--motion-duration-base) var(--motion-easing-standard);
 
   /* Ensure tabs themselves are clickable (not draggable) */
   -webkit-app-region: no-drag;
 
   &:hover {
     background: var(--bg-hover);
+    border-color: var(--input-focus-border);
+    box-shadow: var(--button-active-shadow);
   }
 
   &.is-active {
     font-weight: 500;
     background: var(--bg-active, var(--bg-hover));
+    border-color: var(--input-focus-border);
+    box-shadow: var(--button-active-shadow);
   }
 
   &.is-dragging {
@@ -167,7 +176,7 @@ const statusVisual = computed<StatusVisual | undefined>(() => (props.status ? ST
   width: 7px;
   height: 7px;
   background: var(--color-primary);
-  border-radius: 50%;
+  border-radius: var(--radius-full);
 }
 
 .header-tab__icon {
@@ -193,9 +202,10 @@ const statusVisual = computed<StatusVisual | undefined>(() => (props.status ? ST
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--control-radius);
   opacity: 0;
-  transition: all 0.2s;
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard),
+    opacity var(--motion-duration-base) var(--motion-easing-standard);
 
   &:hover {
     color: var(--text-primary);
