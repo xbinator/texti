@@ -175,12 +175,12 @@ const BubblePartToolOrderStub = defineComponent({
   template: '<div class="order-tool">{{ part.result.data.marker }}</div>'
 });
 
-/** 顺序测试用 Child Agent Task 片段替身。 */
+/** 顺序测试用 Child Agent 片段替身。 */
 let agentTaskStubInstance = 0;
 
-/** 顺序测试用 Child Agent Task 片段替身。 */
-const BubblePartAgentTaskOrderStub = defineComponent({
-  name: 'BubblePartAgentTask',
+/** 顺序测试用 Child Agent 片段替身。 */
+const BubblePartAgentOrderStub = defineComponent({
+  name: 'BubblePartAgent',
   props: {
     sessionId: {
       type: String,
@@ -474,7 +474,7 @@ function mountOrderedMessageBubble(message: Message): VueWrapper {
         BBubble: BBubbleStub,
         BButton: BButtonStub,
         BIcon: true,
-        BubblePartAgentTask: BubblePartAgentTaskOrderStub,
+        BubblePartAgent: BubblePartAgentOrderStub,
         BubblePartText: BubblePartTextOrderStub,
         BubblePartTool: BubblePartToolOrderStub
       }
@@ -590,7 +590,7 @@ describe('MessageBubble', (): void => {
     });
     const wrapper = mountOrderedMessageBubble(message);
     const content = wrapper.get('.message-bubble__parts').text();
-    const agentTask = wrapper.getComponent(BubblePartAgentTaskOrderStub);
+    const agentTask = wrapper.getComponent(BubblePartAgentOrderStub);
 
     expect(content.indexOf('before agent')).toBeLessThan(content.indexOf('delegated task'));
     expect(content.indexOf('delegated task')).toBeLessThan(content.indexOf('generic tool'));
@@ -648,7 +648,7 @@ describe('MessageBubble', (): void => {
       })
     );
 
-    expect(wrapper.findAllComponents(BubblePartAgentTaskOrderStub)).toHaveLength(1);
+    expect(wrapper.findAllComponents(BubblePartAgentOrderStub)).toHaveLength(1);
     expect(wrapper.findAllComponents(BubblePartToolOrderStub)).toHaveLength(1);
     expect(wrapper.findComponent({ name: 'QuestionCard' }).exists()).toBe(false);
   });

@@ -20,6 +20,8 @@ const routeMock = vi.hoisted(() => ({
 
 /** router.push mock。 */
 const routerPushMock = vi.hoisted(() => vi.fn<(path: string) => Promise<void>>().mockResolvedValue(undefined));
+/** ChatSider 暴露的动画启动方法 mock。 */
+const chatSiderStartMotionMock = vi.hoisted(() => vi.fn<(nextVisible: boolean) => void>());
 
 vi.mock('vue-router', async () => {
   const actual = await vi.importActual<typeof import('vue-router')>('vue-router');
@@ -65,6 +67,13 @@ vi.mock('@/components/BCommandPanel/index.vue', () => ({
 vi.mock('@/layouts/default/components/ChatSider.vue', () => ({
   default: {
     name: 'ChatSider',
+    setup(_props: unknown, { expose }: { expose: (exposed: { startMotion: (nextVisible: boolean) => void }) => void }) {
+      expose({
+        startMotion: chatSiderStartMotionMock
+      });
+
+      return {};
+    },
     template: '<aside />'
   }
 }));
@@ -160,14 +169,17 @@ const BButtonStub = defineComponent({
 });
 
 /**
- * ChatSider 测试替身，暴露动画属性与内部按钮关闭事件。
+ * ChatSider 测试替身，暴露父布局通过 ref 调用的动画方法。
  */
 const ChatSiderStub = defineComponent({
   name: 'ChatSider',
-  props: {
-    motionEnabled: { type: Boolean, default: false }
+  setup(_props: unknown, { expose }: { expose: (exposed: { startMotion: (nextVisible: boolean) => void }) => void }) {
+    expose({
+      startMotion: chatSiderStartMotionMock
+    });
+
+    return {};
   },
-  emits: ['button-close', 'resize-start'],
   template: '<aside class="chat-sider-stub"></aside>'
 });
 
@@ -267,6 +279,7 @@ describe('Default layout settings button', (): void => {
     setActivePinia(createPinia());
     routeMock.fullPath = '/welcome';
     routerPushMock.mockClear();
+    chatSiderStartMotionMock.mockClear();
   });
 
   it('does not navigate again when the current route is already inside settings', async (): Promise<void> => {
@@ -324,82 +337,64 @@ describe('Default layout settings button', (): void => {
     expect(routerPushMock).toHaveBeenCalledWith('/settings');
   });
 
-  it('enables temporary motion when the top sidebar button toggles visibility', async (): Promise<void> => {
-    vi.useFakeTimers();
+  it('starts ChatSider motion when the top sidebar button opens it', async (): Promise<void> => {
     const settingStore = useSettingStore();
     settingStore.setSidebarVisible(false);
     const wrapper = mountDefaultLayout();
-    const chatSider = wrapper.findComponent(ChatSiderStub);
 
     await getSidebarButton(wrapper).trigger('click');
     await nextTick();
 
     expect(settingStore.sidebarVisible).toBe(true);
-    expect(chatSider.props('motionEnabled')).toBe(true);
-
-    await vi.advanceTimersByTimeAsync(360);
-    expect(chatSider.props('motionEnabled')).toBe(false);
+    expect(chatSiderStartMotionMock).toHaveBeenCalledTimes(1);
+    expect(chatSiderStartMotionMock).toHaveBeenCalledWith(true);
   });
 
-  it('enables temporary motion when ChatSider requests button close', async (): Promise<void> => {
-    vi.useFakeTimers();
+  it('starts ChatSider motion when the top sidebar button closes it', async (): Promise<void> => {
     const settingStore = useSettingStore();
     settingStore.setSidebarVisible(true);
     const wrapper = mountDefaultLayout();
-    const chatSider = wrapper.findComponent(ChatSiderStub);
 
-    chatSider.vm.$emit('button-close');
+    await getSidebarButton(wrapper).trigger('click');
     await nextTick();
 
     expect(settingStore.sidebarVisible).toBe(false);
-    expect(chatSider.props('motionEnabled')).toBe(true);
-
-    await vi.advanceTimersByTimeAsync(360);
-    expect(chatSider.props('motionEnabled')).toBe(false);
+    expect(chatSiderStartMotionMock).toHaveBeenCalledTimes(1);
+    expect(chatSiderStartMotionMock).toHaveBeenCalledWith(false);
   });
 
-  it('cancels active button motion when ChatSider resizing starts', async (): Promise<void> => {
-    vi.useFakeTimers();
+  it('restores the default sidebar width when reopening from zero width', async (): Promise<void> => {
     const settingStore = useSettingStore();
     settingStore.setSidebarVisible(false);
+    settingStore.setSidebarWidth(0);
     const wrapper = mountDefaultLayout();
-    const chatSider = wrapper.findComponent(ChatSiderStub);
 
     await getSidebarButton(wrapper).trigger('click');
     await nextTick();
-    expect(chatSider.props('motionEnabled')).toBe(true);
 
-    chatSider.vm.$emit('resize-start');
-    await nextTick();
-
-    expect(chatSider.props('motionEnabled')).toBe(false);
+    expect(settingStore.sidebarVisible).toBe(true);
+    expect(settingStore.sidebarWidth).toBe(340);
+    expect(chatSiderStartMotionMock).toHaveBeenCalledWith(true);
   });
 
-  it('cancels active button motion for a conflicting programmatic update', async (): Promise<void> => {
-    vi.useFakeTimers();
+  it('keeps programmatic sidebar visibility changes free of layout-started motion', async (): Promise<void> => {
     const settingStore = useSettingStore();
     settingStore.setSidebarVisible(false);
-    const wrapper = mountDefaultLayout();
-    const chatSider = wrapper.findComponent(ChatSiderStub);
-
-    await getSidebarButton(wrapper).trigger('click');
-    await nextTick();
-    expect(chatSider.props('motionEnabled')).toBe(true);
-
-    settingStore.setSidebarVisible(false);
-    await nextTick();
-
-    expect(chatSider.props('motionEnabled')).toBe(false);
-  });
-
-  it('keeps programmatic sidebar visibility changes free of motion', async (): Promise<void> => {
-    const settingStore = useSettingStore();
-    const wrapper = mountDefaultLayout();
-    const chatSider = wrapper.findComponent(ChatSiderStub);
+    mountDefaultLayout();
 
     settingStore.setSidebarVisible(true);
     await nextTick();
 
-    expect(chatSider.props('motionEnabled')).toBe(false);
+    expect(chatSiderStartMotionMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps programmatic sidebar width changes free of layout-started motion', async (): Promise<void> => {
+    const settingStore = useSettingStore();
+    mountDefaultLayout();
+
+    settingStore.setSidebarWidth(360);
+    await nextTick();
+
+    expect(chatSiderStartMotionMock).not.toHaveBeenCalled();
   });
 });

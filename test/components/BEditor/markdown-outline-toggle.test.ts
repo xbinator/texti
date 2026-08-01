@@ -65,7 +65,6 @@ const BPanelSplitterStub = defineComponent({
 });
 
 const sidebarSource = readFileSync('src/components/BEditor/components/Sidebar.vue', 'utf8');
-const markdownSource = readFileSync('src/components/BEditor/Markdown.vue', 'utf8');
 
 /**
  * Sidebar 测试挂载属性。
@@ -316,6 +315,6 @@ describe('Markdown outline toggle', (): void => {
     expect(sidebarSource).toContain('transition: width 0.36s ease, opacity 0.24s ease, transform 0.36s ease;');
     expect(sidebarSource).not.toContain('margin-right 0.36s ease');
     expect(sidebarSource).toContain('@media (prefers-reduced-motion: reduce)');
-    expect(markdownSource).toContain('gap: 6px;');
+    expect(sidebarSource).toContain('margin-right: 6px;');
   });
 });

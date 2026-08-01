@@ -42,18 +42,28 @@ function readSource(filePath: string): string {
 }
 
 /**
+ * 转义 CSS 选择器文本，供正则精确定位样式规则。
+ * @param selector - CSS 选择器文本
+ * @returns 已转义的正则片段
+ */
+function escapeSelector(selector: string): string {
+  return selector.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
+
+/**
  * 读取指定选择器的首个规则体。
  * @param source - 样式源码
  * @param selector - CSS 选择器
  * @returns 规则体文本
  */
 function readRuleBody(source: string, selector: string): string {
-  const selectorIndex = source.indexOf(selector);
-  if (selectorIndex < 0) {
+  const selectorMatcher = new RegExp(`(^|[\\s,])${escapeSelector(selector)}\\s*\\{`, 'u');
+  const selectorMatch = selectorMatcher.exec(source);
+  if (!selectorMatch) {
     throw new Error(`未找到选择器：${selector}`);
   }
 
-  const openBraceIndex = source.indexOf('{', selectorIndex);
+  const openBraceIndex = selectorMatch.index + selectorMatch[0].lastIndexOf('{');
   if (openBraceIndex < 0) {
     throw new Error(`选择器缺少规则体：${selector}`);
   }
