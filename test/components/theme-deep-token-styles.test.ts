@@ -124,6 +124,24 @@ describe('deep theme token styles', (): void => {
     expect(nodeDetailSource).toContain('border-radius: var(--surface-radius);');
   });
 
+  it('uses design tokens in skill preview chrome', (): void => {
+    const skillSource = readSource('src/components/BSkill/index.vue');
+    const fileTreeSource = readSource('src/components/BSkill/components/FileTree.vue');
+
+    expect(skillSource).toContain('border: var(--surface-border-width) solid var(--border-tertiary);');
+    expect(skillSource).toContain('border-radius: var(--surface-radius);');
+    expect(skillSource).toContain('border-bottom: var(--surface-border-width) solid var(--border-tertiary);');
+    expect(skillSource).toContain('transition: opacity var(--motion-duration-fast) var(--motion-easing-standard);');
+    expect(skillSource).toContain('font-family: var(--font-mono);');
+    expect(fileTreeSource).toContain('border-right: var(--surface-border-width) solid var(--border-tertiary);');
+    expect(fileTreeSource).toContain('border: var(--control-border-width) solid transparent;');
+    expect(fileTreeSource).toContain('border-radius: var(--control-radius);');
+    expect(fileTreeSource).toContain(
+      'transition: background var(--motion-duration-fast) var(--motion-easing-standard), ' +
+        'border-color var(--motion-duration-fast) var(--motion-easing-standard);'
+    );
+  });
+
   it('uses design tokens in editor content block chrome', (): void => {
     const mathBlockSource = readSource('src/components/BEditor/components/MathBlock.vue');
     const tableViewSource = readSource('src/components/BEditor/components/TableView.vue');

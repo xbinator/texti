@@ -194,8 +194,8 @@ function handleTitleClick(): void {
   width: 100%;
   height: 100%;
   background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
   backdrop-filter: blur(10px);
 }
 

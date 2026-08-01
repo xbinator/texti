@@ -345,7 +345,7 @@ watch(
   padding: 4px 6px 6px;
   overflow: auto;
   background: var(--bg-secondary);
-  border-right: 1px solid var(--border-tertiary);
+  border-right: var(--surface-border-width) solid var(--border-tertiary);
 }
 
 .b-skill__file-tree-node {
@@ -360,8 +360,9 @@ watch(
   text-align: left;
   cursor: pointer;
   background: transparent;
-  border: 0;
-  border-radius: 6px;
+  border: var(--control-border-width) solid transparent;
+  border-radius: var(--control-radius);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard), border-color var(--motion-duration-fast) var(--motion-easing-standard);
 
   span {
     min-width: 0;
@@ -373,6 +374,16 @@ watch(
   &:hover:not(.b-skill__file-tree-node--directory),
   &.b-skill__file-tree-node--active {
     background: var(--bg-tertiary);
+    border-color: var(--border-hover);
+  }
+
+  &:focus-visible {
+    outline: none;
+    border-color: var(--color-primary-border);
+  }
+
+  &.b-skill__file-tree-node--active {
+    border-color: var(--color-primary-border);
   }
 
   &.b-skill__file-tree-node--directory {
@@ -380,6 +391,7 @@ watch(
 
     &:hover {
       background: var(--bg-tertiary);
+      border-color: var(--border-hover);
     }
   }
 

@@ -252,8 +252,8 @@ defineExpose({
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--border-tertiary);
-  border-radius: 6px;
+  border: var(--surface-border-width) solid var(--border-tertiary);
+  border-radius: var(--surface-radius);
 }
 
 .b-skill__pane {
@@ -284,7 +284,7 @@ defineExpose({
   font-size: 12px;
   font-weight: 600;
   color: var(--text-primary);
-  border-bottom: 1px solid var(--border-tertiary);
+  border-bottom: var(--surface-border-width) solid var(--border-tertiary);
 }
 
 .b-skill__file-name {
@@ -300,7 +300,7 @@ defineExpose({
   gap: 5px;
   align-items: center;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .b-skill__content {
@@ -308,7 +308,7 @@ defineExpose({
   min-height: 0;
   padding: 12px;
   margin: 0;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
   color: var(--text-primary);
