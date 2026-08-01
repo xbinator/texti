@@ -109,7 +109,8 @@ const REMOVED_THEME_PRESETS: RemovedThemePreset[] = [
   { id: 'gruvbox', label: '棕黄色「Gruvbox」' },
   { id: 'kanagawa', label: '靛蓝色「Kanagawa」' },
   { id: 'nord', label: '冰蓝色「Nord」' },
-  { id: 'one-dark', label: '深灰色「One Dark」' }
+  { id: 'one-dark', label: '深灰色「One Dark」' },
+  { id: 'manga-ink', label: '黑白线稿「Manga Ink」' }
 ];
 
 describe('theme preset registry', (): void => {
@@ -163,26 +164,6 @@ describe('theme preset registry', (): void => {
     expect(darkTokens.text.primary).toBe('#fff3e0');
     expect(darkTokens.color.primary).toBe('#ff1f3d');
     expect(darkCssVars['--color-primary']).toBe('#ff1f3d');
-  });
-
-  it('registers the monochrome Manga Ink theme preset', (): void => {
-    const presets = getPresetList();
-
-    expect(presets).toContainEqual({ id: 'manga-ink', label: '黑白线稿「Manga Ink」' });
-  });
-
-  it('resolves Manga Ink light and dark tokens for ink paper and inverse ink modes', (): void => {
-    const lightTokens = getResolvedTokens('manga-ink', 'light');
-    const darkTokens = getResolvedTokens('manga-ink', 'dark');
-    const lightCssVars = toCssVars(lightTokens);
-
-    expect(lightTokens.bg.primary).toBe('#fffdf5');
-    expect(lightTokens.text.primary).toBe('#050505');
-    expect(lightTokens.color.primary).toBe('#050505');
-    expect(darkTokens.bg.primary).toBe('#050505');
-    expect(darkTokens.text.primary).toBe('#f8f8f2');
-    expect(darkTokens.color.primary).toBe('#f8f8f2');
-    expect(lightCssVars['--border-primary']).toBe('#050505');
   });
 
   it('registers the retro adventure Overworld theme preset', (): void => {

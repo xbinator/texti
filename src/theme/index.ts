@@ -5,7 +5,6 @@
 import './presets/default';
 import './presets/graphite';
 import './presets/shonen';
-import './presets/manga-ink';
 import './presets/overworld';
 
 export type { ThemeTokens } from './types/tokens';

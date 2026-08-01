@@ -198,7 +198,7 @@ tibis/
 │   ├── theme/                        # 主题系统
 │   │   ├── index.ts                  # 主题入口
 │   │   ├── core/                     # 核心（apply / derive / factory / registry）
-│   │   ├── presets/                  # 12 套预设主题（ayu / catppuccin / default / everforest / gruvbox / kanagawa / manga-ink / matrix / nord / one-dark / shonen / tokyonight）
+│   │   ├── presets/                  # 12 套预设主题（ayu / catppuccin / default / everforest / gruvbox / kanagawa / matrix / nord / one-dark / shonen / tokyonight）
 │   │   └── types/                    # 令牌类型（tokens.ts）
 │   │
 │   ├── shared/                       # 跨组件共享层
@@ -952,18 +952,17 @@ src/theme/
 │   └── registry.ts       # 主题注册表
 ├── presets/              # 12 套预设主题
 │   ├── ayu / catppuccin / default / everforest / gruvbox
-│   ├── kanagawa / manga-ink / matrix / nord / one-dark
+│   ├── kanagawa / matrix / nord / one-dark
 │   └── shonen / tokyonight
 └── types/                # 令牌类型（tokens.ts）
 ```
 
 ### 预设主题
 
-12 套开箱即用的主题预设：ayu、catppuccin、default、everforest、gruvbox、kanagawa、**manga-ink**（黑白线稿）、matrix、nord、one-dark、**shonen**（热血红黑）、tokyonight。
+12 套开箱即用的主题预设：ayu、catppuccin、default、everforest、gruvbox、kanagawa、matrix、nord、one-dark、**shonen**（热血红黑）、tokyonight。
 
 新增主题：
 - **Shonen**（热血红黑）：漫画纸张浅色 + 高对比红黑暗色
-- **Manga Ink**（黑白线稿）：纸张墨线浅色 + 反相线稿暗色
 
 ---
 

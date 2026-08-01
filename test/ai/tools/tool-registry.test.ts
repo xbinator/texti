@@ -271,7 +271,6 @@ describe('toolRegistry', (): void => {
     expect(valueDescription).toContain('整套界面色彩预设');
     expect(valueDescription).toContain('default=暖米白/棕色');
     expect(valueDescription).toContain('graphite=白/浅灰/黑灰');
-    expect(valueDescription).toContain('manga-ink=纸白/墨黑/高反差灰阶');
     expect(valueDescription).toContain('dark=深色');
     expect(valueDescription).toContain('light=浅色');
     expect(valueDescription).toContain('system=跟随系统');
