@@ -54,17 +54,18 @@ import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { useClipboard } from '@/hooks/useClipboard';
+import { normalizeRouteParam } from '@/router/routes/helpers/fileRouteTab';
 import { useSkillStore } from '@/stores/ai/skill';
 
 const route = useRoute();
 const store = useSkillStore();
 const { clipboard } = useClipboard();
 
-/** 从路由参数获取 skill 名称。 */
-const skillName = computed(() => decodeURIComponent(route.params.name as string));
+/** 页面实例创建时捕获的 Skill 名称，避免后台 KeepAlive 页面跟随全局路由变化。 */
+const skillName = decodeURIComponent(normalizeRouteParam(route.params.name) ?? '');
 
 /** 当前查看的 Skill 对象。 */
-const skill = computed(() => store.getSkillByName(skillName.value) ?? null);
+const skill = computed(() => store.getSkillByName(skillName) ?? null);
 
 /** 复制目录路径。 */
 function handleCopyPath(): void {
