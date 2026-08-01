@@ -28,7 +28,14 @@
           <div v-else-if="fileState.status === 'error'" :class="bem('error')">
             {{ fileState.message }}
           </div>
-          <pre v-else-if="fileState.status === 'success'" :class="bem('content')"><code>{{ fileState.content }}</code></pre>
+          <template v-else-if="fileState.status === 'success'">
+            <pre v-if="shouldSkipHighlight" :class="bem('content')"><code>{{ fileState.content }}</code></pre>
+            <pre v-else :class="bem('content')"><code><CodeHighlightNode
+              v-for="(renderNode, index) in highlightedNodes"
+              :key="index"
+              :node="renderNode"
+            /></code></pre>
+          </template>
         </BScrollbar>
       </div>
     </div>
@@ -42,15 +49,19 @@
  */
 
 import type { BSkillProps as Props } from './types';
-import { computed, ref, watch } from 'vue';
+import type { PropType, VNodeChild } from 'vue';
+import { computed, defineComponent, h, ref, watch } from 'vue';
 import { Icon } from '@iconify/vue';
 import { message } from 'ant-design-vue';
+import type { CodeHighlightRenderNode } from '@/components/BMessage/utils/codeHighlight';
+import { highlightMessageCode } from '@/components/BMessage/utils/codeHighlight';
 import { useClipboard } from '@/hooks/useClipboard';
 import { useNavigate } from '@/hooks/useNavigate';
 import { native } from '@/shared/platform';
 import { asyncTo } from '@/utils/asyncTo';
 import { createNamespace } from '@/utils/namespace';
 import FileTree from './components/FileTree.vue';
+import { detectLanguage } from './utils/languageDetect';
 
 const [, bem] = createNamespace('skill');
 
@@ -67,6 +78,37 @@ if (import.meta.env.DEV && props.rootPath && props.virtualFiles) {
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type FileState = { status: 'idle' } | { status: 'loading' } | { status: 'success'; content: string } | { status: 'error'; message: string };
+
+// ─── Local components ────────────────────────────────────────────────────────
+
+/**
+ * 递归渲染单个 CodeHighlightRenderNode 为带 hljs 类名的 <span>。
+ * 定义为局部组件，使父组件 scoped 样式的 .hljs-* 选择器能自动作用于递归节点。
+ */
+const CodeHighlightNode = defineComponent({
+  name: 'CodeHighlightNode',
+  props: {
+    node: {
+      type: Object as PropType<CodeHighlightRenderNode>,
+      required: true
+    }
+  },
+  setup(componentProps): () => VNodeChild {
+    return (): VNodeChild => {
+      // 文本节点直接返回字符串，由父 <code> 包裹
+      if (componentProps.node.type === 'text') {
+        return componentProps.node.value;
+      }
+
+      // 元素节点渲染为带 hljs 类名的 span，递归渲染子节点
+      return h(
+        'span',
+        { class: componentProps.node.className || undefined },
+        componentProps.node.children.map((child: CodeHighlightRenderNode): VNodeChild => h(CodeHighlightNode, { node: child }))
+      );
+    };
+  }
+});
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
@@ -97,6 +139,24 @@ const selectedFileName = computed<string>(() => selectedFilePath.value.split('/'
 
 /** 真实文件加载成功后允许跳转到编辑器，虚拟预览文件仅支持查看。 */
 const canEditFile = computed<boolean>(() => props.editable && Boolean(props.rootPath) && !props.virtualFiles && Boolean(selectedFilePath.value));
+
+/** 超过此字符数的文件跳过语法高亮，避免 lowlight 同步解析大文件造成卡顿。 */
+const HIGHLIGHT_MAX_CHARS = 200 * 1024;
+
+/** 当前选中文件推断出的高亮语言名（未识别为空字符串）。 */
+const highlightLanguage = computed<string>(() => detectLanguage(selectedFilePath.value));
+
+/** 是否跳过语法高亮（非成功状态或大文件）。 */
+const shouldSkipHighlight = computed<boolean>(() => {
+  if (fileState.value.status !== 'success') return true;
+  return fileState.value.content.length > HIGHLIGHT_MAX_CHARS;
+});
+
+/** 高亮渲染节点树；跳过时返回空数组。 */
+const highlightedNodes = computed<CodeHighlightRenderNode[]>(() => {
+  if (shouldSkipHighlight.value || fileState.value.status !== 'success') return [];
+  return highlightMessageCode(highlightLanguage.value, fileState.value.content, true);
+});
 
 // ─── File loading ─────────────────────────────────────────────────────────────
 
@@ -175,6 +235,8 @@ defineExpose({
 </script>
 
 <style scoped lang="less">
+@import url('@/assets/styles/markdown.less');
+
 .b-skill {
   display: flex;
   flex: 1;
@@ -249,6 +311,9 @@ defineExpose({
   color: var(--text-primary);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+
+  // 复用 markdown.less 的 hljs 主题色（基于 --code-* CSS 变量）
+  .code-highlight();
 }
 
 .b-skill__empty,
