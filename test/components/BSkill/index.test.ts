@@ -86,4 +86,21 @@ describe('BSkill editor entry', (): void => {
     expect(editIcon.exists()).toBe(false);
     expect(openFileByPathMock).not.toHaveBeenCalled();
   });
+
+  it('keeps the user selected file when the tree reloads', async (): Promise<void> => {
+    const initialFilePath = '/skills/demo/SKILL.md';
+    const selectedFilePath = '/skills/demo/references/runtime.md';
+    const wrapper = await mountSkill({ rootPath: '/skills/demo', initialFilePath, editable: true });
+    const fileTree = wrapper.findComponent(FileTree);
+
+    readFileMock.mockClear();
+    fileTree.vm.$emit('select-file', selectedFilePath);
+    await flushPromises();
+
+    fileTree.vm.$emit('loaded', 2);
+    await flushPromises();
+
+    expect(readFileMock).toHaveBeenLastCalledWith(selectedFilePath);
+    expect(readFileMock).not.toHaveBeenCalledWith(initialFilePath);
+  });
 });

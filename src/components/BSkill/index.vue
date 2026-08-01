@@ -192,8 +192,11 @@ async function selectFile(filePath: string): Promise<void> {
 function onTreeLoaded(count: number): void {
   treeFileCount.value = count;
   emit('loaded', count);
-  //
-  props.initialFilePath && selectFile(props.initialFilePath);
+
+  // 仅在首次加载或数据源重置后使用初始文件，避免树刷新覆盖用户当前选择。
+  if (!selectedFilePath.value && props.initialFilePath) {
+    selectFile(props.initialFilePath);
+  }
 }
 
 function copyContent(): void {
