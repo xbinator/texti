@@ -42,7 +42,9 @@ export function isMatchingAwaitingUserChoicePart(part: ChatMessageRecord['parts'
  */
 export function isCancelledUserChoiceAnswer(answer: AIUserChoiceAnswerData): boolean {
   const questionAnswers = answer.questionAnswers ?? [];
-  return answer.answers.length === 0 && (answer.otherText ?? '') === '' && questionAnswers.every((item) => item.answers.length === 0);
+  return (
+    answer.answers.length === 0 && (answer.otherText ?? '') === '' && questionAnswers.every((item) => item.answers.length === 0 && (item.text ?? '') === '')
+  );
 }
 
 /**

@@ -441,7 +441,10 @@ export const userChoice = {
 
       if (resultPart?.type !== 'tool') continue;
 
-      const isUserCancelled = answer.answers.length === 0 && answer.otherText === '' && (answer.questionAnswers ?? []).every((qa) => qa.answers.length === 0);
+      const isUserCancelled =
+        answer.answers.length === 0 &&
+        answer.otherText === '' &&
+        (answer.questionAnswers ?? []).every((qa) => qa.answers.length === 0 && (qa.text ?? '') === '');
 
       if (isUserCancelled) {
         resultPart.result = { toolName: resultPart.toolName, status: 'cancelled', error: { code: 'USER_CANCELLED', message: '用户取消了选择' } };

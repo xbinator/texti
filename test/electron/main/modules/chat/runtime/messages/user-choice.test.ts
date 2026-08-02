@@ -17,7 +17,8 @@ function createAwaitingChoiceMessage(): ChatMessageRecord {
     role: 'assistant',
     content: '',
     parts: [
-      { id: 'part0061',
+      {
+        id: 'part0061',
         type: 'tool',
         toolCallId: 'tool-call-1',
         toolName: 'ask_user_choice',
@@ -43,6 +44,28 @@ function createAwaitingChoiceMessage(): ChatMessageRecord {
 }
 
 describe('user-choice message helpers', () => {
+  it('marks input-mode text answers as success instead of cancelled', (): void => {
+    const assistantMessage = createAwaitingChoiceMessage();
+    const answer: AIUserChoiceAnswerData = {
+      questionId: 'question-1',
+      toolCallId: 'tool-call-1',
+      answers: [],
+      questionAnswers: [{ question: '继续吗？', answers: [], text: '自定义回复' }]
+    };
+
+    const updatedMessage = applyUserChoiceAnswer([assistantMessage], answer);
+
+    expect(updatedMessage).toBe(assistantMessage);
+    expect(assistantMessage.parts[0]).toMatchObject({
+      type: 'tool',
+      result: {
+        toolName: 'ask_user_choice',
+        status: 'success',
+        data: answer
+      }
+    });
+  });
+
   it('marks awaiting user choice tool result as cancelled when answer is empty', (): void => {
     const assistantMessage = createAwaitingChoiceMessage();
     const answer: AIUserChoiceAnswerData = {

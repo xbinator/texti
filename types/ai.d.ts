@@ -49,14 +49,16 @@ export interface AIChoiceOption {
  * @description 批量等待用户输入时使用的单题条目。
  */
 export interface AIAwaitingUserChoiceItem {
-  /** 选择模式。 */
-  mode: 'single' | 'multiple';
+  /** 题目模式：单选、多选或输入框。 */
+  mode: 'single' | 'multiple' | 'input';
   /** 提示文本。 */
   question: string;
-  /** 可用选项。 */
+  /** 可用选项（输入框模式为空数组）。 */
   options: AIChoiceOption[];
   /** 多选时的最大选择数。 */
   maxSelections?: number;
+  /** 输入框模式的占位提示文本。 */
+  placeholder?: string;
 }
 
 /**

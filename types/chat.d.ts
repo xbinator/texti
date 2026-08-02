@@ -472,6 +472,8 @@ export interface AIUserChoiceQuestionAnswer {
   question: string;
   /** 选中的选项值列表 */
   answers: string[];
+  /** 输入框模式的文本答案 */
+  text?: string;
 }
 
 /**

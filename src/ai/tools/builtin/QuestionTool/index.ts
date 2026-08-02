@@ -1,82 +1,86 @@
 /**
  * @file QuestionTool/index.ts
- * @description Built-in executor for pausing tool flow until the user answers one or more questions.
+ * @description 内置 question 工具执行器：暂停工具流程，等待用户回答一个或多个问题后继续。
  */
 import type { AIChoiceOption, AIAwaitingUserChoiceItem, AIAwaitingUserChoiceQuestion, AIToolExecutor } from 'types/ai';
 import { createAwaitingUserInputResult, createToolFailureResult } from '../../results';
 
-/** Shared tool name constant. */
+/** 工具共享名称常量。 */
 export const QUESTION_TOOL_NAME = 'question';
 
-/** Legacy tool name kept only for reading historical conversation data. */
+/** 旧版工具名称，仅用于读取历史会话数据。 */
 export const LEGACY_ASK_USER_QUESTION_TOOL_NAME = 'ask_user_question';
 
-/** Maximum number of options accepted by the executor. */
+/** 执行器接受的最大选项数量。 */
 const MAX_CHOICE_OPTIONS = 10;
 
 /**
- * Single question input.
+ * 单个问题输入。
  */
 export interface QuestionItemInput {
-  /** Prompt shown to the user. */
+  /** 向用户展示的问题文本。 */
   question: string;
-  /** Selection mode. */
-  mode: 'single' | 'multiple';
-  /** Available options. */
-  options: AIChoiceOption[];
-  /** Maximum number of answers allowed in multiple mode. */
+  /** 题目模式：单选、多选或输入框。 */
+  mode: 'single' | 'multiple' | 'input';
+  /** 可选项列表（单选/多选必填）。 */
+  options?: AIChoiceOption[];
+  /** 多选模式下允许选择的最大数量。 */
   maxSelections?: number;
+  /** 输入框模式下的占位提示文本。 */
+  placeholder?: string;
 }
 
 /**
- * Question tool input.
+ * 问题工具输入。
  */
 export interface QuestionToolInput {
-  /** Prompt shown to the user for legacy single-question calls. */
+  /** 旧版单问题调用时向用户展示的问题文本。 */
   question?: string;
-  /** Selection mode for legacy single-question calls. */
-  mode?: 'single' | 'multiple';
-  /** Available options for legacy single-question calls. */
+  /** 旧版单问题调用的选择模式。 */
+  mode?: 'single' | 'multiple' | 'input';
+  /** 旧版单问题调用的可选项列表。 */
   options?: AIChoiceOption[];
-  /** Maximum number of answers allowed in multiple mode. */
+  /** 多选模式下允许选择的最大数量。 */
   maxSelections?: number;
-  /** Questions shown to the user in one tool call. */
+  /** 输入框模式下的占位提示文本。 */
+  placeholder?: string;
+  /** 同一次工具调用中向用户展示的问题列表。 */
   questions?: QuestionItemInput[];
 }
 
 /**
- * Pending question snapshot.
+ * 待回答问题快照。
  */
 export interface PendingQuestionSnapshot {
-  /** Current pending question identifier. */
+  /** 当前待回答问题的标识符。 */
   questionId: string;
-  /** Related tool call identifier. */
+  /** 关联的工具调用标识符。 */
   toolCallId: string;
 }
 
 /**
- * Factory options for the question tool.
+ * 问题工具的工厂选项。
  */
 export interface CreateQuestionToolOptions {
-  /** Reads the current pending question, if one exists. */
+  /** 读取当前待回答问题，不存在时返回 null。 */
   getPendingQuestion: () => PendingQuestionSnapshot | null;
-  /** Creates a stable question identifier. */
+  /** 生成稳定的问题标识符。 */
   createQuestionId: () => string;
 }
 
 /**
- * Validates one choice option.
- * @param option - Option to validate.
- * @returns Whether the option has a usable label and value.
+ * 校验单个选项。
+ * @param option - 待校验的选项
+ * @returns 选项是否包含可用的 label 和 value
  */
 function isValidChoiceOption(option: AIChoiceOption): boolean {
   return typeof option.label === 'string' && option.label.trim().length > 0 && typeof option.value === 'string' && option.value.trim().length > 0;
 }
 
 /**
- * Normalizes legacy single-question input and batch input to a question list.
- * @param input - Raw tool input.
- * @returns Question list, or null when input does not contain usable question shape.
+ * 将旧版单问题输入和批量输入归一化为问题列表。
+ * @param input - 原始工具输入
+ * @returns 问题列表；输入不包含可用问题结构时返回 null
  */
 function normalizeQuestionInput(input: QuestionToolInput): QuestionItemInput[] | null {
   if (Array.isArray(input.questions)) {
@@ -92,35 +96,49 @@ function normalizeQuestionInput(input: QuestionToolInput): QuestionItemInput[] |
       question: input.question ?? '',
       mode: input.mode ?? ('single' as const),
       options: input.options ?? [],
-      maxSelections: input.maxSelections
+      maxSelections: input.maxSelections,
+      placeholder: input.placeholder
     }
   ];
 }
 
 /**
- * Validates one normalized question at execution time.
- * @param question - Question item.
- * @returns Validation error message, or null when valid.
+ * 在执行时校验单个归一化问题。
+ * @param question - 问题条目
+ * @returns 校验错误信息，合法时返回 null
  */
 function validateQuestionItem(question: QuestionItemInput): string | null {
   if (typeof question.question !== 'string' || question.question.trim().length === 0) {
     return '问题内容不能为空。';
   }
 
-  if (!Array.isArray(question.options) || question.options.length === 0) {
+  if (question.mode !== 'single' && question.mode !== 'multiple' && question.mode !== 'input') {
+    return 'mode 只能是 single、multiple 或 input。';
+  }
+
+  if (question.mode === 'input') {
+    if ((question.options ?? []).length > 0) {
+      return '输入模式不能提供可选项。';
+    }
+
+    if (typeof question.maxSelections !== 'undefined') {
+      return '输入问题不能设置 maxSelections。';
+    }
+
+    return null;
+  }
+
+  const options = question.options ?? [];
+  if (options.length === 0) {
     return '至少需要提供一个可选项。';
   }
 
-  if (question.options.length > MAX_CHOICE_OPTIONS) {
+  if (options.length > MAX_CHOICE_OPTIONS) {
     return `可选项数量不能超过 ${MAX_CHOICE_OPTIONS} 个。`;
   }
 
-  if (!question.options.every((option) => isValidChoiceOption(option))) {
+  if (!options.every((option) => isValidChoiceOption(option))) {
     return '每个选项都必须提供非空的 label 和 value。';
-  }
-
-  if (question.mode !== 'single' && question.mode !== 'multiple') {
-    return 'mode 只能是 single 或 multiple。';
   }
 
   if (question.mode === 'single') {
@@ -136,7 +154,7 @@ function validateQuestionItem(question: QuestionItemInput): string | null {
       return '多选问题的 maxSelections 必须是大于 0 的整数。';
     }
 
-    if (question.maxSelections > question.options.length) {
+    if (question.maxSelections > options.length) {
       return '多选问题的 maxSelections 不能超过可选项数量。';
     }
   }
@@ -145,14 +163,14 @@ function validateQuestionItem(question: QuestionItemInput): string | null {
 }
 
 /**
- * Question tool validation result.
+ * 问题工具校验结果。
  */
 type QuestionToolValidationResult = { valid: true; questions: QuestionItemInput[] } | { valid: false; error: string };
 
 /**
- * Validates question tool input at execution time.
- * @param input - Raw tool input.
- * @returns Normalized questions and no error, or a validation error.
+ * 在执行时校验问题工具输入。
+ * @param input - 原始工具输入
+ * @returns 归一化问题列表且无错误，或返回校验错误
  */
 function validateQuestionToolInput(input: QuestionToolInput): QuestionToolValidationResult {
   const questions = normalizeQuestionInput(input);
@@ -172,18 +190,19 @@ function validateQuestionToolInput(input: QuestionToolInput): QuestionToolValida
 }
 
 /**
- * Builds the awaiting-user-input payload.
- * @param questions - Validated questions.
- * @param questionId - Generated question identifier.
- * @returns Question payload sent through the terminal tool result.
+ * 构建等待用户输入的结果载荷。
+ * @param questions - 已校验的问题列表
+ * @param questionId - 生成的问题标识符
+ * @returns 通过工具终止结果发送的问题载荷
  */
 function createQuestionPayload(questions: QuestionItemInput[], questionId: string): AIAwaitingUserChoiceQuestion {
   const [firstQuestion] = questions;
   const normalizedQuestions: AIAwaitingUserChoiceItem[] = questions.map((question) => ({
     question: question.question,
     mode: question.mode,
-    options: question.options,
-    maxSelections: question.mode === 'multiple' ? question.maxSelections : undefined
+    options: question.options ?? [],
+    maxSelections: question.mode === 'multiple' ? question.maxSelections : undefined,
+    placeholder: question.mode === 'input' ? question.placeholder : undefined
   }));
 
   return {
@@ -191,22 +210,23 @@ function createQuestionPayload(questions: QuestionItemInput[], questionId: strin
     toolCallId: '',
     question: firstQuestion.question,
     mode: firstQuestion.mode,
-    options: firstQuestion.options,
+    options: firstQuestion.options ?? [],
     maxSelections: firstQuestion.mode === 'multiple' ? firstQuestion.maxSelections : undefined,
+    placeholder: firstQuestion.mode === 'input' ? firstQuestion.placeholder : undefined,
     questions: normalizedQuestions
   };
 }
 
 /**
- * Creates the built-in question tool.
- * @param options - Factory dependencies.
- * @returns Configured read-only tool executor.
+ * 创建内置 question 工具。
+ * @param options - 工厂依赖
+ * @returns 配置完成的只读工具执行器
  */
 export function createQuestionTool(options: CreateQuestionToolOptions): AIToolExecutor<QuestionToolInput, AIAwaitingUserChoiceQuestion> {
   return {
     definition: {
       name: QUESTION_TOOL_NAME,
-      description: '向用户发起一个或多个单选/多选问题，并等待用户选择后继续。',
+      description: '向用户发起一个或多个单选/多选/输入问题，并等待用户回答后继续。',
       source: 'builtin',
       riskLevel: 'read',
       permissionCategory: 'system',
@@ -215,10 +235,10 @@ export function createQuestionTool(options: CreateQuestionToolOptions): AIToolEx
         type: 'object',
         properties: {
           question: { type: 'string', description: '向用户展示的问题文本。' },
-          mode: { type: 'string', enum: ['single', 'multiple'], description: '选择模式。' },
+          mode: { type: 'string', enum: ['single', 'multiple', 'input'], description: '题目模式：单选、多选或输入框。' },
           options: {
             type: 'array',
-            description: '可选项列表，最多 10 项。',
+            description: '可选项列表（单选/多选必填），最多 10 项。',
             items: {
               type: 'object',
               properties: {
@@ -231,6 +251,7 @@ export function createQuestionTool(options: CreateQuestionToolOptions): AIToolEx
             }
           },
           maxSelections: { type: 'number', description: '多选时允许选择的最大数量。' },
+          placeholder: { type: 'string', description: '输入框模式的占位提示文本。' },
           questions: {
             type: 'array',
             description: '同一次工具调用展示的问题列表。',
@@ -238,10 +259,10 @@ export function createQuestionTool(options: CreateQuestionToolOptions): AIToolEx
               type: 'object',
               properties: {
                 question: { type: 'string', description: '向用户展示的问题文本。' },
-                mode: { type: 'string', enum: ['single', 'multiple'], description: '选择模式。' },
+                mode: { type: 'string', enum: ['single', 'multiple', 'input'], description: '题目模式：单选、多选或输入框。' },
                 options: {
                   type: 'array',
-                  description: '可选项列表，最多 10 项。',
+                  description: '可选项列表（单选/多选必填），最多 10 项。',
                   items: {
                     type: 'object',
                     properties: {
@@ -253,9 +274,10 @@ export function createQuestionTool(options: CreateQuestionToolOptions): AIToolEx
                     additionalProperties: false
                   }
                 },
-                maxSelections: { type: 'number', description: '多选时允许选择的最大数量。' }
+                maxSelections: { type: 'number', description: '多选时允许选择的最大数量。' },
+                placeholder: { type: 'string', description: '输入框模式的占位提示文本。' }
               },
-              required: ['question', 'mode', 'options'],
+              required: ['question', 'mode'],
               additionalProperties: false
             }
           }

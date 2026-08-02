@@ -1,7 +1,7 @@
 <!--
   @file QuestionCard.vue
   @description 渲染 question 等待态工具结果，分步步骤条形式。
-  多个问题时逐个展示，用户点击"下一步"逐步完成，最后一步为补充信息。
+  支持单选/多选/输入框问题，多个问题时逐个展示，用户点击"下一步"逐步完成，最后一步为补充信息。
 -->
 <template>
   <div class="choice-card">
@@ -19,6 +19,16 @@
         class="choice-card__other"
         type="text"
         placeholder="请输入补充信息..."
+        :disabled="interactionDisabled"
+      />
+
+      <!-- 输入框模式问题 -->
+      <input
+        v-else-if="isInputStep"
+        v-model="currentInputText"
+        class="choice-card__other"
+        type="text"
+        :placeholder="currentItem.placeholder || '请输入...'"
         :disabled="interactionDisabled"
       />
 
@@ -79,6 +89,8 @@ const props = withDefaults(
 
 /** 每个问题的选中值列表，索引与 questionItems 一一对应 */
 const selectedValuesByQuestion = ref<string[][]>([]);
+/** 每个输入框模式问题的文本答案，索引与 questionItems 一一对应 */
+const inputTextByQuestion = ref<string[]>([]);
 /** 补充信息文本 */
 const otherText = ref('');
 /** 当前步骤：0 ~ questionItems.length-1 为问题步骤，questionItems.length 为补充信息步骤 */
@@ -100,16 +112,33 @@ const isSupplementaryStep = computed(() => currentStep.value >= questionItems.va
 /** 当前步骤对应的问题项 */
 const currentItem = computed<AIAwaitingUserChoiceItem>(() => questionItems.value[currentStep.value]);
 
+/** 当前步骤是否为输入框模式 */
+const isInputStep = computed<boolean>(() => currentItem.value?.mode === 'input');
+
 /** 当前步骤的选中值 */
 const currentSelectedValues = computed<string[]>(() => selectedValuesByQuestion.value[currentStep.value] ?? []);
 
-/** 当前问题是否已选择至少一个选项 */
-const canSubmitCurrentQuestion = computed(() => currentSelectedValues.value.length > 0);
+/** 当前输入框模式问题的文本值 */
+const currentInputText = computed<string>({
+  get: () => inputTextByQuestion.value[currentStep.value] ?? '',
+  set: (value: string) => {
+    inputTextByQuestion.value[currentStep.value] = value;
+  }
+});
+
+/** 当前问题是否已满足作答条件：输入框模式需非空文本，选项模式需至少选择一项 */
+const canSubmitCurrentQuestion = computed(() => {
+  if (isInputStep.value) {
+    return currentInputText.value.trim().length > 0;
+  }
+  return currentSelectedValues.value.length > 0;
+});
 
 watch(
   questionItems,
   (items) => {
     selectedValuesByQuestion.value = items.map((_, index) => selectedValuesByQuestion.value[index] ?? []);
+    inputTextByQuestion.value = items.map((_, index) => inputTextByQuestion.value[index] ?? '');
   },
   { immediate: true }
 );
@@ -151,7 +180,7 @@ function getSelectedValues(questionIndex: number): string[] {
  */
 function handleButtonClick(value: string): void {
   const item = currentItem.value;
-  if (!item) {
+  if (!item || item.mode === 'input') {
     return;
   }
 
@@ -234,7 +263,8 @@ async function handleCancel(): Promise<void> {
 async function handleSubmit(): Promise<void> {
   const questionAnswers = questionItems.value.map((item, index) => ({
     question: item.question,
-    answers: [...getSelectedValues(index)]
+    answers: item.mode === 'input' ? [] : [...getSelectedValues(index)],
+    ...(item.mode === 'input' ? { text: (inputTextByQuestion.value[index] ?? '').trim() } : {})
   }));
 
   await submitChoice(

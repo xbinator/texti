@@ -43,6 +43,32 @@ function createAwaitingChoiceMessage(): Message {
 }
 
 describe('message helper user choice', (): void => {
+  it('applies input-mode text answers as success', (): void => {
+    const message = createAwaitingChoiceMessage();
+
+    const submitted = userChoice.submitAnswer([message], {
+      questionId: 'question-1',
+      toolCallId: 'tool-call-question',
+      answers: [],
+      questionAnswers: [{ question: '继续吗？', answers: [], text: '自定义回复' }],
+      otherText: ''
+    });
+
+    expect(submitted).toBe(true);
+    expect(message.parts[0]).toMatchObject({
+      result: {
+        toolName: 'question',
+        status: 'success',
+        data: {
+          questionId: 'question-1',
+          answers: [],
+          questionAnswers: [{ question: '继续吗？', answers: [], text: '自定义回复' }],
+          otherText: ''
+        }
+      }
+    });
+  });
+
   it('finishes an awaiting message when the user actively aborts it', (): void => {
     const message = createAwaitingChoiceMessage();
 

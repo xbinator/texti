@@ -163,8 +163,9 @@ function resolveQaQuestions(input: QuestionToolInput): QuestionItemInput[] {
  */
 function resolveQaLabels(questions: QuestionItemInput[], questionText: string, values: string[]): string[] {
   const matched = questions.find((q) => q.question === questionText);
-  if (!matched?.options?.length) return values;
-  return values.map((v) => matched.options.find((o) => o.value === v)?.label ?? v);
+  const options = matched?.options ?? [];
+  if (options.length === 0) return values;
+  return values.map((v) => options.find((o) => o.value === v)?.label ?? v);
 }
 
 /**
@@ -363,11 +364,11 @@ const qaItems = computed<QaItem[]>(() => {
 
   const answer = props.part.result!.data as AIUserChoiceAnswerData;
   const answers = answer.questionAnswers ?? [];
-  // 多问题模式：逐条映射 questionAnswers
+  // 多问题模式：逐条映射 questionAnswers；输入框模式直接展示文本答案
   if (answers.length > 0) {
     return answers.map((qa: AIUserChoiceQuestionAnswer) => ({
       question: qa.question,
-      selectedLabels: resolveQaLabels(questions, qa.question, qa.answers)
+      selectedLabels: [...resolveQaLabels(questions, qa.question, qa.answers), ...(qa.text ? [qa.text] : [])]
     }));
   }
   // 单问题模式：使用第一个问题 + 顶层 answers
