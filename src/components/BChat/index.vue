@@ -171,9 +171,15 @@ const promptEditorRef = ref<EditorInstance>();
 const containerRef = ref<HTMLElement | null>(null);
 /** 模型选择使用的活动会话 ID，包含首轮发送后创建但尚未由宿主回写的会话。 */
 const modelSessionId = ref<string | null>(props.sessionId);
+/** 传给输入组合层的当前工作区根目录镜像，稍后由会话工作区状态同步。 */
+const composerWorkspaceRoot = ref<string | null>(null);
+/** 传给输入组合层的手动工作区镜像，用于决定 @ 文件候选来源。 */
+const composerWorkspaceOverride = ref<string>();
 /** 输入区域状态与交互能力。 */
 const composer = useChatComposer({
   activeSessionId: modelSessionId,
+  workspaceRoot: composerWorkspaceRoot,
+  workspaceOverride: composerWorkspaceOverride,
   containerRef,
   promptEditorRef,
   interactionAPI,
@@ -241,6 +247,20 @@ const { workspaceRoot, workspaceOverride, workspaceLabel, selectWorkspace, clear
   activeSessionId,
   defaultWorkspaceRoot
 });
+watch(
+  workspaceRoot,
+  (nextWorkspaceRoot: string | null): void => {
+    composerWorkspaceRoot.value = nextWorkspaceRoot;
+  },
+  { immediate: true }
+);
+watch(
+  workspaceOverride,
+  (nextWorkspaceOverride: string | undefined): void => {
+    composerWorkspaceOverride.value = nextWorkspaceOverride;
+  },
+  { immediate: true }
+);
 /** 首轮会话创建时将草稿选择的工作区一并持久化。 */
 function ensureActiveSession(title: string, model: ChatSessionModelMetadata): Promise<string> {
   return ensureSession(title, model, workspaceOverride.value);

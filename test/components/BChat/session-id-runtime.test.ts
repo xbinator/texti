@@ -37,6 +37,7 @@ import type { FileMentionOption } from '@/components/BSmart/types';
 import { useProvideActorSystem } from '@/hooks/useChat/useActorSystem';
 import { emitChatFileReferenceInsert } from '@/shared/chat/fileReference';
 import { native } from '@/shared/platform';
+import type { ReadWorkspaceDirectoryResult } from '@/shared/platform/native/types';
 import type { StoredFile } from '@/shared/storage';
 import { useChatConfirmationQueueStore } from '@/stores/chat/confirmationQueue';
 import { useChatPermissionStore } from '@/stores/chat/permission';
@@ -320,6 +321,7 @@ vi.mock('@/shared/platform', () => ({
     openExternal: vi.fn(),
     getHomeDir: vi.fn(() => '/Users/test'),
     readFile: vi.fn(() => ({ content: '' })),
+    readWorkspaceFile: vi.fn(),
     readWorkspaceDirectory: vi.fn(() => []),
     getPathStatus: vi.fn(),
     selectDirectory: vi.fn(),
@@ -804,6 +806,9 @@ describe('BChat sessionId runtime', (): void => {
     vi.mocked(native.selectDirectory).mockReset();
     vi.mocked(native.getPathStatus).mockReset();
     vi.mocked(native.getPathStatus).mockResolvedValue({ exists: true, isFile: false, isDirectory: true });
+    vi.mocked(native.readWorkspaceFile).mockReset();
+    vi.mocked(native.readWorkspaceFile).mockRejectedValue(new Error('file not found'));
+    vi.mocked(native.readWorkspaceDirectory).mockReset();
     vi.mocked(native.watchDirectory).mockClear();
     todoStoreMock.todosBySession.clear();
     todoStoreMock.clearTodos.mockReset();
@@ -942,6 +947,79 @@ describe('BChat sessionId runtime', (): void => {
     expect(wrapper.findComponent(BSmartEditorStub).props('fileMentions')).toEqual([
       {
         id: 'md-1',
+        name: 'note.md',
+        path: '/workspace/note.md',
+        ext: 'md'
+      }
+    ]);
+
+    wrapper.unmount();
+  });
+
+  it('switches prompt file mention source when selecting and clearing a draft workspace', async (): Promise<void> => {
+    recentStoreMock.recentFiles = [
+      createStoredFile({ id: 'recent-md', name: 'note.md', path: '/workspace/note.md', ext: 'md' }),
+      createStoredFile({ id: 'recent-ts', name: 'main.ts', path: '/workspace/main.ts', ext: 'ts' })
+    ];
+    vi.mocked(native.selectDirectory).mockResolvedValue('/manual-workspace');
+    vi.mocked(native.readWorkspaceDirectory).mockImplementation(async (options): Promise<ReadWorkspaceDirectoryResult> => {
+      if (options.directoryPath === '.') {
+        return {
+          path: '/manual-workspace',
+          entries: [
+            { name: 'src', path: '/manual-workspace/src', type: 'directory' },
+            { name: 'README.md', path: '/manual-workspace/README.md', type: 'file' }
+          ]
+        };
+      }
+
+      if (options.directoryPath === 'src') {
+        return {
+          path: '/manual-workspace/src',
+          entries: [{ name: 'main.ts', path: '/manual-workspace/src/main.ts', type: 'file' }]
+        };
+      }
+
+      throw new Error(`Unexpected directory: ${options.directoryPath}`);
+    });
+
+    const wrapper = mountBChat(null, true);
+    await flushPromises();
+
+    expect(wrapper.findComponent(BSmartEditorStub).props('fileMentions')).toEqual([
+      {
+        id: 'recent-md',
+        name: 'note.md',
+        path: '/workspace/note.md',
+        ext: 'md'
+      }
+    ]);
+
+    wrapper.findComponent(InputToolbarStub).vm.$emit('workspace-select');
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.findComponent(BSmartEditorStub).props('fileMentions')).toEqual([
+      {
+        id: 'README.md',
+        name: 'README.md',
+        path: 'README.md',
+        ext: 'md'
+      },
+      {
+        id: 'src/main.ts',
+        name: 'main.ts',
+        path: 'src/main.ts',
+        ext: 'ts'
+      }
+    ]);
+
+    wrapper.findComponent(InputToolbarStub).vm.$emit('workspace-clear');
+    await flushPromises();
+
+    expect(wrapper.findComponent(BSmartEditorStub).props('fileMentions')).toEqual([
+      {
+        id: 'recent-md',
         name: 'note.md',
         path: '/workspace/note.md',
         ext: 'md'
