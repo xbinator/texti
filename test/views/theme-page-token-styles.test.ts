@@ -14,6 +14,23 @@ function readSource(filePath: string): string {
   return readFileSync(filePath, 'utf8');
 }
 
+/**
+ * 读取指定 CSS 选择器的规则体。
+ * @param source - Vue 单文件组件源码
+ * @param selector - CSS 选择器
+ * @returns 规则体内容，未找到时返回空字符串
+ */
+function getRuleBody(source: string, selector: string): string {
+  const start = source.indexOf(`${selector} {`);
+  if (start < 0) {
+    return '';
+  }
+
+  const bodyStart = source.indexOf('{', start) + 1;
+  const bodyEnd = source.indexOf('\n}', bodyStart);
+  return source.slice(bodyStart, bodyEnd);
+}
+
 describe('page theme token styles', (): void => {
   it('uses design tokens in default layout chrome', (): void => {
     const layoutSource = readSource('src/layouts/default/index.vue');
@@ -23,8 +40,12 @@ describe('page theme token styles', (): void => {
     const dropZoneSource = readSource('src/layouts/default/components/MainDropZone.vue');
     const shortcutsSource = readSource('src/layouts/default/components/ShortcutsHelp.vue');
     const chatSiderSource = readSource('src/layouts/default/components/ChatSider.vue');
+    const windowControlsRule = getRuleBody(layoutSource, '.b-layout-header__controls');
+    const windowButtonRule = getRuleBody(layoutSource, '.b-layout-header__button');
+    const windowButtonHoverRule = getRuleBody(layoutSource, '.b-layout-header__button:hover,\n.b-layout-header__button:focus-visible');
+    const windowButtonActiveRule = getRuleBody(layoutSource, '.b-layout-header__button:active');
 
-    expect(layoutSource).toContain('transition: background var(--motion-duration-base) var(--motion-easing-standard);');
+    expect(layoutSource).toContain('background var(--motion-duration-base) var(--motion-easing-standard)');
     expect(layoutSource).toContain('overflow: hidden;');
     expect(layoutSource).toContain('overflow-x: clip;');
     expect(layoutSource).toContain('min-width: 0;');
@@ -33,6 +54,17 @@ describe('page theme token styles', (): void => {
     expect(layoutSource).toContain('border: var(--button-border-width) solid var(--button-border);');
     expect(layoutSource).toContain('box-shadow: var(--button-pressed-shadow);');
     expect(layoutSource).toContain('transform: translate(var(--interaction-press-offset), var(--interaction-press-offset));');
+    expect(windowControlsRule).toContain('gap: var(--button-border-width);');
+    expect(windowControlsRule).toContain('padding-right: var(--button-border-width);');
+    expect(windowButtonRule).toContain('border: var(--button-border-width) solid var(--button-border);');
+    expect(windowButtonRule).toContain('border-radius: var(--control-radius);');
+    expect(windowButtonRule).toContain('box-shadow: var(--button-shadow);');
+    expect(windowButtonRule).toContain('box-shadow var(--motion-duration-base) var(--motion-easing-standard)');
+    expect(windowButtonRule).toContain('transform var(--motion-duration-fast) var(--motion-easing-press)');
+    expect(windowButtonHoverRule).toContain('border-color: var(--input-focus-border);');
+    expect(windowButtonHoverRule).toContain('box-shadow: var(--button-active-shadow);');
+    expect(windowButtonActiveRule).toContain('box-shadow: var(--button-pressed-shadow);');
+    expect(windowButtonActiveRule).toContain('transform: translate(var(--interaction-press-offset), var(--interaction-press-offset));');
     expect(updateNoticeSource).toContain('border: var(--control-border-width) solid color-mix');
     expect(updateNoticeSource).toContain('border-radius: var(--radius-full);');
     expect(updateNoticeSource).toContain('background var(--motion-duration-fast) var(--motion-easing-standard)');

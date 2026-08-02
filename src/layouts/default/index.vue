@@ -367,22 +367,38 @@ useEventListener(window, 'resize', validateWindowState);
 
 .b-layout-header__controls {
   display: flex;
+  gap: var(--button-border-width);
+  align-items: center;
   height: 100%;
+  padding-right: var(--button-border-width);
 }
 
 .b-layout-header__button {
+  box-sizing: border-box;
   width: 46px;
   height: 100%;
   color: var(--text-primary);
   cursor: pointer;
   outline: none;
   background: transparent;
-  border: none;
-  transition: background var(--motion-duration-base) var(--motion-easing-standard);
+  border: var(--button-border-width) solid var(--button-border);
+  border-radius: var(--control-radius);
+  box-shadow: var(--button-shadow);
+  transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard),
+    border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard),
+    transform var(--motion-duration-fast) var(--motion-easing-press);
 }
 
-.b-layout-header__button:hover {
+.b-layout-header__button:hover,
+.b-layout-header__button:focus-visible {
   background: var(--bg-hover);
+  border-color: var(--input-focus-border);
+  box-shadow: var(--button-active-shadow);
+}
+
+.b-layout-header__button:active {
+  box-shadow: var(--button-pressed-shadow);
+  transform: translate(var(--interaction-press-offset), var(--interaction-press-offset));
 }
 
 .b-layout-header__left,
