@@ -9,6 +9,9 @@ import { computed, ref, type Ref, type ComputedRef, type ShallowRef } from 'vue'
 import { buildFileReferenceToken } from '@/utils/file/reference';
 import { filterAndSortFiles } from '../utils/fileScoring';
 
+/** 默认文件提及候选展示数量。 */
+const DEFAULT_FILE_MENTION_LIMIT = 100;
+
 /**
  * useFileMention 返回类型
  */
@@ -84,7 +87,7 @@ export function useFileMention(
 
   // 过滤后的文件列表
   const filteredFileMentions = computed<FileMentionOption[]>(() => {
-    return filterAndSortFiles(fileMentions.value, mentionQuery.value);
+    return filterAndSortFiles(fileMentions.value, mentionQuery.value).slice(0, DEFAULT_FILE_MENTION_LIMIT);
   });
 
   /**
@@ -134,6 +137,23 @@ export function useFileMention(
   }
 
   /**
+   * 判断新旧文件提及上下文是否一致。
+   * @param context - 新读取到的文件提及上下文
+   * @returns 上下文未变化时返回 true
+   */
+  function isSameMentionContext(context: { from: number; to: number; query: string }): boolean {
+    return mentionRange.value?.from === context.from && mentionRange.value.to === context.to && mentionQuery.value === context.query;
+  }
+
+  /**
+   * 将高亮索引限制在当前候选范围内。
+   */
+  function clampMentionIndex(): void {
+    const maxIndex = filteredFileMentions.value.length - 1;
+    mentionActiveIndex.value = Math.max(0, Math.min(mentionActiveIndex.value, maxIndex));
+  }
+
+  /**
    * 关闭文件提及菜单
    */
   function closeMentionMenu(suppressSync = false): void {
@@ -167,9 +187,16 @@ export function useFileMention(
       return;
     }
 
+    const keepActiveIndex = isSameMentionContext(context);
     mentionVisible.value = true;
     mentionQuery.value = context.query;
     mentionRange.value = { from: context.from, to: context.to };
+
+    if (keepActiveIndex) {
+      clampMentionIndex();
+      return;
+    }
+
     mentionShouldScrollActive.value = false;
     mentionActiveIndex.value = 0;
   }

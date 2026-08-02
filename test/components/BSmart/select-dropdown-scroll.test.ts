@@ -90,4 +90,15 @@ describe('SelectDropdown active item scrolling', (): void => {
 
     expect(scrollIntoViewMock).not.toHaveBeenCalled();
   });
+
+  it('renders the complete item list', (): void => {
+    const wrapper = mountDropdown({
+      items: createItems(100)
+    });
+    const renderedItems = wrapper.findAll('.select-dropdown__item');
+
+    expect(renderedItems).toHaveLength(100);
+    expect(renderedItems[0]?.text()).toBe('Item 0');
+    expect(renderedItems[99]?.text()).toBe('Item 99');
+  });
 });

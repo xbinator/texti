@@ -78,4 +78,20 @@ describe('FileMentionSelect', (): void => {
     expect(wrapper.find('.b-recent-icon-stub').attributes('data-file-name')).toBe('package.json');
     expect(wrapper.find('.b-recent-icon-stub').attributes('data-file-ext')).toBe('json');
   });
+
+  it('renders all file mention rows', (): void => {
+    const files = Array.from(
+      { length: 100 },
+      (_value: unknown, index: number): FileMentionOption =>
+        createFileMention({
+          id: `file-${index}`,
+          name: `file-${index}.ts`,
+          path: `/tmp/file-${index}.ts`,
+          ext: 'ts'
+        })
+    );
+    const wrapper = mountFileMentionSelect(files);
+
+    expect(wrapper.findAll('.b-recent-icon-stub')).toHaveLength(100);
+  });
 });

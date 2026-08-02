@@ -132,6 +132,23 @@ export function useSlashCommand(
   }
 
   /**
+   * 判断新旧斜杠命令上下文是否一致。
+   * @param context - 新读取到的斜杠命令上下文
+   * @returns 上下文未变化时返回 true
+   */
+  function isSameSlashContext(context: SlashCommandContext): boolean {
+    return slashRange.value?.from === context.from && slashRange.value.to === context.to && slashQuery.value === context.query;
+  }
+
+  /**
+   * 将高亮索引限制在当前命令候选范围内。
+   */
+  function clampSlashIndex(): void {
+    const maxIndex = filteredSlashCommands.value.length - 1;
+    slashActiveIndex.value = Math.max(0, Math.min(slashActiveIndex.value, maxIndex));
+  }
+
+  /**
    * 关闭斜杠命令菜单
    */
   function closeSlashCommandMenu(suppressSync = false): void {
@@ -165,9 +182,16 @@ export function useSlashCommand(
       return;
     }
 
+    const keepActiveIndex = isSameSlashContext(context);
     slashVisible.value = true;
     slashQuery.value = context.query;
     slashRange.value = { from: context.from, to: context.to };
+
+    if (keepActiveIndex) {
+      clampSlashIndex();
+      return;
+    }
+
     slashShouldScrollActive.value = false;
     slashActiveIndex.value = 0;
   }
