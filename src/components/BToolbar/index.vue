@@ -98,31 +98,6 @@ const shouldShowSelectedCheckColumn = computed<boolean>(
   border-radius: var(--control-radius);
 }
 
-// 参考 CurrentBlockMenu 的样式
-:deep(.b-dropdown-button) {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
-  height: 32px;
-  padding: 0 12px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  background: var(--bg-primary);
-  border: var(--control-border-width) solid var(--border-primary);
-  border-radius: var(--control-radius);
-  box-shadow: var(--shadow-dropdown);
-  transition: color var(--motion-duration-fast) var(--motion-easing-standard), background var(--motion-duration-fast) var(--motion-easing-standard),
-    border-color var(--motion-duration-fast) var(--motion-easing-standard), transform var(--motion-duration-fast) var(--motion-easing-press);
-
-  &:hover,
-  &.is-active {
-    color: var(--text-primary);
-    background: var(--bg-tertiary);
-    border-color: var(--border-primary);
-  }
-}
-
 :deep(.b-dropdown-menu) {
   min-width: 172px;
   padding: 6px;
