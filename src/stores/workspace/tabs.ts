@@ -496,14 +496,20 @@ export const useTabsStore = defineStore('tabs', {
     },
 
     /**
-     * 添加或更新标签页。
+     * 添加或更新标签页；新标签插入到当前激活标签之后，无激活标签时追加到末尾。
      * @param tab - 需要加入状态的标签页
      */
     addTab(tab: Tab, options: AddTabOptions = {}): void {
       const normalizedTab = normalizeTab(tab);
       const index = this.tabs.findIndex((t) => t.id === normalizedTab.id);
       if (index === -1) {
-        this.tabs.push(normalizedTab);
+        // 新标签插入到当前激活标签之后，保持类 IDE 的标签分组顺序
+        const activeIndex = findTabIndex(this.tabs, this.activeTab?.id ?? null);
+        if (activeIndex === -1) {
+          this.tabs.push(normalizedTab);
+        } else {
+          this.tabs.splice(activeIndex + 1, 0, normalizedTab);
+        }
       } else {
         const existingTab = this.tabs[index];
         const nextStatus = normalizedTab.status ?? existingTab?.status;

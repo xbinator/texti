@@ -171,6 +171,25 @@ describe('tabs store replacement', (): void => {
     expect(local.getItem<TabsState>('app_tabs')?.tabs[0]).not.toHaveProperty('status');
   });
 
+  it('inserts a new tab right after the active tab', (): void => {
+    const store = useTabsStore();
+    store.tabs = [createTab('tab-a'), createTab('tab-b'), createTab('tab-c')];
+    store.setActivePath('/tab-a');
+
+    store.addTab(createTab('tab-d'));
+
+    expect(store.tabs.map((tab) => tab.id)).toEqual(['tab-a', 'tab-d', 'tab-b', 'tab-c']);
+  });
+
+  it('appends a new tab when there is no active tab', (): void => {
+    const store = useTabsStore();
+    store.tabs = [createTab('tab-a')];
+
+    store.addTab(createTab('tab-b'));
+
+    expect(store.tabs.map((tab) => tab.id)).toEqual(['tab-a', 'tab-b']);
+  });
+
   it('migrates transient status when replacing a tab', (): void => {
     const store = useTabsStore();
     store.tabs = [createTab('chat:new', '/chat')];
