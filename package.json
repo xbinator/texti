@@ -1,7 +1,7 @@
 {
   "name": "tibis",
   "private": true,
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "A local-first Markdown desktop editor for writing and AI workflows.",
   "author": "Tibis contributors",
   "type": "module",
