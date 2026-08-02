@@ -14,23 +14,6 @@ function readSource(filePath: string): string {
   return readFileSync(filePath, 'utf8');
 }
 
-/**
- * 读取指定 CSS 选择器的规则体。
- * @param source - Vue 单文件组件源码
- * @param selector - CSS 选择器
- * @returns 规则体内容，未找到时返回空字符串
- */
-function getRuleBody(source: string, selector: string): string {
-  const start = source.indexOf(`${selector} {`);
-  if (start < 0) {
-    return '';
-  }
-
-  const bodyStart = source.indexOf('{', start) + 1;
-  const bodyEnd = source.indexOf('\n}', bodyStart);
-  return source.slice(bodyStart, bodyEnd);
-}
-
 describe('theme design token styles', (): void => {
   it('uses overlay and control radius tokens in dropdown components', (): void => {
     const dropdownSource = readSource('src/components/BDropdown/index.vue');
