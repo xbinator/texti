@@ -35,13 +35,10 @@ describe('theme design token styles', (): void => {
   it('uses overlay and control radius tokens in dropdown components', (): void => {
     const dropdownSource = readSource('src/components/BDropdown/index.vue');
     const dropdownMenuSource = readSource('src/components/BDropdown/Menu.vue');
-    const dropdownButtonSource = readSource('src/components/BDropdown/Button.vue');
 
     expect(dropdownSource).toContain('border-radius: var(--overlay-radius);');
     expect(dropdownMenuSource).toContain('border-radius: var(--overlay-radius);');
     expect(dropdownMenuSource).toContain('border-radius: var(--control-radius);');
-    expect(dropdownButtonSource).toContain('border-radius: var(--control-radius);');
-    expect(dropdownButtonSource).toContain('var(--motion-duration-base)');
   });
 
   it('uses overlay and control radius tokens in modal and drawer chrome', (): void => {
@@ -124,7 +121,6 @@ describe('theme design token styles', (): void => {
     const buttonSource = readSource('src/components/BButton/index.vue');
     const dropdownSource = readSource('src/components/BDropdown/index.vue');
     const dropdownMenuSource = readSource('src/components/BDropdown/Menu.vue');
-    const dropdownButtonSource = readSource('src/components/BDropdown/Button.vue');
     const segmentedSource = readSource('src/components/BSegmented/index.vue');
     const toolbarSource = readSource('src/components/BToolbar/index.vue');
     const smartSelectSource = readSource('src/components/BSmart/Select.vue');
@@ -133,16 +129,12 @@ describe('theme design token styles', (): void => {
     const messageBubbleSource = readSource('src/components/BChat/components/MessageBubble.vue');
     const questionCardSource = readSource('src/components/BChat/components/QuestionCard.vue');
     const confirmationSource = readSource('src/components/BChat/components/ConfirmationSheet.vue');
-    const dropdownButtonRule = getRuleBody(dropdownButtonSource, '.b-dropdown-button');
-    const borderedDropdownButtonRule = getRuleBody(dropdownButtonSource, '.b-dropdown-button.is-bordered');
 
     expect(buttonSource).toContain('border: var(--button-border-width) solid var(--button-border);');
     expect(buttonSource).toContain('border-color: var(--button-border);');
     expect(buttonSource).toContain('border: var(--control-border-width) solid var(--color-danger-border);');
     expect(dropdownSource).toContain('border: var(--overlay-border-width) solid var(--dropdown-border);');
     expect(dropdownMenuSource).toContain('border: var(--overlay-border-width) solid var(--dropdown-border);');
-    expect(dropdownButtonRule).toContain('border: var(--button-border-width) solid var(--button-border);');
-    expect(borderedDropdownButtonRule).toContain('border: var(--control-border-width) solid var(--input-border);');
     expect(segmentedSource).toContain('border: var(--control-border-width) solid var(--border-primary);');
     expect(toolbarSource).toContain('border: var(--control-border-width) solid var(--border-primary);');
     expect(toolbarSource).toContain('border: var(--overlay-border-width) solid var(--dropdown-border);');
@@ -158,25 +150,20 @@ describe('theme design token styles', (): void => {
   it('uses theme font tokens in global and display chrome styles', (): void => {
     const resetSource = readSource('src/assets/styles/reset.less');
     const buttonSource = readSource('src/components/BButton/index.vue');
-    const dropdownButtonSource = readSource('src/components/BDropdown/Button.vue');
 
     expect(resetSource).toContain('font-family: var(--font-sans);');
     expect(resetSource).toContain('font-family: var(--font-mono);');
     expect(existsSync('src/assets/styles/theme-fonts.less')).toBe(false);
     expect(buttonSource).toContain('font-family: var(--font-display);');
-    expect(dropdownButtonSource).toContain('font-family: var(--font-display);');
   });
 
   it('uses interaction shadow tokens in pressable themed chrome', (): void => {
     const buttonSource = readSource('src/components/BButton/index.vue');
-    const dropdownButtonSource = readSource('src/components/BDropdown/Button.vue');
     const questionCardSource = readSource('src/components/BChat/components/QuestionCard.vue');
 
     expect(buttonSource).toContain('box-shadow: var(--button-shadow);');
     expect(buttonSource).toContain('box-shadow: var(--button-pressed-shadow);');
     expect(buttonSource).toContain('translate(var(--interaction-press-offset), var(--interaction-press-offset))');
-    expect(dropdownButtonSource).toContain('box-shadow: var(--button-shadow);');
-    expect(dropdownButtonSource).toContain('box-shadow: var(--button-pressed-shadow);');
     expect(questionCardSource).toContain('box-shadow: var(--interaction-raised-shadow);');
   });
 
