@@ -44,6 +44,27 @@ function isMenuLabel(item: MenuItemConstructorOptions, label: string): boolean {
   return item.label === label;
 }
 
+/**
+ * 递归收集菜单模板中的 accelerator。
+ * @param items - Electron 菜单模板
+ * @returns 菜单模板中声明的快捷键
+ */
+function collectAccelerators(items: MenuItemConstructorOptions[]): string[] {
+  const accelerators: string[] = [];
+
+  for (const item of items) {
+    if (typeof item.accelerator === 'string') {
+      accelerators.push(item.accelerator);
+    }
+
+    if (Array.isArray(item.submenu)) {
+      accelerators.push(...collectAccelerators(item.submenu));
+    }
+  }
+
+  return accelerators;
+}
+
 describe('buildAppMenuTemplate', () => {
   it('adds check update action to the help menu', (): void => {
     const template = buildAppMenuTemplate(false, 'Tibis');
@@ -63,19 +84,27 @@ describe('buildAppMenuTemplate', () => {
     expect(submenu.find((item: MenuItemConstructorOptions): boolean => isMenuLabel(item, '强制重新加载'))).toBeUndefined();
   });
 
-  it('keeps reload actions when the reload menu is enabled', (): void => {
+  it('keeps reload actions without reload accelerators when the reload menu is enabled', (): void => {
     const template = buildAppMenuTemplate(false, 'Tibis', { enableReloadMenu: true });
     const submenu = getSubmenu(template, '视图');
     const reloadItem = submenu.find((item: MenuItemConstructorOptions): boolean => isMenuLabel(item, '重新加载'));
     const forceReloadItem = submenu.find((item: MenuItemConstructorOptions): boolean => isMenuLabel(item, '强制重新加载'));
 
     expect(reloadItem).toMatchObject({
-      label: '重新加载',
-      accelerator: 'CmdOrCtrl+R'
+      label: '重新加载'
     });
+    expect(reloadItem?.accelerator).toBeUndefined();
     expect(forceReloadItem).toMatchObject({
-      label: '强制重新加载',
-      accelerator: 'CmdOrCtrl+Shift+R'
+      label: '强制重新加载'
     });
+    expect(forceReloadItem?.accelerator).toBeUndefined();
+  });
+
+  it('does not bind Ctrl R accelerators to any menu item', (): void => {
+    const template = buildAppMenuTemplate(false, 'Tibis', { enableReloadMenu: true });
+    const accelerators = collectAccelerators(template);
+
+    expect(accelerators).not.toContain('CmdOrCtrl+R');
+    expect(accelerators).not.toContain('CmdOrCtrl+Shift+R');
   });
 });

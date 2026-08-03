@@ -135,7 +135,7 @@ export function buildAppMenuTemplate(isMac: boolean, appName: string, options: A
       { label: '新建', accelerator: 'CmdOrCtrl+Alt+N', click: () => sendMenuAction('file:new') },
       { type: 'separator' as const },
       { label: '打开...', accelerator: 'CmdOrCtrl+Shift+O', click: () => sendMenuAction('file:open') },
-      { label: '打开最近的文件', accelerator: 'CmdOrCtrl+R', click: () => sendMenuAction('file:recent') },
+      { label: '打开最近的文件', click: () => sendMenuAction('file:recent') },
       { type: 'separator' as const },
       { label: '复制为新文件', accelerator: 'CmdOrCtrl+Alt+D', click: () => sendMenuAction('file:duplicate') },
       { label: '保存', accelerator: 'CmdOrCtrl+S', click: () => sendMenuAction('file:save') },
@@ -170,7 +170,6 @@ export function buildAppMenuTemplate(isMac: boolean, appName: string, options: A
       { type: 'separator' as const },
       {
         label: '重新加载',
-        accelerator: 'CmdOrCtrl+R',
         click: () => {
           const win = BrowserWindow.getFocusedWindow();
           if (win) win.reload();
@@ -178,7 +177,6 @@ export function buildAppMenuTemplate(isMac: boolean, appName: string, options: A
       },
       {
         label: '强制重新加载',
-        accelerator: 'CmdOrCtrl+Shift+R',
         click: () => {
           const win = BrowserWindow.getFocusedWindow();
           if (win) win.webContents.reloadIgnoringCache();

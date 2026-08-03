@@ -6,7 +6,6 @@ export const EditorShortcuts = {
   FILE_SAVE_AS: 'Ctrl+Shift+S',
   FILE_DUPLICATE: 'Ctrl+Alt+D',
   FILE_RENAME: 'F2',
-  FILE_RECENT: 'Ctrl+R',
 
   // 全局操作
   COMMAND_PANEL: 'Ctrl+P',
