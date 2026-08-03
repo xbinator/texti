@@ -132,7 +132,7 @@ export function buildAppMenuTemplate(isMac: boolean, appName: string, options: A
   template.push({
     label: '文件',
     submenu: [
-      { label: '新建', accelerator: 'CmdOrCtrl+Alt+N', click: () => sendMenuAction('file:new') },
+      { label: '新建', accelerator: 'CmdOrCtrl+N', click: () => sendMenuAction('file:new') },
       { type: 'separator' as const },
       { label: '打开...', accelerator: 'CmdOrCtrl+Shift+O', click: () => sendMenuAction('file:open') },
       { label: '打开最近的文件', click: () => sendMenuAction('file:recent') },
@@ -143,7 +143,7 @@ export function buildAppMenuTemplate(isMac: boolean, appName: string, options: A
       { type: 'separator' as const },
       { label: '重命名', accelerator: 'F2', click: () => sendMenuAction('file:rename') },
       { type: 'separator' as const },
-      { role: 'close' as const, label: '关闭' }
+      { label: '关闭标签页', accelerator: 'CmdOrCtrl+W', click: () => sendMenuAction('tab:close') }
     ]
   });
 

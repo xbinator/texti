@@ -97,6 +97,16 @@ const shortcutGroups: ShortcutGroup[] = [
     description: '编辑模式切换',
     icon: 'lucide:panel-top',
     items: [{ label: '源代码模式', shortcut: EditorShortcuts.VIEW_SOURCE }]
+  },
+  {
+    title: '窗口与标签页',
+    description: '新建、关闭与切换标签',
+    icon: 'lucide:app-window',
+    items: [
+      { label: '新建文档标签页', shortcut: EditorShortcuts.FILE_NEW },
+      { label: '关闭当前标签页', shortcut: EditorShortcuts.TAB_CLOSE },
+      { label: '切换到下一个标签页', shortcut: EditorShortcuts.TAB_NEXT }
+    ]
   }
 ];
 

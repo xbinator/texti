@@ -109,6 +109,7 @@ import { useEditActive } from './hooks/useEditActive';
 import { useFileActive } from './hooks/useFileActive';
 import { useHelpActive } from './hooks/useHelpActive';
 import { useKeepAlive } from './hooks/useKeepAlive';
+import { useTabShortcuts } from './hooks/useTabShortcuts';
 import { useViewActive } from './hooks/useViewActive';
 import { useWatchSkill } from './hooks/useWatchSkill';
 import { useWatchWidget } from './hooks/useWatchWidget';
@@ -134,6 +135,8 @@ const { toolbarFileOptions } = useFileActive();
 const { toolbarEditOptions } = useEditActive();
 const { toolbarViewOptions } = useViewActive();
 const { toolbarHelpOptions } = useHelpActive(visible);
+/** 注册标签页级快捷键。 */
+useTabShortcuts();
 
 /** 欢迎页路由。 */
 const WELCOME_ROUTE_PATH = '/welcome';

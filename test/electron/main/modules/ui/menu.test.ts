@@ -107,4 +107,27 @@ describe('buildAppMenuTemplate', () => {
     expect(accelerators).not.toContain('CmdOrCtrl+R');
     expect(accelerators).not.toContain('CmdOrCtrl+Shift+R');
   });
+
+  it('binds Ctrl N to the new document action', (): void => {
+    const template = buildAppMenuTemplate(false, 'Tibis');
+    const submenu = getSubmenu(template, '文件');
+    const newItem = submenu.find((item: MenuItemConstructorOptions): boolean => isMenuLabel(item, '新建'));
+
+    expect(newItem).toMatchObject({
+      label: '新建',
+      accelerator: 'CmdOrCtrl+N'
+    });
+  });
+
+  it('routes Ctrl W to the in-app tab close action', (): void => {
+    const template = buildAppMenuTemplate(false, 'Tibis');
+    const submenu = getSubmenu(template, '文件');
+    const closeItem = submenu.find((item: MenuItemConstructorOptions): boolean => isMenuLabel(item, '关闭标签页'));
+
+    expect(closeItem).toMatchObject({
+      label: '关闭标签页',
+      accelerator: 'CmdOrCtrl+W'
+    });
+    expect(closeItem?.role).toBeUndefined();
+  });
 });

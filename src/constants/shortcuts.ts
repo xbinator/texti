@@ -1,6 +1,10 @@
+/**
+ * @file shortcuts.ts
+ * @description 应用菜单与快捷键帮助共用的快捷键常量。
+ */
 export const EditorShortcuts = {
   // 文件操作
-  FILE_NEW: 'Ctrl+Alt+N',
+  FILE_NEW: 'Ctrl+N',
   FILE_OPEN: 'Ctrl+Shift+O',
   FILE_SAVE: 'Ctrl+S',
   FILE_SAVE_AS: 'Ctrl+Shift+S',
@@ -16,5 +20,9 @@ export const EditorShortcuts = {
   EDIT_FIND: 'Ctrl+F',
 
   // 视图操作
-  VIEW_SOURCE: 'Ctrl+E'
+  VIEW_SOURCE: 'Ctrl+E',
+
+  // 标签页操作
+  TAB_CLOSE: 'Ctrl+W',
+  TAB_NEXT: 'Ctrl+Tab'
 };

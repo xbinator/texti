@@ -49,6 +49,9 @@ export function useMenuAction(): void {
       case 'file:rename':
         emitter.emit('file:rename');
         break;
+      case 'tab:close':
+        emitter.emit('tab:close');
+        break;
 
       case 'edit:undo':
         emitter.emit('edit:undo');
