@@ -9,9 +9,12 @@
 
     <div v-if="selection" class="inspector-panel__content">
       <BSectionBlock title="元素">
+        <template #extra>
+          <BButton type="text" size="mini" square icon="lucide:camera" @click.stop="emit('captureSelectedElementScreenshot', selection)" />
+        </template>
+
         <BSectionItem label="选择器">
           <code class="inspector-panel__value-tag">{{ selection.selector }}</code>
-          <BButton type="text" size="small" square icon="lucide:copy" @click="copyText(selection.selector)" />
         </BSectionItem>
         <BSectionItem label="位置">
           <div class="inspector-panel__value-group">
@@ -77,12 +80,9 @@
  * @description 展示 WebView 页面 DOM 元素层级、属性与计算样式。
  */
 import { computed } from 'vue';
-import { useClipboard } from '@/hooks/useClipboard';
 import type { WebviewElementSelection } from '@/views/webview/shared/types';
 import { filterStyleEntries } from '@/views/webview/web/utils/styles';
 import type { StyleEntry } from '@/views/webview/web/utils/styles';
-
-const { clipboard } = useClipboard();
 
 /**
  * DOM 看板组件属性。
@@ -95,10 +95,13 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), { selection: null });
 
 /**
- * 面板事件。点击关闭按钮时触发，由父组件决定如何隐藏面板与停止元素选择模式。
+ * 面板事件。
  */
 const emit = defineEmits<{
+  /** 点击关闭按钮时触发，由父组件决定如何隐藏面板与停止元素选择模式。 */
   close: [];
+  /** 点击元素区块截图按钮时触发，由父组件执行选中元素截图。 */
+  captureSelectedElementScreenshot: [selection: WebviewElementSelection];
 }>();
 
 /**
@@ -149,14 +152,6 @@ const hierarchyItems = computed<HierarchyItem[]>(() => {
 
 /** 计算样式键值对（过滤空值、默认值、以及标签默认 display） */
 const styleEntries = computed<StyleEntry[]>(() => filterStyleEntries(props.selection?.computedStyles, props.selection?.tagName));
-
-/**
- * 复制看板中的文本内容。
- * @param value - 需要复制的文本
- */
-function copyText(value: string): void {
-  clipboard(value, { successMessage: '已复制选择器' });
-}
 </script>
 
 <style scoped lang="less">

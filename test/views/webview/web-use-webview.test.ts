@@ -5,7 +5,7 @@
  */
 import { Script, createContext } from 'node:vm';
 import type { DidNavigateEvent, PageFaviconUpdatedEvent, WebviewTag } from 'electron';
-import { ref, watch } from 'vue';
+import { ref } from 'vue';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createElementSelectionScript, normalizeWebviewPageSnapshot, useWebView } from '@/views/webview/web/hooks/useWebView';
 import { TIBIS_WEBVIEW_HOST_CHANNEL } from '../../../shared/webview/host-bridge';
@@ -351,21 +351,6 @@ function readLastSelectionMessage(messages: TestWebviewHostMessage[]): { kind: s
   return message.payload;
 }
 
-/**
- * 判断值是否为工具条动作宿主消息。
- * @param entry - 宿主消息
- * @returns 是否为工具条动作宿主消息
- */
-function isToolbarActionHostMessage(entry: TestWebviewHostMessage): entry is TestWebviewHostMessage & { payload: { kind: string; actionType?: string } } {
-  return (
-    entry.channel === TIBIS_WEBVIEW_HOST_CHANNEL &&
-    typeof entry.payload === 'object' &&
-    entry.payload !== null &&
-    'kind' in entry.payload &&
-    entry.payload.kind === 'element-picker-action'
-  );
-}
-
 describe('useWebView', () => {
   afterEach((): void => {
     (window as WindowWithElementPickerCleanup).__tibisElementPickerCleanup?.();
@@ -539,7 +524,7 @@ describe('useWebView', () => {
     expect(selection?.text).toBe('较去年人数变化');
   });
 
-  it('renders themed selected element toolbar and emits screenshot action', (): void => {
+  it('keeps selected element highlight without rendering the removed floating toolbar', (): void => {
     document.body.innerHTML = `
       <section class="article-section">
         <article class="article-item"><span>第七条</span></article>
@@ -568,152 +553,39 @@ describe('useWebView', () => {
         color: '#123456',
         background: '#eaf2ff',
         border: '#789abc',
-        toolbarText: '#123456',
-        toolbarBackground: '#eaf2ff',
-        toolbarHoverText: '#0f2f55',
         borderWidth: '2px',
-        surfaceRadius: '0px',
-        controlRadius: '0px'
+        surfaceRadius: '0px'
       })
     ).runInContext(scriptContext);
     item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
 
+    const selectedHighlight = document.querySelector('.tibis-element-picker-selected');
     const toolbar = document.querySelector('.tibis-element-picker-toolbar');
     const tagName = document.querySelector('.tibis-element-picker-toolbar__tag');
-    const actions = document.querySelector('.tibis-element-picker-toolbar__actions');
-    const captureButton = document.querySelector(
-      '.tibis-element-picker-toolbar__action[data-tibis-element-picker-action="capture-selected-element-screenshot"]'
-    );
-    const captureIconLens = document.querySelector('.tibis-element-picker-toolbar__action-icon circle');
-    const toolbarStyle = Array.from(document.querySelectorAll('style'))
+    const captureButton = document.querySelector('[data-tibis-element-picker-action="capture-selected-element-screenshot"]');
+    const pickerStyle = Array.from(document.querySelectorAll('style'))
       .map((style) => style.textContent ?? '')
-      .find((content) => content.includes('.tibis-element-picker-toolbar'));
-
-    if (!(captureIconLens instanceof Element)) {
-      throw new Error('capture icon lens should exist');
-    }
-
-    captureIconLens.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      .find((content) => content.includes('.tibis-element-picker-selected'));
     (window as WindowWithElementPickerCleanup).__tibisElementPickerCleanup?.();
 
-    const actionMessage = hostMessages.find(isToolbarActionHostMessage);
-
-    expect(toolbar).toBeInstanceOf(HTMLElement);
-    expect(tagName?.textContent).toBe('article');
-    expect(tagName?.parentElement).toBe(toolbar);
-    expect(actions?.parentElement).toBe(toolbar);
-    expect(captureButton).toBeInstanceOf(HTMLElement);
-    expect(captureIconLens?.tagName.toLowerCase()).toBe('circle');
-    expect((toolbar as HTMLElement).style.left).toBe('332px');
-    expect((toolbar as HTMLElement).style.top).toBe('59px');
-    expect(toolbarStyle).toContain('.tibis-element-picker-toolbar{position:absolute;');
-    expect(toolbarStyle).toContain('color:#123456;');
-    expect(toolbarStyle).toContain('background:#eaf2ff;');
-    expect(toolbarStyle).not.toContain('border:1px solid #123456;');
-    expect(toolbarStyle).toContain('border:2px solid #789abc;');
-    expect(toolbarStyle).toContain('height:20px;');
-    expect(toolbarStyle).toContain('font-size:12px;');
-    expect(toolbarStyle).toContain('border-radius:0px;');
-    expect(toolbarStyle).not.toContain('border-radius:3px;');
-    expect(toolbarStyle).toContain('animation:tibis-element-picker-toolbar-enter 120ms ease-out;');
-    expect(toolbarStyle).toContain('transition:color 120ms ease,transform 120ms ease;');
-    expect(toolbarStyle).toContain('.tibis-element-picker-toolbar__action:hover{color:#0f2f55;}');
-    expect(toolbarStyle).not.toContain('.tibis-element-picker-toolbar__action:hover{background:');
-    expect(toolbarStyle).toContain('transform:scale(.92);');
-    expect(toolbarStyle).toContain('font-size:14px;');
-    expect(actionMessage?.payload.actionType).toBe('capture-selected-element-screenshot');
-  });
-
-  it('moves selected element toolbar below the selection when top-right has no room', (): void => {
-    document.body.innerHTML = '<button id="top-entry">顶部入口</button>';
-    const button = document.querySelector('#top-entry');
-
-    if (!(button instanceof HTMLElement)) {
-      throw new Error('button should exist');
-    }
-
-    installElementRect(button, { x: 80, y: 8, width: 160, height: 32 });
-
-    const scriptContext = createContext({
-      window,
-      document,
-      console,
-      Element: window.Element,
-      HTMLElement: window.HTMLElement,
-      Promise,
-      requestAnimationFrame: window.requestAnimationFrame.bind(window)
-    });
-    new Script(createElementSelectionScript()).runInContext(scriptContext);
-    button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-
-    const toolbar = document.querySelector('.tibis-element-picker-toolbar');
-    (window as WindowWithElementPickerCleanup).__tibisElementPickerCleanup?.();
-
-    expect(toolbar).toBeInstanceOf(HTMLElement);
-    expect((toolbar as HTMLElement).style.left).toBe('112px');
-    expect((toolbar as HTMLElement).style.top).toBe('41px');
-  });
-
-  it('uses page coordinates for the absolute selected element toolbar position', (): void => {
-    document.body.innerHTML = '<button id="scrolled-entry">滚动入口</button>';
-    document.documentElement.scrollLeft = 12;
-    document.documentElement.scrollTop = 34;
-    const button = document.querySelector('#scrolled-entry');
-
-    if (!(button instanceof HTMLElement)) {
-      throw new Error('button should exist');
-    }
-
-    installElementRect(button, { x: 80, y: 8, width: 160, height: 32 });
-
-    const scriptContext = createContext({
-      window,
-      document,
-      console,
-      Element: window.Element,
-      HTMLElement: window.HTMLElement,
-      Promise,
-      requestAnimationFrame: window.requestAnimationFrame.bind(window)
-    });
-    new Script(createElementSelectionScript()).runInContext(scriptContext);
-    button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-
-    const toolbar = document.querySelector('.tibis-element-picker-toolbar');
-    (window as WindowWithElementPickerCleanup).__tibisElementPickerCleanup?.();
-
-    expect(toolbar).toBeInstanceOf(HTMLElement);
-    expect((toolbar as HTMLElement).style.left).toBe('124px');
-    expect((toolbar as HTMLElement).style.top).toBe('21px');
-  });
-
-  it('keeps selected element toolbar aligned to the selection box instead of the viewport edge', (): void => {
-    document.body.innerHTML = '<button id="right-entry">右侧入口</button>';
-    const button = document.querySelector('#right-entry');
-
-    if (!(button instanceof HTMLElement)) {
-      throw new Error('button should exist');
-    }
-
-    installElementRect(button, { x: 980, y: 120, width: 160, height: 32 });
-
-    const scriptContext = createContext({
-      window,
-      document,
-      console,
-      Element: window.Element,
-      HTMLElement: window.HTMLElement,
-      Promise,
-      requestAnimationFrame: window.requestAnimationFrame.bind(window)
-    });
-    new Script(createElementSelectionScript()).runInContext(scriptContext);
-    button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-
-    const toolbar = document.querySelector('.tibis-element-picker-toolbar');
-    (window as WindowWithElementPickerCleanup).__tibisElementPickerCleanup?.();
-
-    expect(toolbar).toBeInstanceOf(HTMLElement);
-    expect((toolbar as HTMLElement).style.left).toBe('1012px');
-    expect((toolbar as HTMLElement).style.top).toBe('99px');
+    expect(selectedHighlight).toBeInstanceOf(HTMLElement);
+    expect((selectedHighlight as HTMLElement).style.left).toBe('200px');
+    expect((selectedHighlight as HTMLElement).style.top).toBe('80px');
+    expect(toolbar).toBeNull();
+    expect(tagName).toBeNull();
+    expect(captureButton).toBeNull();
+    expect(pickerStyle).toContain('.tibis-element-picker-selected{position:fixed;');
+    expect(pickerStyle).not.toContain('.tibis-element-picker-toolbar');
+    expect(
+      hostMessages.some(
+        (entry) =>
+          entry.channel === TIBIS_WEBVIEW_HOST_CHANNEL &&
+          typeof entry.payload === 'object' &&
+          entry.payload !== null &&
+          'kind' in entry.payload &&
+          entry.payload.kind === 'element-picker-action'
+      )
+    ).toBe(false);
   });
 
   it('drains selected element messages when the preload bridge is unavailable', async (): Promise<void> => {
@@ -745,81 +617,10 @@ describe('useWebView', () => {
     await vi.advanceTimersByTimeAsync(160);
 
     expect(controller.selectedElement?.selector).toBe('button#primary-button');
-
-    const captureIconLens = document.querySelector('.tibis-element-picker-toolbar__action-icon circle');
-    if (!(captureIconLens instanceof Element)) {
-      throw new Error('capture icon lens should exist');
-    }
-
-    captureIconLens.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    await vi.advanceTimersByTimeAsync(160);
-
-    expect(controller.selectedElementToolbarActionRef.value?.type).toBe('capture-selected-element-screenshot');
+    expect(document.querySelector('.tibis-element-picker-toolbar')).toBeNull();
 
     await controller.stopElementSelection();
     await selectionTask;
-  });
-
-  it('deduplicates element picker toolbar actions delivered through ipc and the fallback queue', async (): Promise<void> => {
-    vi.useFakeTimers();
-    document.body.innerHTML = '<button id="dual-channel-button">双通道</button>';
-    const button = document.querySelector('#dual-channel-button');
-
-    if (!(button instanceof HTMLElement)) {
-      throw new Error('button should exist');
-    }
-
-    installElementRect(button, { x: 24, y: 36, width: 120, height: 40 });
-    const hostMessages = installWebviewHostBridge();
-    const scriptContext = createContext({
-      window,
-      document,
-      console,
-      Element: window.Element,
-      HTMLElement: window.HTMLElement,
-      Promise,
-      requestAnimationFrame: window.requestAnimationFrame.bind(window)
-    });
-    const webviewElement = createVmScriptExecutingWebview(scriptContext);
-    const controller = useWebView(ref<WebviewTag | null>(webviewElement));
-    const toolbarActionTypes: string[] = [];
-    const stopWatchingToolbarActions = watch(
-      controller.selectedElementToolbarActionRef,
-      (action): void => {
-        if (action) {
-          toolbarActionTypes.push(action.type);
-        }
-      },
-      { flush: 'sync' }
-    );
-    const selectionTask = controller.startElementSelection();
-
-    try {
-      await Promise.resolve();
-      button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-      await Promise.resolve();
-
-      const captureIconLens = document.querySelector('.tibis-element-picker-toolbar__action-icon circle');
-      if (!(captureIconLens instanceof Element)) {
-        throw new Error('capture icon lens should exist');
-      }
-
-      captureIconLens.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-      await Promise.resolve();
-      const actionMessage = hostMessages.findLast(isToolbarActionHostMessage);
-      if (!actionMessage) {
-        throw new Error('toolbar action host message should be posted');
-      }
-
-      controller.handleIpcMessage({ channel: TIBIS_WEBVIEW_HOST_CHANNEL, args: [actionMessage.payload] });
-      await vi.advanceTimersByTimeAsync(160);
-
-      expect(toolbarActionTypes).toEqual(['capture-selected-element-screenshot']);
-    } finally {
-      stopWatchingToolbarActions();
-      await controller.stopElementSelection();
-      await selectionTask;
-    }
   });
 
   it('normalizes webpage agent snapshot fields', (): void => {

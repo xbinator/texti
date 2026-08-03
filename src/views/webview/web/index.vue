@@ -34,7 +34,11 @@
       </div>
 
       <BPanelSplitter v-if="isInspectorOpen" v-model:size="domPanelWidth" :min-width="280" :max-width="480" :closable="false">
-        <InspectorPanel :selection="webview.selectedElement" @close="handleCloseDomInspector" />
+        <InspectorPanel
+          :selection="webview.selectedElement"
+          @capture-selected-element-screenshot="handleCaptureSelectedElementScreenshot"
+          @close="handleCloseDomInspector"
+        />
       </BPanelSplitter>
     </div>
 
@@ -299,13 +303,8 @@ function resolveElementPickerTheme(): WebviewElementPickerTheme {
     color: colors.primary,
     background: colors.primaryBg,
     border: colors.primaryBorder,
-    toolbarText: colors.primary,
-    toolbarBackground: colors.primarySolidBg,
-    toolbarHoverText: colors.primaryHover,
-    toolbarShadow: 'none',
     borderWidth: readThemeVariable(style, '--overlay-border-width', '2px'),
-    surfaceRadius: readThemeVariable(style, '--surface-radius', '4px'),
-    controlRadius: readThemeVariable(style, '--control-radius', '3px')
+    surfaceRadius: readThemeVariable(style, '--surface-radius', '4px')
   };
 }
 
@@ -397,12 +396,6 @@ watch([deviceMode.isToolbarVisible, deviceMode.activePreset], () => nextTick(req
 watch(webview.selectedElementRef, (value) => {
   if (value && isInspectorOpen.value === null) {
     isInspectorOpen.value = true;
-  }
-});
-
-watch(webview.selectedElementToolbarActionRef, (action) => {
-  if (action?.type === 'capture-selected-element-screenshot') {
-    handleCaptureSelectedElementScreenshot(action.selection);
   }
 });
 

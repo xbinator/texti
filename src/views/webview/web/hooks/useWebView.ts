@@ -10,7 +10,6 @@ import type {
   WebviewAgentActivityPhase,
   WebviewController,
   WebviewElementSelection,
-  WebviewElementToolbarAction,
   WebviewPageState
 } from '@/views/webview/shared/types';
 import { normalizeWebviewUrl } from '@/views/webview/shared/utils/url';
@@ -37,7 +36,6 @@ import {
   createStopElementSelectionScript,
   isElementSelection,
   isWebviewElementHostMessage,
-  isWebviewElementToolbarActionType,
   isWebviewIpcMessageEvent,
   normalizeElementSelection,
   type WebviewElementHostMessage,
@@ -276,7 +274,6 @@ function createTouchSimulationScript(enabled: boolean): string {
 export function useWebView(webviewRef: Ref<WebviewTag | null>) {
   const state = ref<WebviewPageState>({ ...DEFAULT_STATE });
   const selectedElement = ref<WebviewElementSelection | null>(null);
-  const selectedElementToolbarAction = ref<WebviewElementToolbarAction | null>(null);
   const agentActivity = ref<WebviewAgentActivity>({ ...DEFAULT_AGENT_ACTIVITY });
   let initialUrlAttached = false;
   let isDomReady = false;
@@ -361,18 +358,6 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
     }
 
     markElementPickerMessageHandled(payload);
-    if (payload.kind === 'element-picker-action') {
-      if (!isWebviewElementToolbarActionType(payload.actionType)) {
-        return;
-      }
-      selectedElementToolbarAction.value = {
-        type: payload.actionType,
-        selection: selectedElement.value,
-        triggeredAt: Date.now()
-      };
-      return;
-    }
-
     if (isElementSelection(payload.selection)) {
       selectedElement.value = normalizeElementSelection(payload.selection);
     }
@@ -887,7 +872,6 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
       return selectedElement.value;
     },
     selectedElementRef: selectedElement,
-    selectedElementToolbarActionRef: selectedElementToolbarAction,
     agentActivity,
 
     attachInitialUrl,

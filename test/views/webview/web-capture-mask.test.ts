@@ -326,12 +326,10 @@ describe('webview screenshot wiring', () => {
     expect(executeJavaScriptMock.mock.calls.at(-1)?.[0]).toContain('__tibisElementPickerCleanup');
   });
 
-  it('uses an opaque light theme background and distinct hover color for the element picker toolbar', async (): Promise<void> => {
+  it('uses theme colors for the element picker highlight without a floating toolbar', async (): Promise<void> => {
     document.documentElement.style.setProperty('--color-primary', '#123456');
     document.documentElement.style.setProperty('--color-primary-bg', 'rgb(18 52 86 / 10%)');
     document.documentElement.style.setProperty('--color-primary-border', '#789abc');
-    document.documentElement.style.setProperty('--color-primary-hover', '#0f2f55');
-    document.documentElement.style.setProperty('--bg-elevated', '#ffffff');
 
     const wrapper = mountWebviewPage();
     const executeJavaScriptMock = executeJavaScriptMockHolder.value;
@@ -350,17 +348,16 @@ describe('webview screenshot wiring', () => {
       throw new Error('element picker script should be generated');
     }
 
-    expect(script).toContain('color:#123456;');
-    expect(script).toContain('background:#e7ebee;');
-    expect(script).toContain('color:#0f2f55;');
-    expect(script).not.toContain('background:#123456;');
-    expect(script.match(/background:#e7ebee;/g) ?? []).toHaveLength(2);
-    expect(script).not.toContain('color:rgb(18 52 86 / 10%);');
+    expect(script.match(/border:2px solid #789abc;/g) ?? []).toHaveLength(2);
+    expect(script).toContain('background:rgb(18 52 86 / 10%);');
+    expect(script).toContain('background:transparent;');
+    expect(script).not.toContain('.tibis-element-picker-toolbar');
+    expect(script).not.toContain('data-tibis-element-picker-action');
 
     wrapper.unmount();
   });
 
-  it('captures the selected element when the in-page toolbar action is clicked', async (): Promise<void> => {
+  it('captures the selected element when the address bar action is emitted', async (): Promise<void> => {
     const wrapper = mountWebviewPage();
     const webviewElement = hostLayerHolder.value?.querySelector('webview');
     const selection = createElementSelection();
@@ -370,7 +367,8 @@ describe('webview screenshot wiring', () => {
     }
 
     dispatchHostMessage(webviewElement, { kind: 'element-picker-selection', selection });
-    dispatchHostMessage(webviewElement, { kind: 'element-picker-action', actionType: 'capture-selected-element-screenshot' });
+    await nextTick();
+    wrapper.findComponent({ name: 'AddressBar' }).vm.$emit('capture-selected-element-screenshot');
     await nextTick();
 
     expect(captureSelectedElementScreenshotMock).toHaveBeenCalledWith(expect.objectContaining({ selector: 'div#target' }));
@@ -378,7 +376,26 @@ describe('webview screenshot wiring', () => {
     wrapper.unmount();
   });
 
-  it('ignores repeated selected element toolbar screenshot clicks while a screenshot is running', async (): Promise<void> => {
+  it('captures the selected element when the inspector action is emitted', async (): Promise<void> => {
+    const wrapper = mountWebviewPage();
+    const webviewElement = hostLayerHolder.value?.querySelector('webview');
+    const selection = createElementSelection();
+
+    if (!webviewElement) {
+      throw new Error('webview element should exist');
+    }
+
+    dispatchHostMessage(webviewElement, { kind: 'element-picker-selection', selection });
+    await nextTick();
+    wrapper.findComponent({ name: 'InspectorPanel' }).vm.$emit('capture-selected-element-screenshot', selection);
+    await nextTick();
+
+    expect(captureSelectedElementScreenshotMock).toHaveBeenCalledWith(expect.objectContaining({ selector: 'div#target' }));
+
+    wrapper.unmount();
+  });
+
+  it('ignores repeated address bar selected element screenshot clicks while a screenshot is running', async (): Promise<void> => {
     const wrapper = mountWebviewPage();
     const webviewElement = hostLayerHolder.value?.querySelector('webview');
     const selection = createElementSelection();
@@ -395,9 +412,10 @@ describe('webview screenshot wiring', () => {
     });
 
     dispatchHostMessage(webviewElement, { kind: 'element-picker-selection', selection });
-    dispatchHostMessage(webviewElement, { kind: 'element-picker-action', actionType: 'capture-selected-element-screenshot' });
     await nextTick();
-    dispatchHostMessage(webviewElement, { kind: 'element-picker-action', actionType: 'capture-selected-element-screenshot' });
+    wrapper.findComponent({ name: 'AddressBar' }).vm.$emit('capture-selected-element-screenshot');
+    await nextTick();
+    wrapper.findComponent({ name: 'AddressBar' }).vm.$emit('capture-selected-element-screenshot');
     await nextTick();
 
     expect(captureSelectedElementScreenshotMock).toHaveBeenCalledTimes(1);

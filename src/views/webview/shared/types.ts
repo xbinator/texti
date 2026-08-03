@@ -107,23 +107,6 @@ export interface WebviewElementSelection {
 }
 
 /**
- * WebView 元素工具条动作类型。
- */
-export type WebviewElementToolbarActionType = 'capture-selected-element-screenshot';
-
-/**
- * WebView 元素工具条动作。
- */
-export interface WebviewElementToolbarAction {
-  /** 动作类型 */
-  type: WebviewElementToolbarActionType;
-  /** 动作触发时的选中元素 */
-  selection: WebviewElementSelection | null;
-  /** 动作触发时间 */
-  triggeredAt: number;
-}
-
-/**
  * 跨实现共享的最小控制接口。
  */
 export interface WebviewController {
