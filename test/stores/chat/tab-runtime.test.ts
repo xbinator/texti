@@ -74,6 +74,38 @@ describe('chat tab runtime store', (): void => {
     expect(tabsStore.tabs[0]?.status).toBeUndefined();
   });
 
+  it.each([
+    ['running', 'loading'],
+    ['waiting', 'attention']
+  ] as const)('hides viewed %s state while preserving its resumable runtime status', (status, expectedTabStatus): void => {
+    const tabsStore = useTabsStore();
+    tabsStore.tabs = [createTab('chat:session-a')];
+    const store = useChatTabStore();
+    store.ensureTab('chat:session-a', 'session-a');
+    store.setStatus('chat:session-a', status);
+
+    store.markViewed('chat:session-a');
+
+    expect(store.getStatus('chat:session-a')).toBe(status);
+    expect(tabsStore.tabs[0]?.status).toBeUndefined();
+    store.syncStatus('chat:session-a');
+    expect(tabsStore.tabs[0]?.status).toBe(expectedTabStatus);
+  });
+
+  it.each(['error', 'completed'] as const)('acknowledges viewed %s status as idle', (status): void => {
+    const tabsStore = useTabsStore();
+    tabsStore.tabs = [createTab('chat:session-a')];
+    const store = useChatTabStore();
+    store.ensureTab('chat:session-a', 'session-a');
+    if (status === 'completed') store.markCompleted('chat:session-a', false);
+    else store.setStatus('chat:session-a', status);
+
+    store.markViewed('chat:session-a');
+
+    expect(store.getStatus('chat:session-a')).toBe('idle');
+    expect(tabsStore.tabs[0]?.status).toBeUndefined();
+  });
+
   it('writes chat runtime states through to generic tab status', (): void => {
     const tabsStore = useTabsStore();
     tabsStore.tabs = [createTab('chat:running'), createTab('chat:waiting'), createTab('chat:error'), createTab('chat:completed')];

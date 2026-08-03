@@ -123,12 +123,16 @@ function findBChat(wrapper: ReturnType<typeof mount>): ComponentPublicInstance {
  * @param sessionId - 当前路由会话 ID
  * @returns 页面可见状态
  */
-function mountKeepAlivePage(sessionId: string | null): { visible: { value: boolean } } {
+function mountKeepAlivePage(sessionId: string | null): {
+  visible: { value: boolean };
+  wrapper: ReturnType<typeof mount>;
+  bChat: ComponentPublicInstance;
+} {
   const visible = ref<boolean>(true);
   routerMocks.route.params = sessionId ? { sessionId } : {};
   routerMocks.route.path = sessionId ? `/chat/${sessionId}` : '/chat';
   routerMocks.route.fullPath = routerMocks.route.path;
-  mount(
+  const wrapper = mount(
     defineComponent({
       name: 'ChatPageKeepAliveHarness',
       components: { ChatPage },
@@ -139,7 +143,7 @@ function mountKeepAlivePage(sessionId: string | null): { visible: { value: boole
     })
   );
 
-  return { visible };
+  return { visible, wrapper, bChat: findBChat(wrapper) };
 }
 
 describe('chat page', (): void => {
@@ -510,6 +514,130 @@ describe('chat page', (): void => {
     expect(routerMocks.push).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['running', 'running'],
+    ['waiting', 'waiting'],
+    ['error', 'idle']
+  ] as const)('does not expose %s status while its chat page is active', async (status, expectedRuntimeStatus): Promise<void> => {
+    routerMocks.route.path = '/chat/session-a';
+    routerMocks.route.fullPath = '/chat/session-a';
+    const tabsStore = useTabsStore();
+    tabsStore.tabs = [{ id: 'chat:session-a', path: '/chat/session-a', title: '会话 A', cacheKey: 'chat:session-a' }];
+    const wrapper = mountPage('session-a');
+
+    findBChat(wrapper).$emit('runtime-status-change', { status });
+    await nextTick();
+
+    expect(tabsStore.tabs[0]?.status).toBeUndefined();
+    expect(useChatTabStore().getStatus('chat:session-a')).toBe(expectedRuntimeStatus);
+  });
+
+  it.each([
+    ['running', 'running'],
+    ['waiting', 'waiting'],
+    ['error', 'idle'],
+    ['completed', 'idle']
+  ] as const)('hides externally projected %s status while its chat page is active', async (status, expectedRuntimeStatus): Promise<void> => {
+    routerMocks.route.path = '/chat/session-a';
+    routerMocks.route.fullPath = '/chat/session-a';
+    const tabsStore = useTabsStore();
+    const runtimeStore = useChatTabStore();
+    tabsStore.tabs = [{ id: 'chat:session-a', path: '/chat/session-a', title: '会话 A', cacheKey: 'chat:session-a' }];
+    mountPage('session-a');
+
+    if (status === 'completed') runtimeStore.markCompleted('chat:session-a', false);
+    else runtimeStore.setStatus('chat:session-a', status);
+    await nextTick();
+
+    expect(tabsStore.tabs[0]?.status).toBeUndefined();
+    expect(runtimeStore.getStatus('chat:session-a')).toBe(expectedRuntimeStatus);
+  });
+
+  it.each(['running', 'waiting'] as const)('keeps repeated external %s projections hidden while its chat page is active', async (status): Promise<void> => {
+    routerMocks.route.path = '/chat/session-a';
+    routerMocks.route.fullPath = '/chat/session-a';
+    const tabsStore = useTabsStore();
+    const runtimeStore = useChatTabStore();
+    tabsStore.tabs = [{ id: 'chat:session-a', path: '/chat/session-a', title: '会话 A', cacheKey: 'chat:session-a' }];
+    mountPage('session-a');
+    runtimeStore.setStatus('chat:session-a', status);
+    await nextTick();
+    expect(tabsStore.tabs[0]?.status).toBeUndefined();
+
+    runtimeStore.setStatus('chat:session-a', status);
+    await nextTick();
+
+    expect(runtimeStore.getStatus('chat:session-a')).toBe(status);
+    expect(tabsStore.tabs[0]?.status).toBeUndefined();
+  });
+
+  it.each([
+    ['running', 'loading'],
+    ['waiting', 'attention'],
+    ['error', 'error'],
+    ['completed', 'completed']
+  ] as const)('shows externally projected %s status while its chat page is in the background', async (status, expectedTabStatus): Promise<void> => {
+    routerMocks.route.path = '/welcome';
+    routerMocks.route.fullPath = '/welcome';
+    const tabsStore = useTabsStore();
+    const runtimeStore = useChatTabStore();
+    tabsStore.tabs = [{ id: 'chat:session-a', path: '/chat/session-a', title: '会话 A', cacheKey: 'chat:session-a' }];
+    mountPage('session-a');
+
+    if (status === 'completed') runtimeStore.markCompleted('chat:session-a', false);
+    else runtimeStore.setStatus('chat:session-a', status);
+    await nextTick();
+
+    expect(tabsStore.tabs[0]?.status).toBe(expectedTabStatus);
+    expect(runtimeStore.getStatus('chat:session-a')).toBe(status);
+  });
+
+  it.each([
+    ['running', 'loading'],
+    ['waiting', 'attention']
+  ] as const)('restores %s status whenever an active chat page moves to the background', async (status, expectedTabStatus): Promise<void> => {
+    const tabsStore = useTabsStore();
+    tabsStore.tabs = [{ id: 'chat:session-a', path: '/chat/session-a', title: '会话 A', cacheKey: 'chat:session-a' }];
+    const { visible, bChat } = mountKeepAlivePage('session-a');
+
+    bChat.$emit('runtime-status-change', { status });
+    await nextTick();
+    expect(tabsStore.tabs[0]?.status).toBeUndefined();
+
+    visible.value = false;
+    await nextTick();
+    expect(tabsStore.tabs[0]?.status).toBe(expectedTabStatus);
+
+    visible.value = true;
+    await nextTick();
+    expect(tabsStore.tabs[0]?.status).toBeUndefined();
+
+    visible.value = false;
+    await nextTick();
+    expect(tabsStore.tabs[0]?.status).toBe(expectedTabStatus);
+  });
+
+  it('shows a background error and clears it when the chat page is viewed', async (): Promise<void> => {
+    const tabsStore = useTabsStore();
+    tabsStore.tabs = [{ id: 'chat:session-a', path: '/chat/session-a', title: '会话 A', cacheKey: 'chat:session-a' }];
+    const { visible, bChat } = mountKeepAlivePage('session-a');
+    visible.value = false;
+    await nextTick();
+
+    bChat.$emit('runtime-status-change', { status: 'error' });
+    await nextTick();
+    expect(tabsStore.tabs[0]?.status).toBe('error');
+
+    visible.value = true;
+    await nextTick();
+    expect(tabsStore.tabs[0]?.status).toBeUndefined();
+    expect(useChatTabStore().getStatus('chat:session-a')).toBe('idle');
+
+    visible.value = false;
+    await nextTick();
+    expect(tabsStore.tabs[0]?.status).toBeUndefined();
+  });
+
   it('marks a background completion unread and clears it when mounted as active', async (): Promise<void> => {
     routerMocks.route.path = '/welcome';
     routerMocks.route.fullPath = '/welcome';
@@ -551,14 +679,40 @@ describe('chat page', (): void => {
     expect(runtimeStore.getStatus('chat:session-a')).toBe('idle');
   });
 
-  it('keeps a running Runtime record after the page instance unmounts', async (): Promise<void> => {
+  it.each([
+    ['running', 'loading'],
+    ['waiting', 'attention']
+  ] as const)('keeps a %s Runtime record after the page instance unmounts', async (status, expectedTabStatus): Promise<void> => {
+    routerMocks.route.path = '/chat/session-a';
+    routerMocks.route.fullPath = '/chat/session-a';
     const runtimeStore = useChatTabStore();
+    const tabsStore = useTabsStore();
+    tabsStore.tabs = [{ id: 'chat:session-a', path: '/chat/session-a', title: '会话 A', cacheKey: 'chat:session-a' }];
     const wrapper = mountPage('session-a');
-    findBChat(wrapper).$emit('runtime-status-change', { status: 'running' });
+    findBChat(wrapper).$emit('runtime-status-change', { status });
     await flushPromises();
+    expect(tabsStore.tabs[0]?.status).toBeUndefined();
 
     wrapper.unmount();
 
-    expect(runtimeStore.records['chat:session-a']).toMatchObject({ sessionId: 'session-a', status: 'running' });
+    expect(runtimeStore.records['chat:session-a']).toMatchObject({ sessionId: 'session-a', status });
+    expect(tabsStore.tabs[0]?.status).toBe(expectedTabStatus);
+  });
+
+  it.each(['error', 'completed'] as const)('does not restore an acknowledged %s status after the active page unmounts', async (status): Promise<void> => {
+    routerMocks.route.path = '/chat/session-a';
+    routerMocks.route.fullPath = '/chat/session-a';
+    const runtimeStore = useChatTabStore();
+    const tabsStore = useTabsStore();
+    tabsStore.tabs = [{ id: 'chat:session-a', path: '/chat/session-a', title: '会话 A', cacheKey: 'chat:session-a' }];
+    const wrapper = mountPage('session-a');
+
+    if (status === 'completed') findBChat(wrapper).$emit('runtime-status-change', { status, sessionId: 'session-a' });
+    else findBChat(wrapper).$emit('runtime-status-change', { status });
+    await nextTick();
+    wrapper.unmount();
+
+    expect(runtimeStore.getStatus('chat:session-a')).toBe('idle');
+    expect(tabsStore.tabs[0]?.status).toBeUndefined();
   });
 });

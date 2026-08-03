@@ -20,7 +20,7 @@
 
 <script setup lang="ts">
 import type { ChatSession } from 'types/chat';
-import { computed, nextTick, onActivated, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import BChat from '@/components/BChat/index.vue';
 import type { BChatRuntimeStatusChange } from '@/components/BChat/utils/types';
@@ -29,10 +29,10 @@ import { CHAT_DRAFT_TAB_ID, createChatPath, createChatTabId, findChatTab } from 
 import { normalizeRouteParam } from '@/router/routes/helpers/fileRouteTab';
 import { createChatRecentId } from '@/shared/storage';
 import { useChatSessionStore } from '@/stores/chat/session';
-import { useChatTabStore } from '@/stores/chat/tab';
+import { useChatTabStore, type ChatTabRuntimeStatus } from '@/stores/chat/tab';
 import { useSettingStore } from '@/stores/ui/setting';
 import { useRecentStore } from '@/stores/workspace/recent';
-import type { Tab } from '@/stores/workspace/tabs';
+import type { Tab, TabStatus } from '@/stores/workspace/tabs';
 import { useTabsStore } from '@/stores/workspace/tabs';
 import { asyncTo } from '@/utils/asyncTo';
 
@@ -57,6 +57,8 @@ const pendingSession = ref<ChatSession>();
 const lastRecentPayload = ref<string>('');
 /** 是否已有输入框聚焦请求排入下一轮渲染，避免 mount 与 activate 重复触发。 */
 let focusInputQueued = false;
+/** 当前 Chat 页面实例是否处于 KeepAlive 激活态。 */
+let pageActivated = true;
 
 // 独立聊天页接管同一会话时，侧栏回到空白草稿，避免两个 BChat 同时拥有同一会话。
 if (initialSessionId && settingStore.chatSidebarActiveSessionId === initialSessionId) {
@@ -81,6 +83,15 @@ function isTabActive(tabId: string): boolean {
   return route.path === fallbackPath;
 }
 
+/**
+ * 判断指定聊天标签是否由当前激活的 Chat 页面实例展示。
+ * @param tabId - 聊天标签 ID
+ * @returns 页面实例与路由是否同时激活
+ */
+function isPageActive(tabId: string): boolean {
+  return pageActivated && isTabActive(tabId);
+}
+
 /** 当前组件拥有的聊天标签是否处于活动路由。 */
 const ownerActive = computed<boolean>((): boolean => isTabActive(ownerTabId.value));
 /** 当前持久化会话标题。 */
@@ -92,7 +103,16 @@ const initialSessionTitle = computed<string>((): string => {
 
 /** 标记当前活动聊天已被用户查看。 */
 function markCurrentViewed(): void {
-  if (ownerActive.value) runtimeStore.markViewed(ownerTabId.value);
+  if (isPageActive(ownerTabId.value)) runtimeStore.markViewed(ownerTabId.value);
+}
+
+/**
+ * 根据页面活动状态同步当前聊天标签的后台视觉投影。
+ * @param active - 当前聊天页是否处于活动路由
+ */
+function syncOwnerStatus(active: boolean): void {
+  if (active && pageActivated) runtimeStore.markViewed(ownerTabId.value);
+  else runtimeStore.syncStatus(ownerTabId.value);
 }
 
 /**
@@ -275,12 +295,13 @@ function handleRuntimeStatus(event: BChatRuntimeStatusChange): void {
   if (event.status === 'completed') {
     const owner = runtimeStore.findOwner(event.sessionId);
     const tabId = owner?.tabId ?? ownerTabId.value;
-    runtimeStore.markCompleted(tabId, isTabActive(tabId));
+    runtimeStore.markCompleted(tabId, isPageActive(tabId));
     return;
   }
 
   const tabId = event.sessionId ? runtimeStore.findOwner(event.sessionId)?.tabId ?? createChatTabId(event.sessionId) : ownerTabId.value;
   runtimeStore.setStatus(tabId, event.status);
+  if (isPageActive(tabId)) runtimeStore.markViewed(tabId);
   if (tabId === ownerTabId.value && event.status === 'idle' && !runtimeStore.isClosing(tabId)) asyncTo(promoteDraft());
 }
 
@@ -289,7 +310,16 @@ function handleProviderNavigate(): void {
   asyncTo(router.push('/settings/provider'));
 }
 
-watch(() => route.fullPath, markCurrentViewed, { immediate: true });
+watch(
+  [
+    ownerTabId,
+    ownerActive,
+    (): ChatTabRuntimeStatus | undefined => runtimeStore.records[ownerTabId.value]?.status,
+    (): TabStatus | undefined => tabsStore.tabs.find((tab: Tab): boolean => tab.id === ownerTabId.value)?.status
+  ],
+  (): void => syncOwnerStatus(ownerActive.value),
+  { immediate: true }
+);
 watch(initialSessionTitle, syncInitialSessionTitle, { immediate: true });
 watch(
   (): number | undefined => runtimeStore.records[ownerTabId.value]?.focusRequestId,
@@ -303,10 +333,21 @@ watch(
   }
 );
 onActivated((): void => {
+  pageActivated = true;
   markCurrentViewed();
   syncInitialSessionTitle();
   asyncTo(recordRecentSession());
   focusChatInput();
+});
+
+onDeactivated((): void => {
+  pageActivated = false;
+  runtimeStore.syncStatus(ownerTabId.value);
+});
+
+onUnmounted((): void => {
+  // 非 KeepAlive 宿主会直接卸载页面，仍需把保留的 Runtime 状态恢复到后台标签。
+  runtimeStore.syncStatus(ownerTabId.value);
 });
 
 onMounted((): void => {

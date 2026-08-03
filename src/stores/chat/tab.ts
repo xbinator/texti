@@ -3,7 +3,7 @@
  * @description 管理聊天标签的 renderer 运行时归属、可视状态与后台分离记录。
  */
 import { defineStore } from 'pinia';
-import type { TabStatus } from '@/stores/workspace/tabs';
+import type { Tab, TabStatus } from '@/stores/workspace/tabs';
 import { useTabsStore } from '@/stores/workspace/tabs';
 
 /** BChat 直接发布的运行状态。 */
@@ -229,14 +229,17 @@ export const useChatTabStore = defineStore('chat-tab', {
     },
 
     /**
-     * 标记用户已经查看聊天标签。
+     * 标记用户正在查看聊天标签。
+     * running/waiting 保留真实状态以便再次进入后台时恢复提示；终态提示被确认后归一为 idle。
      * @param tabId - 标签 ID
      */
     markViewed(tabId: string): void {
       const record = this.records[tabId];
       if (!record) return;
-      if (record.status === 'completed') record.status = 'idle';
-      syncTabStatus(tabId, record.status);
+      if (record.status === 'error' || record.status === 'completed') record.status = 'idle';
+      const tabsStore = useTabsStore();
+      const visualStatus = tabsStore.tabs.find((tab: Tab): boolean => tab.id === tabId)?.status;
+      if (visualStatus) tabsStore.setTabStatus(tabId, undefined);
     },
 
     /**
