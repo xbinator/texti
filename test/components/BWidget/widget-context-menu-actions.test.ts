@@ -241,6 +241,18 @@ function readContextMenuLabels(wrapper: VueWrapper): string[] {
 }
 
 /**
+ * 按文案读取右键菜单按钮。
+ * @param wrapper - BWidget 测试包装器
+ * @param label - 菜单项文案
+ * @returns 菜单按钮包装器，不存在时返回 undefined
+ */
+function findContextMenuItem(wrapper: VueWrapper, label: string): DOMWrapper<HTMLButtonElement> | undefined {
+  return wrapper
+    .findAll<HTMLButtonElement>('.b-widget-context-menu__item')
+    .find((menuItem: DOMWrapper<HTMLButtonElement>): boolean => menuItem.text().includes(label));
+}
+
+/**
  * 读取右键菜单条目顺序，分割线以 divider 表示。
  * @param wrapper - BWidget 测试包装器
  * @returns 菜单条目顺序
@@ -298,23 +310,32 @@ describe('BWidget context menu actions', (): void => {
     wrapper.unmount();
   });
 
-  it('does not open the context menu when right-clicking the blank canvas area', async (): Promise<void> => {
+  it('opens the blank canvas context menu with selection actions disabled', async (): Promise<void> => {
     const wrapper = mount(BWidget, {
       props: {
-        value: createWidgetData(),
-        select: {}
+        value: createWidgetData()
       },
       attachTo: document.body
     });
     setElementRect(wrapper.element, { height: 600, left: 0, top: 0, width: 800 });
     setElementRect(wrapper.find('.b-widget-canvas').element, { height: 600, left: 0, top: 0, width: 800 });
 
-    getWidgetExpose(wrapper).selectElementById('node-1');
     await flushWidgetUpdates();
     await wrapper.find('.b-widget-canvas').trigger('contextmenu', { clientX: 500, clientY: 360 });
+    await flushWidgetUpdates();
 
-    expect(wrapper.find('.b-widget-context-menu').exists()).toBe(false);
-    expect(wrapper.emitted('selection-change')?.at(-1)).toEqual([['node-1']]);
+    expect(wrapper.find('.b-widget-context-menu').exists()).toBe(true);
+    expect(readContextMenuLabels(wrapper)).toEqual(['复制', '粘贴', '上一层', '下一层', '置顶', '置底', '删除']);
+    expect(readContextMenuLabels(wrapper)).not.toContain('锁定');
+    expect(readContextMenuLabels(wrapper)).not.toContain('合并');
+    expect(findContextMenuItem(wrapper, '复制')?.attributes('disabled')).toBeDefined();
+    expect(findContextMenuItem(wrapper, '粘贴')?.attributes('disabled')).toBeDefined();
+    expect(findContextMenuItem(wrapper, '上一层')?.attributes('disabled')).toBeDefined();
+    expect(findContextMenuItem(wrapper, '下一层')?.attributes('disabled')).toBeDefined();
+    expect(findContextMenuItem(wrapper, '置顶')?.attributes('disabled')).toBeDefined();
+    expect(findContextMenuItem(wrapper, '置底')?.attributes('disabled')).toBeDefined();
+    expect(findContextMenuItem(wrapper, '删除')?.attributes('disabled')).toBeDefined();
+    expect(wrapper.emitted('selection-change')?.at(-1)).toEqual([[]]);
     wrapper.unmount();
   });
 
