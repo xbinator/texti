@@ -15,14 +15,12 @@ function readSource(filePath: string): string {
 }
 
 describe('theme input token styles', (): void => {
-  it('uses input shell and keycap tokens in the command panel search box', (): void => {
+  it('uses input shell tokens in the command panel search box', (): void => {
     const commandPanelSource = readSource('src/components/BCommandPanel/index.vue');
     const resetSource = readSource('src/assets/styles/reset.less');
 
     expect(commandPanelSource).toContain(`:class="bem('search-shell')"`);
     expect(commandPanelSource).toContain(':bordered="false"');
-    expect(commandPanelSource).toContain('icon="lucide:search"');
-    expect(commandPanelSource).toContain(`:class="bem('search-keycap')"`);
     expect(commandPanelSource).toContain('border: var(--input-border-width) solid var(--input-border);');
     expect(commandPanelSource).toContain('border-radius: var(--input-radius);');
     expect(commandPanelSource).toContain('box-shadow: var(--input-shadow);');
@@ -30,10 +28,8 @@ describe('theme input token styles', (): void => {
     expect(commandPanelSource).toContain('gap: var(--input-gap);');
     expect(commandPanelSource).toContain('font-family: var(--input-font-family);');
     expect(commandPanelSource).toContain('color: var(--input-placeholder-color);');
-    expect(commandPanelSource).toContain('border: var(--input-keycap-border-width) solid var(--input-border);');
-    expect(commandPanelSource).toContain('min-width: var(--input-keycap-size);');
-    expect(commandPanelSource).toContain('border-radius: var(--input-keycap-radius);');
     expect(commandPanelSource).not.toContain('--input-height');
+    expect(commandPanelSource).not.toContain('--input-keycap-size');
     expect(resetSource).toContain('.ant-input.ant-input:not(.ant-input-borderless)');
   });
 

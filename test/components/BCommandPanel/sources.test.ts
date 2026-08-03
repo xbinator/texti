@@ -3,8 +3,11 @@
  * @description 验证 BCommandPanel 三类 source 的结果生成与行为绑定。
  * @vitest-environment jsdom
  */
+import type { ChatSession } from 'types/chat';
 import { h } from 'vue';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createChatSource } from '@/components/BCommandPanel/sources/chat';
+import { createHintSource } from '@/components/BCommandPanel/sources/hint';
 import { createJumpSource } from '@/components/BCommandPanel/sources/jump';
 import { createModelSource } from '@/components/BCommandPanel/sources/model';
 import { createRecentSource } from '@/components/BCommandPanel/sources/recent';
@@ -19,6 +22,8 @@ const getPathStatusMock = vi.fn<(_path: string) => Promise<{ exists: boolean; is
 const loadProvidersMock = vi.fn<() => Promise<void>>();
 const loadChatModelMock = vi.fn<() => Promise<void>>();
 const setChatModelMock = vi.fn<(_model: { providerId: string; modelId: string }) => Promise<void>>();
+const ensureSessionsMock = vi.fn<() => Promise<void>>();
+const openSessionMock = vi.fn<(_sessionId: string) => Promise<void>>();
 
 /**
  * 创建文件最近记录。
@@ -68,6 +73,8 @@ describe('BCommandPanel sources', (): void => {
     loadProvidersMock.mockResolvedValue(undefined);
     loadChatModelMock.mockResolvedValue(undefined);
     setChatModelMock.mockResolvedValue(undefined);
+    ensureSessionsMock.mockResolvedValue(undefined);
+    openSessionMock.mockReset();
   });
 
   it('filters jump commands and exposes routeInput without trailing space', async (): Promise<void> => {
@@ -84,6 +91,14 @@ describe('BCommandPanel sources', (): void => {
             description: '切换当前使用的模型',
             hideIcon: true,
             routeInput: '> model'
+          },
+          {
+            key: 'jump:chat',
+            title: 'chat',
+            kind: 'jump',
+            description: '搜索聊天历史会话',
+            hideIcon: true,
+            routeInput: '> chat'
           }
         ]
       }
@@ -93,6 +108,11 @@ describe('BCommandPanel sources', (): void => {
     expect(matchedGroups[0]?.items[0]?.key).toBe('jump:model');
 
     expect(await source.search('models')).toEqual([{ key: 'jump', items: [] }]);
+
+    const chatMatchedGroups = await source.search('ch');
+    expect(chatMatchedGroups[0]?.items[0]?.key).toBe('jump:chat');
+
+    expect(await source.search('chats')).toEqual([{ key: 'jump', items: [] }]);
   });
 
   it('creates recent file, url, and absolute path items', async (): Promise<void> => {
@@ -195,5 +215,59 @@ describe('BCommandPanel sources', (): void => {
     expect(groups[0]).toMatchObject({ key: 'openai', title: 'OpenAI' });
     expect(groups[0]?.items).toHaveLength(1);
     expect(groups[0]?.items[0]).toMatchObject({ kind: 'model', title: 'GPT 4o', active: true });
+  });
+
+  it('creates chat session groups and opens session on select', async (): Promise<void> => {
+    const now = new Date().toISOString();
+    const sessions: ChatSession[] = [
+      { id: 's1', type: 'assistant', title: '重构计划', createdAt: now, updatedAt: now, lastMessageAt: now },
+      { id: 's2', type: 'assistant', title: 'Bug 修复', createdAt: now, updatedAt: now, lastMessageAt: now }
+    ];
+
+    const source = createChatSource({
+      ensureLoaded: ensureSessionsMock,
+      getSessions: () => sessions,
+      openSession: openSessionMock,
+      renderSessionIcon: () => h('span', { class: 'chat-icon-stub' })
+    });
+
+    await source.load();
+    expect(ensureSessionsMock).toHaveBeenCalled();
+
+    const groups = await source.search('重构');
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.items).toHaveLength(1);
+    expect(groups[0]?.items[0]).toMatchObject({ kind: 'chat', title: '重构计划' });
+
+    const chatItem = groups[0]?.items[0] as CommandPanelActionItem | undefined;
+    await chatItem?.onSelect();
+    expect(openSessionMock).toHaveBeenCalledWith('s1');
+  });
+
+  it('returns empty groups when no sessions match', async (): Promise<void> => {
+    const source = createChatSource({
+      ensureLoaded: ensureSessionsMock,
+      getSessions: () => [],
+      openSession: openSessionMock,
+      renderSessionIcon: () => h('span', { class: 'chat-icon-stub' })
+    });
+
+    const groups = await source.search('任意关键词');
+    expect(groups).toEqual([]);
+  });
+
+  it('hint source exposes a single > jump item', async (): Promise<void> => {
+    const source = createHintSource();
+    const groups = await source.search('');
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.items).toHaveLength(1);
+    expect(groups[0]?.items[0]).toMatchObject({
+      key: 'hint:jump',
+      kind: 'jump',
+      title: '>',
+      description: '运行命令',
+      hideIcon: true,
+      routeInput: '>'
+    });
   });
 });

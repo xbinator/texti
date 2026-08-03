@@ -7,9 +7,8 @@
     <div :class="bem()">
       <div ref="inputRef" :class="bem('toolbar')">
         <div :class="bem('search-shell')">
-          <BIcon :class="bem('search-icon')" icon="lucide:search" :size="20" />
-          <AInput v-model:value="keyword" :bordered="false" :class="bem('search-input')" placeholder="搜索..." @keydown="handleKeydown" />
-          <span :class="bem('search-keycap')" aria-hidden="true">/</span>
+          <AInput v-model:value="keyword" :bordered="false" :class="bem('search-input')" placeholder="搜索最近历史记录..." @keydown="handleKeydown" />
+          <span v-if="!keyword" :class="bem('search-hint')" aria-hidden="true">输入“?”即可查看可用命令</span>
         </div>
       </div>
 
@@ -52,6 +51,7 @@
 import type { CommandPanelActionItem, CommandPanelGroup, CommandPanelItem, CommandPanelJumpItem, CommandPanelSource, CommandPanelSourceId } from './types';
 import type { VNodeChild } from 'vue';
 import { computed, h, nextTick, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import BIcon from '@/components/BIcon/index.vue';
 import BModal from '@/components/BModal/index.vue';
@@ -60,14 +60,18 @@ import BRecentIcon from '@/components/BRecent/Icon.vue';
 import BScrollbar from '@/components/BScrollbar/index.vue';
 import { useNavigate } from '@/hooks/useNavigate';
 import { useRecentRecord } from '@/hooks/useRecentRecord';
+import { createChatPath } from '@/router/routes/helpers/chatRouteTab';
 import { native } from '@/shared/platform';
 import { useProviderStore } from '@/stores/ai/provider';
 import type { SelectedModel } from '@/stores/ai/serviceModel';
 import { useServiceModelStore } from '@/stores/ai/serviceModel';
+import { useChatSessionStore } from '@/stores/chat/session';
 import { useCommandPanelStore } from '@/stores/ui/commandPanel';
 import { useRecentStore } from '@/stores/workspace/recent';
 import { asyncTo } from '@/utils/asyncTo';
 import { createNamespace } from '@/utils/namespace';
+import { createChatSource } from './sources/chat';
+import { createHintSource } from './sources/hint';
 import { createJumpSource } from './sources/jump';
 import { createModelSource } from './sources/model';
 import { createRecentSource } from './sources/recent';
@@ -96,6 +100,10 @@ const serviceModelStore = useServiceModelStore();
 const { openFileByPath, openWebview } = useNavigate();
 /** 最近记录打开与删除能力。 */
 const { openRecentRecord, removeRecentRecord } = useRecentRecord();
+/** 路由跳转能力。 */
+const router = useRouter();
+/** 聊天会话 store。 */
+const chatSessionStore = useChatSessionStore();
 /** 全局命令面板 Store。 */
 const commandPanelStore = useCommandPanelStore();
 /** 全局命令面板响应式状态。 */
@@ -156,11 +164,24 @@ const modelSource = createModelSource({
   getCurrentModel: (): SelectedModel | undefined => commandPanelStore.getContextModel() ?? serviceModelStore.chatModel,
   renderModelIcon: (model, context) => h(BModelIcon, { provider: model.providerId, model: model.modelId, class: context.className, size: context.size })
 });
+/** 聊天历史 source。 */
+const chatSource = createChatSource({
+  ensureLoaded: () => chatSessionStore.ensureSessions(),
+  getSessions: () => chatSessionStore.sessions,
+  openSession: async (sessionId: string): Promise<void> => {
+    await router.push(createChatPath(sessionId));
+  },
+  renderSessionIcon: (_session, context) => h(BIcon, { class: context.className, icon: 'lucide:message-circle', size: context.size })
+});
+/** 命令提示 source，输入 ? 时展示可用前缀。 */
+const hintSource = createHintSource();
 /** source 映射表。 */
 const sources: Record<CommandPanelSourceId, CommandPanelSource> = {
   jump: jumpSource,
   model: modelSource,
-  recent: recentSource
+  recent: recentSource,
+  chat: chatSource,
+  hint: hintSource
 };
 
 /** 当前输入路由。 */
@@ -177,7 +198,9 @@ const emptyText = computed<string>(() => {
   const textMap: Record<CommandPanelSourceId, string> = {
     jump: '没有匹配的跳转命令',
     model: '未找到匹配的模型',
-    recent: '没有匹配的最近记录'
+    recent: '没有匹配的最近记录',
+    chat: '没有匹配的聊天会话',
+    hint: '没有可用命令'
   };
 
   return textMap[currentRoute.value.sourceId];
@@ -465,16 +488,28 @@ watch([visible, scope], ([nextVisible]): void => {
   box-shadow: var(--input-shadow);
   transition: border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard),
     background var(--motion-duration-base) var(--motion-easing-standard);
-}
 
-.b-command-panel__search-shell:focus-within {
-  border-color: var(--input-focus-border);
-  box-shadow: var(--input-active-shadow);
-}
+  &:focus-within {
+    border-color: var(--input-focus-border);
+    box-shadow: var(--input-active-shadow);
+  }
 
-.b-command-panel__search-icon {
-  flex-shrink: 0;
-  color: var(--input-icon-color);
+  & :deep(.ant-input) {
+    min-height: 0;
+    padding: 0;
+    font-family: var(--input-font-family);
+    font-size: 14px;
+    color: var(--text-primary);
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  & :deep(.ant-input::placeholder) {
+    color: var(--input-placeholder-color);
+    opacity: 1;
+  }
 }
 
 .b-command-panel__search-input {
@@ -483,39 +518,12 @@ watch([visible, scope], ([nextVisible]): void => {
   font-family: var(--input-font-family);
 }
 
-.b-command-panel__search-shell :deep(.ant-input) {
-  min-height: 0;
-  padding: 0;
-  font-family: var(--input-font-family);
-  font-size: 16px;
-  color: var(--text-primary);
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-}
-
-.b-command-panel__search-shell :deep(.ant-input::placeholder) {
-  color: var(--input-placeholder-color);
-  opacity: 1;
-}
-
-.b-command-panel__search-keycap {
-  display: flex;
+.b-command-panel__search-hint {
   flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  min-width: var(--input-keycap-size);
-  height: var(--input-keycap-size);
-  padding: 0 8px;
-  font-family: var(--input-font-family);
-  font-size: 18px;
-  line-height: 1;
-  color: var(--input-keycap-color);
-  background: var(--input-keycap-bg);
-  border: var(--input-keycap-border-width) solid var(--input-border);
-  border-radius: var(--input-keycap-radius);
-  box-shadow: var(--input-keycap-shadow);
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  user-select: none;
 }
 
 .b-command-panel__list {
@@ -548,9 +556,12 @@ watch([visible, scope], ([nextVisible]): void => {
   border: none;
   border-radius: var(--control-radius);
   transition: background var(--motion-duration-fast) var(--motion-easing-standard), border-color var(--motion-duration-fast) var(--motion-easing-standard);
+
+  &:hover {
+    background: var(--bg-hover);
+  }
 }
 
-.b-command-panel__item:hover,
 .b-command-panel__item--active {
   background: var(--bg-hover);
 }
@@ -623,11 +634,11 @@ watch([visible, scope], ([nextVisible]): void => {
   border: none;
   border-radius: var(--control-radius);
   transition: background var(--motion-duration-fast) var(--motion-easing-standard), color var(--motion-duration-fast) var(--motion-easing-standard);
-}
 
-.b-command-panel__item-delete:hover {
-  color: var(--text-primary);
-  background: var(--bg-active);
+  &:hover {
+    color: var(--text-primary);
+    background: var(--bg-active);
+  }
 }
 
 .b-command-panel__item:hover .b-command-panel__item-delete {

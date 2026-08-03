@@ -13,7 +13,7 @@ export type CommandPanelScope = 'recent' | 'model';
 /**
  * 命令面板 source 标识。
  */
-export type CommandPanelSourceId = 'recent' | 'model' | 'jump';
+export type CommandPanelSourceId = 'recent' | 'model' | 'jump' | 'chat' | 'hint';
 
 /**
  * 输入路由解析结果。

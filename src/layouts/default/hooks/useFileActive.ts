@@ -77,7 +77,7 @@ export function useFileActive(): UseFileActiveResult {
     {
       value: 'recent',
       label: '打开最近的文件',
-      shortcut: EditorShortcuts.FILE_RECENT,
+      shortcut: EditorShortcuts.COMMAND_PANEL,
       onClick: () => {
         commandPanelStore.openRecent();
       }

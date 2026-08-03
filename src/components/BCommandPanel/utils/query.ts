@@ -6,6 +6,8 @@ import type { CommandPanelQueryRoute, CommandPanelScope } from '../types';
 
 /** 跳转命令前缀。 */
 const JUMP_PREFIX = '>';
+/** 查看命令提示前缀。 */
+const HINT_PREFIX = '?';
 
 /**
  * 解析命令面板当前输入。
@@ -20,6 +22,10 @@ export function parseCommandPanelQuery(scope: CommandPanelScope, input: string):
     return { sourceId: 'model', keyword: value };
   }
 
+  if (value.startsWith(HINT_PREFIX)) {
+    return { sourceId: 'hint', keyword: value.slice(HINT_PREFIX.length).trim() };
+  }
+
   if (!value.startsWith(JUMP_PREFIX)) {
     return { sourceId: 'recent', keyword: value };
   }
@@ -29,6 +35,12 @@ export function parseCommandPanelQuery(scope: CommandPanelScope, input: string):
 
   if (modelMatch) {
     return { sourceId: 'model', keyword: (modelMatch[1] ?? '').trim() };
+  }
+
+  const chatMatch = /^chat(?:\s+(.*)|\s*)$/.exec(jumpBody);
+
+  if (chatMatch) {
+    return { sourceId: 'chat', keyword: (chatMatch[1] ?? '').trim() };
   }
 
   return { sourceId: 'jump', keyword: jumpBody.trim() };

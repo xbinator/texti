@@ -297,7 +297,6 @@ describe('BCommandPanel', (): void => {
     await flushPromises();
     expect(wrapper.text()).toContain('model');
     expect(wrapper.text()).not.toContain('> model');
-    expect(wrapper.find('.icon-stub').exists()).toBe(true);
 
     await wrapper.findAll('.b-command-panel__item')[0].trigger('click');
     await flushPromises();
