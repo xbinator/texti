@@ -2,9 +2,17 @@
  * @file projector.test.ts
  * @description 上下文压缩模型投影测试。
  */
-import type { ChatMessageCompactionPart, ChatMessagePart, ChatMessageRecord, CompactionBudgetSnapshot, StructuredContextSummary } from 'types/chat';
+import type {
+  ChatMessageCompactionPart,
+  ChatMessagePart,
+  ChatMessageRecord,
+  ChatMessageToolPart,
+  CompactionBudgetSnapshot,
+  StructuredContextSummary
+} from 'types/chat';
 import { describe, expect, it } from 'vitest';
 import { projectContext } from '../../../../../../../electron/main/modules/chat/runtime/compaction/projector.mjs';
+import { estimateRequestTokens } from '../../../../../../../electron/main/modules/chat/runtime/compaction/token-estimator.mjs';
 
 /**
  * 创建投影测试预算。
@@ -95,7 +103,131 @@ function createMessage(id: string, role: 'user' | 'assistant', parts: ChatMessag
   };
 }
 
+/**
+ * 创建成功网页读取 Part。
+ * @param id - Part ID
+ * @param snapshotId - 快照 ID
+ * @returns 网页读取 Part
+ */
+function createWebviewReadPart(id: string, snapshotId: string): ChatMessageToolPart {
+  return {
+    id,
+    type: 'tool',
+    toolCallId: `call-${id}`,
+    toolName: 'read_current_webpage',
+    status: 'done',
+    input: {},
+    result: {
+      toolName: 'read_current_webpage',
+      status: 'success',
+      data: {
+        url: 'https://example.com',
+        title: 'Example',
+        summary: 'DOM_SENTINEL',
+        header: 'Header',
+        content: 'DOM_SENTINEL',
+        footer: 'Footer',
+        text: 'Visible text',
+        selectedText: '',
+        headings: [],
+        links: [],
+        capturedAt: 1,
+        truncated: {},
+        snapshotId
+      }
+    }
+  };
+}
+
+/**
+ * 创建成功网页操作 Part。
+ * @param id - Part ID
+ * @param snapshotId - 快照 ID
+ * @returns 网页操作 Part
+ */
+function createWebviewOperatePart(id: string, snapshotId: string): ChatMessageToolPart {
+  return {
+    id,
+    type: 'tool',
+    toolCallId: `call-${id}`,
+    toolName: 'operate_webpage',
+    status: 'done',
+    input: {
+      snapshotId,
+      step: { evaluation: '列表已更新', memory: '当前最低价格为 ¥820', nextGoal: '继续比较' },
+      action: { type: 'click', index: 2 }
+    },
+    result: { toolName: 'operate_webpage', status: 'success', data: { ok: true } }
+  };
+}
+
 describe('context projector', (): void => {
+  it('只保留最新用户轮次中尚未消费的网页观察', (): void => {
+    const messages = [
+      createMessage('user-1', 'user', [{ id: 'user-part-1', type: 'text', text: '比较价格' }]),
+      createMessage('assistant-1', 'assistant', [
+        createWebviewReadPart('read-1', 'snapshot-1'),
+        createWebviewOperatePart('operate-1', 'snapshot-1'),
+        createWebviewReadPart('read-2', 'snapshot-2')
+      ])
+    ];
+    const original = structuredClone(messages);
+
+    const projection = projectContext({ messages });
+    const serialized = JSON.stringify(projection.messages);
+
+    expect(messages).toEqual(original);
+    expect(serialized).toContain('snapshot-2');
+    expect(serialized.match(/DOM_SENTINEL/gu)).toHaveLength(2);
+  });
+
+  it('网页操作后不再把已消费观察发送给模型', (): void => {
+    const messages = [
+      createMessage('user-1', 'user', [{ id: 'user-part-1', type: 'text', text: '继续' }]),
+      createMessage('assistant-1', 'assistant', [createWebviewReadPart('read-1', 'snapshot-1'), createWebviewOperatePart('operate-1', 'snapshot-1')])
+    ];
+    const original = structuredClone(messages);
+
+    const serialized = JSON.stringify(projectContext({ messages }).messages);
+
+    expect(messages).toEqual(original);
+    expect(serialized).not.toContain('DOM_SENTINEL');
+    expect(serialized).not.toContain('snapshot-1');
+    expect(serialized).toContain('当前最低价格为 ¥820');
+  });
+
+  it('新用户轮次不继承上一轮完整网页观察', (): void => {
+    const messages = [
+      createMessage('user-1', 'user', [{ id: 'user-part-1', type: 'text', text: '第一轮' }]),
+      createMessage('assistant-1', 'assistant', [createWebviewReadPart('read-1', 'snapshot-1')]),
+      createMessage('user-2', 'user', [{ id: 'user-part-2', type: 'text', text: '第二轮' }])
+    ];
+    const original = structuredClone(messages);
+
+    const serialized = JSON.stringify(projectContext({ messages }).messages);
+
+    expect(messages).toEqual(original);
+    expect(serialized).not.toContain('DOM_SENTINEL');
+  });
+
+  it('按 WebView 裁剪后的消息估算请求 Token', (): void => {
+    const largeReadPart = createWebviewReadPart('read-1', 'snapshot-1');
+    if (largeReadPart.result?.status !== 'success') throw new Error('Expected a successful read fixture');
+    const largeReadData = largeReadPart.result.data as Record<string, unknown>;
+    largeReadData.summary = `DOM_SENTINEL${'x'.repeat(5_000)}`;
+    largeReadData.content = `DOM_SENTINEL${'x'.repeat(5_000)}`;
+    const messages = [
+      createMessage('user-1', 'user', [{ id: 'user-part-1', type: 'text', text: '第一轮' }]),
+      createMessage('assistant-1', 'assistant', [largeReadPart]),
+      createMessage('user-2', 'user', [{ id: 'user-part-2', type: 'text', text: '第二轮' }])
+    ];
+
+    const projection = projectContext({ messages });
+
+    expect(projection.estimatedTokens).toBe(estimateRequestTokens({ messages: projection.messages }));
+    expect(projection.estimatedTokens).toBeLessThan(estimateRequestTokens({ messages }));
+  });
+
   it('用最新有效摘要替换已覆盖前缀并保留 checkpoint 后原始 tail', (): void => {
     const messages = [
       createMessage('old-user', 'user', [{ id: 'source-1', type: 'text', text: '很早的需求' }]),

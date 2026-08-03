@@ -3,7 +3,7 @@
  * @description 上下文压缩纯规划器测试。
  */
 import type { AITransportTool } from 'types/ai';
-import type { ChatMessagePart, ChatMessageRecord, CompactionModelSnapshot } from 'types/chat';
+import type { ChatMessagePart, ChatMessageRecord, ChatMessageToolPart, CompactionModelSnapshot } from 'types/chat';
 import { describe, expect, it } from 'vitest';
 import { createCompactionPlan, type CompactionPlanInput } from '../../../../../../../electron/main/modules/chat/runtime/compaction/planner.mjs';
 
@@ -39,6 +39,34 @@ function createMessage(id: string, role: 'user' | 'assistant', parts: ChatMessag
     createdAt: `2026-07-16T00:00:0${id.length}.000Z`,
     loading: false,
     finished: true
+  };
+}
+
+/**
+ * 创建 compaction 源中的网页读取 Part。
+ * @param content - 原始网页 DOM 标记
+ * @returns 网页读取 Part
+ */
+function createWebviewReadPart(content: string): ChatMessageToolPart {
+  return {
+    id: 'source-webview-read',
+    type: 'tool',
+    toolCallId: 'call-source-webview-read',
+    toolName: 'read_current_webpage',
+    status: 'done',
+    input: {},
+    result: {
+      toolName: 'read_current_webpage',
+      status: 'success',
+      data: {
+        url: 'https://example.com',
+        title: 'Example',
+        summary: content,
+        content,
+        capturedAt: 1,
+        snapshotId: 'webview-snapshot-SNAPSHOT_SENTINEL'
+      }
+    }
   };
 }
 
@@ -227,6 +255,78 @@ describe('compaction planner', (): void => {
       result: { data: { artifactId: 'artifact-1', path: 'src/large.ts', pruned: true } }
     });
     expect(JSON.stringify(result.plan.fingerprintSources[0])).toContain('x'.repeat(40_000));
+  });
+
+  it('从摘要源移除网页 DOM 但保留 fingerprint 原文', (): void => {
+    const input = createInput('', 'manual');
+    input.messages[0] = createMessage('old-webview', 'assistant', [createWebviewReadPart('DOM_SENTINEL')]);
+
+    const result = createCompactionPlan(input);
+
+    expect(result.status).toBe('ready');
+    if (result.status !== 'ready') return;
+    expect(JSON.stringify(result.plan.sourceSnapshot)).not.toContain('DOM_SENTINEL');
+    expect(JSON.stringify(result.plan.sourceSnapshot)).not.toContain('SNAPSHOT_SENTINEL');
+    expect(result.plan.sourceSnapshot.sourceParts[0].part).toMatchObject({
+      type: 'tool',
+      result: { data: { pruned: true, pruneReason: 'historical_webview_snapshot' } }
+    });
+    expect(JSON.stringify(result.plan.fingerprintSources)).toContain('DOM_SENTINEL');
+    expect(JSON.stringify(result.plan.fingerprintSources)).toContain('SNAPSHOT_SENTINEL');
+  });
+
+  it('自动压缩的摘要源同样移除网页 DOM 并保留 fingerprint 原文', (): void => {
+    const input = createInput('');
+    input.messages[0] = createMessage('old-webview', 'assistant', [
+      { id: 'large-history', type: 'text', text: 'x'.repeat(13_000) },
+      createWebviewReadPart('AUTO_DOM_SENTINEL')
+    ]);
+
+    const result = createCompactionPlan(input);
+
+    expect(result.status).toBe('ready');
+    if (result.status !== 'ready') return;
+    expect(JSON.stringify(result.plan.sourceSnapshot)).not.toContain('AUTO_DOM_SENTINEL');
+    expect(JSON.stringify(result.plan.sourceSnapshot)).not.toContain('SNAPSHOT_SENTINEL');
+    expect(JSON.stringify(result.plan.fingerprintSources)).toContain('AUTO_DOM_SENTINEL');
+    expect(JSON.stringify(result.plan.fingerprintSources)).toContain('SNAPSHOT_SENTINEL');
+  });
+
+  it('清理摘要源中的网页操作句柄并保留步骤记忆', (): void => {
+    const input = createInput('', 'manual');
+    input.messages[0] = createMessage('old-operate', 'assistant', [
+      {
+        id: 'source-operate',
+        type: 'tool',
+        toolCallId: 'call-source-operate',
+        toolName: 'operate_webpage',
+        status: 'done',
+        input: {
+          snapshotId: 'webview-snapshot-SNAPSHOT_SENTINEL',
+          step: { evaluation: '[2] 已出现', memory: '最低价格为 ¥820', nextGoal: '点击 [3]' },
+          action: { type: 'click', index: 3 }
+        },
+        inputText: '{"rawDom":"SUMMARY_INPUT_TEXT_DOM_SENTINEL"}',
+        providerMetadata: { rawRequest: '<button>SUMMARY_PROVIDER_DOM_SENTINEL</button>' },
+        result: { toolName: 'operate_webpage', status: 'success', data: { ok: true } }
+      }
+    ]);
+
+    const result = createCompactionPlan(input);
+
+    expect(result.status).toBe('ready');
+    if (result.status !== 'ready') return;
+    const serialized = JSON.stringify(result.plan.sourceSnapshot);
+    expect(serialized).not.toContain('SNAPSHOT_SENTINEL');
+    expect(serialized).not.toContain('[2]');
+    expect(serialized).not.toContain('[3]');
+    expect(serialized).not.toContain('SUMMARY_INPUT_TEXT_DOM_SENTINEL');
+    expect(serialized).not.toContain('SUMMARY_PROVIDER_DOM_SENTINEL');
+    expect(serialized).toContain('最低价格为 ¥820');
+    expect(serialized).toContain('"action":{"type":"click","index":3}');
+    expect(JSON.stringify(result.plan.fingerprintSources)).toContain('SNAPSHOT_SENTINEL');
+    expect(JSON.stringify(result.plan.fingerprintSources)).toContain('SUMMARY_INPUT_TEXT_DOM_SENTINEL');
+    expect(JSON.stringify(result.plan.fingerprintSources)).toContain('SUMMARY_PROVIDER_DOM_SENTINEL');
   });
 
   it('确定性裁剪后摘要请求仍超窗时阻止模型调用', (): void => {

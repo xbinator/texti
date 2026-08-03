@@ -2,7 +2,12 @@
  * @file types.mts
  * @description ChatRuntime 主进程工具共享类型。
  */
-import type { SUPPORTED_SETTING_KEYS } from './constants.mjs';
+import type {
+  SUPPORTED_SETTING_KEYS,
+  SUPPORTED_WEBPAGE_ACTION_TYPES,
+  SUPPORTED_WEBPAGE_PRESS_KEYS,
+  SUPPORTED_WEBPAGE_SCROLL_DIRECTIONS
+} from './constants.mjs';
 import type { LogLevel, LogScope } from '../../../logger/types.mjs';
 import type { ChatRuntimeMainToolExecutionInput } from '../types.mjs';
 import type { AIToolExecutionResult, MCPServerConfig, MCPToolSettings } from 'types/ai';
@@ -99,10 +104,60 @@ export interface RuntimeWebpageSnapshot {
   capturedAt: number;
   /** 字段截断状态。 */
   truncated: Record<string, unknown>;
+  /** 页面 Agent 观察快照 ID。 */
+  snapshotId: string;
   /** 当前视口视觉摘要。 */
   viewport?: Record<string, unknown>;
   /** 用户手动选择的页面元素摘要。 */
   selectedElement?: Record<string, unknown>;
+}
+
+/** Runtime 网页操作动作。 */
+export type RuntimeWebpageOperateAction =
+  | { type: 'click'; index: number }
+  | { type: 'input'; index: number; text: string; clear?: boolean }
+  | { type: 'select'; index: number; optionText: string }
+  | { type: 'press'; index: number; key: (typeof SUPPORTED_WEBPAGE_PRESS_KEYS)[number] }
+  | { type: 'scroll'; index?: number; direction: (typeof SUPPORTED_WEBPAGE_SCROLL_DIRECTIONS)[number]; pixels?: number }
+  | { type: 'navigate'; url: string }
+  | { type: 'wait'; seconds?: number };
+
+/** Runtime 网页操作输入。 */
+export interface RuntimeWebpageOperateInput {
+  /** 非 navigate 动作使用的当前快照 ID。 */
+  snapshotId?: string;
+  /** 已归一化的网页操作动作。 */
+  action: RuntimeWebpageOperateAction;
+}
+
+/** Runtime 网页操作目标。 */
+export interface RuntimeWebpageOperateTarget {
+  /** 元素句柄。 */
+  index: number;
+  /** 元素可读标签。 */
+  label: string;
+  /** 元素标签名。 */
+  tagName: string;
+}
+
+/** Runtime 网页滚动坐标。 */
+export interface RuntimeWebpageScrollPosition {
+  /** 水平滚动位置。 */
+  x: number;
+  /** 垂直滚动位置。 */
+  y: number;
+}
+
+/** Runtime 网页滚动结果。 */
+export interface RuntimeWebpageOperateScrollResult {
+  /** 滚动窗口或元素。 */
+  targetType: 'window' | 'element';
+  /** 滚动前位置。 */
+  before: RuntimeWebpageScrollPosition;
+  /** 滚动后位置。 */
+  after: RuntimeWebpageScrollPosition;
+  /** 位置是否变化。 */
+  changed: boolean;
 }
 
 /** Runtime 网页操作结果。 */
@@ -110,13 +165,13 @@ export interface RuntimeWebpageOperateResult {
   /** 操作是否完成。 */
   ok: boolean;
   /** 实际执行的动作类型。 */
-  action: string;
+  action: (typeof SUPPORTED_WEBPAGE_ACTION_TYPES)[number];
   /** 被操作目标摘要。 */
-  target: Record<string, unknown> | null;
+  target: RuntimeWebpageOperateTarget | null;
   /** 给模型看的结果说明。 */
   message: string;
   /** 滚动动作的实际滚动结果。 */
-  scroll?: Record<string, unknown>;
+  scroll?: RuntimeWebpageOperateScrollResult;
   /** 操作是否触发导航。 */
   navigationStarted: boolean;
   /** 页面是否可能发生变化。 */

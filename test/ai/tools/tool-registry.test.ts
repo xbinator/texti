@@ -147,8 +147,51 @@ describe('toolRegistry', (): void => {
     const operateDefinition = getToolDefinitionByName(OPERATE_WEBPAGE_TOOL_NAME);
     const snapshotIdSchema = operateDefinition?.parameters.properties.snapshotId as { description?: string } | undefined;
 
-    expect(operateDefinition?.parameters.required).toEqual(['action']);
+    expect(operateDefinition?.parameters.required).toEqual(['step', 'action']);
     expect(snapshotIdSchema?.description).toContain('非 navigate');
+  });
+
+  it('requires bounded step memory for operate_webpage', (): void => {
+    const definition = getToolDefinitionByName(OPERATE_WEBPAGE_TOOL_NAME);
+    const stepSchema = definition?.parameters.properties.step as {
+      required?: string[];
+      additionalProperties?: boolean;
+      properties?: Record<string, { maxLength?: number; description?: string }>;
+    };
+
+    expect(definition?.parameters.required).toEqual(['step', 'action']);
+    expect(stepSchema.required).toEqual(['evaluation', 'memory', 'nextGoal']);
+    expect(stepSchema.additionalProperties).toBe(false);
+    expect(stepSchema.properties?.evaluation?.maxLength).toBe(500);
+    expect(stepSchema.properties?.memory?.maxLength).toBe(1_200);
+    expect(stepSchema.properties?.nextGoal?.maxLength).toBe(300);
+    expect(stepSchema.properties?.memory?.description).toContain('不得包含 [N]');
+  });
+
+  it('bounds variable-length operate_webpage action fields', (): void => {
+    const definition = getToolDefinitionByName(OPERATE_WEBPAGE_TOOL_NAME);
+    const snapshotIdSchema = definition?.parameters.properties.snapshotId as { minLength?: number; maxLength?: number } | undefined;
+    const actionSchema = definition?.parameters.properties.action as {
+      oneOf?: Array<{
+        properties?: {
+          type?: { enum?: string[] };
+          index?: { type?: string; minimum?: number; maximum?: number };
+          text?: { maxLength?: number };
+          optionText?: { maxLength?: number };
+          url?: { minLength?: number; maxLength?: number };
+        };
+      }>;
+    };
+    const clickSchema = actionSchema.oneOf?.find((schema) => schema.properties?.type?.enum?.includes('click'));
+    const inputSchema = actionSchema.oneOf?.find((schema) => schema.properties?.type?.enum?.includes('input'));
+    const selectSchema = actionSchema.oneOf?.find((schema) => schema.properties?.type?.enum?.includes('select'));
+    const navigateSchema = actionSchema.oneOf?.find((schema) => schema.properties?.type?.enum?.includes('navigate'));
+
+    expect(snapshotIdSchema).toMatchObject({ minLength: 1, maxLength: 256 });
+    expect(clickSchema?.properties?.index).toMatchObject({ type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
+    expect(inputSchema?.properties?.text?.maxLength).toBe(4_000);
+    expect(selectSchema?.properties?.optionText?.maxLength).toBe(500);
+    expect(navigateSchema?.properties?.url).toMatchObject({ minLength: 1, maxLength: 2_048 });
   });
 
   it('documents navigate as address-bar navigation instead of a DOM action substitute', (): void => {

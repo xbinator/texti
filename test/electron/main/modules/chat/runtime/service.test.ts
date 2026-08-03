@@ -1869,6 +1869,119 @@ describe('chat runtime service shell', (): void => {
     );
   });
 
+  it('projects WebView history before the next same-turn model request', async (): Promise<void> => {
+    let projectedAssistant: ChatMessageRecord | undefined;
+    const streamExecutor = vi.fn<ChatRuntimeStreamExecutor>(async ({ assistantMessage, sourceMessages }, updateAssistant) => {
+      if (streamExecutor.mock.calls.length === 1) {
+        assistantMessage.parts = [
+          {
+            id: 'webview-read-old',
+            type: 'tool',
+            toolCallId: 'webview-call-old',
+            toolName: 'read_current_webpage',
+            status: 'done',
+            input: {},
+            result: {
+              toolName: 'read_current_webpage',
+              status: 'success',
+              data: {
+                url: 'https://example.com/old',
+                title: 'Old',
+                summary: 'OLD_DOM_SENTINEL',
+                header: 'Old header',
+                content: 'OLD_DOM_SENTINEL',
+                footer: 'Old footer',
+                text: 'Old text',
+                selectedText: '',
+                headings: [],
+                links: [],
+                truncated: {},
+                snapshotId: 'webview-snapshot-OLD_SNAPSHOT_SENTINEL',
+                capturedAt: 1
+              }
+            }
+          },
+          {
+            id: 'webview-operate',
+            type: 'tool',
+            toolCallId: 'webview-call-operate',
+            toolName: 'operate_webpage',
+            status: 'done',
+            input: {
+              snapshotId: 'webview-snapshot-OLD_SNAPSHOT_SENTINEL',
+              step: {
+                evaluation: '[2]<button>旧页面按钮</button>',
+                memory: '稳定事实：商品价格 ¥820',
+                nextGoal: '读取更新后的页面'
+              },
+              action: { type: 'click', index: 2 }
+            },
+            result: { toolName: 'operate_webpage', status: 'success', data: { ok: true, action: 'click' } }
+          },
+          {
+            id: 'webview-read-current',
+            type: 'tool',
+            toolCallId: 'webview-call-current',
+            toolName: 'read_current_webpage',
+            status: 'done',
+            input: {},
+            result: {
+              toolName: 'read_current_webpage',
+              status: 'success',
+              data: {
+                url: 'https://example.com/current',
+                title: 'Current',
+                summary: 'CURRENT_DOM_SENTINEL',
+                header: 'Current header',
+                content: 'CURRENT_DOM_SENTINEL',
+                footer: 'Current footer',
+                text: 'Current text',
+                selectedText: '',
+                headings: [],
+                links: [],
+                truncated: {},
+                snapshotId: 'webview-snapshot-CURRENT_SNAPSHOT_SENTINEL',
+                capturedAt: 2
+              }
+            }
+          }
+        ];
+        await updateAssistant(assistantMessage);
+        return { shouldContinue: true };
+      }
+
+      projectedAssistant = sourceMessages?.find((message) => message.id === assistantMessage.id);
+      return {};
+    });
+    const service = createChatRuntimeService({
+      emit: vi.fn(),
+      createMessageId: (role) => `${role}-message-webview-round`,
+      now: () => '2026-08-03T00:00:00.000Z',
+      messageReader: createNoopMessageReader(),
+      messageWriter: createNoopMessageWriter(),
+      streamExecutor
+    });
+
+    await service.send(createInput({ content: '检查网页' }));
+    await flushRuntimeTasks();
+
+    expect(streamExecutor).toHaveBeenCalledTimes(2);
+    const serialized = JSON.stringify(projectedAssistant);
+    expect(serialized).not.toContain('OLD_DOM_SENTINEL');
+    expect(serialized).not.toContain('OLD_SNAPSHOT_SENTINEL');
+    expect(serialized).not.toContain('<button>');
+    expect(serialized).toContain('稳定事实：商品价格 ¥820');
+    expect(serialized).toContain('CURRENT_DOM_SENTINEL');
+    expect(serialized).toContain('CURRENT_SNAPSHOT_SENTINEL');
+    expect(projectedAssistant?.parts[0]).toMatchObject({ result: { data: { pruned: true } } });
+    expect(projectedAssistant?.parts[1]).toMatchObject({
+      input: {
+        step: { evaluation: '', memory: '稳定事实：商品价格 ¥820', nextGoal: '读取更新后的页面' },
+        action: { type: 'click', index: 2 }
+      }
+    });
+  });
+
   it('does not count confirmation wait time against the task-wide continuation deadline', async (): Promise<void> => {
     vi.useFakeTimers();
     try {
@@ -2600,6 +2713,91 @@ describe('chat runtime service shell', (): void => {
     expect(
       collector.events.some(
         (event) => event.name === 'chat:runtime:message-updated' && 'message' in event.payload && event.payload.message.id === 'old-assistant'
+      )
+    ).toBe(false);
+  });
+
+  it('projects historical WebView snapshots only in the model request', async (): Promise<void> => {
+    const collector = createEventCollector();
+    const updatedMessages: ChatMessageRecord[] = [];
+    const oldAssistant: ChatMessageRecord = {
+      id: 'old-webview-assistant',
+      sessionId: 'session-1',
+      role: 'assistant',
+      content: '',
+      parts: [
+        {
+          id: 'old-webview-part',
+          type: 'tool',
+          toolCallId: 'old-webview-call',
+          toolName: 'read_current_webpage',
+          status: 'done',
+          input: {},
+          result: {
+            toolName: 'read_current_webpage',
+            status: 'success',
+            data: {
+              url: 'https://example.com',
+              title: 'Example',
+              summary: 'DOM_SENTINEL',
+              header: 'header',
+              content: 'DOM_SENTINEL',
+              footer: 'footer',
+              text: 'DOM_SENTINEL',
+              selectedText: '',
+              headings: [],
+              links: [],
+              capturedAt: 1,
+              truncated: {},
+              snapshotId: 'webview-snapshot-SNAPSHOT_SENTINEL',
+              elements: []
+            }
+          }
+        }
+      ],
+      createdAt: '2026-06-19T00:00:01.000Z',
+      finished: true
+    };
+    const persistedMessages = [createMessageRecord('old-webview-user', 'user', '读取网页', '2026-06-19T00:00:00.000Z'), oldAssistant];
+    const original = structuredClone(persistedMessages);
+    let projectedOldAssistant: ChatMessageRecord | undefined;
+    const service = createChatRuntimeService({
+      emit: collector.emit,
+      createMessageId: (role) => `${role}-message-webview`,
+      now: () => '2026-06-19T00:00:02.000Z',
+      messageReader: { getMessages: (): ChatMessageRecord[] => persistedMessages },
+      messageWriter: {
+        addMessage: (): void => undefined,
+        updateMessage: (message: ChatMessageRecord): void => {
+          updatedMessages.push(structuredClone(message));
+        }
+      },
+      streamExecutor: async ({ assistantMessage, sourceMessages }, updateAssistant) => {
+        projectedOldAssistant = sourceMessages?.find((message) => message.id === 'old-webview-assistant');
+        assistantMessage.content = 'done';
+        assistantMessage.parts = [{ id: 'webview-answer', type: 'text', text: 'done' }];
+        assistantMessage.loading = false;
+        assistantMessage.finished = true;
+        await updateAssistant(assistantMessage);
+        return {};
+      }
+    });
+
+    await service.send(createInput({ content: '继续处理' }));
+    await flushRuntimeTasks();
+
+    const serialized = JSON.stringify(projectedOldAssistant);
+    expect(serialized).not.toContain('DOM_SENTINEL');
+    expect(serialized).not.toContain('SNAPSHOT_SENTINEL');
+    expect(projectedOldAssistant?.parts[0]).toMatchObject({
+      type: 'tool',
+      result: { data: { pruned: true, pruneReason: 'historical_webview_snapshot' } }
+    });
+    expect(persistedMessages).toEqual(original);
+    expect(updatedMessages.some((message) => message.id === 'old-webview-assistant')).toBe(false);
+    expect(
+      collector.events.some(
+        (event) => event.name === 'chat:runtime:message-updated' && 'message' in event.payload && event.payload.message.id === 'old-webview-assistant'
       )
     ).toBe(false);
   });

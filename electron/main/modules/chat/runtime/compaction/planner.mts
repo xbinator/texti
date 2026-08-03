@@ -7,6 +7,7 @@ import type { ActiveTurnToolPruneMode } from '../context/tool-output-prune.mjs';
 import type { AITransportTool } from 'types/ai';
 import type { ChatMessageCompactionPart, ChatMessagePart, ChatMessageRecord, CompactionBudgetSnapshot, CompactionModelSnapshot } from 'types/chat';
 import { pruneActiveTurnToolOutputs, pruneMessageToolOutputs } from '../context/tool-output-prune.mjs';
+import { projectHistoricalWebviewPart } from '../context/webview-tool-output.mjs';
 import { findSafeBoundary } from './boundary.mjs';
 import { canGenerateSummary, createCompactionBudget, hasSummaryCapacity, shouldAutoCompact } from './budget.mjs';
 import { buildSourceFingerprint, createFingerprintInput } from './fingerprint.mjs';
@@ -171,6 +172,20 @@ function estimateSummaryTokens(snapshot: CompactionSourceSnapshot): number {
 }
 
 /**
+ * 将摘要源中的 WebView 工具 Part 全部投影为历史语义。
+ * @param sourceParts - 原始冻结源
+ * @returns 不含完整网页快照和瞬时句柄的摘要源 clone
+ */
+function projectSummarySources(sourceParts: ImmutableChatPart[]): ImmutableChatPart[] {
+  return sourceParts.map(
+    (source): ImmutableChatPart => ({
+      messageId: source.messageId,
+      part: projectHistoricalWebviewPart(source.part)
+    })
+  );
+}
+
+/**
  * 对摘要请求中的大型工具结果执行仅投影软剪枝。
  * @param sourceParts - 原始冻结源
  * @returns 不修改输入的摘要源 clone
@@ -293,7 +308,7 @@ export function createCompactionPlan(input: CompactionPlanInput): CompactionPlan
   }
 
   const parentSummary = parent?.part.summary ? structuredClone(parent.part.summary) : undefined;
-  let summarySources = fingerprintSources.map((source): ImmutableChatPart => structuredClone(source));
+  let summarySources = projectSummarySources(fingerprintSources);
   let sourceSnapshot: CompactionSourceSnapshot = {
     parentCheckpoint: parentSummary,
     sourceParts: summarySources,

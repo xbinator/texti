@@ -12,11 +12,13 @@ import type {
   RuntimeSettingKey,
   RuntimeSettingsSnapshot,
   RuntimeSettingValue,
+  RuntimeWebpageOperateScrollResult,
+  RuntimeWebpageOperateTarget,
   RuntimeWebpageOperateResult,
   RuntimeUpdateSettingsResult,
   RuntimeWebpageSnapshot
 } from './types.mjs';
-import { SUPPORTED_SETTING_KEYS } from './constants.mjs';
+import { SUPPORTED_SETTING_KEYS, SUPPORTED_WEBPAGE_ACTION_TYPES, WEBPAGE_OPERATION_LIMITS } from './constants.mjs';
 
 /**
  * 判断值是否为对象记录。
@@ -73,8 +75,36 @@ export function isRuntimeWebpageSnapshot(value: unknown): value is RuntimeWebpag
     Array.isArray(value.links) &&
     typeof value.capturedAt === 'number' &&
     isRecord(value.truncated) &&
+    typeof value.snapshotId === 'string' &&
+    value.snapshotId.trim().length > 0 &&
+    value.snapshotId.length <= WEBPAGE_OPERATION_LIMITS.snapshotId &&
     (value.viewport === undefined || isRecord(value.viewport)) &&
     (value.selectedElement === undefined || isRecord(value.selectedElement))
+  );
+}
+
+/**
+ * 判断值是否为有限数字。
+ * @param value - 待判断值
+ * @returns 是否为有限数字
+ */
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+/**
+ * 判断值是否为网页操作目标。
+ * @param value - 待判断值
+ * @returns 是否为完整目标摘要
+ */
+function isWebpageOperateTarget(value: unknown): value is RuntimeWebpageOperateTarget {
+  return (
+    isRecord(value) &&
+    isFiniteNumber(value.index) &&
+    Number.isSafeInteger(value.index) &&
+    value.index >= 0 &&
+    typeof value.label === 'string' &&
+    typeof value.tagName === 'string'
   );
 }
 
@@ -83,17 +113,17 @@ export function isRuntimeWebpageSnapshot(value: unknown): value is RuntimeWebpag
  * @param value - 待判断值
  * @returns 是否为网页滚动操作结果
  */
-function isRuntimeWebpageOperateScrollResult(value: unknown): value is Record<string, unknown> {
+function isRuntimeWebpageOperateScrollResult(value: unknown): value is RuntimeWebpageOperateScrollResult {
   if (!isRecord(value) || !isRecord(value.before) || !isRecord(value.after)) {
     return false;
   }
 
   return (
     (value.targetType === 'window' || value.targetType === 'element') &&
-    typeof value.before.x === 'number' &&
-    typeof value.before.y === 'number' &&
-    typeof value.after.x === 'number' &&
-    typeof value.after.y === 'number' &&
+    isFiniteNumber(value.before.x) &&
+    isFiniteNumber(value.before.y) &&
+    isFiniteNumber(value.after.x) &&
+    isFiniteNumber(value.after.y) &&
     typeof value.changed === 'boolean'
   );
 }
@@ -107,8 +137,8 @@ export function isRuntimeWebpageOperateResult(value: unknown): value is RuntimeW
   return (
     isRecord(value) &&
     typeof value.ok === 'boolean' &&
-    typeof value.action === 'string' &&
-    (value.target === null || isRecord(value.target)) &&
+    SUPPORTED_WEBPAGE_ACTION_TYPES.some((action): boolean => action === value.action) &&
+    (value.target === null || isWebpageOperateTarget(value.target)) &&
     typeof value.message === 'string' &&
     (value.scroll === undefined || isRuntimeWebpageOperateScrollResult(value.scroll)) &&
     typeof value.navigationStarted === 'boolean' &&

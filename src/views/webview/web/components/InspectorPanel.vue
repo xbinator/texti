@@ -185,6 +185,7 @@ const styleEntries = computed<StyleEntry[]>(() => filterStyleEntries(props.selec
   justify-content: space-between;
   min-height: 42px;
   padding: 0 10px 0 12px;
+  margin-bottom: 12px;
   border-bottom: 1px solid var(--border-primary);
 }
 

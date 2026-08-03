@@ -237,6 +237,79 @@ describe('createMainToolExecutor', (): void => {
     });
   });
 
+  it('rejects read_current_webpage payloads without a snapshot id', async (): Promise<void> => {
+    const executeMainTool = createMainToolExecutor({
+      ...createMainToolDependencies([]),
+      async requestBridge() {
+        return {
+          status: 'success',
+          data: {
+            url: 'https://example.com',
+            title: 'Example',
+            summary: 'Current Page: Example',
+            header: 'Page info: 800x600px',
+            content: '[1]<button>Search</button>',
+            footer: '[End of page]',
+            text: 'Hello',
+            selectedText: '',
+            headings: [],
+            links: [],
+            capturedAt: 1,
+            truncated: { content: false }
+          }
+        };
+      }
+    });
+
+    const result = await executeMainTool({
+      runtime,
+      toolCallId: 'tool-call-web-missing-snapshot-1',
+      toolName: 'read_current_webpage',
+      input: {}
+    });
+
+    expect(result).toMatchObject({
+      toolName: 'read_current_webpage',
+      status: 'failure',
+      error: { code: 'INVALID_INPUT', message: '当前网页快照格式无效' }
+    });
+  });
+
+  it('rejects read_current_webpage payloads with a blank snapshot id', async (): Promise<void> => {
+    const executeMainTool = createMainToolExecutor({
+      ...createMainToolDependencies([]),
+      async requestBridge() {
+        return {
+          status: 'success',
+          data: {
+            url: 'https://example.com',
+            title: 'Example',
+            summary: 'Current Page: Example',
+            header: 'Page info: 800x600px',
+            content: '[1]<button>Search</button>',
+            footer: '[End of page]',
+            text: 'Hello',
+            selectedText: '',
+            headings: [],
+            links: [],
+            capturedAt: 1,
+            truncated: { content: false },
+            snapshotId: '   '
+          }
+        };
+      }
+    });
+
+    const result = await executeMainTool({
+      runtime,
+      toolCallId: 'tool-call-web-blank-snapshot-1',
+      toolName: 'read_current_webpage',
+      input: {}
+    });
+
+    expect(result).toMatchObject({ status: 'failure', error: { code: 'INVALID_INPUT', message: '当前网页快照格式无效' } });
+  });
+
   it('rejects invalid read_current_webpage bridge payloads', async (): Promise<void> => {
     const bridgeRequests: MainToolBridgeRequest[] = [];
     const executeMainTool = createMainToolExecutor({
@@ -286,7 +359,15 @@ describe('createMainToolExecutor', (): void => {
         };
       }
     });
-    const toolInput = { snapshotId: 'snap-1', action: { type: 'click', index: 2 } };
+    const toolInput = {
+      snapshotId: 'snap-1',
+      step: {
+        evaluation: '结果列表已经出现。',
+        memory: '当前最低价格为 ¥820。',
+        nextGoal: '打开下一页继续比较。'
+      },
+      action: { type: 'click', index: 2, rawDom: 'ACTION_INPUT_DOM_SENTINEL' }
+    };
 
     const result = await executeMainTool({
       runtime,
@@ -302,19 +383,125 @@ describe('createMainToolExecutor', (): void => {
       expect.objectContaining({
         request: expect.objectContaining({
           toolName: 'operate_webpage',
+          description: '点击当前网页元素 #2',
           allowRemember: true,
           rememberScopes: ['session', 'always']
         })
       })
     );
+    expect(JSON.stringify(requestConfirmation.mock.calls)).not.toContain('当前最低价格');
+    expect(JSON.stringify(bridgeRequests)).not.toContain('ACTION_INPUT_DOM_SENTINEL');
     expect(bridgeRequests).toEqual([
       {
         runtimeId: 'runtime-1',
         toolCallId: 'tool-call-web-2',
         kind: 'webview-operate',
-        payload: toolInput
+        payload: { snapshotId: 'snap-1', action: { type: 'click', index: 2 } }
       }
     ]);
+  });
+
+  it('keeps legacy operate_webpage inputs compatible at the bridge boundary', async (): Promise<void> => {
+    const bridgeRequests: MainToolBridgeRequest[] = [];
+    const executeMainTool = createMainToolExecutor({
+      now: () => '2026-06-22T00:00:00.000Z',
+      async requestConfirmation() {
+        return { approved: true };
+      },
+      async requestBridge(input: MainToolBridgeRequest) {
+        bridgeRequests.push(input);
+        return {
+          status: 'success',
+          data: {
+            ok: true,
+            action: 'click',
+            target: { index: 2, label: 'Search', tagName: 'BUTTON' },
+            message: '已点击 Search',
+            navigationStarted: false,
+            pageChanged: true,
+            shouldReadAgain: true
+          }
+        };
+      }
+    });
+
+    await executeMainTool({
+      runtime,
+      toolCallId: 'tool-call-web-legacy-1',
+      toolName: 'operate_webpage',
+      input: { snapshotId: 'snap-1', action: { type: 'click', index: 2 } }
+    });
+
+    expect(bridgeRequests).toEqual([
+      {
+        runtimeId: 'runtime-1',
+        toolCallId: 'tool-call-web-legacy-1',
+        kind: 'webview-operate',
+        payload: { snapshotId: 'snap-1', action: { type: 'click', index: 2 } }
+      }
+    ]);
+  });
+
+  it('never forwards malformed operate_webpage input verbatim', async (): Promise<void> => {
+    const bridgeRequests: MainToolBridgeRequest[] = [];
+    const executeMainTool = createMainToolExecutor({
+      now: () => '2026-06-22T00:00:00.000Z',
+      async requestConfirmation() {
+        return { approved: true };
+      },
+      async requestBridge(input: MainToolBridgeRequest) {
+        bridgeRequests.push(input);
+        return {
+          status: 'failure',
+          error: { code: 'INVALID_INPUT', message: '网页操作参数无效' }
+        };
+      }
+    });
+
+    const result = await executeMainTool({
+      runtime,
+      toolCallId: 'tool-call-web-malformed-1',
+      toolName: 'operate_webpage',
+      input: 'STEP_SENTINEL'
+    });
+
+    expect(result).toMatchObject({ status: 'failure', error: { code: 'INVALID_INPUT', message: '网页操作参数无效' } });
+    expect(JSON.stringify(bridgeRequests)).not.toContain('STEP_SENTINEL');
+    expect(bridgeRequests).toEqual([]);
+  });
+
+  it('rejects oversized operate_webpage input before confirmation', async (): Promise<void> => {
+    const bridgeRequests: MainToolBridgeRequest[] = [];
+    const requestConfirmation = vi.fn(async () => ({ approved: true }));
+    const executeMainTool = createMainToolExecutor({
+      now: () => '2026-06-22T00:00:00.000Z',
+      requestConfirmation,
+      async requestBridge(input: MainToolBridgeRequest) {
+        bridgeRequests.push(input);
+        return {
+          status: 'failure',
+          error: { code: 'INVALID_INPUT', message: '网页操作参数无效' }
+        };
+      }
+    });
+
+    const result = await executeMainTool({
+      runtime,
+      toolCallId: 'tool-call-web-oversized-1',
+      toolName: 'operate_webpage',
+      input: {
+        snapshotId: 'snap-1',
+        action: { type: 'input', index: 2, text: 'x'.repeat(4_001) }
+      }
+    });
+
+    expect(result).toMatchObject({
+      toolName: 'operate_webpage',
+      status: 'failure',
+      error: { code: 'INVALID_INPUT', message: '网页操作参数无效' }
+    });
+    expect(requestConfirmation).not.toHaveBeenCalled();
+    expect(bridgeRequests).toEqual([]);
   });
 
   it('keeps operate_webpage bridge idle when permission is denied', async (): Promise<void> => {
@@ -380,6 +567,86 @@ describe('createMainToolExecutor', (): void => {
       error: { code: 'INVALID_INPUT', message: '网页操作结果格式无效' }
     });
     expect(bridgeRequests).toHaveLength(1);
+  });
+
+  it('rejects structurally complete operate_webpage results with an unknown action', async (): Promise<void> => {
+    const executeMainTool = createMainToolExecutor({
+      now: () => '2026-06-22T00:00:00.000Z',
+      async requestConfirmation() {
+        return { approved: true };
+      },
+      async requestBridge() {
+        return {
+          status: 'success',
+          data: {
+            ok: true,
+            action: 'RESULT_ACTION_DOM_SENTINEL',
+            target: null,
+            message: 'executed',
+            navigationStarted: false,
+            pageChanged: true,
+            shouldReadAgain: true
+          }
+        };
+      }
+    });
+
+    const result = await executeMainTool({
+      runtime,
+      toolCallId: 'tool-call-web-invalid-action-1',
+      toolName: 'operate_webpage',
+      input: { snapshotId: 'snap-1', action: { type: 'click', index: 2 } }
+    });
+
+    expect(result).toMatchObject({
+      toolName: 'operate_webpage',
+      status: 'failure',
+      error: { code: 'INVALID_INPUT', message: '网页操作结果格式无效' }
+    });
+    expect(JSON.stringify(result)).not.toContain('RESULT_ACTION_DOM_SENTINEL');
+  });
+
+  it('drops unknown fields from successful operate_webpage results', async (): Promise<void> => {
+    const executeMainTool = createMainToolExecutor({
+      now: () => '2026-06-22T00:00:00.000Z',
+      async requestConfirmation() {
+        return { approved: true };
+      },
+      async requestBridge() {
+        return {
+          status: 'success',
+          data: {
+            ok: true,
+            action: 'click',
+            target: { index: 2, label: 'Search', tagName: 'BUTTON', rawDom: 'TARGET_DOM_SENTINEL' },
+            message: '已点击 Search',
+            navigationStarted: false,
+            pageChanged: true,
+            shouldReadAgain: true,
+            rawDom: 'RESULT_DOM_SENTINEL'
+          }
+        };
+      }
+    });
+
+    const result = await executeMainTool({
+      runtime,
+      toolCallId: 'tool-call-web-result-fields-1',
+      toolName: 'operate_webpage',
+      input: { snapshotId: 'snap-1', action: { type: 'click', index: 2 } }
+    });
+
+    expect(result).toMatchObject({
+      status: 'success',
+      data: {
+        ok: true,
+        action: 'click',
+        target: { index: 2, label: 'Search', tagName: 'BUTTON' },
+        message: '已点击 Search'
+      }
+    });
+    expect(JSON.stringify(result)).not.toContain('TARGET_DOM_SENTINEL');
+    expect(JSON.stringify(result)).not.toContain('RESULT_DOM_SENTINEL');
   });
 
   it('returns a stable failure for unknown main tools', async (): Promise<void> => {

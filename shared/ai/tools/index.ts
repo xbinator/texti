@@ -53,7 +53,15 @@ export {
 } from './MCPSettingsTool/index.js';
 export { OPEN_RESOURCE_TOOL_NAME } from './OpenResourceTool/index.js';
 export { GET_SETTINGS_TOOL_NAME, UPDATE_SETTINGS_TOOL_NAME } from './SettingsTool/index.js';
-export { OPERATE_WEBPAGE_TOOL_NAME, READ_CURRENT_WEBPAGE_TOOL_NAME } from './WebviewTool/index.js';
+export {
+  OPERATE_WEBPAGE_TOOL_NAME,
+  READ_CURRENT_WEBPAGE_TOOL_NAME,
+  SUPPORTED_WEBPAGE_ACTION_TYPES,
+  SUPPORTED_WEBPAGE_PRESS_KEYS,
+  SUPPORTED_WEBPAGE_SCROLL_DIRECTIONS,
+  WEBPAGE_OPERATION_LIMITS,
+  WEBPAGE_STEP_LIMITS
+} from './WebviewTool/index.js';
 
 /** 已迁移到主进程的工具 registry。 */
 export const TOOL_REGISTRY = [

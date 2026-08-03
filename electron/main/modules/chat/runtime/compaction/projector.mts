@@ -2,11 +2,12 @@
  * @file projector.mts
  * @description 将持久化消息投影为 checkpoint 摘要与未压缩原始 tail，且只在投影中软剪枝旧工具结果。
  */
+import type { ActiveTurnToolPruneMode } from '../context/tool-output-prune.mjs';
 import type { AITransportTool } from 'types/ai';
 import type { ChatMessageCompactionPart, ChatMessagePart, ChatMessageRecord } from 'types/chat';
 import { invalidateStaleSkillToolResults } from '../context/model-message.mjs';
-import type { ActiveTurnToolPruneMode } from '../context/tool-output-prune.mjs';
 import { findToolOutputPruneProtectedStartIndex, pruneActiveTurnToolOutputs, pruneMessageToolOutputs } from '../context/tool-output-prune.mjs';
+import { projectWebviewToolOutputs } from '../context/webview-tool-output.mjs';
 import { estimateRequestTokens } from './token-estimator.mjs';
 import { indexMessageParts, validatePartTopology } from './topology.mjs';
 
@@ -192,7 +193,8 @@ export function projectContext(input: ContextProjectionInput): ContextProjection
   const boundary = located?.checkpoint.boundaryPartId ? findPartLocation(input.messages, located.checkpoint.boundaryPartId) : undefined;
   const rawMessages = located && boundary ? [createSummaryMessage(located), ...createRawTail(input.messages, boundary)] : createRawProjection(input.messages);
   const skillProjectedMessages = invalidateStaleSkillToolResults(rawMessages, input.skillContentHashes);
-  const oldToolPrunedMessages = pruneProjection(skillProjectedMessages);
+  const webviewProjectedMessages = projectWebviewToolOutputs(skillProjectedMessages);
+  const oldToolPrunedMessages = pruneProjection(webviewProjectedMessages);
   const messages = input.activeTurnToolPruneMode ? pruneActiveTurnToolOutputs(oldToolPrunedMessages, input.activeTurnToolPruneMode) : oldToolPrunedMessages;
   const estimatedTokens = estimateRequestTokens({
     messages,
