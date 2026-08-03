@@ -31,7 +31,7 @@
 }
 ```
 
-`name` 支持的取值为 `rect`、`text`、`image`、`button`、`group`。元素 ID 必须全局唯一，包括嵌套 group 内的元素。
+`name` 支持的取值为 `rect`、`text`、`image`、`button`、`group`、`swiper`。元素 ID 必须全局唯一，包括嵌套 group 内的元素。
 
 ## 元素 metadata
 
@@ -63,6 +63,32 @@
 ```
 
 每个按钮的 `actions[].method` 都应是导出 Widget 类上已声明的方法。
+
+`swiper` 的 metadata：
+
+```json
+{
+  "images": [
+    {
+      "title": "首图",
+      "src": "{{ $input.heroImage }}",
+      "alt": "{{ $input.heroAlt }}"
+    }
+  ],
+  "fit": "cover",
+  "autoplay": true,
+  "autoplayInterval": 3000,
+  "animationDuration": 300,
+  "initialIndex": 0,
+  "loop": true,
+  "showIndicator": true,
+  "vertical": false,
+  "indicatorColor": "#ffffff",
+  "indicatorShape": "active-line"
+}
+```
+
+`images` 至少保留一项。每项的 `src` 是图片地址，支持绑定；`alt` 是替代文本，支持绑定；`title` 只用于设置面板中区分图片项。`fit` 与 image 元素一致，支持 `cover`、`contain`、`fill`、`none`、`scale-down`。`autoplayInterval` 与 `animationDuration` 的单位均为 ms，`initialIndex` 从 0 开始。`indicatorShape` 支持 `dot`、`line`、`active-line`；其中 `dot` 是 3px 圆点，`line` 是短线，`active-line` 的未激活项是 3px 圆点、激活项是 10px 短线。
 
 ## 样式
 
@@ -121,4 +147,4 @@
 
 ## 图片资源
 
-包内可包含本地资源文件，校验器会检查本地图片路径是否存在以及是否越界。当前图片渲染会直接把 `metadata.src` 传给 `<img>`，因此除非已知宿主集成会分发包内资源，否则优先使用 HTTPS URL、data URL 或宿主可解析的 URL。
+包内可包含本地资源文件，校验器会检查本地图片路径是否存在以及是否越界。当前图片渲染会直接把 image 元素的 `metadata.src` 与 swiper 元素的 `metadata.images[].src` 传给 `<img>`，因此除非已知宿主集成会分发包内资源，否则优先使用 HTTPS URL、data URL 或宿主可解析的 URL。
