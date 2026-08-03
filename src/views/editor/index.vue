@@ -16,10 +16,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onActivated, onDeactivated, ref } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import BEditor from '@/components/BEditor/index.vue';
 import type { EditorController, EditorScrollController } from '@/components/BEditor/types';
+import { asyncTo } from '@/utils/asyncTo';
 import { useBindings } from './hooks/useBindings';
 import { useFileSelection } from './hooks/useFileSelection';
 import { useSession } from './hooks/useSession';
@@ -28,7 +29,7 @@ const route = useRoute();
 
 const fileId = ref(String(route.params.id || ''));
 
-const { fileState, actions } = useSession(fileId);
+const { fileState, isLoading, actions } = useSession(fileId);
 
 /**
  * 编辑器页面需要额外调度的 BEditor 实例能力。
@@ -38,7 +39,9 @@ type EditorPageController = EditorController & EditorScrollController;
 const editorRef = ref<EditorPageController | null>(null);
 const isActive = ref(true);
 const isEditorReady = computed<boolean>(() => editorRef.value !== null);
+const isBlankUnsavedDocument = computed<boolean>(() => fileState.value.path === null && fileState.value.content === '');
 let scrollRestoreVersion = 0;
+let blankFocusCompleted = false;
 
 useBindings(fileId, { fileState, isActive, actions, editorInstance: editorRef });
 
@@ -74,6 +77,23 @@ async function restoreEditorScrollPositionAfterActivation(): Promise<void> {
   await editorRef.value?.restoreScrollPosition();
 }
 
+/**
+ * 新建空白文档加载完成后，将输入焦点放到编辑器开头。
+ */
+async function focusBlankUnsavedDocument(): Promise<void> {
+  if (blankFocusCompleted || isLoading.value || !isActive.value || !isEditorReady.value || !isBlankUnsavedDocument.value) {
+    return;
+  }
+
+  await nextTick();
+  if (blankFocusCompleted || isLoading.value || !isActive.value || !isEditorReady.value || !isBlankUnsavedDocument.value) {
+    return;
+  }
+
+  blankFocusCompleted = true;
+  editorRef.value?.focusEditorAtStart();
+}
+
 onActivated(async (): Promise<void> => {
   isActive.value = true;
   await restoreEditorScrollPositionAfterActivation();
@@ -84,6 +104,14 @@ onDeactivated(() => {
   editorRef.value?.rememberScrollPosition();
   isActive.value = false;
 });
+
+watch(
+  [isLoading, isEditorReady, isBlankUnsavedDocument, isActive],
+  () => {
+    asyncTo(focusBlankUnsavedDocument());
+  },
+  { immediate: true }
+);
 </script>
 
 <style lang="less" scoped>

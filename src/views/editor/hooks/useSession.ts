@@ -74,6 +74,8 @@ export interface EditorSessionActions {
 export interface EditorSessionResult {
   /** 当前文件状态。 */
   fileState: Ref<EditorFile>;
+  /** 当前文件是否仍在初始或重载流程中。 */
+  isLoading: Ref<boolean>;
   /** 编辑器视图状态。 */
   viewState: { mode: ViewMode };
   /** 当前标签标题。 */
@@ -454,6 +456,7 @@ export function useSession(fileId: Ref<string>): EditorSessionResult {
 
   return {
     fileState,
+    isLoading: controller.isLoading,
     viewState,
     currentTitle,
     actions: {

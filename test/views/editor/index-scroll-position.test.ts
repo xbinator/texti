@@ -9,8 +9,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import EditorPage from '@/views/editor/index.vue';
 
 const bEditorMethods = vi.hoisted(() => ({
+  focusEditorAtStart: vi.fn(),
   rememberScrollPosition: vi.fn(),
   restoreScrollPosition: vi.fn()
+}));
+
+/** useSession 返回的文件状态测试数据。 */
+const sessionFileState = vi.hoisted(() => ({
+  value: {
+    id: 'scroll-file',
+    name: 'scroll.md',
+    path: '/workspace/scroll.md' as string | null,
+    ext: 'md',
+    content: '# Scroll'
+  }
 }));
 
 vi.mock('vue-router', () => ({
@@ -43,7 +55,7 @@ vi.mock('@/components/BEditor/index.vue', async () => {
           canUndo: (): boolean => false,
           canRedo: (): boolean => false,
           focusEditor: vi.fn(),
-          focusEditorAtStart: vi.fn(),
+          focusEditorAtStart: bEditorMethods.focusEditorAtStart,
           setSearchTerm: vi.fn(),
           findNext: vi.fn(),
           findPrevious: vi.fn(),
@@ -71,13 +83,8 @@ vi.mock('@/views/editor/hooks/useSession', async () => {
 
   return {
     useSession: () => ({
-      fileState: vueRef({
-        id: 'scroll-file',
-        name: 'scroll.md',
-        path: '/workspace/scroll.md',
-        ext: 'md',
-        content: '# Scroll'
-      }),
+      fileState: vueRef({ ...sessionFileState.value }),
+      isLoading: vueRef(false),
       actions: {
         onEditorBlur: vi.fn(),
         onRename: vi.fn(),
@@ -122,6 +129,13 @@ function mountKeepAliveEditorPage(): { visible: { value: boolean } } {
 describe('editor page scroll position lifecycle', () => {
   beforeEach((): void => {
     vi.clearAllMocks();
+    sessionFileState.value = {
+      id: 'scroll-file',
+      name: 'scroll.md',
+      path: '/workspace/scroll.md',
+      ext: 'md',
+      content: '# Scroll'
+    };
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback): number => {
       callback(0);
       return 1;
@@ -143,5 +157,22 @@ describe('editor page scroll position lifecycle', () => {
     await nextTick();
 
     expect(bEditorMethods.restoreScrollPosition).toHaveBeenCalledTimes(1);
+  });
+
+  it('focuses an empty unsaved document after the editor mounts', async (): Promise<void> => {
+    sessionFileState.value = {
+      id: 'new-file',
+      name: 'Untitled',
+      path: null,
+      ext: 'md',
+      content: ''
+    };
+
+    mountKeepAliveEditorPage();
+
+    await nextTick();
+    await nextTick();
+
+    expect(bEditorMethods.focusEditorAtStart).toHaveBeenCalledTimes(1);
   });
 });
