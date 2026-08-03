@@ -127,7 +127,12 @@ interface RuntimeStreamRoundsResult {
 function createDefaultEmitter(): ChatRuntimeServiceDependencies['emit'] {
   return (name, payload): void => {
     for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send(name, payload);
+      if (win.webContents.isDestroyed()) continue;
+      try {
+        win.webContents.send(name, payload);
+      } catch {
+        // 单个窗口失效不能阻止同一事件继续广播给其他健康 Renderer。
+      }
     }
   };
 }
@@ -620,14 +625,11 @@ export function createChatRuntimeService(
   }
 
   /**
-   * 完成 runtime 并释放 session 写入锁。
-   * @param runtime - 需要完成的 runtime
-   * @param usage - Provider 返回的 usage
-   * @param reason - Runtime 成功完成、暂停等待用户或等待 Child
-   * @param checkpointId - waiting_children 对应的 Checkpoint
+   * 清理已结束 Runtime 的活动资源并返回最后一次安全消息快照。
+   * @param runtime - 需要清理的 Runtime
+   * @returns 清理前捕获的安全 assistant 消息
    */
-  function completeRuntime(runtime: ActiveChatRuntime, usage?: AIUsage, reason?: ChatRuntimeCompletionReason, checkpointId?: string): void {
-    const completionReason = reason ?? 'completed';
+  function cleanupRuntime(runtime: ActiveChatRuntime): ChatMessageRecord | undefined {
     const workingMessage = activeAssistantMessages.get(runtime.runtimeId);
     const assistantMessage = structuredClone(safeAssistantMessages.get(runtime.runtimeId) ?? workingMessage);
     runtime.status = 'completed';
@@ -638,6 +640,20 @@ export function createChatRuntimeService(
     confirmationRequests.rejectRuntime(runtime.runtimeId, 'Runtime completed');
     bridgeRequests.rejectRuntime(runtime.runtimeId, 'Runtime completed');
     locks.releaseWritingLock({ sessionId: runtime.sessionId, runtimeId: runtime.runtimeId });
+
+    return assistantMessage;
+  }
+
+  /**
+   * 完成 runtime 并释放 session 写入锁。
+   * @param runtime - 需要完成的 runtime
+   * @param usage - Provider 返回的 usage
+   * @param reason - Runtime 成功完成、暂停等待用户或等待 Child
+   * @param checkpointId - waiting_children 对应的 Checkpoint
+   */
+  function completeRuntime(runtime: ActiveChatRuntime, usage?: AIUsage, reason?: ChatRuntimeCompletionReason, checkpointId?: string): void {
+    const completionReason = reason ?? 'completed';
+    const assistantMessage = cleanupRuntime(runtime);
     if ((completionReason === 'awaiting_user_input' || completionReason === 'waiting_children') && assistantMessage) {
       emit('chat:runtime:message-updated', {
         ...createRuntimeEventBase(runtime),
@@ -661,21 +677,29 @@ export function createChatRuntimeService(
   }
 
   /**
-   * 在失败 assistant 已落盘后必达清理 Runtime，并尽力广播错误。
-   * completeRuntime 在任何 complete 事件前先删除活动状态并释放短写锁。
+   * 在失败 assistant 已落盘后必达清理 Runtime，并尽力广播消息终态与错误。
    * @param runtime - 已安全持久化失败的 Runtime
    * @param runtimeError - 对应 AI 错误
+   * @param projectionMessage - 持久化失败时仍需即时投影的内存消息终态
    */
-  function completeFailedRuntime(runtime: ActiveChatRuntime, runtimeError: AIServiceError): void {
-    try {
-      completeRuntime(runtime);
-    } catch {
-      // Renderer 事件异常不能逆转已经完成的活动状态和短写锁清理。
+  function completeFailedRuntime(runtime: ActiveChatRuntime, runtimeError: AIServiceError, projectionMessage?: ChatMessageRecord): void {
+    const persistedMessage = cleanupRuntime(runtime);
+    const assistantMessage = projectionMessage ?? persistedMessage;
+    if (assistantMessage) {
+      try {
+        emit('chat:runtime:message-updated', {
+          ...createRuntimeEventBase(runtime),
+          message: assistantMessage
+        });
+      } catch {
+        // 消息广播异常不能阻止后续错误终态，并由持久化消息保证刷新恢复。
+      }
     }
     try {
       emit('chat:runtime:error', {
         ...createRuntimeEventBase(runtime),
-        error: runtimeError
+        error: runtimeError,
+        messagePersistenceFailed: projectionMessage ? true : undefined
       });
     } catch {
       // 错误广播是 best-effort；持久化失败 assistant 才是终态依据。
@@ -1088,12 +1112,19 @@ export function createChatRuntimeService(
       const safeMessage = structuredClone(safeAssistantMessages.get(runtime.runtimeId) ?? assistantMessage);
       markAssistantMessageFailed(safeMessage, runtimeError);
       activeAssistantMessages.set(runtime.runtimeId, safeMessage);
-      await messageWriter.updateMessage(structuredClone(safeMessage), runtime.ownerCheckpointId);
-      safeAssistantMessages.set(runtime.runtimeId, structuredClone(safeMessage));
+      let persistenceError: unknown;
+      try {
+        await messageWriter.updateMessage(structuredClone(safeMessage), runtime.ownerCheckpointId);
+        safeAssistantMessages.set(runtime.runtimeId, structuredClone(safeMessage));
+      } catch (persistenceFailure: unknown) {
+        persistenceError = persistenceFailure;
+      }
       if (!activeRuntimes.has(runtime.runtimeId)) {
+        if (persistenceError) throw persistenceError;
         return { outcome: 'failed', phase: 'runtime', error: createPrimaryError(runtime, 'runtime') };
       }
-      completeFailedRuntime(runtime, runtimeError);
+      completeFailedRuntime(runtime, runtimeError, persistenceError ? safeMessage : undefined);
+      if (persistenceError) throw persistenceError;
       return { outcome: 'failed', phase: 'runtime', error: createPrimaryError(runtime, 'runtime') };
     }
   }

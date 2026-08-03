@@ -32,6 +32,24 @@ import { createRuntimeLockRegistry } from '../../../../../../electron/main/modul
 import { createChatRuntimeService } from '../../../../../../electron/main/modules/chat/runtime/service.mjs';
 import { chatSessionManager } from '../../../../../../electron/main/modules/chat/service.mjs';
 
+/** 默认 Runtime emitter 测试用窗口最小能力。 */
+interface RuntimeTestWindow {
+  /** Renderer IPC 发送能力。 */
+  webContents: {
+    /** WebContents 是否已经销毁。 */
+    isDestroyed: () => boolean;
+    /** 发送 Runtime 事件。 */
+    send: (name: string, payload: unknown) => void;
+  };
+}
+
+/** 默认 Runtime emitter 使用的 Electron 窗口列表替身。 */
+const getAllWindowsMock = vi.hoisted(() => vi.fn<() => RuntimeTestWindow[]>(() => []));
+
+vi.mock('electron', () => ({
+  BrowserWindow: { getAllWindows: getAllWindowsMock }
+}));
+
 /** 已捕获的 runtime 事件，保留事件名与载荷之间的判别关系。 */
 type CapturedRuntimeEvent = {
   [TName in keyof ChatRuntimeEventMap]: {
@@ -290,6 +308,36 @@ function createCompactionSummary(sourcePartId: string): StructuredContextSummary
 }
 
 describe('chat runtime service shell', (): void => {
+  it('continues broadcasting when one renderer window cannot receive an event', async (): Promise<void> => {
+    const failedSend = vi.fn((): never => {
+      throw new Error('renderer window unavailable');
+    });
+    const healthySend = vi.fn();
+    const destroyedSend = vi.fn();
+    getAllWindowsMock.mockReturnValue([
+      { webContents: { isDestroyed: (): boolean => false, send: failedSend } },
+      { webContents: { isDestroyed: (): boolean => false, send: healthySend } },
+      { webContents: { isDestroyed: (): boolean => true, send: destroyedSend } }
+    ]);
+    const service = createChatRuntimeService({
+      messageWriter: createNoopMessageWriter(),
+      messageReader: createNoopMessageReader(),
+      streamExecutor: createNoopStreamExecutor(),
+      keepRuntimeOpenForTest: true
+    });
+
+    try {
+      const result = await service.send(createInput({ content: 'broadcast safely' }));
+
+      expect(failedSend).toHaveBeenCalled();
+      expect(healthySend).toHaveBeenCalledWith('chat:runtime:message-created', expect.any(Object));
+      expect(destroyedSend).not.toHaveBeenCalled();
+      await service.abort({ runtimeId: result.runtimeId });
+    } finally {
+      getAllWindowsMock.mockReturnValue([]);
+    }
+  });
+
   it('rejects renderer-supplied deferred tools and internal lineage before taking locks or writing messages', async (): Promise<void> => {
     const addMessage = vi.fn();
     const prepareDelegation = vi.fn();
@@ -2270,12 +2318,14 @@ describe('chat runtime service shell', (): void => {
         })
       ]
     });
-    expect(collector.events).toContainEqual(
-      expect.objectContaining({
-        name: 'chat:runtime:complete',
-        payload: expect.objectContaining({ runtimeId: result.runtimeId, reason: 'completed' })
-      })
-    );
+    const terminalEventNames = collector.events
+      .filter(
+        (event): boolean =>
+          event.payload.runtimeId === result.runtimeId && ['chat:runtime:message-updated', 'chat:runtime:error', 'chat:runtime:complete'].includes(event.name)
+      )
+      .map((event): string => event.name);
+
+    expect(terminalEventNames).toEqual(['chat:runtime:message-updated', 'chat:runtime:error']);
   });
 
   it('continues beyond five distinct tool steps until the model naturally stops', async (): Promise<void> => {
@@ -3997,11 +4047,110 @@ describe('chat runtime service shell', (): void => {
       loading: false,
       finished: true
     });
-    const errorEvent = collector.events.find((event) => event.name === 'chat:runtime:error' && event.payload.runtimeId === result.runtimeId);
-    const completeEvent = collector.events.find((event) => event.name === 'chat:runtime:complete' && event.payload.runtimeId === result.runtimeId);
+    const terminalEventNames = collector.events
+      .filter(
+        (event): boolean =>
+          event.payload.runtimeId === result.runtimeId && ['chat:runtime:message-updated', 'chat:runtime:error', 'chat:runtime:complete'].includes(event.name)
+      )
+      .map((event): string => event.name);
+    const messageUpdatedEvent = collector.events.find(
+      (event): boolean => event.name === 'chat:runtime:message-updated' && event.payload.runtimeId === result.runtimeId
+    );
+    const errorEvent = collector.events.find((event): boolean => event.name === 'chat:runtime:error' && event.payload.runtimeId === result.runtimeId);
+
+    expect(terminalEventNames).toEqual(['chat:runtime:message-updated', 'chat:runtime:error']);
+    expect(messageUpdatedEvent).toMatchObject({
+      payload: {
+        message: {
+          id: 'assistant-message-1',
+          content: 'model failed',
+          parts: [{ type: 'error', text: 'model failed' }],
+          loading: false,
+          finished: true
+        }
+      }
+    });
     expect(errorEvent?.payload).toMatchObject({ error: runtimeError });
-    expect(completeEvent).toBeDefined();
   });
+
+  it('releases a failed runtime when persisting its terminal assistant message fails', async (): Promise<void> => {
+    const collector = createEventCollector();
+    const locks = createRuntimeLockRegistry();
+    const updateMessage = vi.fn<() => Promise<never>>(() => Promise.reject(new Error('terminal persistence failed')));
+    const service = createChatRuntimeService({
+      locks,
+      emit: collector.emit,
+      createMessageId: (role) => `${role}-message-persist-failure`,
+      now: () => '2026-08-03T00:00:00.000Z',
+      messageReader: createNoopMessageReader(),
+      messageWriter: {
+        addMessage: (): void => undefined,
+        updateMessage
+      },
+      streamExecutor: async (): Promise<never> => {
+        throw new Error('model failed before terminal persistence');
+      }
+    });
+
+    const result = await service.send(createInput({ sessionId: 'session-terminal-persist-failure' }));
+    await flushRuntimeTasks();
+
+    expect(updateMessage).toHaveBeenCalledOnce();
+    expect(service.getActiveRuntime(result.runtimeId)).toBeUndefined();
+    expect(locks.getWritingOwner(result.sessionId)).toBeUndefined();
+    expect(collector.events).toContainEqual(
+      expect.objectContaining({
+        name: 'chat:runtime:message-updated',
+        payload: expect.objectContaining({
+          runtimeId: result.runtimeId,
+          message: expect.objectContaining({
+            content: 'model failed before terminal persistence',
+            parts: [expect.objectContaining({ type: 'error', text: 'model failed before terminal persistence' })],
+            loading: false,
+            finished: true
+          })
+        })
+      })
+    );
+    expect(collector.events).toContainEqual(
+      expect.objectContaining({
+        name: 'chat:runtime:error',
+        payload: expect.objectContaining({
+          runtimeId: result.runtimeId,
+          error: expect.objectContaining({ message: 'model failed before terminal persistence' }),
+          messagePersistenceFailed: true
+        })
+      })
+    );
+  });
+
+  it.each(['chat:runtime:message-updated', 'chat:runtime:error'] as const)(
+    'releases a failed runtime when the %s listener throws',
+    async (failingEventName): Promise<void> => {
+      const locks = createRuntimeLockRegistry();
+      const emit = vi.fn((name: string): void => {
+        if (name === failingEventName) throw new Error(`${name} listener failed`);
+      });
+      const service = createChatRuntimeService({
+        locks,
+        emit,
+        createMessageId: (role) => `${role}-message-emit-failure`,
+        now: () => '2026-08-03T00:00:00.000Z',
+        messageReader: createNoopMessageReader(),
+        messageWriter: createNoopMessageWriter(),
+        streamExecutor: async (): Promise<never> => {
+          throw new Error('model failed before terminal emit');
+        }
+      });
+
+      const result = await service.send(createInput({ sessionId: `session-${failingEventName}` }));
+      await flushRuntimeTasks();
+
+      expect(service.getActiveRuntime(result.runtimeId)).toBeUndefined();
+      expect(locks.getWritingOwner(result.sessionId)).toBeUndefined();
+      expect(emit).toHaveBeenCalledWith('chat:runtime:error', expect.objectContaining({ runtimeId: result.runtimeId }));
+    }
+  );
 
   it('marks pending tool part as failed without appending duplicate error part when stream executor fails', async (): Promise<void> => {
     const collector = createEventCollector();

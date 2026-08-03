@@ -5,7 +5,13 @@
 import type { Message } from './types';
 import type { FileReference } from '../types';
 import type { JSONValue, ModelMessage } from 'ai';
-import type { AIAwaitingUserChoiceQuestion, AIToolExecutionAwaitingUserInputResult, AIToolExecutionCancelledResult } from 'types/ai';
+import type {
+  AIAwaitingUserChoiceQuestion,
+  AIServiceError,
+  AIToolExecutionAwaitingUserInputResult,
+  AIToolExecutionCancelledResult,
+  AIToolExecutionFailureResult
+} from 'types/ai';
 import type {
   AIUserChoiceAnswerData,
   ChatMessageFilePart,
@@ -156,6 +162,34 @@ export function finalizeInterruptedPartsAsCancelled(message: Message): void {
       delete part.inputText;
     }
   }
+}
+
+/**
+ * 将 Renderer 中未收到 Main 终态更新的 assistant 收敛为失败消息。
+ * @param message - 待处理的 assistant 消息
+ * @param error - Runtime 错误
+ */
+export function finalizeFailedMessage(message: Message, error: AIServiceError): void {
+  let hasFailedToolPart = false;
+  for (const part of message.parts) {
+    if (part.type !== 'tool') continue;
+    const isAwaitingUserInput = part.result?.status === 'awaiting_user_input';
+    if (part.status === 'done' && !isAwaitingUserInput) continue;
+
+    part.status = 'done';
+    part.result = {
+      toolName: part.toolName,
+      status: 'failure',
+      error: { code: 'EXECUTION_FAILED', message: error.message }
+    } satisfies AIToolExecutionFailureResult;
+    delete part.inputText;
+    hasFailedToolPart = true;
+  }
+
+  message.content = message.content ? `${message.content}\n${error.message}` : error.message;
+  if (!hasFailedToolPart) message.parts.push({ id: nanoid(), type: 'error', text: error.message });
+  message.loading = false;
+  message.finished = true;
 }
 
 // ─── is —— 消息类型判断 ──────────────────────────────────────────────────────

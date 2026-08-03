@@ -45,6 +45,8 @@ export interface RuntimeErrorAppendOptions {
   setLoadedMessages: (messages: Message[]) => void;
   /** 判断错误所属会话是否仍在当前视图。 */
   isSessionActive?: (sessionId: string) => boolean;
+  /** 同内容错误已在 Renderer 本地收敛时仍持久化当前消息。 */
+  persistExistingError?: boolean;
   /** 可选的视图更新后回调，用于等待 nextTick、滚动到底部等 UI 操作。 */
   afterMessagesUpdated?: () => Promise<void> | void;
 }
@@ -147,15 +149,14 @@ function isSameVisibleErrorMessage(message: Message | undefined, content: string
 export async function appendRuntimeErrorMessage(options: RuntimeErrorAppendOptions): Promise<void> {
   const visibleMessages = [...options.visibleMessages];
   const lastVisibleMessage = visibleMessages[visibleMessages.length - 1];
-  if (isSameVisibleErrorMessage(lastVisibleMessage, options.content)) {
-    return;
-  }
+  const hasVisibleError = isSameVisibleErrorMessage(lastVisibleMessage, options.content);
+  if (hasVisibleError && !options.persistExistingError) return;
 
   if (options.precedingMessage && !visibleMessages.some((message) => message.id === options.precedingMessage?.id)) {
     visibleMessages.push(options.precedingMessage);
   }
 
-  visibleMessages.push(create.errorMessage(options.content));
+  if (!hasVisibleError) visibleMessages.push(create.errorMessage(options.content));
   const historyMessages = await options.fetchAllPriorHistory(options.sessionId);
   await options.persistMessages(options.sessionId, [...historyMessages, ...visibleMessages]);
   if (options.isSessionActive && !options.isSessionActive(options.sessionId)) return;

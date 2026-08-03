@@ -131,7 +131,15 @@ export function createRuntimeConfirmationRequests(dependencies: RuntimeConfirmat
         const removeAbortListener = input.signal ? (): void => input.signal?.removeEventListener('abort', rejectAborted) : undefined;
         input.signal?.addEventListener('abort', rejectAborted, { once: true });
         pendingConfirmationRequests.set(key, { event, resolve, reject, removeAbortListener, resumeTaskClock });
-        dependencies.emit('chat:runtime:confirmation-requested', event);
+        try {
+          dependencies.emit('chat:runtime:confirmation-requested', event);
+        } catch (error: unknown) {
+          // Renderer 未收到确认请求时立即回滚等待状态并恢复任务时钟。
+          pendingConfirmationRequests.delete(key);
+          removeAbortListener?.();
+          resumeTaskClock();
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
       });
     },
 

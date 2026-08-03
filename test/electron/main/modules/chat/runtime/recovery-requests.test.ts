@@ -4,6 +4,7 @@
  */
 import type { ActiveChatRuntime } from '../../../../../../electron/main/modules/chat/runtime/types.mjs';
 import type { ChatMessageRecord } from 'types/chat';
+import type { ChatRuntimeEventMap } from 'types/chat-runtime';
 import { describe, expect, it, vi } from 'vitest';
 import { createRuntimeBridgeRequests } from '../../../../../../electron/main/modules/chat/runtime/controllers/bridge.mjs';
 import { createRuntimeConfirmationRequests } from '../../../../../../electron/main/modules/chat/runtime/controllers/confirmation.mjs';
@@ -154,6 +155,81 @@ describe('chat runtime recovery request projections', (): void => {
       result: { toolName: 'read_current_document', status: 'success', data: { content: 'hello' } }
     });
     await result;
+    expect(requests.listPending(runtime.runtimeId)).toEqual([]);
+  });
+
+  it('settles a renderer tool request when its cancellation notification throws', async (): Promise<void> => {
+    const runtime = createRuntime();
+    const emit = vi.fn(<TName extends keyof ChatRuntimeEventMap>(name: TName, payload: ChatRuntimeEventMap[TName]): void => {
+      if (name !== 'chat:runtime:tool-cancelled') return;
+      expect(payload).toMatchObject({ runtimeId: runtime.runtimeId, toolCallId: 'tool-call-failed-cancel' });
+      throw new Error('cancel notification failed');
+    });
+    const requests = createRuntimeRendererToolRequests({ emit, getRuntime: () => runtime, timeoutMs: 30_000 });
+    const result = requests.request({ runtime, toolCallId: 'tool-call-failed-cancel', toolName: 'read_current_document', input: {} });
+
+    expect((): void => requests.rejectRuntime(runtime.runtimeId, 'Runtime failed')).not.toThrow();
+    const pendingAfterReject = requests.listPending(runtime.runtimeId);
+    if (pendingAfterReject.length > 0) {
+      requests.submit({
+        runtimeId: runtime.runtimeId,
+        toolCallId: 'tool-call-failed-cancel',
+        result: { toolName: 'read_current_document', status: 'failure', error: { code: 'TOOL_TIMEOUT', message: 'test cleanup' } }
+      });
+    }
+
+    expect(pendingAfterReject).toEqual([]);
+    await expect(result).rejects.toMatchObject({ code: 'TOOL_REQUEST_CANCELLED' });
+  });
+
+  it('rolls back a renderer tool request when its initial notification throws', async (): Promise<void> => {
+    const runtime = createRuntime();
+    const requests = createRuntimeRendererToolRequests({
+      emit: (): never => {
+        throw new Error('tool request notification failed');
+      },
+      getRuntime: () => runtime,
+      timeoutMs: 30_000
+    });
+
+    const result = requests.request({ runtime, toolCallId: 'tool-call-notify-failed', toolName: 'read_current_document', input: {} });
+
+    await expect(result).rejects.toThrow('tool request notification failed');
+    expect(requests.listPending(runtime.runtimeId)).toEqual([]);
+  });
+
+  it('rolls back a confirmation request when its initial notification throws', async (): Promise<void> => {
+    const runtime = createRuntime();
+    const requests = createRuntimeConfirmationRequests({
+      emit: (): never => {
+        throw new Error('confirmation notification failed');
+      },
+      getRuntime: () => runtime
+    });
+
+    const result = requests.request({
+      runtimeId: runtime.runtimeId,
+      confirmationId: 'confirmation-notify-failed',
+      request: { toolName: 'write_file', title: '写入文件', description: '是否写入？', riskLevel: 'write' }
+    });
+
+    await expect(result).rejects.toThrow('confirmation notification failed');
+    expect(requests.listPending(runtime.runtimeId)).toEqual([]);
+  });
+
+  it('rolls back a bridge request when its initial notification throws', async (): Promise<void> => {
+    const runtime = createRuntime();
+    const requests = createRuntimeBridgeRequests({
+      emit: (): never => {
+        throw new Error('bridge notification failed');
+      },
+      getRuntime: () => runtime,
+      timeoutMs: 30_000
+    });
+
+    const result = requests.request({ runtimeId: runtime.runtimeId, requestId: 'bridge-notify-failed', kind: 'document-snapshot' });
+
+    await expect(result).rejects.toThrow('bridge notification failed');
     expect(requests.listPending(runtime.runtimeId)).toEqual([]);
   });
 

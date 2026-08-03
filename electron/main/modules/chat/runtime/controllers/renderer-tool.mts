@@ -81,18 +81,22 @@ export function createRuntimeRendererToolRequests(dependencies: RuntimeRendererT
    * @param event - 原工具请求事件
    */
   function emitToolCancelled(event: ChatRuntimeToolRequestEvent): void {
-    dependencies.emit('chat:runtime:tool-cancelled', {
-      runtimeId: event.runtimeId,
-      sessionId: event.sessionId,
-      turnId: event.turnId,
-      clientId: event.clientId,
-      agentId: event.agentId,
-      parentAgentId: event.parentAgentId,
-      parentRuntimeId: event.parentRuntimeId,
-      rootRuntimeId: event.rootRuntimeId,
-      continuationOfRuntimeId: event.continuationOfRuntimeId,
-      toolCallId: event.toolCallId
-    });
+    try {
+      dependencies.emit('chat:runtime:tool-cancelled', {
+        runtimeId: event.runtimeId,
+        sessionId: event.sessionId,
+        turnId: event.turnId,
+        clientId: event.clientId,
+        agentId: event.agentId,
+        parentAgentId: event.parentAgentId,
+        parentRuntimeId: event.parentRuntimeId,
+        rootRuntimeId: event.rootRuntimeId,
+        continuationOfRuntimeId: event.continuationOfRuntimeId,
+        toolCallId: event.toolCallId
+      });
+    } catch {
+      // 取消通知是旁路信号，不能阻止 pending 请求终结或 Runtime 释放资源。
+    }
   }
 
   return {
@@ -125,27 +129,35 @@ export function createRuntimeRendererToolRequests(dependencies: RuntimeRendererT
         const resolveAborted = (): void => {
           pendingRendererToolRequests.delete(key);
           clearTimeout(timeoutId);
-          emitToolCancelled(event);
           resolve({
             toolName: input.toolName,
             status: 'failure',
             error: { code: 'TOOL_TIMEOUT', message: 'Renderer tool request was aborted' }
           });
+          emitToolCancelled(event);
         };
         timeoutId = setTimeout((): void => {
           pendingRendererToolRequests.delete(key);
           input.signal?.removeEventListener('abort', resolveAborted);
-          emitToolCancelled(event);
           resolve({
             toolName: input.toolName,
             status: 'failure',
             error: { code: 'TOOL_TIMEOUT', message: 'Renderer tool request timed out' }
           });
+          emitToolCancelled(event);
         }, dependencies.timeoutMs);
         const removeAbortListener = input.signal ? (): void => input.signal?.removeEventListener('abort', resolveAborted) : undefined;
         input.signal?.addEventListener('abort', resolveAborted, { once: true });
         pendingRendererToolRequests.set(key, { event, resolve, reject, timeoutId, removeAbortListener });
-        dependencies.emit('chat:runtime:tool-request', event);
+        try {
+          dependencies.emit('chat:runtime:tool-request', event);
+        } catch (error: unknown) {
+          // 初始通知失败时回滚全部资源，避免留下永远无法由 Renderer 响应的请求。
+          pendingRendererToolRequests.delete(key);
+          clearTimeout(timeoutId);
+          removeAbortListener?.();
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
       });
     },
 
@@ -175,9 +187,9 @@ export function createRuntimeRendererToolRequests(dependencies: RuntimeRendererT
 
         clearTimeout(request.timeoutId);
         request.removeAbortListener?.();
-        emitToolCancelled(request.event);
         request.reject(new ChatRuntimeError('TOOL_REQUEST_CANCELLED', reason));
         pendingRendererToolRequests.delete(key);
+        emitToolCancelled(request.event);
       }
     },
 

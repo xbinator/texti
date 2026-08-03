@@ -2476,6 +2476,162 @@ describe('BChat sessionId runtime', (): void => {
     expect(chatStoreMock.setSessionMessages).toHaveBeenCalledWith('session-active', [expect.objectContaining({ role: 'error', content: '模型调用失败' })]);
   });
 
+  it('projects a failed assistant update before the runtime error without keeping message loading', async (): Promise<void> => {
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+    const runtimeId = await submitTextAndReadRuntimeId(wrapper, 'trigger projected runtime error');
+    const failedAssistant = {
+      ...createAssistantMessage({
+        id: 'assistant-runtime-failed',
+        content: '模型调用失败',
+        parts: [{ id: 'error-part-runtime-failed', type: 'error', text: '模型调用失败' }],
+        runtimeId,
+        loading: false,
+        finished: true
+      }),
+      sessionId: 'session-active'
+    } satisfies ChatMessageRecord;
+
+    emitRuntimeEvent(runtimeListeners, 'messageUpdated', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      message: failedAssistant
+    });
+    emitRuntimeEvent(runtimeListeners, 'error', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      error: { code: 'REQUEST_FAILED', message: '模型调用失败' }
+    });
+    await flushPromises();
+
+    const visibleMessages = wrapper.findComponent(ConversationViewStub).props('messages') as Message[];
+    expect(visibleMessages).toEqual([
+      expect.objectContaining({
+        id: 'assistant-runtime-failed',
+        role: 'assistant',
+        parts: [expect.objectContaining({ type: 'error', text: '模型调用失败' })],
+        loading: false,
+        finished: true
+      })
+    ]);
+    expect(wrapper.findComponent(ConversationViewStub).props('loading')).toBe(false);
+    expect(wrapper.emitted('runtime-status-change')).toContainEqual([{ status: 'error' }]);
+    expect(chatStoreMock.setSessionMessages).not.toHaveBeenCalled();
+  });
+
+  it('retries a projected assistant persistence when Main reports its terminal write failed', async (): Promise<void> => {
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+    const runtimeId = await submitTextAndReadRuntimeId(wrapper, 'trigger terminal persistence retry');
+    const failedAssistant = {
+      ...createAssistantMessage({
+        id: 'assistant-runtime-persist-retry',
+        content: '模型调用失败',
+        parts: [{ id: 'error-part-persist-retry', type: 'error', text: '模型调用失败' }],
+        runtimeId,
+        loading: false,
+        finished: true
+      }),
+      sessionId: 'session-active'
+    } satisfies ChatMessageRecord;
+
+    emitRuntimeEvent(runtimeListeners, 'messageUpdated', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      message: failedAssistant
+    });
+    emitRuntimeEvent(runtimeListeners, 'error', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      error: { code: 'REQUEST_FAILED', message: '模型调用失败' },
+      messagePersistenceFailed: true
+    });
+    await flushPromises();
+
+    const visibleMessages = wrapper.findComponent(ConversationViewStub).props('messages') as Message[];
+    expect(visibleMessages).toEqual([
+      expect.objectContaining({
+        id: 'assistant-runtime-persist-retry',
+        role: 'assistant',
+        parts: [expect.objectContaining({ type: 'error', text: '模型调用失败' })],
+        loading: false,
+        finished: true
+      })
+    ]);
+    expect(chatStoreMock.setSessionMessages).toHaveBeenCalledWith('session-active', [
+      expect.objectContaining({ id: 'assistant-runtime-persist-retry', loading: false, finished: true })
+    ]);
+  });
+
+  it('finalizes a loading assistant when the runtime error arrives without its terminal message update', async (): Promise<void> => {
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+    const runtimeId = await submitTextAndReadRuntimeId(wrapper, 'trigger runtime error without terminal update');
+    const loadingAssistant = {
+      ...createAssistantMessage({
+        id: 'assistant-runtime-loading',
+        content: '',
+        parts: [],
+        runtimeId,
+        loading: true,
+        finished: false
+      }),
+      sessionId: 'session-active'
+    } satisfies ChatMessageRecord;
+
+    emitRuntimeEvent(runtimeListeners, 'messageCreated', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      message: loadingAssistant
+    });
+    emitRuntimeEvent(runtimeListeners, 'error', {
+      runtimeId,
+      sessionId: 'session-active',
+      turnId: 'session-active:turn:1',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: runtimeId,
+      error: { code: 'REQUEST_FAILED', message: '终态消息投影失败' }
+    });
+    await flushPromises();
+
+    const visibleMessages = wrapper.findComponent(ConversationViewStub).props('messages') as Message[];
+    expect(visibleMessages).toEqual([
+      expect.objectContaining({
+        id: 'assistant-runtime-loading',
+        role: 'assistant',
+        content: '终态消息投影失败',
+        parts: [expect.objectContaining({ type: 'error', text: '终态消息投影失败' })],
+        loading: false,
+        finished: true
+      })
+    ]);
+    expect(chatStoreMock.setSessionMessages).toHaveBeenCalledWith('session-active', [
+      expect.objectContaining({ id: 'assistant-runtime-loading', loading: false, finished: true })
+    ]);
+    expect(wrapper.findComponent(ConversationViewStub).props('loading')).toBe(false);
+  });
+
   it('does not append runtime error message when latest assistant tool part already shows the same failure', async (): Promise<void> => {
     const failedToolPart: ChatMessageToolPart = {
       id: 'tool-part-1',

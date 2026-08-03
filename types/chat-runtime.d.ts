@@ -513,6 +513,8 @@ export interface ChatRuntimeRecoverySnapshot extends ChatRuntimeEventBase {
 export interface ChatRuntimeErrorEvent extends ChatRuntimeEventBase {
   /** Normalized AI or runtime error. */
   error: AIServiceError;
+  /** Main failed to persist the terminal assistant projection and Renderer should retry it. */
+  messagePersistenceFailed?: boolean;
 }
 
 /** Runtime 完成原因。 */

@@ -139,7 +139,15 @@ export function createRuntimeBridgeRequests(dependencies: RuntimeBridgeRequestsD
         const removeAbortListener = input.signal ? (): void => input.signal?.removeEventListener('abort', resolveAborted) : undefined;
         input.signal?.addEventListener('abort', resolveAborted, { once: true });
         pendingBridgeRequests.set(key, { event, resolve, reject, timeoutId, removeAbortListener });
-        dependencies.emit('chat:runtime:bridge-requested', event);
+        try {
+          dependencies.emit('chat:runtime:bridge-requested', event);
+        } catch (error: unknown) {
+          // Renderer 未收到 Bridge 请求时释放全部等待资源，避免超时前残留幽灵请求。
+          pendingBridgeRequests.delete(key);
+          clearTimeout(timeoutId);
+          removeAbortListener?.();
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
       });
     },
 

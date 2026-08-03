@@ -30,7 +30,7 @@ import { useChatSessionStore } from '@/stores/chat/session';
 import { asyncTo } from '@/utils/asyncTo';
 import { hasRuntimeConfirmations, type createChatConfirmationController } from '../utils/confirmationController';
 import { parseUserInput } from '../utils/filePartParser';
-import { append, create, userChoice } from '../utils/messageHelper';
+import { append, create, finalizeFailedMessage, userChoice } from '../utils/messageHelper';
 import { appendRuntimeErrorMessage } from '../utils/runtimeError';
 import { useChatRuntime } from './useChatRuntime';
 import { useChatRuntimeLauncher } from './useChatRuntimeLauncher';
@@ -274,8 +274,21 @@ export function useChatWorkflow(options: UseChatWorkflowOptions): UseChatWorkflo
     await options.onRuntimeComplete(nextMessage);
   }
 
-  /** 处理 Runtime 错误并写入持久化错误消息。 */
-  async function handleRuntimeError(error: AIServiceError): Promise<void> {
+  /**
+   * 处理 Runtime 错误并写入持久化错误消息。
+   * @param error - Runtime 标准错误
+   * @param runtimeId - 失败 Runtime ID
+   * @param messagePersistenceFailed - Main 是否未能持久化失败 assistant
+   */
+  async function handleRuntimeError(error: AIServiceError, runtimeId: string, messagePersistenceFailed = false): Promise<void> {
+    const loadingAssistant = [...options.messages.value]
+      .reverse()
+      .find((message: Message): boolean => message.role === 'assistant' && message.runtimeId === runtimeId && message.loading === true);
+    const recoveredMessage = loadingAssistant ? cloneDeep(loadingAssistant) : undefined;
+    if (recoveredMessage) {
+      finalizeFailedMessage(recoveredMessage, error);
+      options.upsertLiveMessage(recoveredMessage);
+    }
     options.sessionActor.markFailed({ code: 'runtime_failed', message: error.message, cause: error });
     const activeRuntimeId = options.sessionActor.activeRuntimeId.value;
     if (activeRuntimeId) {
@@ -283,7 +296,7 @@ export function useChatWorkflow(options: UseChatWorkflowOptions): UseChatWorkflo
     }
     if (error.code === 'MODEL_NOT_FOUND') {
       options.onModelNotFound();
-      return;
+      if (!recoveredMessage && !messagePersistenceFailed) return;
     }
 
     const sessionId = options.activeSessionId.value;
@@ -298,6 +311,7 @@ export function useChatWorkflow(options: UseChatWorkflowOptions): UseChatWorkflo
       fetchAllPriorHistory: options.fetchAllPriorHistory,
       persistMessages: chatStore.setSessionMessages,
       setLoadedMessages: options.setLoadedMessages,
+      persistExistingError: Boolean(recoveredMessage) || messagePersistenceFailed,
       isSessionActive: (targetSessionId: string): boolean => options.activeSessionId.value === targetSessionId,
       afterMessagesUpdated: async (): Promise<void> => {
         await nextTick();
@@ -766,7 +780,7 @@ export function useChatWorkflow(options: UseChatWorkflowOptions): UseChatWorkflo
       return;
     }
     if (event.type === 'runtimeError') {
-      await handleRuntimeError(event.event.error);
+      await handleRuntimeError(event.event.error, event.event.runtimeId, event.event.messagePersistenceFailed);
       return;
     }
     if (event.type === 'runtimeCompleted') {

@@ -3,6 +3,7 @@
  * @description ChatRuntime 错误处理与中文展示测试。
  */
 import { describe, expect, it } from 'vitest';
+import { finalizeFailedMessage } from '@/components/BChat/utils/messageHelper';
 import { appendRuntimeErrorMessage, createRuntimeError, createRuntimeRequestError, localizeRuntimeErrorMessage } from '@/components/BChat/utils/runtimeError';
 import type { Message } from '@/components/BChat/utils/types';
 
@@ -84,5 +85,68 @@ describe('runtimeError', (): void => {
       })
     ]);
     expect(persistedMessages).toEqual(loadedMessages);
+  });
+
+  it('finalizes every pending tool part when the terminal message update is missing', (): void => {
+    const message = createMessage({
+      role: 'assistant',
+      content: 'partial answer',
+      loading: true,
+      finished: false,
+      parts: [
+        {
+          id: 'tool-inputting',
+          type: 'tool',
+          toolCallId: 'tool-call-inputting',
+          toolName: 'read_file',
+          status: 'inputting',
+          input: null,
+          inputText: '{"path":"'
+        },
+        {
+          id: 'tool-awaiting',
+          type: 'tool',
+          toolCallId: 'tool-call-awaiting',
+          toolName: 'question',
+          status: 'done',
+          input: {},
+          result: {
+            toolName: 'question',
+            status: 'awaiting_user_input',
+            data: {
+              questionId: 'question-1',
+              toolCallId: 'tool-call-awaiting',
+              question: '继续吗？',
+              mode: 'single',
+              options: [{ label: '继续', value: 'yes' }]
+            }
+          }
+        },
+        {
+          id: 'tool-success',
+          type: 'tool',
+          toolCallId: 'tool-call-success',
+          toolName: 'read_file',
+          status: 'done',
+          input: {},
+          result: { toolName: 'read_file', status: 'success', data: { content: 'done' } }
+        }
+      ]
+    });
+
+    finalizeFailedMessage(message, { code: 'REQUEST_FAILED', message: '模型调用失败' });
+
+    expect(message).toMatchObject({ content: 'partial answer\n模型调用失败', loading: false, finished: true });
+    expect(message.parts[0]).toMatchObject({
+      status: 'done',
+      result: { status: 'failure', error: { code: 'EXECUTION_FAILED', message: '模型调用失败' } }
+    });
+    expect(message.parts[0]).not.toHaveProperty('inputText');
+    expect(message.parts[1]).toMatchObject({
+      status: 'done',
+      result: { status: 'failure', error: { code: 'EXECUTION_FAILED', message: '模型调用失败' } }
+    });
+    expect(message.parts[2]).toMatchObject({ result: { status: 'success' } });
+    expect(message.parts.some((part) => part.type === 'error')).toBe(false);
   });
 });
