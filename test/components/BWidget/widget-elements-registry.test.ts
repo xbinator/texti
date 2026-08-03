@@ -34,6 +34,43 @@ describe('BWidget element registry', (): void => {
     expect(getWidgetElementSetter('button')).not.toBeNull();
   });
 
+  it('registers the swiper element schema for the sidebar tool list', (): void => {
+    const schemaNames = WIDGET_ELEMENT_SCHEMAS.map((schema: WidgetElementSchema): string => schema.name);
+    const swiperSchema = getWidgetElementSchema('swiper');
+
+    expect(schemaNames).toContain('swiper');
+    expect(swiperSchema).toMatchObject({
+      name: 'swiper',
+      label: '轮播图',
+      icon: 'lucide:gallery-horizontal-end',
+      createAnchor: 'center',
+      createCursor: 'grab',
+      metadata: {
+        autoplay: false,
+        autoplayInterval: 3000,
+        animationDuration: 300,
+        fit: 'cover',
+        images: [
+          {
+            alt: '',
+            src: ''
+          }
+        ],
+        indicatorColor: '#ffffff',
+        indicatorShape: 'dot',
+        initialIndex: 0,
+        loop: true,
+        showIndicator: true,
+        vertical: false
+      }
+    });
+  });
+
+  it('registers swiper view and setter components', (): void => {
+    expect(getWidgetElementView('swiper')).not.toBeNull();
+    expect(getWidgetElementSetter('swiper')).not.toBeNull();
+  });
+
   it('registers ordered sidebar categories and assigns every element', (): void => {
     expect(WIDGET_ELEMENT_ROLES).toEqual([
       { key: 'basic', label: '基础' },
@@ -48,6 +85,7 @@ describe('BWidget element registry', (): void => {
       rect: 'basic',
       text: 'basic',
       image: 'basic',
+      swiper: 'basic',
       button: 'interaction'
     });
   });

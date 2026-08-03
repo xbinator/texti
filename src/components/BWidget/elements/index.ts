@@ -13,6 +13,9 @@ import { imageElementSchema } from './Image/schema';
 import ImageSetter from './Image/Setter.vue';
 import RectView from './Rect/index.vue';
 import { rectElementSchema } from './Rect/schema';
+import SwiperView from './Swiper/index.vue';
+import { swiperElementSchema } from './Swiper/schema';
+import SwiperSetter from './Swiper/Setter.vue';
 import TextView from './Text/index.vue';
 import { textElementSchema } from './Text/schema';
 import TextSetter from './Text/Setter.vue';
@@ -20,7 +23,13 @@ import TextSetter from './Text/Setter.vue';
 /**
  * BWidget 侧边栏可创建元素注册表。
  */
-export const WIDGET_ELEMENT_SCHEMAS: WidgetElementSchema[] = [rectElementSchema, textElementSchema, imageElementSchema, buttonElementSchema];
+export const WIDGET_ELEMENT_SCHEMAS: WidgetElementSchema[] = [
+  rectElementSchema,
+  textElementSchema,
+  imageElementSchema,
+  swiperElementSchema,
+  buttonElementSchema
+];
 
 /** 元素配置索引。 */
 const widgetElementSchemaByName = new Map<string, WidgetElementSchema>(
@@ -32,6 +41,7 @@ const widgetElementViewByName = new Map<string, Component>([
   [rectElementSchema.name, RectView],
   [textElementSchema.name, TextView],
   [imageElementSchema.name, ImageView],
+  [swiperElementSchema.name, SwiperView],
   [buttonElementSchema.name, ButtonView]
 ]);
 
@@ -40,6 +50,7 @@ const widgetElementSetterByName = new Map<string, Component>([
   ['group', GroupSetter],
   [textElementSchema.name, TextSetter],
   [imageElementSchema.name, ImageSetter],
+  [swiperElementSchema.name, SwiperSetter],
   [buttonElementSchema.name, ButtonSetter]
 ]);
 
