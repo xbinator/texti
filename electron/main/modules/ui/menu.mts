@@ -3,9 +3,26 @@
  * @description 应用系统菜单构建与菜单动作派发。
  */
 import { app, Menu, MenuItemConstructorOptions, BrowserWindow } from 'electron';
-import { getWindow } from '../../window.mjs';
+import { env } from '../../env.mjs';
+import { getWindow, isDev } from '../../window.mjs';
 
 const pendingActions: string[] = [];
+
+/**
+ * 应用菜单构建选项。
+ */
+interface AppMenuBuildOptions {
+  /** 是否显示重新加载相关开发菜单。 */
+  enableReloadMenu?: boolean;
+}
+
+/**
+ * 判断当前运行环境是否允许显示刷新菜单。
+ * @returns 是否显示重新加载相关菜单项
+ */
+function shouldEnableReloadMenu(): boolean {
+  return isDev() && env.TIBIS_ENABLE_RELOAD_MENU;
+}
 
 /**
  * 确保窗口可见并聚焦，避免系统快捷入口触发后用户没有可见反馈。
@@ -66,10 +83,32 @@ export function sendMenuAction(action: string): void {
  * 构建应用系统菜单模板。
  * @param isMac - 是否为 macOS 平台
  * @param appName - 应用名称
+ * @param options - 应用菜单构建选项
  * @returns Electron 菜单模板
  */
-export function buildAppMenuTemplate(isMac: boolean, appName: string): MenuItemConstructorOptions[] {
+export function buildAppMenuTemplate(isMac: boolean, appName: string, options: AppMenuBuildOptions = {}): MenuItemConstructorOptions[] {
   const template: MenuItemConstructorOptions[] = [];
+  const viewSubmenu: MenuItemConstructorOptions[] = [
+    { id: 'view:source', type: 'checkbox', label: '源代码模式', accelerator: 'CmdOrCtrl+E', click: () => sendMenuAction('view:toggleSource') },
+    { id: 'view:outline', type: 'checkbox', label: '大纲', click: () => sendMenuAction('view:toggleOutline') },
+    { type: 'separator' as const },
+    {
+      label: '配色方案',
+      submenu: [
+        { id: 'theme:system', type: 'checkbox', label: '跟随系统', click: () => sendMenuAction('theme:system') },
+        { id: 'theme:light', type: 'checkbox', label: '浅色主题', click: () => sendMenuAction('theme:light') },
+        { id: 'theme:dark', type: 'checkbox', label: '深色主题', click: () => sendMenuAction('theme:dark') }
+      ]
+    },
+    {
+      label: '页宽',
+      submenu: [
+        { id: 'view:pageWidth:default', type: 'checkbox', label: '默认', click: () => sendMenuAction('view:pageWidth:default') },
+        { id: 'view:pageWidth:wide', type: 'checkbox', label: '较宽', click: () => sendMenuAction('view:pageWidth:wide') },
+        { id: 'view:pageWidth:full', type: 'checkbox', label: '全宽', click: () => sendMenuAction('view:pageWidth:full') }
+      ]
+    }
+  ];
 
   // macOS 特有的应用菜单
   if (isMac) {
@@ -126,29 +165,8 @@ export function buildAppMenuTemplate(isMac: boolean, appName: string): MenuItemC
     ]
   });
 
-  // 视图菜单（所有平台）
-  template.push({
-    label: '视图',
-    submenu: [
-      { id: 'view:source', type: 'checkbox', label: '源代码模式', accelerator: 'CmdOrCtrl+E', click: () => sendMenuAction('view:toggleSource') },
-      { id: 'view:outline', type: 'checkbox', label: '大纲', click: () => sendMenuAction('view:toggleOutline') },
-      { type: 'separator' as const },
-      {
-        label: '配色方案',
-        submenu: [
-          { id: 'theme:system', type: 'checkbox', label: '跟随系统', click: () => sendMenuAction('theme:system') },
-          { id: 'theme:light', type: 'checkbox', label: '浅色主题', click: () => sendMenuAction('theme:light') },
-          { id: 'theme:dark', type: 'checkbox', label: '深色主题', click: () => sendMenuAction('theme:dark') }
-        ]
-      },
-      {
-        label: '页宽',
-        submenu: [
-          { id: 'view:pageWidth:default', type: 'checkbox', label: '默认', click: () => sendMenuAction('view:pageWidth:default') },
-          { id: 'view:pageWidth:wide', type: 'checkbox', label: '较宽', click: () => sendMenuAction('view:pageWidth:wide') },
-          { id: 'view:pageWidth:full', type: 'checkbox', label: '全宽', click: () => sendMenuAction('view:pageWidth:full') }
-        ]
-      },
+  if (options.enableReloadMenu === true) {
+    viewSubmenu.push(
       { type: 'separator' as const },
       {
         label: '重新加载',
@@ -165,10 +183,16 @@ export function buildAppMenuTemplate(isMac: boolean, appName: string): MenuItemC
           const win = BrowserWindow.getFocusedWindow();
           if (win) win.webContents.reloadIgnoringCache();
         }
-      },
-      { type: 'separator' as const },
-      { role: 'togglefullscreen' as const, label: '切换全屏' }
-    ]
+      }
+    );
+  }
+
+  viewSubmenu.push({ type: 'separator' as const }, { role: 'togglefullscreen' as const, label: '切换全屏' });
+
+  // 视图菜单（所有平台）
+  template.push({
+    label: '视图',
+    submenu: viewSubmenu
   });
 
   // 帮助菜单（所有平台）
@@ -190,7 +214,7 @@ export function buildAppMenuTemplate(isMac: boolean, appName: string): MenuItemC
  */
 export function setupAppMenu(): void {
   const isMac = process.platform === 'darwin';
-  const template = buildAppMenuTemplate(isMac, app.name);
+  const template = buildAppMenuTemplate(isMac, app.name, { enableReloadMenu: shouldEnableReloadMenu() });
 
   const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
