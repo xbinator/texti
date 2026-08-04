@@ -27,15 +27,29 @@ function extractStyleRuleBody(source: string, selector: string): string {
 }
 
 describe('BEditor rich selection styles', (): void => {
-  it('extends inline code selection highlight into code padding only at code boundaries', (): void => {
+  it('keeps inline code base padding so AI selection highlight has visual breathing room', (): void => {
     const source = readPaneRichEditorSource();
-    const inlineCodeStartRuleBody = extractStyleRuleBody(source, ':not(pre) > code .ai-selection-highlight--code-start');
-    const inlineCodeEndRuleBody = extractStyleRuleBody(source, ':not(pre) > code .ai-selection-highlight--code-end');
+    // 行内 code 的视觉边距由基础 `code { padding: 0.125em 0.25em; }` 兜底；
+    // AI 选区高亮不再为 `--code-start` / `--code-end` 单独写 margin/padding 覆盖。
+    const inlineCodeRuleBody = extractStyleRuleBody(source, ':not(pre) > code');
 
-    expect(inlineCodeStartRuleBody).toContain('margin-left: -0.25em;');
-    expect(inlineCodeStartRuleBody).toContain('padding-left: 0.25em;');
-    expect(inlineCodeEndRuleBody).toContain('margin-right: -0.25em;');
-    expect(inlineCodeEndRuleBody).toContain('padding-right: 0.25em;');
+    // `:not(pre) > code` 块不应再追加任何 AI 选区高亮的 margin/padding 调整
+    expect(inlineCodeRuleBody).not.toMatch(/margin-(?:left|right):\s*-0\.25em;/);
+    expect(inlineCodeRuleBody).not.toMatch(/padding-(?:left|right):\s*0\.25em;/);
+    // 但需要保留基础 `code` 规则的 padding，给 AI 选区高亮提供视觉呼吸
+    expect(source).toContain('padding: 0.125em 0.25em;');
+  });
+
+  it('resets box-shadow on inline code selection highlight instead of painting zero-value double bands', (): void => {
+    const source = readPaneRichEditorSource();
+    // 行内 code 内的 AI 选区高亮需要重置 box-shadow，避免与父级规则的 0.2em 阴影条叠加
+    // 源码用 Less 嵌套语法，`:not(pre) > code` 块内嵌 `.ai-selection-highlight` 子规则
+    const inlineCodeRuleBody = extractStyleRuleBody(source, ':not(pre) > code');
+
+    expect(inlineCodeRuleBody).toContain('vertical-align: baseline;');
+    expect(inlineCodeRuleBody).toContain('box-shadow: none;');
+    // 防止回归到冗余的 `0 0 0 0 X, 0 0 0 0 Y` 双阴影写法
+    expect(inlineCodeRuleBody).not.toMatch(/box-shadow:\s*0\s+0\s+0\s+0[^,;]*,\s*0\s+0\s+0\s+0/);
   });
 
   it('renders table container selection as a filled table state instead of an outline ring', (): void => {
