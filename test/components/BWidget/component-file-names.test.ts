@@ -46,7 +46,7 @@ describe('BWidget component file names', (): void => {
     const registryContent = readFileSync(resolve(__dirname, '../../../src/components/BWidget/elements/index.ts'), 'utf-8');
 
     expect(readElementFilesByName('View.vue')).toEqual([]);
-    expect(readElementFilesByName('index.vue')).toHaveLength(4);
+    expect(readElementFilesByName('index.vue')).toHaveLength(5);
     expect(registryContent).not.toContain('/View.vue');
     expect(registryContent).toContain('/index.vue');
   });

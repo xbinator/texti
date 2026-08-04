@@ -124,7 +124,8 @@ function readImageItemSource(): string {
  * @returns CSS 规则内容
  */
 function readStyleRule(source: string, selector: string): string {
-  const pattern = new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')} \\{(?<body>[\\s\\S]*?)\\n\\}`, 'u');
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const pattern = new RegExp(`(?:^|\\n)\\s*${escapedSelector} \\{(?<body>[\\s\\S]*?)\\n\\}`, 'u');
 
   return pattern.exec(source)?.groups?.body ?? '';
 }
@@ -179,8 +180,8 @@ describe('SwiperImageItem', (): void => {
     expect(bodyRule).toContain('padding: 0 8px 8px;');
     expect(bodyRule).not.toContain('36px');
     expect(removeRule).toContain('opacity: 0;');
-    expect(source).toContain('.widget-swiper-image-item:hover .widget-swiper-image-item__remove');
-    expect(source).toContain('.widget-swiper-image-item:focus-within .widget-swiper-image-item__remove');
+    expect(source).toContain('&:hover .widget-swiper-image-item__remove');
+    expect(source).toContain('&:focus-within .widget-swiper-image-item__remove');
     wrapper.unmount();
   });
 

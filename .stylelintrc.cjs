@@ -4,7 +4,6 @@ module.exports = {
     'stylelint-config-standard', // 配置stylelint拓展插件
     'stylelint-config-html/vue', // 配置 vue 中 template 样式格式化
     'stylelint-config-standard-less', // 配置stylelint scss插件
-    'stylelint-config-standard-vue', // 配置 vue 中 scss 样式格式化
     'stylelint-config-recess-order' // 配置stylelint css属性书写顺序插件,
   ],
   overrides: [
@@ -21,6 +20,7 @@ module.exports = {
   rules: {
     'font-family-no-missing-generic-family-keyword': null,
     'value-keyword-case': null, // 在 css 中使用 v-bind，不报错
+    'import-notation': null, // 保留 Less 中现有 @import url(...) 写法
     'no-descending-specificity': null, // 禁止在具有较高优先级的选择器后出现被其覆盖的较低优先级的选择器
     'function-url-quotes': 'always', // 要求或禁止 URL 的引号 "always(必须加上引号)"|"never(没有引号)"
     'no-empty-source': null, // 关闭禁止空源码
