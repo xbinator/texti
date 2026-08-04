@@ -449,6 +449,85 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * 统计目录读取结果中的指定类型条目数量。
+ * @param entries - 目录条目列表
+ * @param type - 条目类型
+ * @returns 匹配类型的条目数量
+ */
+function countDirectoryEntries(entries: unknown[], type: 'file' | 'directory'): number {
+  return entries.filter((entry) => isRecord(entry) && entry.type === type).length;
+}
+
+/**
+ * 格式化 read_directory 工具的结果。
+ * @param data - 工具结果数据
+ * @returns 目录读取摘要
+ */
+function summarizeReadDirectory(data: Record<string, unknown>): ToolResultSummary {
+  const directoryPath = typeof data.path === 'string' ? data.path : '';
+  const entries = Array.isArray(data.entries) ? data.entries : [];
+  const tags: ToolSummaryTag[] = [];
+
+  if (directoryPath) {
+    tags.push({ label: '目录', value: toFileName(directoryPath) });
+  }
+
+  tags.push({ label: '条目', value: String(entries.length) });
+  tags.push({ label: '文件', value: String(countDirectoryEntries(entries, 'file')) });
+  tags.push({ label: '子目录', value: String(countDirectoryEntries(entries, 'directory')) });
+
+  if (data.truncated === true) {
+    tags.push({ label: '结果', value: '已截断' });
+  }
+
+  return {
+    text: '已读取目录',
+    tags
+  };
+}
+
+/**
+ * 格式化 grep 工具的结果。
+ * @param data - 工具结果数据
+ * @returns 内容搜索摘要
+ */
+function summarizeGrep(data: Record<string, unknown>): ToolResultSummary {
+  const searchPath = typeof data.path === 'string' ? data.path : '';
+  const pattern = typeof data.pattern === 'string' ? data.pattern : '';
+  const include = typeof data.include === 'string' ? data.include : '';
+  const matches = Array.isArray(data.matches) ? data.matches : [];
+  const count = typeof data.count === 'number' ? data.count : matches.length;
+  const warnings = Array.isArray(data.warnings) ? data.warnings.length : 0;
+  const skippedWarningCount = typeof data.skippedWarningCount === 'number' ? data.skippedWarningCount : 0;
+  const warningCount = warnings + skippedWarningCount;
+  const tags: ToolSummaryTag[] = [];
+
+  if (searchPath) {
+    tags.push({ label: '路径', value: toFileName(searchPath) });
+  }
+  if (pattern) {
+    tags.push({ label: '模式', value: pattern });
+  }
+  if (include) {
+    tags.push({ label: 'Include', value: include });
+  }
+  if (data.truncated === true) {
+    tags.push({ label: '结果', value: '已截断' });
+  }
+  if (data.incomplete === true) {
+    tags.push({ label: '状态', value: '部分结果' });
+  }
+  if (warningCount > 0) {
+    tags.push({ label: '警告', value: String(warningCount) });
+  }
+
+  return {
+    text: count > 0 ? `搜索到 ${count} 处匹配` : '未找到匹配',
+    tags
+  };
+}
+
+/**
  * 格式化 widget 工具的结果。
  * @param data - Widget 契约数据
  * @returns 小组件契约摘要
@@ -626,6 +705,8 @@ const TOOL_SUMMARIZERS: Record<string, (data: unknown) => ToolResultSummary> = {
   widget: (data) => summarizeWidget(data as Record<string, unknown>),
   write_file: (data) => summarizeWriteFile(data as Record<string, unknown>),
   read_file: (data) => summarizeReadFile(data as Record<string, unknown>),
+  read_directory: (data) => summarizeReadDirectory(data as Record<string, unknown>),
+  grep: (data) => summarizeGrep(data as Record<string, unknown>),
   read_current_document: (data) => summarizeReadFile(data as Record<string, unknown>),
   read_current_webpage: (data) => summarizeReadCurrentWebpage(data as Record<string, unknown>),
   operate_webpage: (data) => summarizeOperateWebpage(data as Record<string, unknown>),

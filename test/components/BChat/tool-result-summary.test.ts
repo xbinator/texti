@@ -148,6 +148,62 @@ describe('toolResultSummary open file metadata', (): void => {
     expect(webSummary?.tags).toEqual([{ label: '网址', value: 'https://example.com' }]);
   });
 
+  it('summarizes read_directory results with directory and entry counts', (): void => {
+    const summary = getToolResultSummary(
+      'read_directory',
+      successResult('read_directory', {
+        path: '/workspace/src',
+        entries: [
+          { name: 'components', path: '/workspace/src/components', type: 'directory' },
+          { name: 'main.ts', path: '/workspace/src/main.ts', type: 'file' },
+          { name: 'types.ts', path: '/workspace/src/types.ts', type: 'file' }
+        ]
+      })
+    );
+
+    expect(summary).toEqual({
+      text: '已读取目录',
+      tags: [
+        { label: '目录', value: 'src' },
+        { label: '条目', value: '3' },
+        { label: '文件', value: '2' },
+        { label: '子目录', value: '1' }
+      ]
+    });
+  });
+
+  it('summarizes grep results with match and truncation status', (): void => {
+    const summary = getToolResultSummary(
+      'grep',
+      successResult('grep', {
+        path: '/workspace/src',
+        pattern: 'target',
+        include: '**/*.ts',
+        count: 2,
+        truncated: true,
+        incomplete: true,
+        warnings: [{ path: '/workspace/src/blocked.ts', reason: 'permission denied' }],
+        skippedWarningCount: 3,
+        matches: [
+          { path: '/workspace/src/a.ts', line: 1, text: 'target' },
+          { path: '/workspace/src/b.ts', line: 4, text: 'target again' }
+        ]
+      })
+    );
+
+    expect(summary).toEqual({
+      text: '搜索到 2 处匹配',
+      tags: [
+        { label: '路径', value: 'src' },
+        { label: '模式', value: 'target' },
+        { label: 'Include', value: '**/*.ts' },
+        { label: '结果', value: '已截断' },
+        { label: '状态', value: '部分结果' },
+        { label: '警告', value: '4' }
+      ]
+    });
+  });
+
   it('summarizes operate_webpage click results with the target element', (): void => {
     const summary = getToolResultSummary(
       'operate_webpage',

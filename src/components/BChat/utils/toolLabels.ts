@@ -9,6 +9,11 @@ export const TOOL_ACTION_LABELS: Record<string, { alias: string }> = {
   read_current_document: { alias: '读取当前文档' },
   read_current_webpage: { alias: '读取当前网页' },
   read_directory: { alias: '读取目录' },
+  glob: { alias: '查找文件' },
+  grep: { alias: '搜索内容' },
+  delegate_task: { alias: '委派任务' },
+  stage_file_write: { alias: '暂存写入文件' },
+  stage_file_edit: { alias: '暂存修改文件' },
   list_files: { alias: '查看文件列表' },
   search_files: { alias: '搜索文件' },
   write_file: { alias: '写入文件' },
@@ -27,6 +32,7 @@ export const TOOL_ACTION_LABELS: Record<string, { alias: string }> = {
   query_logs: { alias: '查询日志' },
   skill: { alias: '调用技能' },
   question: { alias: '提问' },
+  ask_user_choice: { alias: '提问' },
   ask_user_question: { alias: '提问' },
   todowrite: { alias: '已完成' },
   create_document: { alias: '创建文档' },
@@ -34,6 +40,7 @@ export const TOOL_ACTION_LABELS: Record<string, { alias: string }> = {
   tavily_extract: { alias: '提取网页内容' },
   open_draft: { alias: '打开草稿' },
   open_resource: { alias: '打开资源' },
+  open_widget: { alias: '打开小组件' },
   widget: { alias: '小组件' }
 };
 
