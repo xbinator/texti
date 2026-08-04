@@ -29,33 +29,6 @@ interface UseRuntimeBridgeHandlerOptions {
 type RuntimeBridgeHandler = (event: ChatRuntimeBridgeRequestEvent) => Promise<unknown>;
 
 /**
- * 判断 Bridge payload 是否可安全展开。
- * @param value - 原始 payload
- * @returns 是否为对象记录
- */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/**
- * 把文件 Bridge 请求约束到 Runtime 启动时冻结的工作区。
- * @param event - 原始 Bridge 请求
- * @param workspaceRoot - 冻结工作区根目录
- * @returns 绑定后的 Bridge 请求
- */
-function bindWorkspace(event: ChatRuntimeBridgeRequestEvent, workspaceRoot: string | null): ChatRuntimeBridgeRequestEvent {
-  if (event.kind !== 'file-content-snapshot' && event.kind !== 'write-file-content') return event;
-  const payload = isRecord(event.payload) ? event.payload : {};
-  return {
-    ...event,
-    payload: {
-      ...payload,
-      workspaceRoot
-    }
-  };
-}
-
-/**
  * 创建 Runtime Bridge 请求处理器。
  * @param options - 文件和导航能力
  * @returns 按 Runtime 身份创建的 Bridge 请求处理器
@@ -72,20 +45,13 @@ export function useRuntimeBridgeHandler(options: UseRuntimeBridgeHandlerOptions)
   function createBridgeHandler(binding?: RuntimeToolBinding): RuntimeBridgeHandler {
     const documentId = binding?.documentId;
     const webviewId = binding?.webviewId;
-    const workspaceRoot = binding?.workspaceRoot ?? null;
 
     /** 执行当前 Runtime 的资源绑定 Bridge 请求。 */
     async function handleRuntimeBridgeRequest(event: ChatRuntimeBridgeRequestEvent): Promise<unknown> {
-      const boundEvent = binding ? bindWorkspace(event, workspaceRoot) : event;
-      return handleBChatRuntimeBridgeRequest(boundEvent, {
+      return handleBChatRuntimeBridgeRequest(event, {
         getEditorContext: binding
           ? () => (documentId ? editorToolContextRegistry.getContext(documentId) : undefined)
           : editorToolContextRegistry.getCurrentContext,
-        getEditorContextByDocumentId: (requestedDocumentId: string) => editorToolContextRegistry.getContext(requestedDocumentId),
-        findFileByPath: async (filePath: string): Promise<{ id: string } | null> => {
-          const file = await recentStore.getFileByPath(filePath);
-          return file ? { id: file.id } : null;
-        },
         getRecentFileById: (fileId: string) => recentStore.getFileById(fileId),
         updateRecentFileById: (fileId: string, updates: Partial<StoredDocumentRecord>) => recentStore.updateFile(fileId, updates),
         getWebviewContext: binding

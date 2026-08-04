@@ -44,7 +44,13 @@ import {
   runGrepSearch
 } from '../file-search.mjs';
 import { isRecord, isRuntimeFileContentSnapshot, isRuntimeOpenDraftResult } from '../guards.mjs';
-import { isRuntimePathInsideWorkspace, isRuntimeTrustedHomeReadPath, resolveRuntimeReadTarget, resolveRuntimeWriteTarget } from '../paths.mjs';
+import {
+  isRuntimePathInsideWorkspace,
+  isRuntimeTrustedHomeReadPath,
+  isRuntimeUnsavedPath,
+  resolveRuntimeReadTarget,
+  resolveRuntimeWriteTarget
+} from '../paths.mjs';
 import {
   createBridgeFailureResult,
   createMainDeniedResult,
@@ -532,27 +538,29 @@ async function executeReadFileTool(input: ChatRuntimeMainToolExecutionInput, dep
   const normalizedInput = normalizeRuntimeReadFileInput(input.input);
   if ('status' in normalizedInput) return normalizedInput;
 
-  const bridgeResult = await deps.requestBridge({
-    runtimeId: input.runtime.runtimeId,
-    toolCallId: input.toolCallId,
-    kind: 'file-content-snapshot',
-    payload: { path: normalizedInput.filePath, workspaceRoot: input.runtime.workspaceRoot }
-  });
-  if (bridgeResult.status === 'success') {
-    if (!isRuntimeFileContentSnapshot(bridgeResult.data)) {
-      return createMainToolFailureResult(input.toolName, 'INVALID_INPUT', '文件内容快照格式无效');
-    }
-    const artifactId = observeRuntimeArtifact(input, {
-      artifactId: bridgeResult.data.artifactId,
-      path: bridgeResult.data.path,
-      operation: 'read'
+  if (isRuntimeUnsavedPath(normalizedInput.filePath)) {
+    const bridgeResult = await deps.requestBridge({
+      runtimeId: input.runtime.runtimeId,
+      toolCallId: input.toolCallId,
+      kind: 'file-content-snapshot',
+      payload: { path: normalizedInput.filePath }
     });
-    return createMainToolSuccessResult(
-      READ_FILE_TOOL_NAME,
-      createRuntimeReadFileData(bridgeResult.data.path, bridgeResult.data.content, normalizedInput.offset, artifactId, normalizedInput.limit)
-    );
+    if (bridgeResult.status === 'success') {
+      if (!isRuntimeFileContentSnapshot(bridgeResult.data)) {
+        return createMainToolFailureResult(input.toolName, 'INVALID_INPUT', '文件内容快照格式无效');
+      }
+      const artifactId = observeRuntimeArtifact(input, {
+        artifactId: bridgeResult.data.artifactId,
+        path: bridgeResult.data.path,
+        operation: 'read'
+      });
+      return createMainToolSuccessResult(
+        READ_FILE_TOOL_NAME,
+        createRuntimeReadFileData(bridgeResult.data.path, bridgeResult.data.content, normalizedInput.offset, artifactId, normalizedInput.limit)
+      );
+    }
+    if (bridgeResult.error.code !== 'EDITOR_UNAVAILABLE') return createBridgeFailureResult(input.toolName, bridgeResult.error);
   }
-  if (bridgeResult.error.code !== 'EDITOR_UNAVAILABLE') return createBridgeFailureResult(input.toolName, bridgeResult.error);
 
   const target = resolveRuntimeReadTarget(normalizedInput.filePath, input.runtime.workspaceRoot, input.toolName);
   if ('status' in target) return target;

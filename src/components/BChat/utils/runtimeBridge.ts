@@ -9,7 +9,6 @@ import type { OpenDraftInput, OpenDraftResult } from '@/ai/tools/shared/types';
 import { isDocumentRecord } from '@/shared/storage';
 import type { StoredDocumentRecord } from '@/shared/storage/files/types';
 import { isUnsavedPath, parseUnsavedPath } from '@/utils/file/unsaved';
-import { workspace } from '@/utils/file/workspace';
 
 /** Bridge handler 实际消费的事件字段。 */
 type BChatRuntimeBridgeRequest = Pick<ChatRuntimeBridgeRequestEvent, 'requestId' | 'kind' | 'payload'> & Partial<ChatRuntimeEventBase>;
@@ -49,10 +48,6 @@ export interface BChatRuntimeApplySettingResult {
 export interface BChatRuntimeBridgeDependencies {
   /** 获取当前编辑器工具上下文。 */
   getEditorContext: () => AIToolContext | undefined;
-  /** 通过文档 ID 获取编辑器工具上下文。 */
-  getEditorContextByDocumentId?: (documentId: string) => AIToolContext | undefined;
-  /** 通过文件路径查找文件记录。 */
-  findFileByPath?: (filePath: string) => Promise<{ id: string } | null>;
   /** 通过最近文件 ID 获取文件记录。 */
   getRecentFileById?: (fileId: string) => StoredDocumentRecord | undefined | Promise<StoredDocumentRecord | undefined>;
   /** 更新最近文件记录。 */
@@ -257,23 +252,6 @@ function readDocumentSnapshot(dependencies: BChatRuntimeBridgeDependencies): BCh
 }
 
 /** File content bridge handlers. */
-/**
- * 解析编辑器文件查找路径。
- * @param filePath - 原始文件路径
- * @param workspaceRoot - 工作区根目录
- * @returns 可用于查找文件的绝对路径，无法解析时返回空字符串
- */
-function resolveEditorFilePath(filePath: string, workspaceRoot: string | null | undefined): string {
-  if (workspace.isAbsoluteFilePath(filePath)) {
-    return filePath;
-  }
-
-  if (!workspaceRoot) {
-    return '';
-  }
-
-  return `${workspaceRoot.replace(/\/$/, '')}/${filePath.replace(/^\//, '')}`;
-}
 
 /**
  * 读取文件内容快照。
@@ -291,7 +269,6 @@ async function readFileContentSnapshot(
     throw createBridgeError('INVALID_INPUT', '文件路径不能为空');
   }
 
-  const workspaceRoot = typeof payload.workspaceRoot === 'string' ? payload.workspaceRoot : null;
   if (isUnsavedPath(filePath)) {
     const unsavedReference = parseUnsavedPath(filePath);
     const file = unsavedReference ? await dependencies.getRecentFileById?.(unsavedReference.fileId) : undefined;
@@ -306,22 +283,7 @@ async function readFileContentSnapshot(
     };
   }
 
-  const resolvedPath = resolveEditorFilePath(filePath, workspaceRoot);
-  if (!resolvedPath || !dependencies.findFileByPath || !dependencies.getEditorContextByDocumentId) {
-    throw createBridgeError('EDITOR_UNAVAILABLE', '当前没有可用的编辑器文件内容');
-  }
-
-  const file = await dependencies.findFileByPath(resolvedPath);
-  const context = file ? dependencies.getEditorContextByDocumentId(file.id) : undefined;
-  if (!context) {
-    throw createBridgeError('EDITOR_UNAVAILABLE', '当前没有可用的编辑器文件内容');
-  }
-
-  return {
-    artifactId: context.document.id,
-    path: filePath,
-    content: context.document.getContent()
-  };
+  throw createBridgeError('EDITOR_UNAVAILABLE', '真实文件由主进程直接读写磁盘，不再通过编辑器 bridge');
 }
 
 /**
@@ -358,20 +320,7 @@ async function writeFileContent(event: BChatRuntimeBridgeRequest, dependencies: 
     return { artifactId: unsavedReference.fileId, path: filePath, content };
   }
 
-  const workspaceRoot = typeof payload.workspaceRoot === 'string' ? payload.workspaceRoot : null;
-  const resolvedPath = resolveEditorFilePath(filePath, workspaceRoot);
-  if (!resolvedPath || !dependencies.findFileByPath || !dependencies.getEditorContextByDocumentId) {
-    throw createBridgeError('EDITOR_UNAVAILABLE', '当前没有可写入的编辑器文件内容');
-  }
-
-  const file = await dependencies.findFileByPath(resolvedPath);
-  const context = file ? dependencies.getEditorContextByDocumentId(file.id) : undefined;
-  if (!context) {
-    throw createBridgeError('EDITOR_UNAVAILABLE', '当前没有可写入的编辑器文件内容');
-  }
-
-  await context.editor.replaceDocument(content);
-  return { artifactId: context.document.id, path: filePath, content };
+  throw createBridgeError('EDITOR_UNAVAILABLE', '真实文件由主进程直接读写磁盘，不再通过编辑器 bridge');
 }
 
 /** Settings bridge handlers. */

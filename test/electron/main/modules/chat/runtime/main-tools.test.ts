@@ -57,7 +57,8 @@ function createMainToolDependencies(bridgeRequests: MainToolBridgeRequest[]): Ma
 }
 
 describe('createMainToolExecutor', (): void => {
-  it('returns the stable bridge artifact ID from read_file', async (): Promise<void> => {
+  it('returns the stable bridge artifact ID when reading unsaved drafts', async (): Promise<void> => {
+    const unsavedPath = 'unsaved://draft-1/note.md';
     const executeMainTool = createMainToolExecutor({
       ...createMainToolDependencies([]),
       async requestBridge() {
@@ -65,8 +66,8 @@ describe('createMainToolExecutor', (): void => {
           status: 'success',
           data: {
             artifactId: 'document-1',
-            path: 'src/index.ts',
-            content: 'export const value = 1;'
+            path: unsavedPath,
+            content: '# Draft'
           }
         };
       }
@@ -76,13 +77,13 @@ describe('createMainToolExecutor', (): void => {
       runtime,
       toolCallId: 'tool-call-artifact-1',
       toolName: 'read_file',
-      input: { path: 'src/index.ts' }
+      input: { path: unsavedPath }
     });
 
     expect(result).toMatchObject({
       toolName: 'read_file',
       status: 'success',
-      data: { artifactId: 'document-1', path: 'src/index.ts' }
+      data: { artifactId: 'document-1', path: unsavedPath, content: '# Draft' }
     });
   });
 
@@ -833,6 +834,42 @@ describe('createMainToolExecutor', (): void => {
       else process.env.HOME = originalHome;
       if (originalUserProfile === undefined) delete process.env.USERPROFILE;
       else process.env.USERPROFILE = originalUserProfile;
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('reads real files directly from disk without renderer bridge', async (): Promise<void> => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tibis-runtime-tools-'));
+    try {
+      const workspaceRoot = path.join(tempRoot, 'workspace');
+      await fs.mkdir(path.join(workspaceRoot, 'src'), { recursive: true });
+      await fs.writeFile(path.join(workspaceRoot, 'src', 'index.ts'), 'export const value = 1;', 'utf8');
+      const bridgeRequests: MainToolBridgeRequest[] = [];
+      const requestConfirmation = vi.fn(async () => ({ approved: true }));
+      const executeMainTool = createMainToolExecutor({
+        now: () => '2026-06-19T00:00:00.000Z',
+        async requestBridge(input: MainToolBridgeRequest) {
+          bridgeRequests.push(input);
+          return { status: 'failure', error: { code: 'EDITOR_UNAVAILABLE', message: 'no editor' } };
+        },
+        requestConfirmation
+      });
+
+      const result = await executeMainTool({
+        runtime: { ...runtime, workspaceRoot },
+        toolCallId: 'tool-call-real-read-1',
+        toolName: 'read_file',
+        input: { path: 'src/index.ts' }
+      });
+
+      expect(result).toMatchObject({
+        toolName: 'read_file',
+        status: 'success',
+        data: { content: 'export const value = 1;' }
+      });
+      expect(bridgeRequests).toEqual([]);
+      expect(requestConfirmation).not.toHaveBeenCalled();
+    } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
   });

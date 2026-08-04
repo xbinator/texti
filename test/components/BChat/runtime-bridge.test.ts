@@ -212,30 +212,26 @@ describe('handleBChatRuntimeBridgeRequest', (): void => {
     expect(operatePage).not.toHaveBeenCalled();
   });
 
-  it('returns an opened editor file content snapshot by path', async (): Promise<void> => {
-    const result = await handleBChatRuntimeBridgeRequest(
-      {
-        runtimeId: 'runtime-1',
-        sessionId: 'session-1',
-        clientId: 'bchat',
-        agentId: 'default',
-        requestId: 'bridge-1',
-        kind: 'file-content-snapshot',
-        payload: { path: 'src/index.ts', workspaceRoot: '/workspace' }
-      },
-      {
-        getEditorContext: createEditorContext,
-        getEditorContextByDocumentId: (documentId) => (documentId === 'doc-1' ? createEditorContext() : undefined),
-        findFileByPath: async (filePath) => (filePath === '/workspace/src/index.ts' ? { id: 'doc-1' } : null),
-        getWebviewContext: () => undefined
-      }
-    );
-
-    expect(result).toEqual({
-      artifactId: 'doc-1',
-      path: 'src/index.ts',
-      content: 'hello document'
-    });
+  it('rejects real file content snapshots instead of reading editor memory', async (): Promise<void> => {
+    const getEditorContext = vi.fn(createEditorContext);
+    await expect(
+      handleBChatRuntimeBridgeRequest(
+        {
+          runtimeId: 'runtime-1',
+          sessionId: 'session-1',
+          clientId: 'bchat',
+          agentId: 'default',
+          requestId: 'bridge-1',
+          kind: 'file-content-snapshot',
+          payload: { path: 'src/index.ts', workspaceRoot: '/workspace' }
+        },
+        {
+          getEditorContext,
+          getWebviewContext: () => undefined
+        }
+      )
+    ).rejects.toMatchObject({ code: 'EDITOR_UNAVAILABLE' });
+    expect(getEditorContext).not.toHaveBeenCalled();
   });
 
   it('returns an unsaved draft file content snapshot by virtual path', async (): Promise<void> => {
@@ -276,34 +272,26 @@ describe('handleBChatRuntimeBridgeRequest', (): void => {
     });
   });
 
-  it('writes an opened editor file content by path', async (): Promise<void> => {
-    const replaceDocument = vi.fn();
-    const context = createEditorContext();
-    context.editor.replaceDocument = replaceDocument;
-    const result = await handleBChatRuntimeBridgeRequest(
-      {
-        runtimeId: 'runtime-1',
-        sessionId: 'session-1',
-        clientId: 'bchat',
-        agentId: 'default',
-        requestId: 'bridge-1',
-        kind: 'write-file-content',
-        payload: { path: 'src/index.ts', content: 'next content', workspaceRoot: '/workspace' }
-      },
-      {
-        getEditorContext: createEditorContext,
-        getEditorContextByDocumentId: (documentId) => (documentId === 'doc-1' ? context : undefined),
-        findFileByPath: async (filePath) => (filePath === '/workspace/src/index.ts' ? { id: 'doc-1' } : null),
-        getWebviewContext: () => undefined
-      }
-    );
-
-    expect(replaceDocument).toHaveBeenCalledWith('next content');
-    expect(result).toEqual({
-      artifactId: 'doc-1',
-      path: 'src/index.ts',
-      content: 'next content'
-    });
+  it('rejects real file content writes instead of replacing editor documents', async (): Promise<void> => {
+    const getEditorContext = vi.fn(createEditorContext);
+    await expect(
+      handleBChatRuntimeBridgeRequest(
+        {
+          runtimeId: 'runtime-1',
+          sessionId: 'session-1',
+          clientId: 'bchat',
+          agentId: 'default',
+          requestId: 'bridge-1',
+          kind: 'write-file-content',
+          payload: { path: 'src/index.ts', content: 'next content', workspaceRoot: '/workspace' }
+        },
+        {
+          getEditorContext,
+          getWebviewContext: () => undefined
+        }
+      )
+    ).rejects.toMatchObject({ code: 'EDITOR_UNAVAILABLE' });
+    expect(getEditorContext).not.toHaveBeenCalled();
   });
 
   it('writes an unsaved draft file content by virtual path', async (): Promise<void> => {
