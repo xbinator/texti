@@ -2,7 +2,7 @@
  * @file core/runtime.ts
  * @description 读取运行时已注入到 DOM 的主题 CSS 变量。
  */
-import { defaultLight } from '../presets/default';
+import { defaultLight } from '../presets/graphite';
 
 /**
  * 运行时主题色集合。

@@ -122,15 +122,16 @@ describe('theme preset registry', (): void => {
     }
   });
 
-  it('registers the soft monochrome Graphite theme preset', (): void => {
+  it('registers Graphite as the default theme preset', (): void => {
     const presets = getPresetList();
 
-    expect(presets).toContainEqual({ id: 'graphite', label: '柔和黑白「Graphite」' });
+    expect(presets[0]).toEqual({ id: 'default', label: '默认「Graphite」' });
+    expect(presets).not.toContainEqual({ id: 'graphite', label: '柔和黑白「Graphite」' });
   });
 
-  it('resolves Graphite tokens for soft gray product shell modes', (): void => {
-    const lightTokens = getResolvedTokens('graphite', 'light');
-    const darkTokens = getResolvedTokens('graphite', 'dark');
+  it('resolves default tokens from Graphite for soft gray product shell modes', (): void => {
+    const lightTokens = getResolvedTokens('default', 'light');
+    const darkTokens = getResolvedTokens('default', 'dark');
     const lightCssVars = toCssVars(lightTokens);
 
     expect(lightTokens.bg.primary).toBe('#ffffff');
@@ -144,6 +145,15 @@ describe('theme preset registry', (): void => {
     expect(darkTokens.bg.secondary).toBe('#1a1a1a');
     expect(darkTokens.color.primary).toBe('#f5f5f5');
     expect(lightCssVars['--color-primary']).toBe('#1f1f1f');
+  });
+
+  it('keeps the previous warm default theme available as Classic', (): void => {
+    const presets = getPresetList();
+    const lightTokens = getResolvedTokens('classic', 'light');
+
+    expect(presets).toContainEqual({ id: 'classic', label: '经典「Classic」' });
+    expect(lightTokens.bg.primary).toBe('#faf9f6');
+    expect(lightTokens.color.primary).toBe('#8a6f5a');
   });
 
   it('registers the high-contrast Shonen theme preset', (): void => {

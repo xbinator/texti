@@ -312,8 +312,9 @@ describe('toolRegistry', (): void => {
     expect(getDescription).toContain('主题预设');
     expect(updateDescription).toContain('色彩氛围');
     expect(valueDescription).toContain('整套界面色彩预设');
-    expect(valueDescription).toContain('default=暖米白/棕色');
-    expect(valueDescription).toContain('graphite=白/浅灰/黑灰');
+    expect(valueDescription).toContain('default=白/浅灰/黑灰');
+    expect(valueDescription).toContain('classic=暖米白/棕色');
+    expect(valueDescription).not.toContain('graphite=');
     expect(valueDescription).toContain('dark=深色');
     expect(valueDescription).toContain('light=浅色');
     expect(valueDescription).toContain('system=跟随系统');

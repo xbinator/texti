@@ -1,6 +1,6 @@
 /**
  * @file graphite.ts
- * @description Graphite 柔和黑白主题预设，模拟白色工作区与浅灰产品外壳的界面层级。
+ * @description 默认 Graphite 柔和黑白主题预设，模拟白色工作区与浅灰产品外壳的界面层级。
  */
 import type { ThemeTokens } from '../types/tokens';
 import { createDefaultDesignTokens } from '../core/factory';
@@ -498,14 +498,14 @@ const graphiteDark: ThemeTokens = {
 };
 
 /**
- * 注册 Graphite 柔和黑白主题预设。
+ * 注册默认 Graphite 柔和黑白主题预设。
  * 预设使用手工定义的完整 ThemeTokens，确保白色主画布与柔灰产品外壳层级足够精确。
  */
 registerPreset({
-  id: 'graphite',
-  label: '柔和黑白「Graphite」',
+  id: 'default',
+  label: '默认「Graphite」',
   light: graphiteLight,
   dark: graphiteDark
 });
 
-export { graphiteLight, graphiteDark };
+export { graphiteLight, graphiteDark, graphiteLight as defaultLight, graphiteDark as defaultDark };

@@ -25,4 +25,10 @@ describe('setting store persistence', (): void => {
 
     expect(useSettingStore().chatSidebarActiveSessionId).toBe('session-a');
   });
+
+  it('normalizes the previous Graphite preset id to the new default preset id', (): void => {
+    local.setItem('app_settings', { themePreset: 'graphite' });
+
+    expect(useSettingStore().themePreset).toBe('default');
+  });
 });

@@ -10,9 +10,9 @@ import { createThemeTokensFromBase } from './factory';
  * 主题预设——注册到注册表的基本单元。
  */
 export interface ThemePreset {
-  /** 预设 ID，如 'default'、'graphite' */
+  /** 预设 ID，如 'default'、'classic' */
   id: string;
-  /** 显示名称，如 '默认'、'Graphite' */
+  /** 显示名称，如 '默认「Graphite」'、'Classic' */
   label: string;
   /** 亮色 Token */
   light: ThemeTokens;

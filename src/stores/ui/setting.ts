@@ -25,7 +25,7 @@ interface PersistedSettingState {
   providerSidebarCollapsed: boolean;
   settingsSidebarCollapsed: boolean;
   theme: ThemeMode;
-  /** 主题预设 ID，如 'default'、'graphite' */
+  /** 主题预设 ID，如 'default'、'classic' */
   themePreset: string;
   sidebarVisible: boolean;
   sidebarWidth: number;
@@ -73,6 +73,18 @@ function normalizeSidebarWidth(value: unknown): number {
 }
 
 /**
+ * 规范化主题预设 ID。
+ * @param value - 持久化主题预设值
+ * @returns 当前可用主题预设 ID
+ */
+function normalizeThemePreset(value: unknown): string {
+  if (value === 'graphite') return DEFAULT_SETTINGS.themePreset;
+  if (typeof value !== 'string' || !value.trim()) return DEFAULT_SETTINGS.themePreset;
+
+  return value;
+}
+
+/**
  * 规范化聊天侧栏持久化会话 ID。
  * @param value - 未知持久化值
  * @returns 非空会话 ID；无效值返回 null
@@ -95,7 +107,7 @@ function normalizeSettings(value: unknown): PersistedSettingState {
     providerSidebarCollapsed: merged.providerSidebarCollapsed,
     settingsSidebarCollapsed: merged.settingsSidebarCollapsed,
     theme: merged.theme,
-    themePreset: merged.themePreset,
+    themePreset: normalizeThemePreset(merged.themePreset),
     sidebarVisible: merged.sidebarVisible,
     sidebarWidth: merged.sidebarWidth
   };
@@ -203,7 +215,7 @@ export const useSettingStore = defineStore('setting', {
 
     /**
      * 设置主题预设
-     * @param presetId - 预设 ID，如 'default'、'graphite'
+     * @param presetId - 预设 ID，如 'default'、'classic'
      */
     setThemePreset(presetId: string): void {
       this.themePreset = presetId;

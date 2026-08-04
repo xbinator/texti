@@ -54,7 +54,7 @@ describe('resolveRuntimeThemeColors', (): void => {
     expect(resolveRuntimeThemeColors()).toEqual({
       primary: light.color.primary,
       primaryBg: light.color.primaryBg,
-      primarySolidBg: '#f3efe8',
+      primarySolidBg: '#ededed',
       primaryBorder: light.color.primaryBorder,
       primaryHover: light.color.primaryHover
     });

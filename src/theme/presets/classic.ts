@@ -1,6 +1,6 @@
 /**
- * @file default.ts
- * @description 默认主题预设，从原 tokens.ts 迁移 light/dark 色值。
+ * @file classic.ts
+ * @description 经典暖米白主题预设，从原 default 主题迁移 light/dark 色值。
  */
 import type { ThemeTokens } from '../types/tokens';
 import { createDefaultDesignTokens } from '../core/factory';
@@ -20,9 +20,9 @@ const SHARED = {
 } as const;
 
 /**
- * 默认亮色主题 Token。
+ * Classic 亮色主题 Token。
  */
-const defaultLight: ThemeTokens = {
+const classicLight: ThemeTokens = {
   bg: {
     primary: '#faf9f6',
     secondary: '#f0ebe1',
@@ -261,7 +261,7 @@ const defaultLight: ThemeTokens = {
 /**
  * 默认暗色主题 Token。
  */
-const defaultDark: ThemeTokens = {
+const classicDark: ThemeTokens = {
   bg: {
     primary: '#13151a',
     secondary: '#0d0f12',
@@ -498,15 +498,15 @@ const defaultDark: ThemeTokens = {
 };
 
 /**
- * 注册默认主题预设。
- * default 预设使用手工定义的完整 ThemeTokens，
+ * 注册经典暖米白主题预设。
+ * classic 预设使用手工定义的完整 ThemeTokens，
  * 不走 createThemeTokens 工厂，保留原始色值的精确控制。
  */
 registerPreset({
-  id: 'default',
-  label: '默认',
-  light: defaultLight,
-  dark: defaultDark
+  id: 'classic',
+  label: '经典「Classic」',
+  light: classicLight,
+  dark: classicDark
 });
 
-export { defaultLight, defaultDark };
+export { classicLight, classicDark };
