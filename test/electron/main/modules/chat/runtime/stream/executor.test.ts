@@ -9,6 +9,7 @@ import type { DelegateTaskInput } from 'types/chat-agent';
 import { cloneDeep } from 'lodash-es';
 import { describe, expect, it, vi } from 'vitest';
 import { hashAgentPayload, validateFoundationContract } from '../../../../../../../electron/main/modules/chat/agents/contracts.mjs';
+import { createToolWatchdogs } from '../../../../../../../electron/main/modules/chat/runtime/controllers/tool-watchdog.mjs';
 import { createRuntimeStreamExecutor } from '../../../../../../../electron/main/modules/chat/runtime/stream/index.mjs';
 
 /** 测试 runtime 状态。 */
@@ -68,11 +69,11 @@ function createDelegateRuntime(overrides: Partial<ActiveChatRuntime> = {}): Acti
 }
 
 /** ChatRuntime 默认传给 AI 服务的内部续轮策略。 */
-const RUNTIME_CALL_OPTIONS = {
+const RUNTIME_CALL_OPTIONS = expect.objectContaining({
   runtimeToolLoop: true,
   forceFinal: false,
-  totalTimeoutMs: 300_000
-} as const;
+  toolActivity: expect.objectContaining({ start: expect.any(Function) })
+});
 
 /** 测试 user 消息。 */
 const userMessage: ChatMessageRecord = {
@@ -3434,7 +3435,7 @@ describe('runtime stream executor', (): void => {
     });
   });
 
-  it('times out renderer-managed tool calls and records a tool timeout result', async (): Promise<void> => {
+  it('records TOOL_UNRESPONSIVE when a renderer-managed tool loses liveness', async (): Promise<void> => {
     vi.useFakeTimers();
     try {
       const assistantMessage = createAssistantMessage();
@@ -3456,7 +3457,8 @@ describe('runtime stream executor', (): void => {
         modelId: 'gpt-test'
       });
       const streamText = vi.fn().mockResolvedValue([undefined, { stream: createRendererToolStream() }]);
-      const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeRendererTool, rendererToolTimeoutMs: 5 });
+      const toolWatchdogs = createToolWatchdogs({ livenessMs: 5, idleMs: 100 });
+      const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeRendererTool, toolWatchdogs });
 
       const task = executor(
         {
@@ -3496,7 +3498,7 @@ describe('runtime stream executor', (): void => {
             result: {
               toolName: 'renderer_echo',
               status: 'failure',
-              error: { code: 'TOOL_TIMEOUT', message: 'Renderer 工具 renderer_echo 执行超时，已等待 5ms' }
+              error: { code: 'TOOL_UNRESPONSIVE', message: '工具执行器长时间没有活动' }
             }
           }
         ]
@@ -3506,7 +3508,7 @@ describe('runtime stream executor', (): void => {
     }
   });
 
-  it('times out main-process tool calls within the task deadline', async (): Promise<void> => {
+  it('returns TOOL_UNRESPONSIVE when a main-process tool loses liveness', async (): Promise<void> => {
     vi.useFakeTimers();
     try {
       const assistantMessage = createAssistantMessage();
@@ -3530,7 +3532,8 @@ describe('runtime stream executor', (): void => {
         modelId: 'gpt-test'
       });
       const streamText = vi.fn().mockResolvedValue([undefined, { stream: createMainReadFileToolCallStream() }]);
-      const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool, observeMainTool, rendererToolTimeoutMs: 5 });
+      const toolWatchdogs = createToolWatchdogs({ livenessMs: 5, idleMs: 100 });
+      const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool, observeMainTool, toolWatchdogs });
 
       const task = executor({ runtime: { ...runtime }, userMessage, assistantMessage }, async (message) => {
         updates.push({ ...message, parts: [...message.parts] });
@@ -3551,7 +3554,7 @@ describe('runtime stream executor', (): void => {
             result: {
               toolName: 'read_file',
               status: 'failure',
-              error: { code: 'TOOL_TIMEOUT', message: '主进程工具 read_file 执行超时，已等待 5ms' }
+              error: { code: 'TOOL_UNRESPONSIVE', message: '工具执行器长时间没有活动' }
             }
           }
         ]
@@ -3564,7 +3567,7 @@ describe('runtime stream executor', (): void => {
         result: {
           toolName: 'read_file',
           status: 'failure',
-          error: { code: 'TOOL_TIMEOUT', message: '主进程工具 read_file 执行超时，已等待 5ms' }
+          error: { code: 'TOOL_UNRESPONSIVE', message: '工具执行器长时间没有活动' }
         }
       });
 
@@ -3602,7 +3605,7 @@ describe('runtime stream executor', (): void => {
     });
   });
 
-  it('pauses main-process tool timeout while waiting for user confirmation', async (): Promise<void> => {
+  it('pauses main-process liveness while waiting for user confirmation', async (): Promise<void> => {
     vi.useFakeTimers();
     try {
       const assistantMessage = createAssistantMessage();
@@ -3612,9 +3615,9 @@ describe('runtime stream executor', (): void => {
       const executeMainTool = vi.fn(
         (input: ChatRuntimeMainToolExecutionInput) =>
           new Promise<AIToolExecutionResult>((resolve) => {
-            input.timeoutControls?.pause();
+            input.activity?.waitUser('确认写入？');
             approveConfirmation = (): void => {
-              input.timeoutControls?.resume();
+              input.activity?.resume();
               resolve({
                 toolName: 'write_file',
                 status: 'success',
@@ -3634,7 +3637,8 @@ describe('runtime stream executor', (): void => {
         modelId: 'gpt-test'
       });
       const streamText = vi.fn().mockResolvedValue([undefined, { stream: createMainWriteFileToolStream() }]);
-      const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool, rendererToolTimeoutMs: 5 });
+      const toolWatchdogs = createToolWatchdogs({ livenessMs: 5, idleMs: 100 });
+      const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeMainTool, toolWatchdogs });
 
       const task = executor({ runtime: { ...runtime, workspaceRoot: '/workspace' }, userMessage, assistantMessage }, async (message) => {
         updates.push({ ...message, parts: [...message.parts] });

@@ -3,9 +3,15 @@
  * @description ChatRuntime renderer 本地工具请求等待管理。
  */
 import type { ActiveChatRuntime, ChatRuntimeEventEmitter, ChatRuntimeRendererToolExecutionInput } from '../types.mjs';
-import type { AIToolExecutionResult } from 'types/ai';
-import type { ChatRuntimeRecoveryPendingRequest, ChatRuntimeSubmitToolResultInput, ChatRuntimeToolRequestEvent } from 'types/chat-runtime';
+import type { AIToolExecutionError, AIToolExecutionResult } from 'types/ai';
+import type {
+  ChatRuntimeRecoveryPendingRequest,
+  ChatRuntimeSubmitToolActivityInput,
+  ChatRuntimeSubmitToolResultInput,
+  ChatRuntimeToolRequestEvent
+} from 'types/chat-runtime';
 import { ChatRuntimeError } from '../errors.mjs';
+import { createMainToolFailureResult, parseToolResult } from '../tools/results.mjs';
 import { createRuntimeEventBase } from '../types.mjs';
 
 /** 活跃 runtime 读取函数。 */
@@ -35,6 +41,12 @@ export interface RuntimeRendererToolRequests {
    */
   submit(input: ChatRuntimeSubmitToolResultInput): void;
   /**
+   * 验证并接受 renderer 工具活动。
+   * @param input - 工具活动
+   * @returns 是否属于当前 pending 请求并满足开始顺序
+   */
+  acceptActivity(input: ChatRuntimeSubmitToolActivityInput): boolean;
+  /**
    * 拒绝指定 runtime 所有等待中的工具请求。
    * @param runtimeId - runtime id
    * @param reason - 拒绝原因
@@ -52,8 +64,10 @@ interface PendingRendererToolRequest {
   resolve: (result: AIToolExecutionResult) => void;
   /** 拒绝工具请求。 */
   reject: (error: Error) => void;
-  /** 请求超时定时器。 */
-  timeoutId: ReturnType<typeof setTimeout>;
+  /** 开始确认超时定时器。 */
+  timeoutId?: ReturnType<typeof setTimeout>;
+  /** Renderer 是否已经确认开始。 */
+  started: boolean;
   /** 移除工具级中止监听器。 */
   removeAbortListener?: () => void;
 }
@@ -66,6 +80,41 @@ interface PendingRendererToolRequest {
  */
 function createToolRequestKey(runtimeId: string, toolCallId: string): string {
   return `${runtimeId}:${toolCallId}`;
+}
+
+/** Watchdog 可能通过 AbortSignal 传递的稳定终止码。 */
+const RENDERER_ABORT_CODES: ReadonlySet<AIToolExecutionError['code']> = new Set([
+  'USER_CANCELLED',
+  'TOOL_UNRESPONSIVE',
+  'EXTERNAL_WAIT_TIMEOUT',
+  'RUNTIME_INTERRUPTED'
+]);
+
+/**
+ * 把工具中止信号转换为稳定 Renderer 工具结果。
+ * @param toolName - 工具名称
+ * @param signal - 已中止信号
+ * @returns 保留 Watchdog 原因的工具结果
+ */
+function createAbortedRendererResult(toolName: string, signal?: AbortSignal): AIToolExecutionResult {
+  const reason: unknown = signal?.reason;
+  const code =
+    typeof reason === 'object' &&
+    reason !== null &&
+    'code' in reason &&
+    typeof reason.code === 'string' &&
+    RENDERER_ABORT_CODES.has(reason.code as AIToolExecutionError['code'])
+      ? (reason.code as AIToolExecutionError['code'])
+      : 'USER_CANCELLED';
+  const message =
+    typeof reason === 'object' && reason !== null && 'message' in reason && typeof reason.message === 'string'
+      ? reason.message
+      : '用户取消了 Renderer 工具调用';
+
+  if (code === 'USER_CANCELLED') {
+    return { toolName, status: 'cancelled', error: { code, message } };
+  }
+  return { toolName, status: 'failure', error: { code, message } };
 }
 
 /**
@@ -107,11 +156,7 @@ export function createRuntimeRendererToolRequests(dependencies: RuntimeRendererT
      */
     request(input: ChatRuntimeRendererToolExecutionInput): Promise<AIToolExecutionResult> {
       if (input.signal?.aborted) {
-        return Promise.resolve({
-          toolName: input.toolName,
-          status: 'failure',
-          error: { code: 'TOOL_TIMEOUT', message: 'Renderer tool request was aborted' }
-        });
+        return Promise.resolve(createAbortedRendererResult(input.toolName, input.signal));
       }
       if (!dependencies.getRuntime(input.runtime.runtimeId)) {
         throw new ChatRuntimeError('RUNTIME_NOT_ACTIVE', `Runtime ${input.runtime.runtimeId} is not active`);
@@ -129,11 +174,7 @@ export function createRuntimeRendererToolRequests(dependencies: RuntimeRendererT
         const resolveAborted = (): void => {
           pendingRendererToolRequests.delete(key);
           clearTimeout(timeoutId);
-          resolve({
-            toolName: input.toolName,
-            status: 'failure',
-            error: { code: 'TOOL_TIMEOUT', message: 'Renderer tool request was aborted' }
-          });
+          resolve(createAbortedRendererResult(input.toolName, input.signal));
           emitToolCancelled(event);
         };
         timeoutId = setTimeout((): void => {
@@ -148,7 +189,7 @@ export function createRuntimeRendererToolRequests(dependencies: RuntimeRendererT
         }, dependencies.timeoutMs);
         const removeAbortListener = input.signal ? (): void => input.signal?.removeEventListener('abort', resolveAborted) : undefined;
         input.signal?.addEventListener('abort', resolveAborted, { once: true });
-        pendingRendererToolRequests.set(key, { event, resolve, reject, timeoutId, removeAbortListener });
+        pendingRendererToolRequests.set(key, { event, resolve, reject, timeoutId, removeAbortListener, started: false });
         try {
           dependencies.emit('chat:runtime:tool-request', event);
         } catch (error: unknown) {
@@ -171,9 +212,32 @@ export function createRuntimeRendererToolRequests(dependencies: RuntimeRendererT
       if (!pendingRequest) return;
 
       pendingRendererToolRequests.delete(key);
-      clearTimeout(pendingRequest.timeoutId);
+      if (pendingRequest.timeoutId !== undefined) clearTimeout(pendingRequest.timeoutId);
       pendingRequest.removeAbortListener?.();
-      pendingRequest.resolve(input.result);
+      pendingRequest.resolve(
+        parseToolResult(pendingRequest.event.toolName, input.result) ??
+          createMainToolFailureResult(pendingRequest.event.toolName, 'INVALID_INPUT', 'Renderer 工具返回了无效或身份不匹配的结果')
+      );
+    },
+
+    /**
+     * 验证并接受 renderer 工具活动。
+     * @param input - 工具活动
+     * @returns 是否接受
+     */
+    acceptActivity(input: ChatRuntimeSubmitToolActivityInput): boolean {
+      const key = createToolRequestKey(input.runtimeId, input.toolCallId);
+      const pendingRequest = pendingRendererToolRequests.get(key);
+      if (!pendingRequest) return false;
+      if (!Number.isSafeInteger(input.sequence) || input.sequence <= 0 || !Number.isFinite(input.occurredAt)) return false;
+      if (input.activity.kind === 'started') {
+        if (pendingRequest.started || input.sequence <= 0) return false;
+        pendingRequest.started = true;
+        if (pendingRequest.timeoutId !== undefined) clearTimeout(pendingRequest.timeoutId);
+        pendingRequest.timeoutId = undefined;
+        return true;
+      }
+      return pendingRequest.started;
     },
 
     /**
@@ -185,7 +249,7 @@ export function createRuntimeRendererToolRequests(dependencies: RuntimeRendererT
       for (const [key, request] of pendingRendererToolRequests) {
         if (!key.startsWith(`${runtimeId}:`)) continue;
 
-        clearTimeout(request.timeoutId);
+        if (request.timeoutId !== undefined) clearTimeout(request.timeoutId);
         request.removeAbortListener?.();
         request.reject(new ChatRuntimeError('TOOL_REQUEST_CANCELLED', reason));
         pendingRendererToolRequests.delete(key);

@@ -6,7 +6,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import type { Dirent } from 'node:fs';
-import type { AIToolExecutionError } from 'types/ai';
+import type { AIToolActivityReporter, AIToolExecutionError } from 'types/ai';
 import picomatch from 'picomatch';
 import { RuntimeSubprocessError, runBoundedSubprocess, type RuntimeSubprocessInput, type RuntimeSubprocessResult } from './subprocess-runner.mjs';
 
@@ -23,9 +23,6 @@ export const DEFAULT_GREP_STDOUT_LIMIT_BYTES = 1024 * 1024;
 
 /** 默认 stderr 字节上限。 */
 export const DEFAULT_GREP_STDERR_LIMIT_BYTES = 64 * 1024;
-
-/** 默认 grep 超时时间。 */
-export const DEFAULT_GREP_TIMEOUT_MS = 30_000;
 
 /** 默认单行文本上限。 */
 export const DEFAULT_GREP_LINE_TEXT_LIMIT = 2048;
@@ -59,6 +56,8 @@ export interface RuntimeGlobSearchInput {
   excludedDirs: readonly string[];
   /** 取消信号。 */
   signal?: AbortSignal;
+  /** 安全活动上报器。 */
+  activity?: AIToolActivityReporter;
 }
 
 /** Glob 搜索结果。 */
@@ -95,8 +94,8 @@ export interface RuntimeGrepSearchInput {
   batchSize: number;
   /** 排除目录名称。 */
   excludedDirs: readonly string[];
-  /** grep 超时时间。 */
-  timeoutMs: number;
+  /** 可选固定总超时；Runtime Watchdog 托管时省略。 */
+  timeoutMs?: number;
   /** stdout 字节上限。 */
   stdoutLimitBytes: number;
   /** stderr 字节上限。 */
@@ -105,6 +104,8 @@ export interface RuntimeGrepSearchInput {
   lineTextLimit: number;
   /** 取消信号。 */
   signal?: AbortSignal;
+  /** 安全活动上报器。 */
+  activity?: AIToolActivityReporter;
 }
 
 /** Grep 匹配结果。 */
@@ -389,6 +390,8 @@ export async function runGlobSearch(input: RuntimeGlobSearchInput): Promise<Runt
   const files: string[] = [];
   const warningState = createRuntimeFileSearchWarningState();
   let truncated = false;
+  let scannedFiles = 0;
+  input.activity?.progress({ phase: 'scanning', completed: 0, message: '正在扫描文件' });
 
   for await (const batch of walkRuntimeFiles({
     rootPath: input.rootPath,
@@ -399,9 +402,12 @@ export async function runGlobSearch(input: RuntimeGlobSearchInput): Promise<Runt
     addRuntimeFileSearchWarnings(warningState, batch.warnings);
     for (const filePath of batch.files) {
       throwIfRuntimeSearchAborted(input.signal);
+      scannedFiles += 1;
       if (!isRuntimeFileMatched(filePath, input.rootPath, matcher)) continue;
       if (files.length >= input.limit) {
         truncated = true;
+        input.activity?.progress({ phase: 'scanning', completed: scannedFiles, message: `已扫描 ${scannedFiles} 个文件，找到 ${files.length} 项` });
+        input.activity?.progress({ phase: 'complete', completed: scannedFiles, message: `扫描完成，找到 ${files.length} 项` });
         return {
           files,
           count: files.length,
@@ -413,8 +419,12 @@ export async function runGlobSearch(input: RuntimeGlobSearchInput): Promise<Runt
       }
       files.push(filePath);
     }
+    if (batch.files.length > 0) {
+      input.activity?.progress({ phase: 'scanning', completed: scannedFiles, message: `已扫描 ${scannedFiles} 个文件，找到 ${files.length} 项` });
+    }
   }
 
+  input.activity?.progress({ phase: 'complete', completed: scannedFiles, message: `扫描完成，找到 ${files.length} 项` });
   return {
     files,
     count: files.length,
@@ -532,18 +542,19 @@ function parseRuntimeGrepMatches(stdout: string, lineTextLimit: number, fileCand
 async function runRuntimeGrepBatch(
   input: RuntimeGrepSearchInput,
   fileBatch: string[],
-  timeoutMs: number,
+  timeoutMs: number | undefined,
   options: RuntimeGrepBatchOptions = {}
 ): Promise<RuntimeSubprocessResult> {
   const subprocessInput: RuntimeSubprocessInput = {
     command: 'grep',
     args: ['-H', '-n', '-E', '--', input.pattern, ...fileBatch],
-    timeoutMs,
     stdoutLimitBytes: input.stdoutLimitBytes,
     stderrLimitBytes: input.stderrLimitBytes,
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
     ...(options.bufferStdout !== undefined ? { bufferStdout: options.bufferStdout } : {}),
     ...(options.onStdoutChunk ? { onStdoutChunk: options.onStdoutChunk } : {}),
-    ...(input.signal ? { signal: input.signal } : {})
+    ...(input.signal ? { signal: input.signal } : {}),
+    ...(input.activity ? { activity: input.activity } : {})
   };
   return runBoundedSubprocess(subprocessInput);
 }
@@ -662,18 +673,18 @@ function createRuntimeGrepStdoutConsumer(
  * 执行 grep 批次并尽量降级为部分结果。
  * @param input - Grep 搜索输入
  * @param fileBatch - 文件批次
- * @param deadlineAt - 整次 grep 搜索截止时间
+ * @param deadlineAt - 可选整次 grep 搜索截止时间
  * @param warnings - 非致命警告收集器
  * @returns 当前批次匹配结果
  */
 async function runRuntimeGrepBatchWithPartialResults(
   input: RuntimeGrepSearchInput,
   fileBatch: string[],
-  deadlineAt: number,
+  deadlineAt: number | undefined,
   warningState: RuntimeFileSearchWarningState,
   maxMatches: number
 ): Promise<RuntimeGrepSearchMatch[]> {
-  const remainingTimeoutMs = getRuntimeRemainingTimeoutMs(deadlineAt);
+  const remainingTimeoutMs = deadlineAt === undefined ? undefined : getRuntimeRemainingTimeoutMs(deadlineAt);
   if (remainingTimeoutMs === 0) {
     throw createRuntimeSearchError('TOOL_TIMEOUT', 'grep 执行超时');
   }
@@ -717,10 +728,12 @@ async function runRuntimeGrepBatchWithPartialResults(
  */
 export async function runGrepSearch(input: RuntimeGrepSearchInput): Promise<RuntimeGrepSearchResult> {
   const startedAt = Date.now();
-  const deadlineAt = startedAt + input.timeoutMs;
+  const deadlineAt = input.timeoutMs === undefined ? undefined : startedAt + input.timeoutMs;
   const matches: RuntimeGrepSearchMatch[] = [];
   const warningState = createRuntimeFileSearchWarningState();
   let truncated = false;
+  let scannedFiles = 0;
+  input.activity?.progress({ phase: 'scanning', completed: 0, message: '正在扫描候选文件' });
   const includeMatcher = input.include ? createRuntimePathMatcher(input.include) : undefined;
   const rootStats = await fs.stat(input.rootPath);
   const candidateBatches = rootStats.isFile()
@@ -730,6 +743,10 @@ export async function runGrepSearch(input: RuntimeGrepSearchInput): Promise<Runt
   for await (const rawBatch of candidateBatches) {
     throwIfRuntimeSearchAborted(input.signal);
     addRuntimeFileSearchWarnings(warningState, rawBatch.warnings);
+    scannedFiles += rawBatch.files.length;
+    if (rawBatch.files.length > 0) {
+      input.activity?.progress({ phase: 'scanning', completed: scannedFiles, message: `已扫描 ${scannedFiles} 个候选文件` });
+    }
     const fileBatch = rootStats.isFile()
       ? rawBatch.files
       : rawBatch.files.filter((filePath) => !includeMatcher || isRuntimeFileMatched(filePath, input.rootPath, includeMatcher));
@@ -739,6 +756,7 @@ export async function runGrepSearch(input: RuntimeGrepSearchInput): Promise<Runt
     for (const match of batchMatches) {
       if (matches.length >= input.limit) {
         truncated = true;
+        input.activity?.progress({ phase: 'complete', completed: scannedFiles, message: `搜索完成，找到 ${matches.length} 项` });
         return {
           matches,
           count: matches.length,
@@ -750,8 +768,10 @@ export async function runGrepSearch(input: RuntimeGrepSearchInput): Promise<Runt
       }
       matches.push(match);
     }
+    input.activity?.progress({ phase: 'matching', completed: matches.length, message: `已找到 ${matches.length} 项` });
   }
 
+  input.activity?.progress({ phase: 'complete', completed: scannedFiles, message: `搜索完成，找到 ${matches.length} 项` });
   return {
     matches,
     count: matches.length,

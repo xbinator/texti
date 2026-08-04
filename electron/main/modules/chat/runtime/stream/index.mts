@@ -4,10 +4,11 @@
  */
 import type { ChatRuntimeDeferredToolCall, ChatRuntimeStreamExecutor, ChatRuntimeStreamExecutorResult } from '../types.mjs';
 import type { RuntimeStreamExecutorDependencies, RuntimeStreamText, RuntimeToolCallChunk, RuntimeToolGuardSource, RuntimeToolResultChunk } from './types.mjs';
-import type { AIUsage, AIToolExecutionResult } from 'types/ai';
+import type { ToolWatchdogLease } from '../controllers/tool-watchdog.mjs';
+import type { AIUsage, AIToolExecutionResult, ChatToolActivitySnapshot } from 'types/ai';
 import type { ChatMessageRecord, ChatMessageToolPart } from 'types/chat';
 import { AI_ERROR_CODE, createAIServiceError } from '../../../ai/errors/codes.mjs';
-import { AI_TASK_TIMEOUT_MS } from '../../../ai/tool-loop-policy.mjs';
+import { createToolWatchdogs } from '../controllers/tool-watchdog.mjs';
 import { toRuntimeStreamChunk } from './chunks.mjs';
 import {
   createPersistableAssistant,
@@ -29,6 +30,7 @@ import {
   appendToolInputEnd,
   appendToolInputStart,
   appendToolResult,
+  applyToolActivity,
   finishAssistantMessage
 } from './message-parts.mjs';
 import { createRuntimeStreamRequest } from './request.mjs';
@@ -39,7 +41,6 @@ import {
   executeRendererToolSafely,
   isMainProcessTool,
   isRendererManagedTool,
-  normalizeRendererToolTimeoutMs,
   normalizeRuntimeError,
   shouldContinueAfterToolResult,
   shouldStopStreamAfterToolResult
@@ -106,10 +107,8 @@ function inheritToolMetadata(message: ChatMessageRecord, chunk: RuntimeToolCallC
  * @returns runtime 流式执行器
  */
 export function createRuntimeStreamExecutor(dependencies: RuntimeStreamExecutorDependencies): ChatRuntimeStreamExecutor {
-  return async (
-    { runtime, sourceMessages, userMessage, assistantMessage, forceFinal = false, totalTimeoutMs = AI_TASK_TIMEOUT_MS },
-    updateAssistant
-  ): Promise<ChatRuntimeStreamExecutorResult> => {
+  const toolWatchdogs = dependencies.toolWatchdogs ?? createToolWatchdogs();
+  return async ({ runtime, sourceMessages, userMessage, assistantMessage, forceFinal = false }, updateAssistant): Promise<ChatRuntimeStreamExecutorResult> => {
     runtime.currentToolStep = { toolCalls: [] };
     const exposedDeferredToolNames = getDeferredToolNames(runtime.tools);
     if (exposedDeferredToolNames.size > 0 && (hasExecutableTavily(runtime.tavily) || hasExecutableMcp(runtime.mcp))) {
@@ -121,10 +120,75 @@ export function createRuntimeStreamExecutor(dependencies: RuntimeStreamExecutorD
     }
     // 冻结本次 Provider 实际使用的默认或显式模型，供 suspension prepare 构造不可变快照。
     runtime.resolvedModel = resolution;
+    const deferredToolCallIds = new Set<string>();
+    const pendingActivities = new Map<string, ChatToolActivitySnapshot>();
+    let persistQueue = Promise.resolve();
+    let persistError: unknown;
+
+    /**
+     * 仅持久化尚未提交的延迟工具片段之外的 assistant 快照。
+     * @returns 持久化操作完成
+     */
+    async function persistAssistant(): Promise<void> {
+      const snapshot = createPersistableAssistant(assistantMessage, deferredToolCallIds);
+      const write = persistQueue.then(async (): Promise<void> => {
+        if (persistError !== undefined) throw persistError;
+        await updateAssistant(snapshot);
+      });
+      persistQueue = write.catch((persistFailure: unknown): void => {
+        persistError ??= persistFailure;
+      });
+      await write;
+    }
+
+    /**
+     * 投影 Watchdog 活动并把后台写入串到现有 assistant 写链。
+     * @param toolCallId - 工具调用 ID
+     * @param snapshot - Watchdog 安全快照
+     */
+    function projectToolActivity(toolCallId: string, snapshot: ChatToolActivitySnapshot): void {
+      if (!applyToolActivity(assistantMessage, toolCallId, snapshot)) {
+        pendingActivities.set(toolCallId, structuredClone(snapshot));
+        return;
+      }
+      persistAssistant().catch((): void => {
+        // 错误已保存在 persistError，下一处受等待的持久化边界会按原错误失败。
+      });
+    }
+
+    /**
+     * 为当前 Runtime 的工具调用创建唯一租约。
+     * @param toolCallId - 工具调用 ID
+     * @param toolName - 工具名称
+     * @returns Watchdog 租约
+     */
+    function startToolLease(toolCallId: string, toolName: string): ToolWatchdogLease {
+      return toolWatchdogs.start({
+        runtimeId: runtime.runtimeId,
+        toolCallId,
+        toolName,
+        onChange: (snapshot): void => projectToolActivity(toolCallId, snapshot)
+      });
+    }
+
+    /**
+     * 在工具 Part 创建后应用更早到达的活动快照。
+     * @param toolCallId - 工具调用 ID
+     */
+    function applyPendingActivity(toolCallId: string): void {
+      const pending = pendingActivities.get(toolCallId);
+      if (!pending || !applyToolActivity(assistantMessage, toolCallId, pending)) return;
+      pendingActivities.delete(toolCallId);
+    }
+
     const [error, result] = await dependencies.streamText(
       resolution.createOptions,
       createRuntimeStreamRequest(resolution.modelId, runtime, userMessage, sourceMessages),
-      { runtimeToolLoop: true, forceFinal, totalTimeoutMs }
+      {
+        runtimeToolLoop: true,
+        forceFinal,
+        toolActivity: { start: startToolLease }
+      }
     );
     if (error) {
       throw error;
@@ -141,18 +205,8 @@ export function createRuntimeStreamExecutor(dependencies: RuntimeStreamExecutorD
     let anyToolStopped = false;
     let isWaitingForUserInput = false;
     let finalTextBuffer = '';
-    const deferredToolCallIds = new Set<string>();
     const observedTools = new Map<string, ObservedToolDefinition>();
     let stoppedToolCallId: string | undefined;
-    const runtimeToolTimeoutMs = Math.min(normalizeRendererToolTimeoutMs(dependencies.rendererToolTimeoutMs), totalTimeoutMs);
-
-    /**
-     * 仅持久化尚未提交的延迟工具片段之外的 assistant 快照。
-     * @returns 持久化操作完成
-     */
-    async function persistAssistant(): Promise<void> {
-      await updateAssistant(createPersistableAssistant(assistantMessage, deferredToolCallIds));
-    }
 
     /**
      * 将一个工具结果投影到工作消息和当前步骤统计。
@@ -220,6 +274,7 @@ export function createRuntimeStreamExecutor(dependencies: RuntimeStreamExecutorD
         await persistAssistant();
       } else if (chunk.type === 'tool-call') {
         appendToolCall(assistantMessage, chunk);
+        applyPendingActivity(chunk.toolCallId);
         const completedCall = inheritToolMetadata(assistantMessage, chunk);
         getObservedTool(observedTools, chunk.toolCallId).calls.push(completedCall);
         runtime.currentToolStep.toolCalls.push({ toolName: chunk.toolName, input: chunk.input });
@@ -352,8 +407,9 @@ export function createRuntimeStreamExecutor(dependencies: RuntimeStreamExecutorD
         if (!toolResult && providerResult) {
           toolResult = providerResult.result;
         } else if (!toolResult && dependencies.executeMainTool && isMainProcessTool(call.toolName)) {
+          const lease = startToolLease(call.toolCallId, call.toolName);
           // eslint-disable-next-line no-await-in-loop
-          toolResult = await executeMainToolSafely(dependencies.executeMainTool, toolExecutionInput, runtimeToolTimeoutMs);
+          toolResult = await executeMainToolSafely(dependencies.executeMainTool, toolExecutionInput, lease);
           // Child 审计必须观察超时与异常均已归一化的唯一最终结果。
           // eslint-disable-next-line no-await-in-loop
           await dependencies.observeMainTool?.({
@@ -363,8 +419,9 @@ export function createRuntimeStreamExecutor(dependencies: RuntimeStreamExecutorD
             result: toolResult
           });
         } else if (!toolResult && dependencies.executeRendererTool && isRendererManagedTool(runtime, call.toolName)) {
+          const lease = startToolLease(call.toolCallId, call.toolName);
           // eslint-disable-next-line no-await-in-loop
-          toolResult = await executeRendererToolSafely(dependencies.executeRendererTool, toolExecutionInput, runtimeToolTimeoutMs);
+          toolResult = await executeRendererToolSafely(dependencies.executeRendererTool, toolExecutionInput, lease);
         }
         if (!toolResult) continue;
 

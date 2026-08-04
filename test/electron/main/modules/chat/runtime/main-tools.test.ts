@@ -10,7 +10,8 @@ import type {
   MainToolConfirmationRequest,
   MainToolsDependencies
 } from '../../../../../../electron/main/modules/chat/runtime/tools/types.mjs';
-import type { ActiveChatRuntime, ChatRuntimeToolTimeoutControls } from '../../../../../../electron/main/modules/chat/runtime/types.mjs';
+import type { ActiveChatRuntime } from '../../../../../../electron/main/modules/chat/runtime/types.mjs';
+import type { AIToolActivityReporter } from 'types/ai';
 import { describe, expect, it, vi } from 'vitest';
 import { createMainToolExecutor } from '../../../../../../electron/main/modules/chat/runtime/tools/index.mjs';
 
@@ -1452,20 +1453,23 @@ describe('createMainToolExecutor', (): void => {
     }
   });
 
-  it('pauses timeout controls while write_file waits for confirmation', async (): Promise<void> => {
+  it('reports waiting and resumed activity while write_file waits for confirmation', async (): Promise<void> => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tibis-runtime-tools-'));
     try {
       const workspaceRoot = path.join(tempRoot, 'workspace');
       const targetPath = path.join(workspaceRoot, 'reports', 'daily.md');
-      const timeoutControls: ChatRuntimeToolTimeoutControls = {
-        pause: vi.fn(),
+      const activity: AIToolActivityReporter = {
+        heartbeat: vi.fn(),
+        progress: vi.fn(),
+        waitUser: vi.fn(),
+        waitExternal: vi.fn(),
         resume: vi.fn()
       };
       await fs.mkdir(workspaceRoot);
       const executeMainTool = createMainToolExecutor({
         ...createMainToolDependencies([]),
         async requestConfirmation(): Promise<{ approved: true }> {
-          expect(timeoutControls.pause).toHaveBeenCalledOnce();
+          expect(activity.waitUser).toHaveBeenCalledOnce();
           return { approved: true };
         }
       });
@@ -1476,12 +1480,12 @@ describe('createMainToolExecutor', (): void => {
         toolName: 'write_file',
         input: { path: 'reports/daily.md', content: '# Daily' },
         signal: new AbortController().signal,
-        timeoutControls
+        activity
       });
 
       expect(result).toMatchObject({ toolName: 'write_file', status: 'success', data: { path: targetPath, created: true } });
-      expect(timeoutControls.pause).toHaveBeenCalledOnce();
-      expect(timeoutControls.resume).toHaveBeenCalledOnce();
+      expect(activity.waitUser).toHaveBeenCalledOnce();
+      expect(activity.resume).toHaveBeenCalledOnce();
       await expect(fs.readFile(targetPath, 'utf8')).resolves.toBe('# Daily');
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });

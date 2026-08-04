@@ -39,7 +39,6 @@ import {
   DEFAULT_GREP_LINE_TEXT_LIMIT,
   DEFAULT_GREP_STDERR_LIMIT_BYTES,
   DEFAULT_GREP_STDOUT_LIMIT_BYTES,
-  DEFAULT_GREP_TIMEOUT_MS,
   RuntimeSubprocessError,
   runGlobSearch,
   runGrepSearch
@@ -725,7 +724,8 @@ async function executeGlobTool(input: ChatRuntimeMainToolExecutionInput, deps: M
       pattern: normalizedInput.pattern,
       limit: DEFAULT_FILE_SEARCH_LIMIT,
       excludedDirs: DEFAULT_FILE_SEARCH_EXCLUDED_DIRS,
-      signal: input.signal ?? input.runtime.abortController.signal
+      signal: input.signal ?? input.runtime.abortController.signal,
+      ...(input.activity ? { activity: input.activity } : {})
     });
     return createMainToolSuccessResult(GLOB_TOOL_NAME, { path: searchTarget.filePath, ...data });
   } catch (error) {
@@ -762,11 +762,11 @@ async function executeGrepTool(input: ChatRuntimeMainToolExecutionInput, deps: M
       limit: DEFAULT_FILE_SEARCH_LIMIT,
       batchSize: DEFAULT_GREP_BATCH_SIZE,
       excludedDirs: DEFAULT_FILE_SEARCH_EXCLUDED_DIRS,
-      timeoutMs: DEFAULT_GREP_TIMEOUT_MS,
       stdoutLimitBytes: DEFAULT_GREP_STDOUT_LIMIT_BYTES,
       stderrLimitBytes: DEFAULT_GREP_STDERR_LIMIT_BYTES,
       lineTextLimit: DEFAULT_GREP_LINE_TEXT_LIMIT,
-      signal: input.signal ?? input.runtime.abortController.signal
+      signal: input.signal ?? input.runtime.abortController.signal,
+      ...(input.activity ? { activity: input.activity } : {})
     });
     return createMainToolSuccessResult(GREP_TOOL_NAME, { path: searchTarget.filePath, ...data });
   } catch (error) {

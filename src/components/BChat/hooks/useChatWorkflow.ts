@@ -608,6 +608,7 @@ export function useChatWorkflow(options: UseChatWorkflowOptions): UseChatWorkflo
       options.showRuntimeError(workflowError.message);
     },
     submitUserChoice: chatRuntime.submitUserChoice,
+    controlRuntimeTool: chatRuntime.controlTool,
     sendRuntimeUserMessage,
     submitRuntimeMessagePart: chatRuntime.submitMessagePart,
     updateSessionMessage: chatStore.updateSessionMessage

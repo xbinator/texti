@@ -6,24 +6,7 @@ import type { RuntimeStreamChunk } from './types.mjs';
 import type { TextStreamPart, ToolSet } from 'ai';
 import type { AIToolExecutionResult } from 'types/ai';
 import { normalizeAIUsage } from '../../../ai/usage.mjs';
-
-/**
- * 判断值是否为对象记录。
- * @param value - 待判断值
- * @returns 是否为对象记录
- */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-/**
- * 判断对象是否已经是规范化工具执行结果。
- * @param value - 待判断值
- * @returns 是否为工具执行结果
- */
-function isToolExecutionResult(value: unknown): value is AIToolExecutionResult {
-  return isRecord(value) && typeof value.toolName === 'string' && typeof value.status === 'string';
-}
+import { parseToolResult } from '../tools/results.mjs';
 
 /**
  * 将 SDK 工具结果 chunk 规范化为应用工具结果。
@@ -32,7 +15,8 @@ function isToolExecutionResult(value: unknown): value is AIToolExecutionResult {
  * @returns 工具执行结果
  */
 export function normalizeToolResult(toolName: string, output: unknown): AIToolExecutionResult {
-  if (isToolExecutionResult(output)) return output;
+  const parsed = parseToolResult(toolName, output);
+  if (parsed) return parsed;
 
   return {
     toolName,

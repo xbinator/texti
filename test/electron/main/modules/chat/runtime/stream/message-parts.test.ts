@@ -5,7 +5,7 @@
 import type { ChatMessageRecord } from 'types/chat';
 import { describe, expect, it } from 'vitest';
 import { createDefaultWidgetData } from '@/components/BWidget/utils/widgetData';
-import { appendToolResult } from '../../../../../../../electron/main/modules/chat/runtime/stream/message-parts.mjs';
+import { appendToolCall, appendToolResult, applyToolActivity } from '../../../../../../../electron/main/modules/chat/runtime/stream/message-parts.mjs';
 
 /**
  * 创建 assistant 测试消息。
@@ -25,6 +25,31 @@ function createAssistantMessage(): ChatMessageRecord {
 }
 
 describe('runtime stream message parts', (): void => {
+  it('projects activity only onto the matching tool and clears it on result', (): void => {
+    const message = createAssistantMessage();
+    appendToolCall(message, { type: 'tool-call', toolCallId: 'tool-1', toolName: 'search_files', input: {} });
+    appendToolCall(message, { type: 'tool-call', toolCallId: 'tool-2', toolName: 'read_file', input: {} });
+
+    expect(
+      applyToolActivity(message, 'tool-1', {
+        state: 'executing',
+        sequence: 2,
+        lastProgressAt: 1_000,
+        progress: { phase: 'scan', completed: 3, total: 10, updatedAt: 1_000 }
+      })
+    ).toBe(true);
+    expect(message.parts[0]).toMatchObject({ type: 'tool', toolCallId: 'tool-1', activity: { progress: { completed: 3 } } });
+    expect(message.parts[1]).not.toHaveProperty('activity');
+
+    appendToolResult(message, {
+      type: 'tool-result',
+      toolCallId: 'tool-1',
+      toolName: 'search_files',
+      result: { toolName: 'search_files', status: 'success', data: { matches: [] } }
+    });
+    expect(message.parts[0]).not.toHaveProperty('activity');
+  });
+
   it('does not change assistant loading when appending an awaiting tool result', (): void => {
     const message = createAssistantMessage();
     message.loading = false;

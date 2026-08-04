@@ -30,7 +30,7 @@ interface TestWidgetDisplayFixture {
 }
 
 /** 小组件提交上下文测试替身。 */
-type TestSubmitContext = Pick<SubmitContext, 'continueAssistantTurn' | 'sendAdaptedUserMessage' | 'updateMessagePart'>;
+type TestSubmitContext = Pick<SubmitContext, 'continueAssistantTurn' | 'controlRuntimeTool' | 'sendAdaptedUserMessage' | 'updateMessagePart'>;
 
 /** 可手动 resolve 的测试 Promise。 */
 interface Deferred<T> {
@@ -60,6 +60,7 @@ function createDeferred<T = void>(): Deferred<T> {
 function createSubmitContextMock(): TestSubmitContext {
   return {
     continueAssistantTurn: vi.fn(),
+    controlRuntimeTool: vi.fn(),
     sendAdaptedUserMessage: vi.fn(),
     updateMessagePart: vi.fn()
   };

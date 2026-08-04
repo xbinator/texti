@@ -70,7 +70,6 @@ import { dbExecute, dbSelect, transaction } from '../../database/service.mjs';
 import { chatRuntimeLocks, getSessionHistoryScope, type RuntimeContinuationFenceHandle, type RuntimeLockRegistry } from '../runtime/infrastructure/locks.mjs';
 import { finishAssistantMessageInterrupted } from '../runtime/messages/finalizer.mjs';
 import { createDefaultChatModelResolver } from '../runtime/model/resolver.mjs';
-import { getRuntimeTaskDeadlineAt } from '../runtime/task-clock.mjs';
 import { chatSessionManager } from '../service.mjs';
 import { createAgentBudgetLedger, type AgentBudgetLedger } from './budget.mjs';
 import { createChildActorRegistry } from './child-registry.mjs';
@@ -105,6 +104,9 @@ import { discardTaskOverlay as discardAgentTaskOverlay } from './write-overlay.m
 
 /** Runtime B 续接允许保留的非敏感内存上下文。 */
 export type ContinuationRuntimeContext = ChatRuntimePrimaryContinuationContext;
+
+/** Runtime B 续接使用的独立最长执行窗口。 */
+const CONTINUATION_DEADLINE_MS = 30 * 60 * 1_000;
 
 /** 委派服务仅使用的 Store 最小能力。 */
 export type ChatAgentDelegationStore = Pick<
@@ -2350,7 +2352,7 @@ export function createChatAgentDelegationService(dependencies: ChatAgentDelegati
           costLimitUsd: 0,
           pricingVersion: 'unknown'
         },
-        absoluteTurnDeadline: new Date(getRuntimeTaskDeadlineAt(input.runtime)).toISOString()
+        absoluteTurnDeadline: new Date(Date.parse(dependencies.now()) + CONTINUATION_DEADLINE_MS).toISOString()
       };
       const continuationSnapshotHash = hashContinuationSnapshot(continuationSnapshot);
       const continuationValidation = validateContinuationSnapshot(continuationSnapshot, continuationSnapshotHash);

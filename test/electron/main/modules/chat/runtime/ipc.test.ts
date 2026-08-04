@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   listRecoverySnapshots: vi.fn(),
   estimateContext: vi.fn(),
   compact: vi.fn(),
+  submitToolActivity: vi.fn(),
+  controlTool: vi.fn(),
   getMessages: vi.fn(),
   addMessage: vi.fn(),
   updateMessage: vi.fn(),
@@ -38,7 +40,9 @@ vi.mock('../../../../../../electron/main/modules/chat/runtime/service.mjs', () =
     recoverInterruptedCompactions: mocks.recoverInterruptedCompactions,
     listRecoverySnapshots: mocks.listRecoverySnapshots,
     estimateContext: mocks.estimateContext,
-    compact: mocks.compact
+    compact: mocks.compact,
+    submitToolActivity: mocks.submitToolActivity,
+    controlTool: mocks.controlTool
   }
 }));
 
@@ -68,6 +72,8 @@ describe('chat runtime recovery IPC', (): void => {
     mocks.listRecoverySnapshots.mockReset();
     mocks.estimateContext.mockReset();
     mocks.compact.mockReset();
+    mocks.submitToolActivity.mockReset();
+    mocks.controlTool.mockReset();
     mocks.getMessages.mockReset();
     mocks.addMessage.mockReset();
     mocks.updateMessage.mockReset();
@@ -206,5 +212,34 @@ describe('chat runtime recovery IPC', (): void => {
     expect(databaseIndex).toBeGreaterThan(-1);
     expect(recoveryIndex).toBeGreaterThan(databaseIndex);
     expect(ipcIndex).toBeGreaterThan(recoveryIndex);
+  });
+
+  it('exposes tool activity and scoped tool control through preload channels', (): void => {
+    const preloadSource = readFileSync('electron/preload/index.mts', 'utf8');
+
+    expect(preloadSource).toContain("chatRuntimeSubmitToolActivity: (input) => ipcRenderer.invoke('chat:runtime:tool-activity', input)");
+    expect(preloadSource).toContain("chatRuntimeControlTool: (input) => ipcRenderer.invoke('chat:runtime:tool-control', input)");
+  });
+
+  it('routes tool activity and scoped controls through runtime handlers', async (): Promise<void> => {
+    mocks.submitToolActivity.mockResolvedValue(undefined);
+    mocks.controlTool.mockResolvedValue(undefined);
+    registerChatRuntimeHandlers();
+    const activityHandler = mocks.handlers.get('chat:runtime:tool-activity');
+    const controlHandler = mocks.handlers.get('chat:runtime:tool-control');
+    if (!activityHandler || !controlHandler) throw new Error('tool activity handlers were not registered');
+    const activity = {
+      runtimeId: 'runtime-1',
+      toolCallId: 'tool-1',
+      sequence: 1,
+      occurredAt: 1,
+      activity: { kind: 'started' }
+    };
+    const control = { runtimeId: 'runtime-1', toolCallId: 'tool-1', action: 'stop' };
+
+    expect(await activityHandler({}, activity)).toEqual({ ok: true, data: undefined });
+    expect(await controlHandler({}, control)).toEqual({ ok: true, data: undefined });
+    expect(mocks.submitToolActivity).toHaveBeenCalledWith(activity);
+    expect(mocks.controlTool).toHaveBeenCalledWith(control);
   });
 });

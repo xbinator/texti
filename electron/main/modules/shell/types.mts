@@ -85,8 +85,8 @@ export interface ShellCommandRunRequest {
   cwd: string;
   /** 当前工作区根目录。 */
   workspaceRoot: string;
-  /** 进程超时时间，单位毫秒。 */
-  timeoutMs: number;
+  /** 进程超时时间，单位毫秒；缺省时由上层 Runtime Watchdog 管理。 */
+  timeoutMs?: number;
   /** 最终结果中每个输出流的最大字符数。 */
   maxOutputChars?: number;
   /** 交互模式，缺省时使用普通管道模式。 */

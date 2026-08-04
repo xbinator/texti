@@ -57,13 +57,14 @@ describe('createToolResultMessages', (): void => {
   });
 
   it('namespaces internal Shell command IDs by runtime', async (): Promise<void> => {
-    const execute = vi.fn(
-      async (): Promise<{ toolName: string; status: 'success'; data: Record<string, never> }> => ({
+    const execute = vi.fn(async (input: unknown): Promise<{ toolName: string; status: 'success'; data: Record<string, never> }> => {
+      expect(input).toEqual(expect.any(Object));
+      return {
         toolName: 'run_shell_command',
         status: 'success',
         data: {}
-      })
-    );
+      };
+    });
     const tool: AIToolExecutor = {
       definition: {
         name: 'run_shell_command',
@@ -76,8 +77,10 @@ describe('createToolResultMessages', (): void => {
       execute
     };
 
+    const controller = new AbortController();
     await executeToolCall({ toolCallId: 'same-call', toolName: 'run_shell_command', input: { shell: 'bash', command: 'echo ok' } }, [tool], undefined, {
-      runtimeId: 'runtime-a'
+      runtimeId: 'runtime-a',
+      abortSignal: controller.signal
     });
     await executeToolCall({ toolCallId: 'same-call', toolName: 'run_shell_command', input: { shell: 'bash', command: 'echo ok' } }, [tool], undefined, {
       runtimeId: 'runtime-b'
@@ -85,5 +88,9 @@ describe('createToolResultMessages', (): void => {
 
     expect(execute).toHaveBeenNthCalledWith(1, expect.objectContaining({ commandId: '9:runtime-a:same-call', toolCallId: 'same-call' }), undefined);
     expect(execute).toHaveBeenNthCalledWith(2, expect.objectContaining({ commandId: '9:runtime-b:same-call', toolCallId: 'same-call' }), undefined);
+    const runtimeInput = execute.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+    expect(runtimeInput).toMatchObject({ runtimeManaged: true, abortSignal: controller.signal });
+    expect(Object.keys(runtimeInput ?? {})).not.toContain('runtimeManaged');
+    expect(Object.keys(runtimeInput ?? {})).not.toContain('abortSignal');
   });
 });

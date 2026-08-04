@@ -68,8 +68,6 @@ export interface CompactionExecuteInput {
   tools?: AITransportTool[];
   /** 当前 Skill 内容版本。 */
   skillContentHashes?: Record<string, string>;
-  /** 当前用户任务的绝对截止时间戳。 */
-  taskDeadlineAt?: number;
 }
 
 /** executor 结果。 */
@@ -559,8 +557,7 @@ export function createCompactionExecutor(dependencies: CompactionExecutorDepende
         contextWindow: input.contextWindow,
         maxOutputTokens: input.maxOutputTokens,
         budgetSnapshot: plan.budgetSnapshot,
-        sourceSnapshot: structuredClone(plan.sourceSnapshot),
-        taskDeadlineAt: input.taskDeadlineAt
+        sourceSnapshot: structuredClone(plan.sourceSnapshot)
       })
     );
     if (controller.signal.aborted) {

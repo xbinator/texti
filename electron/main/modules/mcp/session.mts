@@ -2,7 +2,7 @@
  * @file session.mts
  * @description MCP 会话生命周期管理，替代原 runtime.mts。
  */
-import type { MCPClientWrapper } from './client.mjs';
+import type { MCPClientWrapper, MCPToolCallOptions } from './client.mjs';
 import type { MCPDiscoveryRefreshResult, MCPServerConfig } from 'types/ai';
 import { log } from '../logger/service.mjs';
 import { createMcpClient } from './client.mjs';
@@ -113,8 +113,20 @@ export async function connectMcpServer(server: MCPServerConfig, abortSignal?: Ab
   setStatus(server.id, 'connecting', 'refreshing');
 
   let connectingWrapper: MCPClientWrapper | undefined;
+  let disconnectingWrapper: Promise<void> | undefined;
+
+  /**
+   * 至多关闭一次尚未发布到 session map 的连接包装器。
+   * @returns 关闭操作完成
+   */
+  function closeConnectingWrapper(): Promise<void> {
+    if (!connectingWrapper) return Promise.resolve();
+    disconnectingWrapper ??= connectingWrapper.disconnect().catch((): void => undefined);
+    return disconnectingWrapper;
+  }
+
   const disconnectOnAbort = (): void => {
-    void connectingWrapper?.disconnect();
+    closeConnectingWrapper().catch((): void => undefined);
   };
   abortSignal?.addEventListener('abort', disconnectOnAbort, { once: true });
 
@@ -164,6 +176,11 @@ export async function connectMcpServer(server: MCPServerConfig, abortSignal?: Ab
     setStatus(server.id, 'connected', 'ready');
     return createDiscoverySuccessResult(server.id, tools, Date.now());
   } catch (error) {
+    // 包装器可能已发布后才在通知注册等尾部步骤失败，先移除自身，避免后续复用已关闭连接。
+    if (connectingWrapper && sessionsByServerId.get(server.id) === connectingWrapper) {
+      sessionsByServerId.delete(server.id);
+    }
+    await closeConnectingWrapper();
     const classified = classifyMcpError(error);
 
     if (error instanceof AuthorizationPendingError) {
@@ -226,16 +243,16 @@ export async function refreshMcpDiscovery(server: MCPServerConfig): Promise<MCPD
  * @param server - MCP server 配置
  * @param toolName - MCP tool 名称
  * @param input - tool 输入
- * @param abortSignal - AI SDK 工具调用中止信号
+ * @param options - 工具中止与 progress 回调
  * @returns MCP tool 调用结果
  */
-export async function executeMcpTool(server: MCPServerConfig, toolName: string, input: unknown, abortSignal?: AbortSignal): Promise<unknown> {
-  abortSignal?.throwIfAborted();
+export async function executeMcpTool(server: MCPServerConfig, toolName: string, input: unknown, options: MCPToolCallOptions = {}): Promise<unknown> {
+  options.signal?.throwIfAborted();
   let wrapper = sessionsByServerId.get(server.id);
 
   if (!wrapper || !wrapper.isConnected()) {
-    const result = await connectMcpServer(server);
-    abortSignal?.throwIfAborted();
+    const result = await connectMcpServer(server, options.signal);
+    options.signal?.throwIfAborted();
     if (!result.ok) {
       throw new Error(result.message ?? `MCP server failed to connect: ${server.id}`);
     }
@@ -247,7 +264,7 @@ export async function executeMcpTool(server: MCPServerConfig, toolName: string, 
   }
 
   try {
-    return await wrapper.callTool(toolName, input, abortSignal);
+    return await wrapper.callTool(toolName, input, options);
   } catch (error) {
     const classified = classifyMcpError(error);
     if (classified.status === 'failed') {

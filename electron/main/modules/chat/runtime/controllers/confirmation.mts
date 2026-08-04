@@ -3,6 +3,7 @@
  * @description ChatRuntime renderer 确认请求等待管理。
  */
 import type { ActiveChatRuntime, ChatRuntimeEventEmitter } from '../types.mjs';
+import type { AIToolExecutionError } from 'types/ai';
 import type {
   ChatRuntimeConfirmationDecision,
   ChatRuntimeConfirmationRequest,
@@ -12,8 +13,48 @@ import type {
 } from 'types/chat-runtime';
 import { nanoid } from 'nanoid';
 import { ChatRuntimeError } from '../errors.mjs';
-import { pauseRuntimeTaskClock, resumeRuntimeTaskClock } from '../task-clock.mjs';
 import { createRuntimeEventBase } from '../types.mjs';
+
+/** Watchdog 可通过确认等待传播的稳定中止码。 */
+const CONFIRMATION_ABORT_CODES: ReadonlySet<AIToolExecutionError['code']> = new Set([
+  'USER_CANCELLED',
+  'TOOL_UNRESPONSIVE',
+  'EXTERNAL_WAIT_TIMEOUT',
+  'RUNTIME_INTERRUPTED'
+]);
+
+/** 保留工具中止语义的确认等待异常。 */
+class RuntimeConfirmationAbortError extends Error {
+  /** 稳定工具错误码。 */
+  readonly code: AIToolExecutionError['code'];
+
+  /**
+   * 创建确认等待中止异常。
+   * @param code - 稳定工具错误码
+   * @param message - 中止说明
+   */
+  constructor(code: AIToolExecutionError['code'], message: string) {
+    super(message);
+    this.name = 'RuntimeConfirmationAbortError';
+    this.code = code;
+  }
+}
+
+/**
+ * 从中止信号恢复 Watchdog 的结构化原因。
+ * @param signal - 确认等待使用的中止信号
+ * @returns 可供工具执行边界归一化的异常
+ */
+function createConfirmationAbortError(signal?: AbortSignal): Error {
+  const reason: unknown = signal?.reason;
+  if (typeof reason === 'object' && reason !== null && 'code' in reason && 'message' in reason) {
+    const { code, message } = reason;
+    if (typeof code === 'string' && CONFIRMATION_ABORT_CODES.has(code as AIToolExecutionError['code']) && typeof message === 'string') {
+      return new RuntimeConfirmationAbortError(code as AIToolExecutionError['code'], message);
+    }
+  }
+  return new ChatRuntimeError('CONFIRMATION_DISMISSED', 'Tool confirmation request was aborted');
+}
 
 /** 活跃 runtime 读取函数。 */
 export type RuntimeLookup = (runtimeId: string) => ActiveChatRuntime | undefined;
@@ -75,8 +116,6 @@ interface PendingRuntimeConfirmationRequest {
   timeoutId?: ReturnType<typeof setTimeout>;
   /** 移除中止监听器。 */
   removeAbortListener?: () => void;
-  /** 恢复 runtime 任务级执行时钟。 */
-  resumeTaskClock?: () => void;
 }
 
 /**
@@ -105,7 +144,7 @@ export function createRuntimeConfirmationRequests(dependencies: RuntimeConfirmat
      */
     request(input: RuntimeConfirmationRequestInput): Promise<ChatRuntimeConfirmationDecision> {
       if (input.signal?.aborted) {
-        return Promise.reject(new ChatRuntimeError('CONFIRMATION_DISMISSED', 'Tool confirmation request was aborted'));
+        return Promise.reject(createConfirmationAbortError(input.signal));
       }
       const runtime = dependencies.getRuntime(input.runtimeId);
       if (!runtime) {
@@ -121,23 +160,19 @@ export function createRuntimeConfirmationRequests(dependencies: RuntimeConfirmat
         request: input.request
       };
       return new Promise<ChatRuntimeConfirmationDecision>((resolve, reject) => {
-        pauseRuntimeTaskClock(runtime);
-        const resumeTaskClock = (): void => resumeRuntimeTaskClock(runtime);
         const rejectAborted = (): void => {
           pendingConfirmationRequests.delete(key);
-          resumeTaskClock();
-          reject(new ChatRuntimeError('CONFIRMATION_DISMISSED', 'Tool confirmation request was aborted'));
+          reject(createConfirmationAbortError(input.signal));
         };
         const removeAbortListener = input.signal ? (): void => input.signal?.removeEventListener('abort', rejectAborted) : undefined;
         input.signal?.addEventListener('abort', rejectAborted, { once: true });
-        pendingConfirmationRequests.set(key, { event, resolve, reject, removeAbortListener, resumeTaskClock });
+        pendingConfirmationRequests.set(key, { event, resolve, reject, removeAbortListener });
         try {
           dependencies.emit('chat:runtime:confirmation-requested', event);
         } catch (error: unknown) {
-          // Renderer 未收到确认请求时立即回滚等待状态并恢复任务时钟。
+          // Renderer 未收到确认请求时立即回滚等待状态。
           pendingConfirmationRequests.delete(key);
           removeAbortListener?.();
-          resumeTaskClock();
           reject(error instanceof Error ? error : new Error(String(error)));
         }
       });
@@ -155,7 +190,6 @@ export function createRuntimeConfirmationRequests(dependencies: RuntimeConfirmat
       pendingConfirmationRequests.delete(key);
       if (pendingRequest.timeoutId !== undefined) clearTimeout(pendingRequest.timeoutId);
       pendingRequest.removeAbortListener?.();
-      pendingRequest.resumeTaskClock?.();
       pendingRequest.resolve(input.decision);
     },
 
@@ -170,7 +204,6 @@ export function createRuntimeConfirmationRequests(dependencies: RuntimeConfirmat
 
         if (request.timeoutId !== undefined) clearTimeout(request.timeoutId);
         request.removeAbortListener?.();
-        request.resumeTaskClock?.();
         request.reject(new ChatRuntimeError('CONFIRMATION_DISMISSED', reason));
         pendingConfirmationRequests.delete(key);
       }

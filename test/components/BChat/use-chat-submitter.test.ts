@@ -93,6 +93,7 @@ describe('useChatSubmitter', (): void => {
       ensureSessionModel,
       startRuntime,
       submitUserChoice,
+      controlRuntimeTool: vi.fn(),
       sendRuntimeUserMessage: vi.fn(),
       submitRuntimeMessagePart: vi.fn(),
       updateSessionMessage: vi.fn()
@@ -146,6 +147,7 @@ describe('useChatSubmitter', (): void => {
       ensureSessionModel: vi.fn().mockRejectedValue(new Error('metadata failed')),
       startRuntime,
       submitUserChoice,
+      controlRuntimeTool: vi.fn(),
       sendRuntimeUserMessage: vi.fn(),
       submitRuntimeMessagePart: vi.fn(),
       updateSessionMessage: vi.fn()
@@ -169,6 +171,7 @@ describe('useChatSubmitter', (): void => {
       resolveRuntimeRequestConfig: vi.fn(),
       ensureSessionModel: vi.fn(),
       submitUserChoice: vi.fn(),
+      controlRuntimeTool: vi.fn(),
       sendRuntimeUserMessage,
       submitRuntimeMessagePart: vi.fn(),
       updateSessionMessage: vi.fn()
@@ -190,6 +193,7 @@ describe('useChatSubmitter', (): void => {
       resolveRuntimeRequestConfig: vi.fn(),
       ensureSessionModel: vi.fn(),
       submitUserChoice: vi.fn(),
+      controlRuntimeTool: vi.fn(),
       sendRuntimeUserMessage,
       submitRuntimeMessagePart: vi.fn(),
       updateSessionMessage: vi.fn()
@@ -229,6 +233,7 @@ describe('useChatSubmitter', (): void => {
       resolveRuntimeRequestConfig: vi.fn(),
       ensureSessionModel: vi.fn(),
       submitUserChoice: vi.fn(),
+      controlRuntimeTool: vi.fn(),
       sendRuntimeUserMessage: vi.fn(),
       submitRuntimeMessagePart,
       updateSessionMessage

@@ -124,6 +124,77 @@ export interface EditorSelection {
   text: string;
 }
 
+/** 工具活动状态。 */
+export type ChatToolActivityState = 'starting' | 'executing' | 'running_idle' | 'waiting_user' | 'waiting_external' | 'stopping' | 'interrupted';
+
+/** 不包含产物正文的安全引用。 */
+export interface ChatToolArtifactRef {
+  /** 产物稳定标识。 */
+  id: string;
+  /** 产物类型。 */
+  kind: string;
+  /** 面向用户的短名称。 */
+  label?: string;
+}
+
+/** 可持久化的工具进展快照。 */
+export interface ChatToolProgressSnapshot {
+  /** 稳定阶段标识。 */
+  phase: string;
+  /** 已完成工作量。 */
+  completed?: number;
+  /** 总工作量。 */
+  total?: number;
+  /** 面向用户的短说明。 */
+  message?: string;
+  /** 新增或更新的安全产物引用。 */
+  artifacts?: ChatToolArtifactRef[];
+  /** 主进程接受进展的墙钟时间。 */
+  updatedAt: number;
+}
+
+/** 工具等待外部条件的有限期限。 */
+export interface ChatToolExternalWait {
+  /** 等待原因。 */
+  reason: string;
+  /** 允许下一次重试的墙钟时间。 */
+  retryAt: number;
+  /** 最晚等待截止时间。 */
+  deadlineAt: number;
+}
+
+/** 工具卡片持久化的最后活动状态。 */
+export interface ChatToolActivitySnapshot {
+  /** 当前活动状态。 */
+  state: ChatToolActivityState;
+  /** 最后接受的执行器序号。 */
+  sequence: number;
+  /** 最后实质进展的墙钟时间。 */
+  lastProgressAt?: number;
+  /** 最后安全进展快照。 */
+  progress?: ChatToolProgressSnapshot;
+  /** 等待用户时的简短原因。 */
+  userPrompt?: string;
+  /** 等待外部条件的信息。 */
+  externalWait?: ChatToolExternalWait;
+  /** 用户确认继续等待的时间。 */
+  idleAcknowledgedAt?: number;
+}
+
+/** 工具内部可用的受限活动上报器。 */
+export interface AIToolActivityReporter {
+  /** 上报存活，不代表实质进展。 */
+  heartbeat(): void;
+  /** 上报新的实质进展。 */
+  progress(progress: Omit<ChatToolProgressSnapshot, 'updatedAt'>): void;
+  /** 进入等待用户状态。 */
+  waitUser(prompt: string): void;
+  /** 进入有限期限的外部等待状态。 */
+  waitExternal(wait: ChatToolExternalWait): void;
+  /** 从等待状态恢复执行。 */
+  resume(): void;
+}
+
 /**
  * AI 工具执行上下文。
  * @description 工具所需的文档和编辑器信息。
@@ -131,6 +202,8 @@ export interface EditorSelection {
 export interface AIToolContext {
   /** 当前工具调用 ID，每个工具调用执行时由调用方注入 */
   toolCallId?: string;
+  /** 仅允许上报活动的受限接口。 */
+  activity?: AIToolActivityReporter;
   /** 当前文档信息。 */
   document: {
     /** 文档标识符。 */
@@ -181,6 +254,9 @@ export interface AIToolExecutionError {
     | 'SCROLL_TARGET_NOT_FOUND'
     | 'BRIDGE_TIMEOUT'
     | 'TOOL_TIMEOUT'
+    | 'TOOL_UNRESPONSIVE'
+    | 'EXTERNAL_WAIT_TIMEOUT'
+    | 'RUNTIME_INTERRUPTED'
     | 'INTERACTION_TIMEOUT'
     | 'INTERACTION_LIMIT_EXCEEDED'
     | 'UNSUPPORTED_INTERACTION'

@@ -5,7 +5,8 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import type { AIToolActivityReporter } from 'types/ai';
+import { describe, expect, it, vi } from 'vitest';
 import {
   getRuntimeRemainingTimeoutMs,
   parseGrepMatchLine,
@@ -32,7 +33,51 @@ async function writeTestFile(filePath: string, content: string): Promise<void> {
   await fs.writeFile(filePath, content, 'utf8');
 }
 
+/**
+ * 创建文件搜索活动上报器。
+ * @returns 活动上报器与进展 mock
+ */
+function createSearchActivity(): { activity: AIToolActivityReporter; progress: ReturnType<typeof vi.fn<AIToolActivityReporter['progress']>> } {
+  const progress = vi.fn<AIToolActivityReporter['progress']>();
+  return {
+    activity: {
+      heartbeat: vi.fn(),
+      progress,
+      waitUser: vi.fn(),
+      waitExternal: vi.fn(),
+      resume: vi.fn()
+    },
+    progress
+  };
+}
+
 describe('file-search helpers', (): void => {
+  it('reports glob scan progress only when real work advances', async (): Promise<void> => {
+    const root = await createSearchTempRoot();
+    const { activity, progress } = createSearchActivity();
+    try {
+      await Promise.all(Array.from({ length: 65 }, (_value, index) => writeTestFile(path.join(root, `file-${index}.ts`), 'content')));
+
+      const result = await runGlobSearch({
+        rootPath: root,
+        pattern: '**/*.ts',
+        limit: 100,
+        excludedDirs: ['.git'],
+        activity
+      });
+
+      expect(result.count).toBe(65);
+      expect(progress.mock.calls.map(([snapshot]) => snapshot)).toEqual([
+        { phase: 'scanning', completed: 0, message: '正在扫描文件' },
+        { phase: 'scanning', completed: 64, message: '已扫描 64 个文件，找到 64 项' },
+        { phase: 'scanning', completed: 65, message: '已扫描 65 个文件，找到 65 项' },
+        { phase: 'complete', completed: 65, message: '扫描完成，找到 65 项' }
+      ]);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('glob matches brace patterns and excludes .git directories', async (): Promise<void> => {
     const root = await createSearchTempRoot();
     try {

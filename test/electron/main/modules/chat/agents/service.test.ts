@@ -46,8 +46,7 @@ function createRuntime(): ActiveChatRuntime {
     status: 'running',
     phase: 'streaming',
     abortController: new AbortController(),
-    createdAt: Date.parse('2026-07-23T00:00:00.000Z'),
-    taskPausedDurationMs: 20_000
+    createdAt: Date.parse('2026-07-23T00:00:00.000Z')
   };
 }
 
@@ -592,7 +591,7 @@ describe('chat agent delegation service', (): void => {
             costLimitUsd: 0,
             pricingVersion: 'unknown'
           },
-          absoluteTurnDeadline: '2026-07-23T00:05:20.000Z'
+          absoluteTurnDeadline: '2026-07-23T00:30:01.000Z'
         }
       },
       outbox: {

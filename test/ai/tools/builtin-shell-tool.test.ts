@@ -106,8 +106,18 @@ describe('builtin ShellTool interaction contract', (): void => {
 
     await tool.execute({ shell: 'bash', command: 'echo ok', commandId: 'tool-call-1' });
 
-    expect(mocks.runShellCommand).toHaveBeenCalledWith(expect.objectContaining({ interactionMode: 'none' }));
+    expect(mocks.runShellCommand).toHaveBeenCalledWith(expect.objectContaining({ interactionMode: 'none', timeoutMs: 30_000 }));
     expect(tool.definition.parameters.properties?.interactionMode).toMatchObject({ enum: ['none', 'auto-default'] });
+  });
+
+  it('delegates the total execution deadline to Runtime for managed commands', async (): Promise<void> => {
+    const tool = createTool();
+    const input = { shell: 'bash', command: 'echo ok', commandId: 'tool-call-1', timeoutMs: 1_000 };
+    Object.defineProperty(input, 'runtimeManaged', { value: true });
+
+    await tool.execute(input);
+
+    expect(mocks.runShellCommand.mock.calls[0]?.[0]).not.toHaveProperty('timeoutMs');
   });
 
   it('skips confirmation when safety report has no findings', async (): Promise<void> => {

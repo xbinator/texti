@@ -258,14 +258,17 @@ export function createShellCommandRunner(options: CreateShellCommandRunnerOption
 
     activeCommands.set(request.commandId, activeCommand);
 
-    /** 主超时定时器，在 cleanup 之前声明以便引用。 */
-    let timeout: ReturnType<typeof setTimeout>;
+    /** 可选主超时定时器；Runtime 管理的命令不创建绝对时限。 */
+    let timeout: ReturnType<typeof setTimeout> | null = null;
 
     /**
      * 清理命令：清除定时器、从活跃列表移除。
      */
     function cleanup(): void {
-      clearTimeout(timeout);
+      if (timeout) {
+        clearTimeout(timeout);
+        timeout = null;
+      }
       if (activeCommand.graceTimer) {
         clearTimeout(activeCommand.graceTimer);
         activeCommand.graceTimer = null;
@@ -309,7 +312,10 @@ export function createShellCommandRunner(options: CreateShellCommandRunnerOption
         activeCommand.terminating = true;
 
         // 终止流程启动后清除主超时定时器，避免重复触发
-        clearTimeout(timeout);
+        if (timeout) {
+          clearTimeout(timeout);
+          timeout = null;
+        }
 
         if (reason === 'timeout') {
           activeCommand.timedOut = true;
@@ -348,7 +354,9 @@ export function createShellCommandRunner(options: CreateShellCommandRunnerOption
       // 将终止回调暴露给外部 cancel()，共用同一状态机
       activeCommand.forceTerminate = doForceTerminate;
 
-      timeout = setTimeout(() => doForceTerminate('timeout'), request.timeoutMs);
+      if (request.timeoutMs !== undefined) {
+        timeout = setTimeout(() => doForceTerminate('timeout'), request.timeoutMs);
+      }
 
       child.stdout.on('data', (chunk: Buffer | string) => handleOutput('stdout', chunk));
       child.stderr.on('data', (chunk: Buffer | string) => handleOutput('stderr', chunk));

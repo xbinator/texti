@@ -104,6 +104,12 @@ async function* createEmptyStream(): AsyncGenerator<never, void, undefined> {
   yield* [];
 }
 
+/** AI SDK 可执行工具的测试窄接口。 */
+interface ExecutableSdkTool {
+  /** 执行一次工具调用。 */
+  execute: (input: unknown, options: { toolCallId: string; abortSignal?: AbortSignal }) => Promise<unknown>;
+}
+
 describe('AI SDK 7 service integration', (): void => {
   beforeEach((): void => {
     vi.clearAllMocks();
@@ -171,6 +177,7 @@ describe('AI SDK 7 service integration', (): void => {
 
   it('lets ChatRuntime own the tool loop and force the final model step', async (): Promise<void> => {
     const stream = createEmptyStream();
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
     aiSdkMocks.streamText.mockReturnValue({ stream });
 
     const [error] = await aiService.streamText(
@@ -180,7 +187,7 @@ describe('AI SDK 7 service integration', (): void => {
         prompt: 'Finish from existing tool results.',
         tavily: { enabled: true, apiKey: 'tavily-test-key' }
       },
-      { runtimeToolLoop: true, forceFinal: true, totalTimeoutMs: 12_345 }
+      { runtimeToolLoop: true, forceFinal: true }
     );
 
     expect(error).toBeUndefined();
@@ -190,15 +197,50 @@ describe('AI SDK 7 service integration', (): void => {
         toolChoice: 'none',
         instructions: expect.stringContaining('Do not emit tool-call markup'),
         timeout: {
-          chunkMs: 90_000,
-          toolMs: 60_000
+          chunkMs: 90_000
         }
       })
     );
     expect(aiSdkMocks.streamText.mock.calls[0]?.[0]).not.toHaveProperty('prepareStep');
     expect(aiSdkMocks.streamText.mock.calls[0]?.[0]).not.toHaveProperty('stopWhen');
     expect(aiSdkMocks.streamText.mock.calls[0]?.[0].timeout).not.toHaveProperty('totalMs');
+    expect(aiSdkMocks.streamText.mock.calls[0]?.[0].timeout).not.toHaveProperty('toolMs');
     expect(aiSdkMocks.streamText.mock.calls[0]?.[0].abortSignal).toBeUndefined();
+    expect(timeoutSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps a local compatibility timeout for runtime Tavily tools', async (): Promise<void> => {
+    vi.useFakeTimers();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async (_input: string | URL | Request, init?: RequestInit): Promise<Response> =>
+        new Promise((_resolve, reject): void => {
+          init?.signal?.addEventListener('abort', (): void => reject(new Error('tavily aborted')), { once: true });
+        })
+    );
+    aiSdkMocks.streamText.mockReturnValue({ stream: createEmptyStream() });
+
+    try {
+      const [error] = await aiService.streamText(
+        AI_CREATE_OPTIONS,
+        {
+          modelId: 'gpt-test',
+          prompt: 'Search.',
+          tavily: { enabled: true, apiKey: 'tavily-test-key' }
+        },
+        { runtimeToolLoop: true }
+      );
+      expect(error).toBeUndefined();
+      const searchTool = aiSdkMocks.streamText.mock.calls[0]?.[0].tools.tavily_search as ExecutableSdkTool;
+      const result = searchTool.execute({ query: 'long request' }, { toolCallId: 'tool-call-tavily' });
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      await expect(result).resolves.toMatchObject({ status: 'failure', error: { code: 'TOOL_TIMEOUT' } });
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } finally {
+      fetchMock.mockRestore();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
   });
 
   it('exposes final-step and total usage for generated text', async (): Promise<void> => {
@@ -250,6 +292,22 @@ describe('AI SDK 7 service integration', (): void => {
     onEnd?.();
     expect(removeController).toHaveBeenCalledWith('runtime-stream-cleanup');
   });
+
+  it('does not let an older stream release a newer controller with the same request id', async (): Promise<void> => {
+    aiSdkMocks.streamText.mockReturnValue({ stream: createEmptyStream() });
+
+    await aiService.streamText(AI_CREATE_OPTIONS, { requestId: 'runtime-reused-id', modelId: 'gpt-test', prompt: 'first stream' }, { runtimeToolLoop: true });
+    const firstOptions = aiSdkMocks.streamText.mock.calls[0]?.[0] as { abortSignal?: AbortSignal; onEnd?: () => void } | undefined;
+    await aiService.streamText(AI_CREATE_OPTIONS, { requestId: 'runtime-reused-id', modelId: 'gpt-test', prompt: 'second stream' }, { runtimeToolLoop: true });
+    const secondOptions = aiSdkMocks.streamText.mock.calls[1]?.[0] as { abortSignal?: AbortSignal; onEnd?: () => void } | undefined;
+
+    expect(firstOptions?.abortSignal?.aborted).toBe(true);
+    firstOptions?.onEnd?.();
+    aiService.abortStream('runtime-reused-id');
+
+    expect(secondOptions?.abortSignal?.aborted).toBe(true);
+    secondOptions?.onEnd?.();
+  });
 });
 
 describe('createAIInvokeResult', (): void => {
@@ -291,6 +349,40 @@ describe('createAIInvokeResult', (): void => {
 });
 
 describe('AIService.generateText abort', (): void => {
+  beforeEach((): void => {
+    vi.clearAllMocks();
+  });
+
+  afterEach((): void => {
+    vi.restoreAllMocks();
+  });
+
+  it('keeps the fixed safety deadline for direct generation', async (): Promise<void> => {
+    const deadlineController = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(deadlineController.signal);
+    vi.spyOn(aiService.aiProvider, 'create').mockReturnValue({} as ReturnType<typeof aiService.aiProvider.create>);
+    generateTextMock.mockImplementationOnce(
+      (options: { abortSignal?: AbortSignal }): Promise<never> =>
+        new Promise((_resolve, reject): void => {
+          options.abortSignal?.addEventListener('abort', (): void => reject(new Error('deadline reached')), { once: true });
+        })
+    );
+
+    const invocation = aiService.generateText(AI_CREATE_OPTIONS, {
+      requestId: 'direct-generation-deadline',
+      modelId: 'model-1',
+      prompt: 'generate once'
+    });
+    await vi.waitFor((): void => {
+      expect(generateTextMock).toHaveBeenCalledTimes(1);
+    });
+    deadlineController.abort();
+    const [error] = await invocation;
+
+    expect(timeoutSpy).toHaveBeenCalledWith(300_000);
+    expect(error).toBeDefined();
+  });
+
   it('registers requestId abort signal and cancels synchronous generation', async (): Promise<void> => {
     const createOptions: AICreateOptions = {
       providerType: 'openai',

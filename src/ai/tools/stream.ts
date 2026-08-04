@@ -3,7 +3,7 @@
  * @description AI 工具流式执行相关函数
  */
 import type { JSONValue, ModelMessage } from 'ai';
-import type { AIToolContext, AIToolExecutionResult, AIToolExecutor, AIStreamToolCallChunk, AITransportTool } from 'types/ai';
+import type { AIToolActivityReporter, AIToolContext, AIToolExecutionResult, AIToolExecutor, AIStreamToolCallChunk, AITransportTool } from 'types/ai';
 import { isFunction } from 'lodash-es';
 import { createToolFailureResult } from './results';
 import { createShellCommandId } from './shellCommandId';
@@ -21,6 +21,8 @@ export interface ToolExecutionMetadata {
   runtimeId?: string;
   /** Renderer 本地工具中止信号。 */
   abortSignal?: AbortSignal;
+  /** Renderer 本地工具的受限活动上报器。 */
+  activity?: AIToolActivityReporter;
 }
 
 /**
@@ -100,12 +102,19 @@ function createExecutionInput(toolName: string, input: unknown, toolCallId: stri
     return input;
   }
 
-  return {
+  const executionInput: Record<string, unknown> = {
     ...input,
     toolCallId,
-    commandId: metadata.runtimeId ? createShellCommandId(metadata.runtimeId, toolCallId) : toolCallId,
-    ...(metadata.abortSignal ? { abortSignal: metadata.abortSignal } : {})
+    commandId: metadata.runtimeId ? createShellCommandId(metadata.runtimeId, toolCallId) : toolCallId
   };
+  // Runtime 控制信息仅供本地执行器读取，不允许进入枚举、日志或模型输入回放。
+  if (metadata.runtimeId) {
+    Object.defineProperty(executionInput, 'runtimeManaged', { value: true });
+  }
+  if (metadata.abortSignal) {
+    Object.defineProperty(executionInput, 'abortSignal', { value: metadata.abortSignal });
+  }
+  return executionInput;
 }
 
 /**
@@ -159,7 +168,7 @@ export async function executeToolCall(
 
   // 执行工具，等待用户输入结果仍作为普通终态 tool-result 进入消息历史。
   const executionInput = createExecutionInput(call.toolName, call.input, call.toolCallId, metadata);
-  const enrichedContext = context ? { ...context, toolCallId: call.toolCallId } : undefined;
+  const enrichedContext = context ? { ...context, toolCallId: call.toolCallId, activity: metadata.activity } : undefined;
   const rawResult = await executor.execute(executionInput, enrichedContext);
 
   return {

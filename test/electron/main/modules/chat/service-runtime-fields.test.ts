@@ -275,6 +275,43 @@ describe('chat main service runtime fields', (): void => {
     });
   });
 
+  it('scans non-terminal runtime tools even after streaming set loading false', (): void => {
+    databaseMock.dbSelect.mockReturnValue([
+      {
+        id: 'assistant-pending-tool',
+        session_id: 'session-pending-tool',
+        role: 'assistant',
+        content: '',
+        parts_json: JSON.stringify([
+          {
+            id: 'part-pending-tool',
+            type: 'tool',
+            toolCallId: 'tool-call-pending',
+            toolName: 'grep',
+            status: 'executing',
+            input: { pattern: 'needle' }
+          }
+        ]),
+        thinking: null,
+        files_json: null,
+        usage_json: null,
+        created_at: '2026-08-04T00:00:00.000Z',
+        loading: 0,
+        finished: 0,
+        agent_id: 'primary',
+        runtime_id: 'runtime-pending',
+        parent_runtime_id: null
+      }
+    ]);
+
+    const messages = chatSessionManager.listPendingRuntimeMessages();
+    const recoverySql = String(databaseMock.dbSelect.mock.calls[0]?.[0]);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({ loading: false, finished: false, parts: [expect.objectContaining({ status: 'executing' })] });
+    expect(recoverySql).not.toContain('loading = 1');
+  });
+
   it('orders user messages before assistant messages when runtime records share createdAt', (): void => {
     databaseMock.dbSelect.mockReturnValue([
       {

@@ -3,7 +3,7 @@
  * @description 应用级 ChatRuntime 事件路由 hook 测试。
  * @vitest-environment jsdom
  */
-import type { AIToolExecutor } from 'types/ai';
+import type { AIToolContext, AIToolExecutor } from 'types/ai';
 import type { ChatAgentCheckpointSnapshot } from 'types/chat-agent';
 import type {
   ChatRuntimeCompleteEvent,
@@ -43,6 +43,7 @@ const runtimeListeners = vi.hoisted(() => ({
 
 const runtimeCommands = vi.hoisted(() => ({
   submitConfirmation: vi.fn(),
+  submitToolActivity: vi.fn(),
   submitToolResult: vi.fn()
 }));
 
@@ -81,6 +82,7 @@ vi.mock('@/shared/platform/electron-api', () => ({
       return vi.fn();
     }),
     chatRuntimeSubmitConfirmation: runtimeCommands.submitConfirmation,
+    chatRuntimeSubmitToolActivity: runtimeCommands.submitToolActivity,
     chatRuntimeSubmitToolResult: runtimeCommands.submitToolResult,
     chatRuntimeOnBridgeRequested: vi.fn((): (() => void) => vi.fn()),
     chatRuntimeOnComplete: vi.fn((listener: (event: ChatRuntimeCompleteEvent) => void): (() => void) => {
@@ -121,6 +123,8 @@ describe('useRuntimeEvents', (): void => {
     setActivePinia(createPinia());
     runtimeCommands.submitConfirmation.mockReset();
     runtimeCommands.submitConfirmation.mockResolvedValue({ ok: true });
+    runtimeCommands.submitToolActivity.mockReset();
+    runtimeCommands.submitToolActivity.mockResolvedValue({ ok: true });
     runtimeCommands.submitToolResult.mockReset();
     runtimeCommands.submitToolResult.mockResolvedValue({ ok: true });
     for (const key of Object.keys(runtimeListeners) as Array<keyof typeof runtimeListeners>) {
@@ -563,6 +567,215 @@ describe('useRuntimeEvents', (): void => {
     system.stop();
   });
 
+  it('reports started, progress, and heartbeat in order before clearing the renderer activity timer', async (): Promise<void> => {
+    vi.useFakeTimers();
+    let resolveTool: ((result: { toolName: string; status: 'success'; data: { ok: boolean } }) => void) | undefined;
+    const toolResult = new Promise<{ toolName: string; status: 'success'; data: { ok: boolean } }>((resolve) => {
+      resolveTool = resolve;
+    });
+    const tool: AIToolExecutor = {
+      definition: {
+        name: 'long_renderer_tool',
+        description: 'long renderer tool',
+        source: 'builtin',
+        parameters: { type: 'object', properties: {} },
+        riskLevel: 'read',
+        requiresActiveDocument: false
+      },
+      execute: vi.fn(async (_input: unknown, context?: AIToolContext) => {
+        context?.activity?.progress({ phase: 'reading', completed: 2, total: 4, message: '读取到第二项' });
+        return toolResult;
+      })
+    };
+    const toolContext: AIToolContext = {
+      document: {
+        id: 'document-1',
+        title: 'Document',
+        path: null,
+        getContent: (): string => ''
+      },
+      editor: {
+        getSelection: (): null => null,
+        insertAtCursor: async (): Promise<void> => undefined,
+        replaceSelection: async (): Promise<void> => undefined,
+        replaceDocument: async (): Promise<void> => undefined
+      }
+    };
+    const system = createChatActorSystem();
+    system.start();
+    const session = system.ensureSession('session-1');
+    session.send({ type: 'session.submit', input: { messageId: 'user-1', createdAt: 'now', content: 'hello', parts: [] } });
+    session.send({ type: 'session.prepared' });
+    const turnId = session.getSnapshot().context.turnRef?.getSnapshot().context.turnId;
+    system.registerRuntime(
+      { sessionId: 'session-1', turnId: turnId as string, agentId: 'primary', runtimeId: 'runtime-1', rootRuntimeId: 'runtime-1' },
+      { tools: [tool], getToolContext: (): AIToolContext => toolContext, handleBridgeRequest: async (): Promise<unknown> => undefined }
+    );
+    system.send({ type: 'runtime.event', runtimeId: 'runtime-1', event: { type: 'runtime.started', runtimeId: 'runtime-1' } });
+    const scope = effectScope();
+    scope.run((): void => useRuntimeEvents(system));
+
+    try {
+      runtimeListeners.toolRequest?.({
+        ...createEventBase(),
+        toolCallId: 'tool-call-long',
+        toolName: 'long_renderer_tool',
+        input: {}
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(runtimeCommands.submitToolActivity).toHaveBeenNthCalledWith(1, {
+        runtimeId: 'runtime-1',
+        toolCallId: 'tool-call-long',
+        sequence: 1,
+        occurredAt: expect.any(Number),
+        activity: { kind: 'started' }
+      });
+      expect(runtimeCommands.submitToolActivity).toHaveBeenNthCalledWith(2, {
+        runtimeId: 'runtime-1',
+        toolCallId: 'tool-call-long',
+        sequence: 2,
+        occurredAt: expect.any(Number),
+        activity: { kind: 'progress', progress: { phase: 'reading', completed: 2, total: 4, message: '读取到第二项' } }
+      });
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(runtimeCommands.submitToolActivity).toHaveBeenNthCalledWith(3, {
+        runtimeId: 'runtime-1',
+        toolCallId: 'tool-call-long',
+        sequence: 3,
+        occurredAt: expect.any(Number),
+        activity: { kind: 'heartbeat' }
+      });
+
+      runtimeListeners.toolCancelled?.({
+        ...createEventBase(),
+        toolCallId: 'tool-call-long'
+      });
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(runtimeCommands.submitToolActivity).toHaveBeenCalledTimes(3);
+
+      resolveTool?.({ toolName: 'long_renderer_tool', status: 'success', data: { ok: true } });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(runtimeCommands.submitToolResult).toHaveBeenCalledWith(
+        expect.objectContaining({ runtimeId: 'runtime-1', toolCallId: 'tool-call-long', result: expect.objectContaining({ status: 'success' }) })
+      );
+    } finally {
+      scope.stop();
+      system.stop();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds alternating renderer activity while activity IPC is backpressured', async (): Promise<void> => {
+    let releaseProgress: (() => void) | undefined;
+    const blockedProgress = new Promise<void>((resolve): void => {
+      releaseProgress = resolve;
+    });
+    let startControlFlood: (() => void) | undefined;
+    const controlFloodGate = new Promise<void>((resolve): void => {
+      startControlFlood = resolve;
+    });
+    let releaseControl: (() => void) | undefined;
+    const blockedControl = new Promise<void>((resolve): void => {
+      releaseControl = resolve;
+    });
+    let progressBlocked = false;
+    let controlBlocked = false;
+    runtimeCommands.submitToolActivity.mockImplementation(async (input): Promise<{ ok: true }> => {
+      if (!progressBlocked && input.activity.kind === 'progress') {
+        progressBlocked = true;
+        await blockedProgress;
+      }
+      if (!controlBlocked && input.activity.kind === 'waiting_user') {
+        controlBlocked = true;
+        await blockedControl;
+      }
+      return { ok: true };
+    });
+    const tool: AIToolExecutor = {
+      definition: {
+        name: 'burst_renderer_tool',
+        description: 'burst renderer tool',
+        source: 'builtin',
+        parameters: { type: 'object', properties: {} },
+        riskLevel: 'read',
+        requiresActiveDocument: false
+      },
+      execute: vi.fn(async (_input: unknown, context?: AIToolContext) => {
+        for (let index = 0; index < 100; index += 1) {
+          context?.activity?.progress({ phase: 'burst', completed: index, total: 100 });
+          context?.activity?.heartbeat();
+        }
+        await controlFloodGate;
+        for (let index = 0; index < 100; index += 1) {
+          context?.activity?.waitUser(`prompt-${index}`);
+          context?.activity?.resume();
+        }
+        return { toolName: 'burst_renderer_tool', status: 'success' as const, data: { ok: true } };
+      })
+    };
+    const system = createChatActorSystem();
+    system.start();
+    const session = system.ensureSession('session-1');
+    session.send({ type: 'session.submit', input: { messageId: 'user-1', createdAt: 'now', content: 'hello', parts: [] } });
+    session.send({ type: 'session.prepared' });
+    const turnId = session.getSnapshot().context.turnRef?.getSnapshot().context.turnId;
+    system.registerRuntime(
+      { sessionId: 'session-1', turnId: turnId as string, agentId: 'primary', runtimeId: 'runtime-1', rootRuntimeId: 'runtime-1' },
+      {
+        tools: [tool],
+        getToolContext: (): AIToolContext => ({
+          document: { id: 'document-burst', title: 'Burst', path: null, getContent: (): string => '' },
+          editor: {
+            getSelection: (): null => null,
+            insertAtCursor: async (): Promise<void> => undefined,
+            replaceSelection: async (): Promise<void> => undefined,
+            replaceDocument: async (): Promise<void> => undefined
+          }
+        }),
+        handleBridgeRequest: async (): Promise<unknown> => undefined
+      }
+    );
+    system.send({ type: 'runtime.event', runtimeId: 'runtime-1', event: { type: 'runtime.started', runtimeId: 'runtime-1' } });
+    const scope = effectScope();
+    scope.run((): void => useRuntimeEvents(system));
+
+    try {
+      runtimeListeners.toolRequest?.({
+        ...createEventBase(),
+        toolCallId: 'tool-call-burst',
+        toolName: 'burst_renderer_tool',
+        input: {}
+      });
+      await vi.waitFor((): void => {
+        expect(runtimeCommands.submitToolActivity).toHaveBeenCalledTimes(2);
+      });
+      releaseProgress?.();
+      await vi.waitFor((): void => {
+        expect(runtimeCommands.submitToolActivity).toHaveBeenCalledTimes(4);
+      });
+      startControlFlood?.();
+      await vi.waitFor((): void => {
+        expect(runtimeCommands.submitToolActivity).toHaveBeenCalledTimes(5);
+      });
+      releaseControl?.();
+      await vi.waitFor((): void => {
+        expect(runtimeCommands.submitToolResult).toHaveBeenCalledOnce();
+      });
+
+      const progressInputs = runtimeCommands.submitToolActivity.mock.calls.map(([input]) => input).filter((input) => input.activity.kind === 'progress');
+      expect(runtimeCommands.submitToolActivity).toHaveBeenCalledTimes(6);
+      expect(runtimeCommands.submitToolActivity).toHaveBeenLastCalledWith(expect.objectContaining({ activity: { kind: 'resumed' } }));
+      expect(progressInputs).toHaveLength(2);
+      expect(progressInputs.at(-1)).toMatchObject({ activity: { progress: { completed: 99 } } });
+    } finally {
+      scope.stop();
+      system.stop();
+    }
+  });
+
   it('isolates identical Shell toolCallIds across concurrent runtimes', async (): Promise<void> => {
     const pendingResolvers: Array<() => void> = [];
     const tool: AIToolExecutor = {
@@ -643,6 +856,26 @@ describe('useRuntimeEvents', (): void => {
       createdAt: 'now',
       event: { type: 'terminal_update', content: 'screen-b' }
     });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(runtimeCommands.submitToolActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeId: 'runtime-a',
+        toolCallId: 'same-call',
+        sequence: 2,
+        activity: { kind: 'progress', progress: { phase: 'shell_output', completed: 8, message: 'screen-a' } }
+      })
+    );
+    const activityCallCount = runtimeCommands.submitToolActivity.mock.calls.length;
+    runtimeListeners.shellRunEvent?.({
+      commandId: createShellCommandId('runtime-a', 'same-call'),
+      sequence: 2,
+      createdAt: 'now',
+      event: { type: 'terminal_update', content: 'screen-a' }
+    });
+    await Promise.resolve();
+    expect(runtimeCommands.submitToolActivity).toHaveBeenCalledTimes(activityCallCount);
 
     expect(visibleA).toHaveBeenCalledWith(
       expect.objectContaining({

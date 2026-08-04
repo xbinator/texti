@@ -11,7 +11,9 @@ import type {
   AIToolGrantScope,
   AIToolRiskLevel,
   AITransportTool,
-  AIUsage
+  AIUsage,
+  ChatToolExternalWait,
+  ChatToolProgressSnapshot
 } from './ai';
 import type {
   AIUserChoiceAnswerData,
@@ -360,6 +362,39 @@ export interface ChatRuntimeSubmitToolResultInput {
   toolCallId: string;
   /** Tool execution result. */
   result: AIToolExecutionResult;
+}
+
+/** 执行器可提交的非终态工具活动。 */
+export type ChatRuntimeToolActivity =
+  | { kind: 'started' }
+  | { kind: 'heartbeat' }
+  | { kind: 'progress'; progress: Omit<ChatToolProgressSnapshot, 'updatedAt'> }
+  | { kind: 'waiting_user'; prompt: string }
+  | { kind: 'waiting_external'; wait: ChatToolExternalWait }
+  | { kind: 'resumed' };
+
+/** Renderer 到主进程的工具活动事件。 */
+export interface ChatRuntimeSubmitToolActivityInput {
+  /** 所属 Runtime。 */
+  runtimeId: string;
+  /** 所属工具调用。 */
+  toolCallId: string;
+  /** 单执行器严格递增序号。 */
+  sequence: number;
+  /** 执行器观察到事件的墙钟时间，仅用于诊断。 */
+  occurredAt: number;
+  /** 不包含终态的活动。 */
+  activity: ChatRuntimeToolActivity;
+}
+
+/** 用户针对单个在途工具的控制。 */
+export interface ChatRuntimeControlToolInput {
+  /** 所属 Runtime。 */
+  runtimeId: string;
+  /** 所属工具调用。 */
+  toolCallId: string;
+  /** 继续等待或停止。 */
+  action: 'continue_waiting' | 'stop';
 }
 
 /** Renderer message part submission input. */

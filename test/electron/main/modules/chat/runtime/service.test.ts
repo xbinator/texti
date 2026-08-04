@@ -2030,14 +2030,13 @@ describe('chat runtime service shell', (): void => {
     });
   });
 
-  it('does not count confirmation wait time against the task-wide continuation deadline', async (): Promise<void> => {
+  it('continues after more than 300 seconds without a task-wide Runtime deadline', async (): Promise<void> => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(0);
       const collector = createEventCollector();
       let service: ReturnType<typeof createChatRuntimeService>;
-      let observedSecondRoundTimeout = 0;
-      const streamExecutor = vi.fn<ChatRuntimeStreamExecutor>(async ({ runtime, assistantMessage, totalTimeoutMs }, updateAssistant) => {
+      const streamExecutor = vi.fn<ChatRuntimeStreamExecutor>(async ({ runtime, assistantMessage }, updateAssistant) => {
         if (streamExecutor.mock.calls.length === 1) {
           assistantMessage.parts = [
             {
@@ -2066,7 +2065,6 @@ describe('chat runtime service shell', (): void => {
           return { shouldContinue: true };
         }
 
-        observedSecondRoundTimeout = totalTimeoutMs ?? 0;
         assistantMessage.content = 'final answer';
         assistantMessage.parts = [...assistantMessage.parts, { id: 'part-after-confirmation-wait', type: 'text', text: 'final answer' }];
         assistantMessage.loading = false;
@@ -2100,7 +2098,7 @@ describe('chat runtime service shell', (): void => {
       await flushUntil(didComplete);
 
       expect(streamExecutor).toHaveBeenCalledTimes(2);
-      expect(observedSecondRoundTimeout).toBe(300_000);
+      expect(streamExecutor.mock.calls[1]?.[0]).not.toHaveProperty('totalTimeoutMs');
       expect(didComplete()).toBe(true);
     } finally {
       vi.useRealTimers();
@@ -4482,12 +4480,7 @@ describe('chat runtime service shell', (): void => {
       finished: false,
       createdAt: '2026-07-23T00:00:00.000Z'
     };
-    const createTerminalResult = (
-      taskId: string,
-      agentId: string,
-      attemptId: string,
-      executionStatus: 'completed' | 'cancelled' = 'completed'
-    ) => ({
+    const createTerminalResult = (taskId: string, agentId: string, attemptId: string, executionStatus: 'completed' | 'cancelled' = 'completed') => ({
       taskId,
       agentId,
       attemptId,

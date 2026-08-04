@@ -369,7 +369,9 @@ export function createPtyShellRunner(options: CreatePtyRunnerOptions = {}): PtyS
         });
       });
       pollTimer = setInterval((): void => queueEvaluation(), 50);
-      toolTimer = setTimeout((): void => requestStop({ kind: 'tool_timeout' }, 'tool_timeout'), request.timeoutMs);
+      if (request.timeoutMs !== undefined) {
+        toolTimer = setTimeout((): void => requestStop({ kind: 'tool_timeout' }, 'tool_timeout'), request.timeoutMs);
+      }
       activeCommands.set(request.commandId, {
         process: ptyProcess,
         cancel: (): void => requestStop({ kind: 'cancelled' }, 'cancelled')

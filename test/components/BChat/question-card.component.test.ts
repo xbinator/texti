@@ -31,6 +31,7 @@ const BButtonStub = defineComponent({
 function createSubmitContextMock(): SubmitContext {
   return {
     continueAssistantTurn: vi.fn(),
+    controlRuntimeTool: vi.fn(),
     sendAdaptedUserMessage: vi.fn(),
     updateMessagePart: vi.fn()
   };

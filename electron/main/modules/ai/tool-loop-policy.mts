@@ -16,21 +16,20 @@ const FINAL_ANSWER_INSTRUCTION = [
   'Do not emit tool-call markup, XML-like tool protocol, JSON tool envelopes, or claim to run another tool.'
 ].join(' ');
 
-/** 所有模型调用共享的固定超时策略。 */
-export const AI_REQUEST_TIMEOUT = {
+/** 非 ChatRuntime 一次性 AI 调用的固定保护。 */
+export const AI_DIRECT_REQUEST_TIMEOUT = {
   totalMs: 300_000,
   chunkMs: 90_000,
   toolMs: 60_000
 } as const satisfies TimeoutConfiguration<ToolSet>;
 
-/** ChatRuntime 托管工具循环时交给 SDK 的局部超时策略。 */
-export const AI_RUNTIME_TOOL_LOOP_TIMEOUT = {
-  chunkMs: AI_REQUEST_TIMEOUT.chunkMs,
-  toolMs: AI_REQUEST_TIMEOUT.toolMs
+/** ChatRuntime 模型流只保留模型输出停滞检测。 */
+export const AI_RUNTIME_STREAM_TIMEOUT = {
+  chunkMs: AI_DIRECT_REQUEST_TIMEOUT.chunkMs
 } as const satisfies TimeoutConfiguration<ToolSet>;
 
-/** 单次用户任务允许占用的总时长。 */
-export const AI_TASK_TIMEOUT_MS = AI_REQUEST_TIMEOUT.totalMs;
+/** 不支持活动协议的工具兼容超时。 */
+export const AI_LEGACY_TOOL_TIMEOUT_MS = 60_000;
 
 /** 工具调用比较所需的最小快照。 */
 export interface ToolCallSnapshot {
@@ -53,13 +52,11 @@ export type ToolLoopStopReason = 'repeated-tool-call';
 type ToolStepOptions = Parameters<PrepareStepFunction<ToolSet>>[0];
 
 /**
- * 按任务剩余时间创建单次 SDK 调用超时。
- * @param totalMs - 当前任务剩余毫秒数
- * @returns 不超过固定任务上限的 SDK 超时配置
+ * 创建直接 AI 调用的固定 SDK 超时。
+ * @returns 直接调用超时配置
  */
-export function createRequestTimeout(totalMs: number = AI_TASK_TIMEOUT_MS): TimeoutConfiguration<ToolSet> {
-  const normalizedTotalMs = Math.max(1, Math.min(AI_TASK_TIMEOUT_MS, Math.floor(totalMs)));
-  return { ...AI_REQUEST_TIMEOUT, totalMs: normalizedTotalMs };
+export function createRequestTimeout(): TimeoutConfiguration<ToolSet> {
+  return AI_DIRECT_REQUEST_TIMEOUT;
 }
 
 /**
@@ -67,17 +64,7 @@ export function createRequestTimeout(totalMs: number = AI_TASK_TIMEOUT_MS): Time
  * @returns 不含不可暂停 totalMs 的 SDK 超时配置
  */
 export function createRuntimeToolLoopTimeout(): TimeoutConfiguration<ToolSet> {
-  return AI_RUNTIME_TOOL_LOOP_TIMEOUT;
-}
-
-/**
- * 计算一次用户任务当前剩余的运行时间。
- * @param startedAt - 任务启动时间戳
- * @param currentAt - 当前时间戳
- * @returns 剩余毫秒数；超时后返回 0
- */
-export function getTaskTimeout(startedAt: number, currentAt: number = Date.now()): number {
-  return Math.max(0, AI_TASK_TIMEOUT_MS - Math.max(0, currentAt - startedAt));
+  return AI_RUNTIME_STREAM_TIMEOUT;
 }
 
 /**

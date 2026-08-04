@@ -2,10 +2,12 @@
  * @file stream/tools.mts
  * @description ChatRuntime 流式执行器工具执行与结果工厂。
  */
-import type { ActiveChatRuntime, ChatRuntimeMainToolExecutor, ChatRuntimeRendererToolExecutor, ChatRuntimeToolTimeoutControls } from '../types.mjs';
-import type { AIToolExecutionError, AIToolExecutionResult } from 'types/ai';
+import type { ToolWatchdogLease } from '../controllers/tool-watchdog.mjs';
+import type { ActiveChatRuntime, ChatRuntimeMainToolExecutor, ChatRuntimeRendererToolExecutor } from '../types.mjs';
+import type { AIToolActivityReporter, AIToolExecutionError, AIToolExecutionResult } from 'types/ai';
 import { AI_ERROR_CODE, createAIServiceError, isAIServiceError } from '../../../ai/errors/codes.mjs';
 import { MAIN_PROCESS_TOOL_NAMES } from '../tools/constants.mjs';
+import { isToolExecutionErrorCode } from '../tools/results.mjs';
 
 /**
  * 判断值是否为对象记录。
@@ -16,34 +18,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-/** Renderer 本地工具默认超时时间。 */
-export const DEFAULT_RENDERER_TOOL_TIMEOUT_MS = 60_000;
-
-/** 可透传到工具失败结果的稳定错误码。 */
-const TOOL_EXECUTION_ERROR_CODES: ReadonlySet<AIToolExecutionError['code']> = new Set([
-  'INVALID_INPUT',
-  'NO_ACTIVE_DOCUMENT',
-  'NO_SELECTION',
-  'NO_CURSOR',
-  'PERMISSION_DENIED',
-  'USER_CANCELLED',
-  'EDITOR_UNAVAILABLE',
-  'STALE_CONTEXT',
-  'TOOL_TIMEOUT',
-  'UNSUPPORTED_PROVIDER',
-  'CONFIRMATION_DISMISSED',
-  'EXECUTION_FAILED'
-] satisfies AIToolExecutionError['code'][]);
-
-/** 可暂停的工具执行超时。 */
-interface PausableToolTimeout {
-  /** 超时结果 Promise。 */
-  promise: Promise<AIToolExecutionResult>;
-  /** 暴露给工具执行链路的暂停控制器。 */
-  controls: ChatRuntimeToolTimeoutControls;
-  /** 清理超时计时器。 */
-  clear: () => void;
-}
+/** Renderer 本地工具默认开始确认超时时间。 */
+export const DEFAULT_RENDERER_START_TIMEOUT_MS = 30_000;
+/** 支持活动协议的 Main 工具默认心跳周期。 */
+export const TOOL_HEARTBEAT_INTERVAL_MS = 15_000;
 
 /**
  * 将异常规范化为 AIServiceError。
@@ -63,9 +41,7 @@ export function normalizeRuntimeError(error: unknown): ReturnType<typeof createA
  * @returns 工具错误码
  */
 export function getToolExecutionErrorCode(error: unknown): AIToolExecutionError['code'] {
-  if (isRecord(error) && typeof error.code === 'string' && TOOL_EXECUTION_ERROR_CODES.has(error.code as AIToolExecutionError['code'])) {
-    return error.code as AIToolExecutionError['code'];
-  }
+  if (isRecord(error) && isToolExecutionErrorCode(error.code)) return error.code;
 
   return 'EXECUTION_FAILED';
 }
@@ -78,46 +54,20 @@ export function getToolExecutionErrorCode(error: unknown): AIToolExecutionError[
  */
 export function createToolFailureResultFromError(toolName: string, error: unknown): AIToolExecutionResult {
   const message = error instanceof Error ? error.message : String(error);
+  const code = getToolExecutionErrorCode(error);
+  if (code === 'USER_CANCELLED') {
+    return {
+      toolName,
+      status: 'cancelled',
+      error: { code, message }
+    };
+  }
   return {
     toolName,
     status: 'failure',
     error: {
-      code: getToolExecutionErrorCode(error),
+      code,
       message
-    }
-  };
-}
-
-/**
- * 创建 renderer 工具超时结果。
- * @param toolName - 工具名称
- * @param timeoutMs - 超时时间
- * @returns 工具失败结果
- */
-export function createRendererToolTimeoutResult(toolName: string, timeoutMs: number): AIToolExecutionResult {
-  return {
-    toolName,
-    status: 'failure',
-    error: {
-      code: 'TOOL_TIMEOUT',
-      message: `Renderer 工具 ${toolName} 执行超时，已等待 ${timeoutMs}ms`
-    }
-  };
-}
-
-/**
- * 创建主进程工具超时结果。
- * @param toolName - 工具名称
- * @param timeoutMs - 超时时间
- * @returns 工具失败结果
- */
-export function createMainToolTimeoutResult(toolName: string, timeoutMs: number): AIToolExecutionResult {
-  return {
-    toolName,
-    status: 'failure',
-    error: {
-      code: 'TOOL_TIMEOUT',
-      message: `主进程工具 ${toolName} 执行超时，已等待 ${timeoutMs}ms`
     }
   };
 }
@@ -139,12 +89,12 @@ export function createUnknownToolFailureResult(toolName: string): AIToolExecutio
 }
 
 /**
- * 规整 renderer 工具超时时间。
+ * 规整 renderer 工具开始确认超时时间。
  * @param timeoutMs - 原始超时时间
  * @returns 可使用的超时时间
  */
-export function normalizeRendererToolTimeoutMs(timeoutMs: number | undefined): number {
-  if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs <= 0) return DEFAULT_RENDERER_TOOL_TIMEOUT_MS;
+export function normalizeRendererStartTimeoutMs(timeoutMs: number | undefined): number {
+  if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs <= 0) return DEFAULT_RENDERER_START_TIMEOUT_MS;
 
   return Math.floor(timeoutMs);
 }
@@ -173,100 +123,38 @@ export function shouldStopStreamAfterToolResult(result: AIToolExecutionResult): 
  * @param signal - 组合中止信号
  * @returns 可供执行器读取 signal 的工具输入副本
  */
-function attachToolSignal<TInput extends { signal?: AbortSignal }>(input: TInput, signal: AbortSignal): TInput {
+function attachToolRuntime<TInput extends { signal?: AbortSignal; activity?: AIToolActivityReporter }>(
+  input: TInput,
+  signal: AbortSignal,
+  activity?: AIToolActivityReporter
+): TInput {
   const executionInput = { ...input };
   Object.defineProperty(executionInput, 'signal', { value: signal, enumerable: false });
+  if (activity) Object.defineProperty(executionInput, 'activity', { value: activity, enumerable: false });
   return executionInput;
 }
 
 /**
- * 创建可暂停的工具执行超时。
- * @param timeoutMs - 超时时间
- * @param createTimeoutResult - 创建超时结果
- * @param abortController - 超时中止控制器
- * @param abortReason - 超时中止原因
- * @returns 可暂停的超时 Promise 与控制器
+ * 从 Watchdog 租约创建受限活动上报器。
+ * @param lease - 当前工具租约
+ * @returns 工具可使用的活动上报器
  */
-function createPausableToolTimeout(
-  timeoutMs: number,
-  createTimeoutResult: () => AIToolExecutionResult,
-  abortController: AbortController,
-  abortReason: DOMException
-): PausableToolTimeout {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  let timeoutStartedAt = 0;
-  let remainingMs = Math.max(0, timeoutMs);
-  let pauseDepth = 0;
-  let settled = false;
-  let resolveTimeout: (result: AIToolExecutionResult) => void = () => undefined;
-
-  /**
-   * 清理当前活动计时器。
-   */
-  function clearTimer(): void {
-    if (timeoutId === undefined) return;
-
-    clearTimeout(timeoutId);
-    timeoutId = undefined;
-  }
-
-  /**
-   * 触发工具超时。
-   */
-  function triggerTimeout(): void {
-    if (settled) return;
-
-    settled = true;
-    clearTimer();
-    resolveTimeout(createTimeoutResult());
-    abortController.abort(abortReason);
-  }
-
-  /**
-   * 按剩余时间启动计时器。
-   */
-  function scheduleTimer(): void {
-    if (settled || pauseDepth > 0 || timeoutId !== undefined) return;
-
-    if (remainingMs <= 0) {
-      triggerTimeout();
-      return;
-    }
-
-    timeoutStartedAt = Date.now();
-    timeoutId = setTimeout(triggerTimeout, remainingMs);
-  }
-
-  const controls: ChatRuntimeToolTimeoutControls = {
-    pause(): void {
-      if (settled) return;
-
-      pauseDepth += 1;
-      if (pauseDepth > 1 || timeoutId === undefined) return;
-
-      remainingMs = Math.max(0, remainingMs - Math.max(0, Date.now() - timeoutStartedAt));
-      clearTimer();
-    },
-
-    resume(): void {
-      if (settled || pauseDepth <= 0) return;
-
-      pauseDepth -= 1;
-      if (pauseDepth === 0) scheduleTimer();
-    }
-  };
-
-  const promise = new Promise<AIToolExecutionResult>((resolve) => {
-    resolveTimeout = resolve;
-    scheduleTimer();
-  });
-
+function createLeaseReporter(lease: ToolWatchdogLease): AIToolActivityReporter {
   return {
-    promise,
-    controls,
-    clear(): void {
-      settled = true;
-      clearTimer();
+    heartbeat(): void {
+      lease.report({ kind: 'heartbeat' });
+    },
+    progress(progress): void {
+      lease.report({ kind: 'progress', progress });
+    },
+    waitUser(prompt: string): void {
+      lease.report({ kind: 'waiting_user', prompt });
+    },
+    waitExternal(wait): void {
+      lease.report({ kind: 'waiting_external', wait });
+    },
+    resume(): void {
+      lease.report({ kind: 'resumed' });
     }
   };
 }
@@ -275,35 +163,23 @@ function createPausableToolTimeout(
  * 执行 renderer 本地工具，并把异常或超时转换为工具失败结果。
  * @param executeRendererTool - renderer 工具执行器
  * @param input - renderer 工具输入
- * @param timeoutMs - 超时时间
+ * @param lease - 当前工具 Watchdog 租约
  * @returns 工具执行结果
  */
 export async function executeRendererToolSafely(
   executeRendererTool: ChatRuntimeRendererToolExecutor,
   input: Parameters<ChatRuntimeRendererToolExecutor>[0],
-  timeoutMs: number
+  lease: ToolWatchdogLease
 ): Promise<AIToolExecutionResult> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeoutController = new AbortController();
-  const signal = AbortSignal.any([input.runtime.abortController.signal, timeoutController.signal]);
-  const executionInput = attachToolSignal(input, signal);
+  const signal = AbortSignal.any([input.runtime.abortController.signal, lease.signal]);
+  const executionInput = attachToolRuntime(input, signal);
 
   try {
-    return await Promise.race([
-      executeRendererTool(executionInput),
-      new Promise<AIToolExecutionResult>((resolve) => {
-        timeoutId = setTimeout(() => {
-          resolve(createRendererToolTimeoutResult(input.toolName, timeoutMs));
-          timeoutController.abort(new DOMException('Renderer tool execution timed out', 'TimeoutError'));
-        }, timeoutMs);
-      })
-    ]);
+    return await Promise.race([executeRendererTool(executionInput), lease.settled]);
   } catch (error: unknown) {
     return createToolFailureResultFromError(input.toolName, error);
   } finally {
-    if (timeoutId !== undefined) {
-      clearTimeout(timeoutId);
-    }
+    lease.finish();
   }
 }
 
@@ -311,31 +187,27 @@ export async function executeRendererToolSafely(
  * 执行主进程工具，并把异常或超时转换为工具失败结果。
  * @param executeMainTool - 主进程工具执行器
  * @param input - 主进程工具输入
- * @param timeoutMs - 超时时间
+ * @param lease - 当前工具 Watchdog 租约
  * @returns 工具执行结果
  */
 export async function executeMainToolSafely(
   executeMainTool: ChatRuntimeMainToolExecutor,
   input: Parameters<ChatRuntimeMainToolExecutor>[0],
-  timeoutMs: number
+  lease: ToolWatchdogLease
 ): Promise<AIToolExecutionResult> {
-  const timeoutController = new AbortController();
-  const signal = AbortSignal.any([input.runtime.abortController.signal, timeoutController.signal]);
-  const timeout = createPausableToolTimeout(
-    timeoutMs,
-    () => createMainToolTimeoutResult(input.toolName, timeoutMs),
-    timeoutController,
-    new DOMException('Main tool execution timed out', 'TimeoutError')
-  );
-  const executionInput = attachToolSignal(input, signal);
-  Object.defineProperty(executionInput, 'timeoutControls', { value: timeout.controls, enumerable: false });
+  const signal = AbortSignal.any([input.runtime.abortController.signal, lease.signal]);
+  const activity = createLeaseReporter(lease);
+  const executionInput = attachToolRuntime(input, signal, activity);
+  lease.report({ kind: 'started' });
+  const heartbeatTimer = setInterval((): void => activity.heartbeat(), TOOL_HEARTBEAT_INTERVAL_MS);
 
   try {
-    return await Promise.race([executeMainTool(executionInput), timeout.promise]);
+    return await Promise.race([executeMainTool(executionInput), lease.settled]);
   } catch (error: unknown) {
     return createToolFailureResultFromError(input.toolName, error);
   } finally {
-    timeout.clear();
+    clearInterval(heartbeatTimer);
+    lease.finish();
   }
 }
 

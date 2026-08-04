@@ -112,6 +112,7 @@ describe('structured summary generator', (): void => {
     expect(request).not.toHaveProperty('tavily');
     expect(request).not.toHaveProperty('mcp');
     expect(request.prompt).not.toContain('checkpoint-pending');
+    expect(generateText.mock.calls[0]).toHaveLength(2);
   });
 
   it('结构化输出首次无效时按子错误码重试一次', async (): Promise<void> => {

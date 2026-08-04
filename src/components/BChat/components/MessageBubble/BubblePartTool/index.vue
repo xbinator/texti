@@ -18,6 +18,31 @@
       <span v-if="part.status === 'done' && part.result?.status === 'failure'" :class="bem('status', { failure: true })">失败</span>
     </template>
 
+    <!-- 活动状态来自 Main 持久化快照，不以组件挂载时间或动画推断工具存活。 -->
+    <div v-if="part.activity" :class="bem('activity', { [part.activity.state]: true })">
+      <div :class="bem('activity-header')">
+        <span :class="bem('activity-state')">{{ activityLabel }}</span>
+        <span v-if="activityCount" :class="bem('activity-count')">{{ activityCount }}</span>
+      </div>
+      <div v-if="part.activity.progress?.phase" :class="bem('activity-phase')">{{ part.activity.progress.phase }}</div>
+      <div v-if="activityMessage" :class="bem('activity-message')">{{ activityMessage }}</div>
+      <div v-if="part.activity.state === 'running_idle' && lastProgressText" :class="bem('activity-time')">{{ lastProgressText }}</div>
+      <div v-if="showIdleControls" :class="bem('activity-actions')">
+        <BButton
+          type="text"
+          size="mini"
+          :disabled="controlPending !== null"
+          :loading="controlPending === 'continue_waiting'"
+          @click="handleToolControl('continue_waiting')"
+        >
+          继续等待
+        </BButton>
+        <BButton type="text" size="mini" danger :disabled="controlPending !== null" :loading="controlPending === 'stop'" @click="handleToolControl('stop')">
+          停止
+        </BButton>
+      </div>
+    </div>
+
     <!-- Shell 命令与当前屏幕共享终端区域，命令在前且不重复显示成功摘要 -->
     <template v-if="isShellCommand && shellDisplay">
       <div :class="bem('shell-terminal')">
@@ -84,12 +109,17 @@
 
 <script setup lang="ts">
 import type { ToolSummaryTag } from '../../../utils/toolResultSummary';
+import type { ChatToolActivityState } from 'types/ai';
 import type { AIUserChoiceAnswerData, AIUserChoiceQuestionAnswer, ChatMessageToolPart } from 'types/chat';
+import type { ChatRuntimeControlToolInput } from 'types/chat-runtime';
 import { computed, ref } from 'vue';
 import { isPlainObject, isString } from 'lodash-es';
 import type { QuestionItemInput, QuestionToolInput } from '@/ai/tools/builtin/QuestionTool';
+import type { SubmitAction } from '@/components/BChat/utils/submitAction';
+import { createToolControl } from '@/components/BChat/utils/submitAction';
 import { useNavigate } from '@/hooks/useNavigate';
 import type { TodoItem } from '@/stores/chat/todo';
+import { asyncTo } from '@/utils/asyncTo';
 import { createNamespace } from '@/utils/namespace';
 import { hasStructuredValueContent } from '../../../utils/messagePart';
 import { getActionLabel } from '../../../utils/toolLabels';
@@ -104,9 +134,16 @@ defineOptions({ name: 'BubblePartTool' });
 interface Props {
   /** 工具调用的消息片段数据 */
   part: ChatMessageToolPart;
+  /** 持有该工具调用的 Runtime ID。 */
+  runtimeId?: string;
+  /** 消息级统一提交函数。 */
+  submitAction?: (action: SubmitAction) => Promise<void> | void;
 }
 
-const props = withDefaults(defineProps<Props>(), {});
+const props = withDefaults(defineProps<Props>(), {
+  runtimeId: undefined,
+  submitAction: undefined
+});
 
 const [, bem] = createNamespace('', 'bubble-part-tool');
 
@@ -115,6 +152,8 @@ const { openFile } = useNavigate();
 
 /** 原始数据展开状态 */
 const rawExpanded = ref(false);
+/** 当前卡片正在提交的单工具控制动作。 */
+const controlPending = ref<ChatRuntimeControlToolInput['action'] | null>(null);
 
 /** 工具状态与图标的映射：inputting 旋转加载、executing 扳手、done 成功/失败/取消/等待用户输入 */
 const ICON_MAP = {
@@ -125,6 +164,17 @@ const ICON_MAP = {
 
 /** 提问类工具名称集合，用于判断是否展示问答结果视图 */
 const QUESTION_TOOL_NAMES = new Set(['ask_user_choice', 'ask_user_question', 'question']);
+
+/** 活动状态的人可读文案。 */
+const ACTIVITY_LABELS: Record<ChatToolActivityState, string> = {
+  starting: '执行中',
+  executing: '执行中',
+  running_idle: '仍在运行',
+  waiting_user: '等待用户',
+  waiting_external: '等待外部条件',
+  stopping: '正在停止',
+  interrupted: '已中断'
+};
 
 /** 合法的任务状态，用于保护性解析持久化的工具输入。 */
 const TODO_STATUSES = new Set<TodoItem['status']>(['pending', 'in_progress', 'completed', 'cancelled']);
@@ -217,7 +267,61 @@ const icon = computed(() => {
 });
 
 /** 非 inputting 状态默认折叠，inputting 时展开让用户看到实时输入 */
-const defaultCollapsed = computed(() => props.part.status !== 'inputting');
+const defaultCollapsed = computed<boolean>(() => props.part.status !== 'inputting' && !(props.part.status === 'executing' && props.part.activity));
+
+/** 当前活动状态文案。 */
+const activityLabel = computed<string>(() => (props.part.activity ? ACTIVITY_LABELS[props.part.activity.state] : ''));
+
+/** 当前进度数量文案。 */
+const activityCount = computed<string>(() => {
+  const progress = props.part.activity?.progress;
+  if (progress?.completed === undefined) return '';
+  return progress.total === undefined ? `${progress.completed}` : `${progress.completed} / ${progress.total}`;
+});
+
+/** 当前活动状态的补充说明。 */
+const activityMessage = computed<string>(() => {
+  const { activity } = props.part;
+  if (!activity) return '';
+  if (activity.state === 'waiting_user') return activity.userPrompt ?? '';
+  if (activity.state === 'waiting_external') return activity.externalWait?.reason ?? '';
+  return activity.progress?.message ?? '';
+});
+
+/** 最后实质进展的相对时间。 */
+const lastProgressText = computed<string>(() => {
+  const lastProgressAt = props.part.activity?.lastProgressAt;
+  if (!lastProgressAt) return '';
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - lastProgressAt) / 1_000));
+  if (elapsedSeconds < 60) return `${elapsedSeconds} 秒前有进展`;
+  return `${Math.floor(elapsedSeconds / 60)} 分钟前有进展`;
+});
+
+/** 仅空闲运行中的在途工具展示继续等待与停止。 */
+const showIdleControls = computed<boolean>(
+  () => props.part.status === 'executing' && props.part.activity?.state === 'running_idle' && Boolean(props.runtimeId && props.submitAction)
+);
+
+/**
+ * 提交精确到当前 Runtime/toolCall 的控制动作。
+ * @param action - 继续等待或停止
+ */
+async function handleToolControl(action: ChatRuntimeControlToolInput['action']): Promise<void> {
+  if (!props.runtimeId || !props.submitAction || controlPending.value) return;
+  controlPending.value = action;
+  await asyncTo(
+    Promise.resolve(
+      props.submitAction(
+        createToolControl({
+          runtimeId: props.runtimeId,
+          toolCallId: props.part.toolCallId,
+          action
+        })
+      )
+    )
+  );
+  controlPending.value = null;
+}
 
 /** 工具标题：文件操作显示文件路径，skill 显示技能名称，其余显示工具别名 */
 const title = computed(() => {
@@ -263,6 +367,7 @@ const previewValue = computed(() => {
 /** 判断是否有可展示的内容，done 状态始终有内容，其余状态需检查结构化值 */
 const hasContent = computed(() => {
   if (props.part.status === 'done') return true;
+  if (props.part.activity) return true;
   return hasStructuredValueContent(previewValue.value);
 });
 
@@ -414,6 +519,65 @@ const questionOtherText = computed(() => {
 .bubble-part-tool__status--failure {
   margin-left: 8px;
   color: var(--color-error);
+}
+
+.bubble-part-tool__activity {
+  padding: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--color-fill-tertiary, rgb(0 0 0 / 3%));
+  border-radius: 4px;
+}
+
+.bubble-part-tool__activity--running_idle,
+.bubble-part-tool__activity--waiting_user,
+.bubble-part-tool__activity--waiting_external {
+  background: var(--color-warning-bg, rgb(250 173 20 / 8%));
+}
+
+.bubble-part-tool__activity--stopping,
+.bubble-part-tool__activity--interrupted {
+  background: var(--color-error-bg, rgb(255 0 0 / 8%));
+}
+
+.bubble-part-tool__activity-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.bubble-part-tool__activity-state {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.bubble-part-tool__activity-count,
+.bubble-part-tool__activity-time {
+  color: var(--text-tertiary);
+}
+
+.bubble-part-tool__activity-phase {
+  margin-top: 4px;
+  font-family: Monaco, 'SF Mono', Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.bubble-part-tool__activity-message {
+  margin-top: 2px;
+  white-space: pre-wrap;
+}
+
+.bubble-part-tool__activity-time {
+  margin-top: 2px;
+  font-size: 11px;
+}
+
+.bubble-part-tool__activity-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
 }
 
 .bubble-part-tool__result {

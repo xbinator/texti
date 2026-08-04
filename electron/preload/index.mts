@@ -518,6 +518,20 @@ const electronAPI: ElectronAPI = {
   chatRuntimeSubmitToolResult: (input) => ipcRenderer.invoke('chat:runtime:tool-result', input),
 
   /**
+   * 提交 renderer 工具的非终态活动。
+   * @param input - 工具活动输入
+   * @returns 提交结果
+   */
+  chatRuntimeSubmitToolActivity: (input) => ipcRenderer.invoke('chat:runtime:tool-activity', input),
+
+  /**
+   * 控制单个在途工具。
+   * @param input - 工具控制输入
+   * @returns 控制结果
+   */
+  chatRuntimeControlTool: (input) => ipcRenderer.invoke('chat:runtime:tool-control', input),
+
+  /**
    * 提交 renderer 侧产生的消息片段更新。
    * @param input - 消息片段更新输入
    * @returns 提交结果

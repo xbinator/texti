@@ -33,6 +33,29 @@ function createChildProcess(): { child: ChildProcessWithoutNullStreams; finish: 
 }
 
 describe('Shell command runner result compatibility', (): void => {
+  it('does not create a fixed deadline when timeoutMs is omitted', async (): Promise<void> => {
+    const { child, finish } = createChildProcess();
+    const runner = createShellCommandRunner({ spawnProcess: (): ChildProcessWithoutNullStreams => child });
+    const resultPromise = runner.run({
+      commandId: 'pipe-runtime-managed',
+      shell: 'bash',
+      command: 'long task',
+      cwd: process.cwd(),
+      workspaceRoot: process.cwd(),
+      timeoutMs: undefined,
+      interactionMode: 'none'
+    });
+
+    await new Promise<void>((resolve): void => {
+      setTimeout(resolve, 20);
+    });
+    finish();
+    const result = await resultPromise;
+
+    expect(child.kill).not.toHaveBeenCalled();
+    expect(result.termination).toEqual({ kind: 'exit', exitCode: 0 });
+  });
+
   it('reports pipe output and an exit termination for a successful command', async (): Promise<void> => {
     const runner = createShellCommandRunner();
     const result = await runner.run({

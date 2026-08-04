@@ -77,7 +77,10 @@ describe('recoverRuntimes', (): void => {
     expect(system.getSession('session-1')?.getSnapshot().matches('waitingForUser')).toBe(true);
     expect(system.getRuntimeCapabilities('runtime-1')?.documentId).toBe('document-1');
     expect(electronAPIMock.chatRuntimeSubmitToolResult).toHaveBeenCalledWith(
-      expect.objectContaining({ runtimeId: 'runtime-1', result: expect.objectContaining({ status: 'failure' }) })
+      expect.objectContaining({
+        runtimeId: 'runtime-1',
+        result: expect.objectContaining({ status: 'failure', error: expect.objectContaining({ code: 'RUNTIME_INTERRUPTED' }) })
+      })
     );
     expect(electronAPIMock.chatRuntimeSubmitBridgeResponse).toHaveBeenCalledWith(
       expect.objectContaining({ runtimeId: 'runtime-1', result: expect.objectContaining({ status: 'failure' }) })

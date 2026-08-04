@@ -5,6 +5,7 @@
 import type { ArtifactRegistry } from './compaction/artifact-registry.mjs';
 import type { CompactionExecutor } from './compaction/executor.mjs';
 import type { SummaryGeneratorDependencies } from './compaction/summary-generator.mjs';
+import type { ToolWatchdogs } from './controllers/tool-watchdog.mjs';
 import type { RuntimeLockRegistry } from './infrastructure/locks.mjs';
 import type { RuntimeFilePartMaterializer } from './messages/file-parts.mjs';
 import type { ChatModelResolution } from './model/resolver.mjs';
@@ -17,6 +18,7 @@ import type {
   AIRequestOptions,
   AIServiceError,
   AITavilyRuntimeConfig,
+  AIToolActivityReporter,
   AIToolExecutionResult,
   AITransportTool,
   AIUsage
@@ -81,12 +83,6 @@ export interface ActiveChatRuntime extends ChatRuntimeAddress {
   abortController: AbortController;
   /** 创建时间戳。 */
   createdAt: number;
-  /** 当前任务级执行时钟暂停开始时间戳。 */
-  taskPausedAt?: number;
-  /** 当前任务级执行时钟累计暂停时长。 */
-  taskPausedDurationMs?: number;
-  /** 当前任务级执行时钟暂停嵌套深度。 */
-  taskPauseDepth?: number;
 }
 
 /**
@@ -156,8 +152,6 @@ export interface ChatRuntimeStreamExecutorInput {
   assistantMessage: ChatMessageRecord;
   /** 是否强制当前模型调用生成最终回答。 */
   forceFinal?: boolean;
-  /** 当前用户任务剩余的总超时时间。 */
-  totalTimeoutMs?: number;
 }
 
 /** Provider 边界捕获的单个延迟工具调用。 */
@@ -261,14 +255,6 @@ export interface ChatRuntimeRendererToolExecutionInput {
 /** Renderer 工具执行函数。 */
 export type ChatRuntimeRendererToolExecutor = (input: ChatRuntimeRendererToolExecutionInput) => Promise<AIToolExecutionResult>;
 
-/** 工具执行超时控制器。 */
-export interface ChatRuntimeToolTimeoutControls {
-  /** 暂停当前工具执行超时计时。 */
-  pause: () => void;
-  /** 恢复当前工具执行超时计时。 */
-  resume: () => void;
-}
-
 /** 主进程工具执行输入。 */
 export interface ChatRuntimeMainToolExecutionInput {
   /** runtime 状态。 */
@@ -281,8 +267,8 @@ export interface ChatRuntimeMainToolExecutionInput {
   input: unknown;
   /** 当前工具调用的组合中止信号。 */
   signal?: AbortSignal;
-  /** 当前工具调用的超时控制器，用于等待人工确认时暂停计时。 */
-  timeoutControls?: ChatRuntimeToolTimeoutControls;
+  /** 当前工具调用的受限活动上报器。 */
+  activity?: AIToolActivityReporter;
 }
 
 /** 主进程工具执行函数。 */
@@ -337,14 +323,18 @@ export interface ChatRuntimeServiceDependencies {
   compactionGenerateText: SummaryGeneratorDependencies['generateText'];
   /** 可选的上下文压缩 executor 测试替身。 */
   compactionExecutor?: CompactionExecutor;
+  /** 扫描应用重启后遗留非终态 Runtime Part 的消息。 */
+  listPendingRuntimeMessages?: () => Promise<ChatMessageRecord[]> | ChatMessageRecord[];
   /** 扫描应用重启后遗留 pending checkpoint 的消息。 */
   listPendingCompactionMessages: () => Promise<ChatMessageRecord[]> | ChatMessageRecord[];
   /** 文件 part 固化函数。 */
   materializeFileParts: RuntimeFilePartMaterializer;
   /** runtime 流式中止函数。 */
   streamAbort: ChatRuntimeStreamAborter;
-  /** Renderer 本地工具超时时间。 */
+  /** Renderer 本地工具开始确认超时时间。 */
   rendererToolTimeoutMs: number;
+  /** 可选的共享工具 Watchdog 注册表。 */
+  toolWatchdogs?: ToolWatchdogs;
   /** 可选的底层 Provider 流函数，用于受控集成测试。 */
   streamText?: RuntimeStreamText;
   /** 创建 runtime 消息 ID。 */

@@ -149,6 +149,7 @@ describe('compaction executor', (): void => {
 
     expect(harness.stages).toEqual(['capture', 'plan', 'write:pending', 'generate', 'validate', 'verify', 'write:success']);
     expect(generatorSnapshot?.sourceSnapshot.sourceParts.some((source) => source.part.type === 'compaction')).toBe(false);
+    expect(generatorSnapshot).not.toHaveProperty('taskDeadlineAt');
     expect(harness.writes).toHaveLength(2);
     expect(harness.writes[0].parts.at(-1)).toMatchObject({ type: 'compaction', status: 'pending' });
     expect(harness.writes[1].parts.at(-1)).toMatchObject({ type: 'compaction', status: 'success' });

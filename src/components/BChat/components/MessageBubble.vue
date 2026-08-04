@@ -37,7 +37,7 @@
 
             <QuestionCard v-else-if="item.kind === 'question'" :question="item.question" :disabled="disabled" :submit-action="submitAction" />
 
-            <BubblePartTool v-else-if="item.kind === 'tool'" :part="item.part" />
+            <BubblePartTool v-else-if="item.kind === 'tool'" :part="item.part" :runtime-id="message.runtimeId" :submit-action="submitAction" />
 
             <BubblePartWidget v-else-if="item.kind === 'widget'" :message-id="message.id" :part="item.part" :submit-action="submitAction" />
 

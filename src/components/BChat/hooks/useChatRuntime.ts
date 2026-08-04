@@ -9,6 +9,7 @@ import type {
   ChatRuntimeAddress,
   ChatRuntimeCompactInput,
   ChatRuntimeContinueInput,
+  ChatRuntimeControlToolInput,
   ChatRuntimeHandlerResult,
   ChatRuntimeMessageSnapshot,
   ChatRuntimeSendInput,
@@ -172,10 +173,15 @@ export function useChatRuntime(options: UseChatRuntimeOptions = {}) {
     assertRuntimeResult(await electronAPI.chatRuntimeSubmitMessagePart(toCloneableData(input)));
   }
 
+  /** 控制一个明确的在途工具。 */
+  async function controlTool(input: ChatRuntimeControlToolInput): Promise<void> {
+    assertRuntimeResult(await electronAPI.chatRuntimeControlTool(toCloneableData(input)));
+  }
+
   /** 中止明确指定的 Runtime。 */
   async function abort(runtimeId: string): Promise<ChatRuntimeAbortResult> {
     return unwrapRuntimeResult(await electronAPI.chatRuntimeAbort({ runtimeId }));
   }
 
-  return { abort, compact, continueTurn, send, submitMessagePart, submitUserChoice };
+  return { abort, compact, continueTurn, controlTool, send, submitMessagePart, submitUserChoice };
 }

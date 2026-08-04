@@ -31,6 +31,7 @@ import type {
   ChatRuntimeConfirmationDecision,
   ChatRuntimeCompletionReason,
   ChatRuntimeContinueInput,
+  ChatRuntimeControlToolInput,
   ChatRuntimeContextUsageSnapshot,
   ChatRuntimeEstimateContextInput,
   ChatRuntimeModelSelection,
@@ -39,6 +40,7 @@ import type {
   ChatRuntimeStartResult,
   ChatRuntimeSubmitConfirmationInput,
   ChatRuntimeSubmitMessagePartInput,
+  ChatRuntimeSubmitToolActivityInput,
   ChatRuntimeSubmitUserChoiceInput,
   ChatRuntimeSubmitToolResultInput
 } from 'types/chat-runtime';
@@ -57,11 +59,12 @@ import { createArtifactRegistry } from './compaction/artifact-registry.mjs';
 import { createCompactionBudget, exceedsHardLimit, shouldAutoCompact } from './compaction/budget.mjs';
 import { createCompactionExecutor } from './compaction/executor.mjs';
 import { projectContext } from './compaction/projector.mjs';
-import { generateStructuredSummary } from './compaction/summary-generator.mjs';
+import { generateStructuredSummary, type SummaryGeneratorDependencies } from './compaction/summary-generator.mjs';
 import { addRuntimeUsage, isSameRuntimeUsage } from './context/usage.mjs';
 import { createRuntimeBridgeRequests, type RuntimeBridgeRequestInput } from './controllers/bridge.mjs';
 import { createRuntimeConfirmationRequests, type RuntimeConfirmationRequestInput } from './controllers/confirmation.mjs';
 import { createRuntimeRendererToolRequests } from './controllers/renderer-tool.mjs';
+import { createToolWatchdogs, type ToolWatchdogs } from './controllers/tool-watchdog.mjs';
 import { ChatRuntimeError } from './errors.mjs';
 import { chatRuntimeLocks, createRuntimeLockRegistry, type RuntimeLockResult } from './infrastructure/locks.mjs';
 import {
@@ -92,9 +95,9 @@ import {
 } from './runners/factory.mjs';
 import { createPersistableAssistant } from './stream/deferred-tools.mjs';
 import { createRuntimeStreamExecutor } from './stream/index.mjs';
-import { normalizeRendererToolTimeoutMs } from './stream/tools.mjs';
-import { getRuntimeTaskDeadlineAt, getRuntimeTaskTimeout } from './task-clock.mjs';
+import { normalizeRendererStartTimeoutMs } from './stream/tools.mjs';
 import { createMainToolExecutor } from './tools/index.mjs';
+import { createMainToolFailureResult } from './tools/results.mjs';
 import { createRuntimeEventBase } from './types.mjs';
 
 /** Renderer 请求默认超时时间。 */
@@ -176,9 +179,9 @@ function createDefaultMessageReader(): ChatRuntimeMessageReader {
 function createDefaultStreamExecutor(
   executeRendererTool?: (input: ChatRuntimeRendererToolExecutionInput) => Promise<AIToolExecutionResult>,
   executeMainTool?: (input: ChatRuntimeMainToolExecutionInput) => Promise<AIToolExecutionResult>,
-  rendererToolTimeoutMs?: number,
   resolveModel?: ChatRuntimeServiceDependencies['resolveModel'],
-  streamText?: ChatRuntimeServiceDependencies['streamText']
+  streamText?: ChatRuntimeServiceDependencies['streamText'],
+  toolWatchdogs?: ToolWatchdogs
 ): ChatRuntimeStreamExecutor {
   const defaultResolver = createDefaultChatModelResolver();
   const resolver = {
@@ -189,7 +192,7 @@ function createDefaultStreamExecutor(
     streamText: streamText ?? ((createOptions, request, callOptions) => aiService.streamText(createOptions, request, callOptions)),
     executeRendererTool,
     executeMainTool,
-    rendererToolTimeoutMs
+    toolWatchdogs
   });
 }
 
@@ -435,22 +438,24 @@ export function createChatRuntimeService(
   const emit = dependencies.emit ?? createDefaultEmitter();
   const messageWriter = dependencies.messageWriter ?? createDefaultMessageWriter();
   const messageReader = dependencies.messageReader ?? createDefaultMessageReader();
-  const listPendingCompactionMessages = dependencies.listPendingCompactionMessages ?? (() => chatSessionManager.listPendingCompactionMessages());
+  const listPendingRuntimeMessages =
+    dependencies.listPendingRuntimeMessages ?? dependencies.listPendingCompactionMessages ?? (() => chatSessionManager.listPendingRuntimeMessages());
   const materializeFileParts = dependencies.materializeFileParts ?? materializeRuntimeFileParts;
   const streamAbort = dependencies.streamAbort ?? createDefaultStreamAborter();
   const { prepareDelegation } = dependencies;
-  const rendererToolTimeoutMs = normalizeRendererToolTimeoutMs(dependencies.rendererToolTimeoutMs ?? RUNTIME_RENDERER_REQUEST_TIMEOUT_MS);
+  const rendererStartTimeoutMs = normalizeRendererStartTimeoutMs(dependencies.rendererToolTimeoutMs ?? RUNTIME_RENDERER_REQUEST_TIMEOUT_MS);
   const createMessageId = dependencies.createMessageId ?? createDefaultMessageId;
   const now = dependencies.now ?? (() => new Date().toISOString());
   const requestModelResolver = createDefaultChatModelResolver();
   const resolveModel =
     dependencies.resolveModel ?? ((model?: ChatRuntimeModelSelection): Promise<ChatModelResolution | null> => requestModelResolver.resolve(model));
-  const compactionGenerateText =
-    dependencies.compactionGenerateText ?? ((createOptions, request, callOptions) => aiService.generateText(createOptions, request, callOptions));
+  const compactionGenerateText: SummaryGeneratorDependencies['generateText'] =
+    dependencies.compactionGenerateText ?? ((createOptions, request) => aiService.generateText(createOptions, request));
   const autoNameResolver = dependencies.autoNameResolveModel ?? (() => createDefaultChatModelResolver().resolve());
   const autoNameGenerateText = dependencies.autoNameGenerateText ?? ((createOptions, request) => aiService.generateText(createOptions, request));
   const autoNameUpdateSessionTitle = dependencies.autoNameUpdateSessionTitle ?? ((sessionId, title) => chatSessionManager.updateSessionTitle(sessionId, title));
   const locks = dependencies.locks ?? createRuntimeLockRegistry();
+  const toolWatchdogs = dependencies.toolWatchdogs ?? createToolWatchdogs();
   const activeRuntimes = new Map<string, ActiveChatRuntime>();
   const activeAssistantMessages = new Map<string, ChatMessageRecord>();
   const safeAssistantMessages = new Map<string, ChatMessageRecord>();
@@ -469,7 +474,7 @@ export function createChatRuntimeService(
   const rendererToolRequests = createRuntimeRendererToolRequests({
     emit,
     getRuntime,
-    timeoutMs: rendererToolTimeoutMs
+    timeoutMs: rendererStartTimeoutMs
   });
 
   /**
@@ -548,7 +553,7 @@ export function createChatRuntimeService(
 
   const streamExecutor =
     dependencies.streamExecutor ??
-    createDefaultStreamExecutor(rendererToolRequests.request, executeMainTool, rendererToolTimeoutMs, resolveModel, dependencies.streamText);
+    createDefaultStreamExecutor(rendererToolRequests.request, executeMainTool, resolveModel, dependencies.streamText, toolWatchdogs);
   const compactionExecutor =
     dependencies.compactionExecutor ??
     createCompactionExecutor({
@@ -632,6 +637,7 @@ export function createChatRuntimeService(
   function cleanupRuntime(runtime: ActiveChatRuntime): ChatMessageRecord | undefined {
     const workingMessage = activeAssistantMessages.get(runtime.runtimeId);
     const assistantMessage = structuredClone(safeAssistantMessages.get(runtime.runtimeId) ?? workingMessage);
+    toolWatchdogs.clear(runtime.runtimeId, 'RUNTIME_INTERRUPTED');
     runtime.status = 'completed';
     activeRuntimes.delete(runtime.runtimeId);
     activeAssistantMessages.delete(runtime.runtimeId);
@@ -886,8 +892,7 @@ export function createChatRuntimeService(
             modelSnapshot,
             system: runtime.system,
             tools: runtime.tools,
-            skillContentHashes: runtime.skillContentHashes,
-            taskDeadlineAt: getRuntimeTaskDeadlineAt(runtime)
+            skillContentHashes: runtime.skillContentHashes
           })
         ]);
         activeCompactionSources.delete(runtime.runtimeId);
@@ -930,39 +935,6 @@ export function createChatRuntimeService(
 
     emitContextUsage(runtime, projection.estimatedTokens);
     return projection.messages;
-  }
-
-  /**
-   * 在任务剩余截止时间内完成模型解析与上下文压缩准备。
-   * @param runtime - 当前 runtime
-   * @param rawMessages - 原始消息上下文
-   * @param userMessage - 当前用户消息
-   * @param assistantMessage - 当前 assistant 草稿
-   * @param timeoutMs - 当前任务剩余毫秒数
-   * @returns 模型请求上下文投影
-   */
-  async function prepareContextBeforeDeadline(
-    runtime: ActiveChatRuntime,
-    rawMessages: ChatMessageRecord[],
-    userMessage: ChatMessageRecord,
-    assistantMessage: ChatMessageRecord,
-    timeoutMs: number
-  ): Promise<ChatMessageRecord[]> {
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    try {
-      return await Promise.race([
-        prepareRequestContext(runtime, rawMessages, userMessage, assistantMessage),
-        new Promise<ChatMessageRecord[]>((_resolve, reject) => {
-          timeoutId = setTimeout((): void => {
-            // 超时收口并行触发两个取消动作；allSettled 避免清理失败产生未处理拒绝。
-            Promise.allSettled([compactionExecutor.cancel(runtime.runtimeId), streamAbort(runtime.runtimeId)]);
-            reject(createAIServiceError(AI_ERROR_CODE.REQUEST_FAILED, '本次 AI 任务已达到固定的 300 秒总时限'));
-          }, timeoutMs);
-        })
-      ]);
-    } finally {
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
-    }
   }
 
   /**
@@ -1018,14 +990,9 @@ export function createChatRuntimeService(
     const toolSteps: ToolStepSnapshot[] = [];
 
     while (shouldRun) {
-      const totalTimeoutMs = getRuntimeTaskTimeout(runtime);
-      if (totalTimeoutMs <= 0) {
-        throw createAIServiceError(AI_ERROR_CODE.REQUEST_FAILED, '本次 AI 任务已达到固定的 300 秒总时限');
-      }
-
-      // 每个模型请求边界都重新预算，并且只把 projection 交给模型。
+      // 每个模型请求边界都重新构建 projection。
       // eslint-disable-next-line no-await-in-loop
-      const projectedMessages = await prepareContextBeforeDeadline(runtime, currentSourceMessages, userMessage, assistantMessage, totalTimeoutMs);
+      const projectedMessages = await prepareRequestContext(runtime, currentSourceMessages, userMessage, assistantMessage);
       if (!activeRuntimes.has(runtime.runtimeId)) {
         throw new ChatRuntimeError('RUNTIME_NOT_ACTIVE', `Runtime ${runtime.runtimeId} is not active`);
       }
@@ -1033,9 +1000,8 @@ export function createChatRuntimeService(
       runtime.currentToolStep = { toolCalls: [] };
       // Runtime 是主聊天唯一续轮控制者；最终步骤通过内部参数关闭工具。
       // eslint-disable-next-line no-await-in-loop
-      const streamResult = await streamExecutor(
-        { runtime, sourceMessages: projectedMessages, userMessage, assistantMessage, forceFinal, totalTimeoutMs },
-        (message) => updateAssistantMessage(runtime, message)
+      const streamResult = await streamExecutor({ runtime, sourceMessages: projectedMessages, userMessage, assistantMessage, forceFinal }, (message) =>
+        updateAssistantMessage(runtime, message)
       );
       completedSteps += 1;
       toolSteps.push(runtime.currentToolStep ?? { toolCalls: [] });
@@ -1214,8 +1180,7 @@ export function createChatRuntimeService(
           modelSnapshot,
           system: runtime.system,
           tools: runtime.tools,
-          skillContentHashes: runtime.skillContentHashes,
-          taskDeadlineAt: getRuntimeTaskDeadlineAt(runtime)
+          skillContentHashes: runtime.skillContentHashes
         })
       ]);
       if (executionResult.status === 'rejected' && !assistantMessage.parts.some((part: ChatMessagePart): boolean => part.type === 'compaction')) {
@@ -1245,20 +1210,32 @@ export function createChatRuntimeService(
   }
 
   /**
-   * 把单条消息中的遗留 pending checkpoint 转为稳定失败终态。
+   * 把单条消息中的遗留 pending checkpoint 和未完成工具转为稳定失败终态。
    * @param message - 应用重启后扫描出的消息
    * @returns 不修改输入的恢复消息
    */
-  function interruptPendingCheckpoints(message: ChatMessageRecord): ChatMessageRecord {
+  function interruptPendingParts(message: ChatMessageRecord): ChatMessageRecord {
     const recovered = structuredClone(message);
     const completedAt = getCompactionNow();
     recovered.parts = recovered.parts.map((part: ChatMessagePart): ChatMessagePart => {
-      if (part.type !== 'compaction' || part.status !== 'pending') return part;
+      if (part.type === 'compaction' && part.status === 'pending') {
+        return {
+          ...part,
+          status: 'failed',
+          errorCode: 'INTERRUPTED',
+          completedAt
+        };
+      }
+      if (part.type !== 'tool' || part.status === 'done') return part;
+
       return {
         ...part,
-        status: 'failed',
-        errorCode: 'INTERRUPTED',
-        completedAt
+        status: 'done',
+        result: createMainToolFailureResult(part.toolName, 'RUNTIME_INTERRUPTED', '应用重启后无法恢复原工具执行链'),
+        activity: {
+          ...(part.activity ?? { sequence: 0 }),
+          state: 'interrupted'
+        }
       };
     });
     recovered.loading = false;
@@ -1280,7 +1257,7 @@ export function createChatRuntimeService(
       const writes = messages.map(
         (message: ChatMessageRecord): Promise<void> =>
           Promise.resolve()
-            .then(() => messageWriter.updateMessage(interruptPendingCheckpoints(message)))
+            .then(() => messageWriter.updateMessage(interruptPendingParts(message)))
             .then((): void => undefined)
       );
       const results = await Promise.allSettled(writes);
@@ -1295,7 +1272,7 @@ export function createChatRuntimeService(
    * @returns 本轮扫描和全部写入是否成功
    */
   async function runInterruptedRecovery(): Promise<boolean> {
-    const [messagesResult] = await Promise.allSettled([Promise.resolve().then(() => listPendingCompactionMessages())]);
+    const [messagesResult] = await Promise.allSettled([Promise.resolve().then(() => listPendingRuntimeMessages())]);
     if (messagesResult.status === 'rejected') return false;
 
     const messagesBySession = groupBy(messagesResult.value, (message: ChatMessageRecord): string => message.sessionId);
@@ -1741,6 +1718,7 @@ export function createChatRuntimeService(
       if (!runtime) return {};
 
       runtime.abortController.abort();
+      toolWatchdogs.clear(runtime.runtimeId, 'USER_CANCELLED');
       const compactionCancellation = runtime.phase === 'compacting' ? compactionExecutor.cancel(runtime.runtimeId) : Promise.resolve();
       activeRuntimes.delete(runtime.runtimeId);
       const workingMessage = activeAssistantMessages.get(runtime.runtimeId);
@@ -1802,6 +1780,32 @@ export function createChatRuntimeService(
      */
     submitToolResult(input: ChatRuntimeSubmitToolResultInput): void {
       rendererToolRequests.submit(input);
+    },
+
+    /**
+     * 提交 renderer 工具的非终态活动。
+     * @param input - 工具活动
+     */
+    submitToolActivity(input: ChatRuntimeSubmitToolActivityInput): void {
+      if (!rendererToolRequests.acceptActivity(input)) {
+        throw new ChatRuntimeError('TOOL_ACTIVITY_REJECTED', `Tool activity is not pending: ${input.runtimeId}/${input.toolCallId}`);
+      }
+      if (!toolWatchdogs.submit(input)) {
+        throw new ChatRuntimeError('TOOL_ACTIVITY_REJECTED', `Tool activity is stale or invalid: ${input.runtimeId}/${input.toolCallId}`);
+      }
+    },
+
+    /**
+     * 控制单个在途工具。
+     * @param input - 工具控制输入
+     */
+    controlTool(input: ChatRuntimeControlToolInput): void {
+      if (!activeRuntimes.has(input.runtimeId)) {
+        throw new ChatRuntimeError('RUNTIME_NOT_ACTIVE', `Runtime ${input.runtimeId} is not active`);
+      }
+      if (!toolWatchdogs.control(input)) {
+        throw new ChatRuntimeError('TOOL_CONTROL_REJECTED', `Tool control is invalid: ${input.runtimeId}/${input.toolCallId}`);
+      }
     },
 
     /**

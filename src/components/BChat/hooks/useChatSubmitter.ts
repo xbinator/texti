@@ -7,7 +7,7 @@ import type { PreparedRuntimeRequest } from './useRuntimeRequestConfig';
 import type { AdaptedUserMessageInput, MessagePartUpdateInput, SubmitAction } from '../utils/submitAction';
 import type { Message } from '../utils/types';
 import type { AIUserChoiceAnswerData } from 'types/chat';
-import type { ChatRuntimeAddress, ChatRuntimeModelSelection, ChatRuntimeStartResult } from 'types/chat-runtime';
+import type { ChatRuntimeAddress, ChatRuntimeControlToolInput, ChatRuntimeModelSelection, ChatRuntimeStartResult } from 'types/chat-runtime';
 import type { Ref } from 'vue';
 import { cloneDeep } from 'lodash-es';
 import type { ChatRuntimeRequestConfig } from '@/ai/chat/policies/runtimeRequest';
@@ -42,6 +42,8 @@ interface UseChatSubmitterOptions {
   onContinueFailed?: (error: unknown, runtimeId?: string) => void;
   /** 提交用户选择并续跑。 */
   submitUserChoice: (input: BChatRuntimeSubmitUserChoiceInput) => Promise<ChatRuntimeStartResult>;
+  /** 控制一个明确的在途 Runtime 工具。 */
+  controlRuntimeTool: (input: ChatRuntimeControlToolInput) => Promise<void>;
   /** 发送已创建的用户消息。 */
   sendRuntimeUserMessage: (input: AdaptedUserMessageInput) => Promise<void>;
   /** 提交 renderer 侧产生的消息片段更新。 */
@@ -176,6 +178,7 @@ export function useChatSubmitter(options: UseChatSubmitterOptions): UseChatSubmi
   async function submit(action: SubmitAction): Promise<void> {
     await action.run({
       continueAssistantTurn,
+      controlRuntimeTool: options.controlRuntimeTool,
       sendAdaptedUserMessage,
       updateMessagePart
     });

@@ -2,7 +2,7 @@
  * @file chat.d.ts
  * @description 聊天会话、消息与附件类型定义
  */
-import type { AIProviderType, AIToolExecutionResult, AIUsage } from './ai';
+import type { AIProviderType, AIToolExecutionResult, AIUsage, ChatToolActivitySnapshot } from './ai';
 import type { WidgetSubmitPayload } from './widget';
 
 /**
@@ -448,6 +448,8 @@ export interface ChatMessageToolPart extends ChatMessagePartBase {
   inputText?: string;
   /** 工具执行结果，仅 status === 'done' 时存在 */
   result?: AIToolExecutionResult;
+  /** Watchdog 验证并持久化的最后活动快照。 */
+  activity?: ChatToolActivitySnapshot;
   /** Shell 命令实时输出缓冲，仅 run_shell_command 使用 */
   shellOutput?: ChatMessageShellOutputChunk[];
   /** Shell PTY 临时 UI 状态，不进入模型工具结果。 */

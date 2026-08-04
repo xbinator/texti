@@ -2,9 +2,21 @@
  * @file stream/types.mts
  * @description ChatRuntime 流式执行器内部类型。
  */
+import type { ToolWatchdogLease, ToolWatchdogs } from '../controllers/tool-watchdog.mjs';
 import type { ChatModelResolver } from '../model/resolver.mjs';
 import type { ActiveChatRuntime, ChatRuntimeMainToolExecutor, ChatRuntimeRendererToolExecutor } from '../types.mjs';
 import type { AIRequestOptions, AIServiceError, AIStreamFinishReason, AIStreamResult, AIUsage, AIToolExecutionResult } from 'types/ai';
+
+/** AI SDK 可执行工具获取 Watchdog 租约的受限桥。 */
+export interface RuntimeToolActivityBridge {
+  /**
+   * 启动当前 Runtime 内的工具租约。
+   * @param toolCallId - 工具调用 ID
+   * @param toolName - 工具名称
+   * @returns Watchdog 租约
+   */
+  start(toolCallId: string, toolName: string): ToolWatchdogLease;
+}
 
 /** ChatRuntime 传给 AI 服务的内部调用策略。 */
 export interface RuntimeStreamCallOptions {
@@ -12,8 +24,8 @@ export interface RuntimeStreamCallOptions {
   runtimeToolLoop: true;
   /** 是否强制本次调用只生成最终回答。 */
   forceFinal: boolean;
-  /** 当前用户任务剩余的总超时时间。 */
-  totalTimeoutMs: number;
+  /** Runtime 工具活动桥，仅供 AI SDK 可执行工具使用。 */
+  toolActivity?: RuntimeToolActivityBridge;
 }
 
 /** Runtime 模型流式调用函数。 */
@@ -75,8 +87,8 @@ export interface RuntimeStreamExecutorDependencies {
   observeMainTool?: RuntimeMainToolObserver;
   /** Provider 结果或本地 executor 之前的强制授权钩子。 */
   guardToolCall?: RuntimeToolGuard;
-  /** Renderer 本地工具超时时间。 */
-  rendererToolTimeoutMs?: number;
+  /** 当前 ChatRuntimeService 唯一的工具 Watchdog 注册表。 */
+  toolWatchdogs?: ToolWatchdogs;
 }
 
 /** AI SDK 文本增量 chunk。 */

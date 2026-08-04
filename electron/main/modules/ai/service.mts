@@ -3,14 +3,30 @@
  * @description AI 服务核心类，封装文本生成和流式文本生成能力
  */
 import type { FlexibleSchema, ToolExecutionOptions, ToolSet } from 'ai';
-import type { AICreateOptions, AIRequestOptions, AIInvokeResult, AIStreamResult, AIServiceError, AIUsage, MCPDiscoveredToolSnapshot } from 'types/ai';
+import type {
+  AICreateOptions,
+  AIRequestOptions,
+  AIInvokeResult,
+  AIStreamResult,
+  AIServiceError,
+  AIToolExecutionResult,
+  AIUsage,
+  MCPDiscoveredToolSnapshot
+} from 'types/ai';
 import { generateText, isLoopFinished, jsonSchema, Output, streamText, tool } from 'ai';
 import { log } from '../logger/service.mjs';
 import { connectMcpServer, executeMcpTool, getMcpDiscoveryCache } from '../mcp/session.mjs';
-import { createMcpSdkTools, resolveMcpExposedTools } from '../mcp/tools.mjs';
+import { createMcpSdkTools, resolveMcpExposedTools, type MCPToolActivityBridge } from '../mcp/tools.mjs';
 import { AI_ERROR_CODE } from './errors/codes.mjs';
 import { AIProviderRegistry } from './providers/_index.mjs';
-import { AI_TASK_TIMEOUT_MS, appendFinalInstructions, createRequestTimeout, createRuntimeToolLoopTimeout, prepareToolStep } from './tool-loop-policy.mjs';
+import {
+  AI_LEGACY_TOOL_TIMEOUT_MS,
+  AI_DIRECT_REQUEST_TIMEOUT,
+  appendFinalInstructions,
+  createRequestTimeout,
+  createRuntimeToolLoopTimeout,
+  prepareToolStep
+} from './tool-loop-policy.mjs';
 import { normalizeAIUsage } from './usage.mjs';
 
 // ─── 纯工具函数 ──────────────────────────────────────────────────────────────
@@ -23,6 +39,16 @@ type TavilyEndpoint = '/search' | '/extract';
 
 /** 不声明工具专属 context 时可消费的 AI SDK 执行选项。 */
 type ContextlessToolOptions = Omit<ToolExecutionOptions<unknown>, 'context'>;
+
+/** 主进程内部模型调用策略，不进入 IPC 或用户请求配置。 */
+export interface AIServiceCallOptions {
+  /** 工具续轮是否由 ChatRuntime 统一托管。 */
+  runtimeToolLoop?: boolean;
+  /** 是否强制本次调用只生成最终回答。 */
+  forceFinal?: boolean;
+  /** Runtime MCP 工具的进度升级桥。 */
+  toolActivity?: MCPToolActivityBridge;
+}
 
 /** Tavily 搜索深度。 */
 type TavilySearchDepth = 'basic' | 'advanced';
@@ -146,6 +172,9 @@ interface TavilyExtractRequest {
 /** Tavily API 请求体联合类型。 */
 type TavilyRequestPayload = TavilySearchRequest | TavilyExtractRequest;
 
+/** 延迟到合并中止信号后才启动的 Tavily 请求。 */
+type TavilyRequestRunner = (abortSignal?: AbortSignal) => Promise<unknown>;
+
 /**
  * 判断值是否为普通记录对象。
  * @param value - 待判断值
@@ -215,6 +244,55 @@ async function postTavilyJson(endpoint: TavilyEndpoint, apiKey: string, payload:
   }
 
   return body;
+}
+
+/**
+ * 合并可选中止信号。
+ * @param signals - 可选中止信号列表
+ * @returns 单个中止信号，不存在可用信号时返回 undefined
+ */
+function mergeOptionalSignals(signals: Array<AbortSignal | undefined>): AbortSignal | undefined {
+  const activeSignals = signals.filter((signal): signal is AbortSignal => Boolean(signal));
+  if (activeSignals.length === 0) return undefined;
+  if (activeSignals.length === 1) return activeSignals[0];
+
+  return AbortSignal.any(activeSignals);
+}
+
+/**
+ * 执行不支持活动协议的 Tavily 请求，并保留 60 秒兼容保护。
+ * @param toolName - AI SDK 工具名称
+ * @param runRequest - 使用合并信号启动请求的函数
+ * @param abortSignal - AI SDK 上游中止信号
+ * @returns Tavily 响应或结构化超时结果
+ */
+async function executeLegacyTavily(toolName: string, runRequest: TavilyRequestRunner, abortSignal?: AbortSignal): Promise<unknown> {
+  const timeoutController = new AbortController();
+  const mergedSignal = mergeOptionalSignals([abortSignal, timeoutController.signal]);
+  let timeoutResult: AIToolExecutionResult | undefined;
+  let resolveTimeout: (result: AIToolExecutionResult) => void = (): void => undefined;
+  const timeoutOutcome = new Promise<AIToolExecutionResult>((resolve): void => {
+    resolveTimeout = resolve;
+  });
+  const timeoutTimer = setTimeout((): void => {
+    timeoutResult = {
+      toolName,
+      status: 'failure',
+      error: { code: 'TOOL_TIMEOUT', message: 'Tavily 工具执行超过兼容等待时限' }
+    };
+    resolveTimeout(timeoutResult);
+    timeoutController.abort();
+  }, AI_LEGACY_TOOL_TIMEOUT_MS);
+  const execution = runRequest(mergedSignal).catch((error: unknown): unknown => {
+    if (timeoutResult) return timeoutResult;
+    throw error;
+  });
+
+  try {
+    return await Promise.race([execution, timeoutOutcome]);
+  } finally {
+    clearTimeout(timeoutTimer);
+  }
 }
 
 /**
@@ -306,7 +384,11 @@ function createTavilySearchTool(apiKey: string) {
     description: 'Search the web for real-time, AI-optimized information using Tavily Search.',
     inputSchema: createTavilySearchInputSchema(),
     execute: async (input: TavilySearchInput, options: ContextlessToolOptions) => {
-      return postTavilyJson('/search', apiKey, createTavilySearchRequest(input), options.abortSignal);
+      return executeLegacyTavily(
+        'tavily_search',
+        (abortSignal?: AbortSignal): Promise<unknown> => postTavilyJson('/search', apiKey, createTavilySearchRequest(input), abortSignal),
+        options.abortSignal
+      );
     }
   });
 }
@@ -349,7 +431,11 @@ function createTavilyExtractTool(apiKey: string) {
         include_images: TAVILY_EXTRACT_DEFAULTS.includeImages,
         ...(query?.trim() ? { query } : {})
       };
-      return postTavilyJson('/extract', apiKey, request, options.abortSignal);
+      return executeLegacyTavily(
+        'tavily_extract',
+        (abortSignal?: AbortSignal): Promise<unknown> => postTavilyJson('/extract', apiKey, request, abortSignal),
+        options.abortSignal
+      );
     }
   });
 }
@@ -460,6 +546,7 @@ async function toSdkTools(
   tools: AIRequestOptions['tools'],
   tavily: AIRequestOptions['tavily'],
   mcp: AIRequestOptions['mcp'],
+  callOptions: AIServiceCallOptions,
   abortSignal?: AbortSignal
 ): Promise<ToolSet | undefined> {
   let rendererTools: ToolSet = {};
@@ -484,7 +571,15 @@ async function toSdkTools(
         if (!server) {
           throw new Error(`MCP server not found for tool execution: ${serverId}`);
         }
-        return executeMcpTool(server, toolName, input, options?.abortSignal);
+        return executeMcpTool(server, toolName, input, {
+          signal: options?.abortSignal,
+          onProgress: options?.onProgress,
+          timeoutMs: options?.timeoutMs
+        });
+      },
+      {
+        toolActivity: callOptions.toolActivity,
+        staticTimeouts: new Map(mcp.servers.map((server): [string, number] => [server.id, server.toolCallTimeoutMs]))
       }
     );
   }
@@ -521,16 +616,6 @@ interface GenerateTextResultLike {
   readonly finalStep?: GenerateTextStepLike;
   /** 顶层 token 使用量；AI SDK 7 中为所有步骤累计值。 */
   readonly usage?: Partial<AIUsage> | null;
-}
-
-/** 主进程内部模型调用策略，不进入 IPC 或用户请求配置。 */
-export interface AIServiceCallOptions {
-  /** 工具续轮是否由 ChatRuntime 统一托管。 */
-  runtimeToolLoop?: boolean;
-  /** 是否强制本次调用只生成最终回答。 */
-  forceFinal?: boolean;
-  /** 当前用户任务剩余的总超时时间。 */
-  totalTimeoutMs?: number;
 }
 
 /** AI 请求白名单诊断元数据。 */
@@ -625,19 +710,6 @@ function isExpectedTransientError(error: AIServiceError): boolean {
   return error.code === AI_ERROR_CODE.RATE_LIMITED || error.code === AI_ERROR_CODE.SERVICE_UNAVAILABLE;
 }
 
-/**
- * 合并可选中止信号。
- * @param signals - 可选中止信号列表
- * @returns 单个中止信号，不存在可用信号时返回 undefined
- */
-function mergeOptionalSignals(signals: Array<AbortSignal | undefined>): AbortSignal | undefined {
-  const activeSignals = signals.filter((signal): signal is AbortSignal => Boolean(signal));
-  if (activeSignals.length === 0) return undefined;
-  if (activeSignals.length === 1) return activeSignals[0];
-
-  return AbortSignal.any(activeSignals);
-}
-
 // ─── AIService ───────────────────────────────────────────────────────────────
 
 /**
@@ -665,12 +737,22 @@ class AIService {
   }
 
   /**
+   * 仅释放仍由当前调用持有的控制器，避免旧流结束误删复用 ID 的新流。
+   * @param requestId - 请求标识
+   * @param signal - 当前调用注册的信号
+   */
+  private releaseController(requestId: string, signal: AbortSignal): void {
+    if (this.abortControllers.get(requestId)?.signal === signal) this.removeController(requestId);
+  }
+
+  /**
    * 为指定请求创建 AbortSignal，并注册到内部映射表。
    * requestId 缺失时返回 undefined。
    */
   private registerAbortSignal(requestId?: string): AbortSignal | undefined {
     if (!requestId) return undefined;
 
+    this.abortControllers.get(requestId)?.abort();
     const controller = new AbortController();
     this.abortControllers.set(requestId, controller);
     return controller.signal;
@@ -686,7 +768,7 @@ class AIService {
    * 构建 generateText / streamText 共用的基础选项。
    */
   private async buildBaseOptions(createOptions: AICreateOptions, request: AIRequestOptions, callOptions: AIServiceCallOptions, abortSignal?: AbortSignal) {
-    const tools = await toSdkTools(request.tools, request.tavily, request.mcp, abortSignal);
+    const tools = await toSdkTools(request.tools, request.tavily, request.mcp, callOptions, abortSignal);
     const hasExecutableTools = hasTavilyHttpTools(request.tavily) || hasMcpSdkTools(request.mcp);
     const instructions = appendMcpToolInstructions(request.system, request.mcp);
 
@@ -697,7 +779,7 @@ class AIService {
       maxOutputTokens: request.maxOutputTokens,
       providerOptions: this.aiProvider.createProviderOptions(createOptions.providerType, request),
       tools,
-      timeout: callOptions.runtimeToolLoop ? createRuntimeToolLoopTimeout() : createRequestTimeout(callOptions.totalTimeoutMs),
+      timeout: callOptions.runtimeToolLoop ? createRuntimeToolLoopTimeout() : createRequestTimeout(),
       // 压缩边界的 system 消息由 Tibis 内部生成并持久化，保留其原始消息位置以维持上下文语义。
       ...(request.messages ? { allowSystemInMessages: true } : {}),
       ...(hasExecutableTools && !callOptions.runtimeToolLoop ? { prepareStep: prepareToolStep, stopWhen: isLoopFinished() } : {}),
@@ -731,10 +813,11 @@ class AIService {
     request: AIRequestOptions,
     callOptions: AIServiceCallOptions = {}
   ): Promise<[AIServiceError] | [undefined, AIInvokeResult]> {
+    let manualSignal: AbortSignal | undefined;
     try {
       log.info(`[AIService] generateText request:`, createRequestLog(request));
-      const manualSignal = this.registerAbortSignal(request.requestId);
-      const deadlineSignal = AbortSignal.timeout(Math.max(1, Math.min(AI_TASK_TIMEOUT_MS, callOptions.totalTimeoutMs ?? AI_TASK_TIMEOUT_MS)));
+      manualSignal = this.registerAbortSignal(request.requestId);
+      const deadlineSignal = callOptions.runtimeToolLoop ? undefined : AbortSignal.timeout(AI_DIRECT_REQUEST_TIMEOUT.totalMs);
       const abortSignal = mergeOptionalSignals([manualSignal, deadlineSignal]);
 
       const baseOptions = {
@@ -754,7 +837,7 @@ class AIService {
     } catch (error) {
       return this.handleError('generateText', error, createOptions.providerType);
     } finally {
-      if (request.requestId) this.removeController(request.requestId);
+      if (request.requestId && manualSignal) this.releaseController(request.requestId, manualSignal);
     }
   }
 
@@ -766,18 +849,21 @@ class AIService {
     request: AIRequestOptions,
     callOptions: AIServiceCallOptions = {}
   ): Promise<[AIServiceError] | [undefined, AIStreamResult]> {
+    let manualSignal: AbortSignal | undefined;
     try {
       log.info(`[AIService] streamText request:`, createRequestLog(request));
-      const manualSignal = this.registerAbortSignal(request.requestId);
-      const deadlineSignal = AbortSignal.timeout(Math.max(1, Math.min(AI_TASK_TIMEOUT_MS, callOptions.totalTimeoutMs ?? AI_TASK_TIMEOUT_MS)));
+      manualSignal = this.registerAbortSignal(request.requestId);
+      const deadlineSignal = callOptions.runtimeToolLoop ? undefined : AbortSignal.timeout(AI_DIRECT_REQUEST_TIMEOUT.totalMs);
       const buildAbortSignal = mergeOptionalSignals([manualSignal, deadlineSignal]);
       const streamAbortSignal = callOptions.runtimeToolLoop ? manualSignal : buildAbortSignal;
+      const releaseRequestId = request.requestId;
+      const releaseSignal = manualSignal;
 
       const baseOptions = {
         ...(await this.buildBaseOptions(createOptions, request, callOptions, buildAbortSignal)),
         ...(streamAbortSignal ? { abortSignal: streamAbortSignal } : {}),
         // ChatRuntime 直接消费完整流时没有 IPC finally，由 v7 onEnd 统一释放请求控制器。
-        ...(request.requestId ? { onEnd: this.removeController.bind(this, request.requestId) } : {})
+        ...(releaseRequestId && releaseSignal ? { onEnd: (): void => this.releaseController(releaseRequestId, releaseSignal) } : {})
       };
 
       const result = request.messages
@@ -786,7 +872,7 @@ class AIService {
 
       return [undefined, { stream: result.stream }];
     } catch (error) {
-      if (request.requestId) this.removeController(request.requestId);
+      if (request.requestId && manualSignal) this.releaseController(request.requestId, manualSignal);
       return this.handleError('streamText', error, createOptions.providerType);
     }
   }

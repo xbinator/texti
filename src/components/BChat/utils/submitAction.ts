@@ -4,7 +4,7 @@
  */
 import type { Message } from './types';
 import type { AIUserChoiceAnswerData, ChatMessagePart } from 'types/chat';
-import type { ChatRuntimeUserInputPart } from 'types/chat-runtime';
+import type { ChatRuntimeControlToolInput, ChatRuntimeUserInputPart } from 'types/chat-runtime';
 
 /**
  * 已由底层组件适配好的用户消息提交输入。
@@ -38,6 +38,11 @@ export interface SubmitContext {
    */
   continueAssistantTurn: (answer: AIUserChoiceAnswerData) => Promise<void>;
   /**
+   * 控制一个明确的在途 Runtime 工具。
+   * @param input - 单工具控制输入
+   */
+  controlRuntimeTool: (input: ChatRuntimeControlToolInput) => Promise<void>;
+  /**
    * 发送底层组件已适配好的用户消息。
    * @param input - 用户消息提交输入
    */
@@ -69,6 +74,19 @@ export function createUserChoice(answer: AIUserChoiceAnswerData): SubmitAction {
   return {
     async run(context: SubmitContext): Promise<void> {
       await context.continueAssistantTurn(answer);
+    }
+  };
+}
+
+/**
+ * 创建单个 Runtime 工具控制动作。
+ * @param input - 精确到 runtime/toolCall 的控制输入
+ * @returns 统一提交动作
+ */
+export function createToolControl(input: ChatRuntimeControlToolInput): SubmitAction {
+  return {
+    async run(context: SubmitContext): Promise<void> {
+      await context.controlRuntimeTool(input);
     }
   };
 }

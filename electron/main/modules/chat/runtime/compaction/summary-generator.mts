@@ -25,8 +25,6 @@ export interface SummaryGenerationInput {
   budgetSnapshot: CompactionBudgetSnapshot;
   /** 插入 pending 前冻结的摘要源。 */
   sourceSnapshot: CompactionSourceSnapshot;
-  /** 当前用户任务的绝对截止时间戳。 */
-  taskDeadlineAt?: number;
 }
 
 /**
@@ -36,11 +34,7 @@ export interface SummaryGeneratorDependencies {
   /** 解析当前会话选中的模型。 */
   resolveModel: () => Promise<ChatModelResolution | null>;
   /** 调用 AI SDK 同步结构化生成。 */
-  generateText: (
-    createOptions: AICreateOptions,
-    request: AIRequestOptions,
-    callOptions?: { totalTimeoutMs?: number }
-  ) => Promise<[AIServiceError] | [undefined, AIInvokeResult]>;
+  generateText: (createOptions: AICreateOptions, request: AIRequestOptions) => Promise<[AIServiceError] | [undefined, AIInvokeResult]>;
 }
 
 /** 摘要生成结果。 */
@@ -188,12 +182,7 @@ async function invokeSummary(
       description: 'Tibis rolling context checkpoint'
     }
   };
-  const totalTimeoutMs = input.taskDeadlineAt === undefined ? undefined : Math.max(0, input.taskDeadlineAt - Date.now());
-  if (totalTimeoutMs === 0) return { status: 'failed' };
-
-  const [generationResult] = await Promise.allSettled([
-    dependencies.generateText(resolution.createOptions, request, totalTimeoutMs === undefined ? undefined : { totalTimeoutMs })
-  ]);
+  const [generationResult] = await Promise.allSettled([dependencies.generateText(resolution.createOptions, request)]);
   if (generationResult.status === 'rejected') return { status: 'failed' };
 
   const [serviceError, invokeResult] = generationResult.value;

@@ -109,7 +109,7 @@ async function replayPendingRequest(actorSystem: ChatActorSystem, request: ChatR
       result: {
         toolName: request.event.toolName,
         status: 'failure',
-        error: { code: 'EDITOR_UNAVAILABLE', message: 'Renderer reloaded before the local tool request completed' }
+        error: { code: 'RUNTIME_INTERRUPTED', message: 'Renderer reloaded before the local tool request completed' }
       }
     });
     if (!result.ok) throw new Error(result.error ?? 'Failed to resolve recovered renderer tool request');

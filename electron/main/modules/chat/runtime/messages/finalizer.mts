@@ -39,6 +39,7 @@ function failPendingToolParts(message: ChatMessageRecord, error: AIServiceError)
       status: 'failure',
       error: { code: 'EXECUTION_FAILED', message: error.message }
     } satisfies AIToolExecutionFailureResult;
+    delete toolPart.activity;
     delete toolPart.inputText;
     hasFailedToolPart = true;
   }
@@ -80,6 +81,7 @@ export function finalizeToolPartsAsCancelled(message: ChatMessageRecord): void {
       status: 'cancelled',
       error: { code: 'USER_CANCELLED', message: '用户中止了操作' }
     } satisfies AIToolExecutionCancelledResult;
+    delete toolPart.activity;
     delete toolPart.inputText;
   }
 }

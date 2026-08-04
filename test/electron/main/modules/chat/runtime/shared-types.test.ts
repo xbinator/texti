@@ -1,14 +1,75 @@
-import type { ChatMessageCompactionPart, ChatMessageFilePart, ChatMessageFilePartInput, ChatMessagePart } from 'types/chat';
+import type { AIToolExecutionError } from 'types/ai';
+import type { ChatMessageCompactionPart, ChatMessageFilePart, ChatMessageFilePartInput, ChatMessagePart, ChatMessageToolPart } from 'types/chat';
 import type {
   ChatRuntimeAddress,
   ChatRuntimeCompactInput,
+  ChatRuntimeControlToolInput,
   ChatRuntimeRecoverySnapshot,
   ChatRuntimeSendInput,
+  ChatRuntimeSubmitToolActivityInput,
   ChatRuntimeSubmitUserChoiceInput
 } from 'types/chat-runtime';
 import { describe, expect, it } from 'vitest';
 
 describe('chat runtime shared types', (): void => {
+  it('keeps tool activity and control payloads cloneable', (): void => {
+    const progress = {
+      phase: 'scan',
+      completed: 3,
+      total: 10,
+      message: '已扫描 3 个目录'
+    };
+    const progressInput: ChatRuntimeSubmitToolActivityInput = {
+      runtimeId: 'runtime-1',
+      toolCallId: 'tool-1',
+      sequence: 2,
+      occurredAt: 1_000,
+      activity: {
+        kind: 'progress',
+        progress
+      }
+    };
+    const stopInput: ChatRuntimeControlToolInput = {
+      runtimeId: 'runtime-1',
+      toolCallId: 'tool-1',
+      action: 'stop'
+    };
+    const toolPart: ChatMessageToolPart = {
+      id: 'part-tool-1',
+      type: 'tool',
+      toolCallId: 'tool-1',
+      toolName: 'search_files',
+      status: 'executing',
+      input: {},
+      activity: {
+        state: 'executing',
+        sequence: 2,
+        lastProgressAt: 1_000,
+        progress: { ...progress, updatedAt: 1_000 }
+      }
+    };
+    const stableErrorCodes: AIToolExecutionError['code'][] = ['TOOL_UNRESPONSIVE', 'EXTERNAL_WAIT_TIMEOUT', 'USER_CANCELLED', 'RUNTIME_INTERRUPTED'];
+
+    expect(structuredClone({ progressInput, stopInput, toolPart })).toEqual({ progressInput, stopInput, toolPart });
+    expect(stableErrorCodes).toHaveLength(4);
+  });
+
+  it('requires a complete external wait deadline', (): void => {
+    const input: ChatRuntimeSubmitToolActivityInput = {
+      runtimeId: 'runtime-1',
+      toolCallId: 'tool-1',
+      sequence: 3,
+      occurredAt: 2_000,
+      activity: {
+        kind: 'waiting_external',
+        // @ts-expect-error External waits must always include retryAt and deadlineAt.
+        wait: { reason: '等待限流解除' }
+      }
+    };
+
+    expect(input.activity.kind).toBe('waiting_external');
+  });
+
   it('accepts input file parts without snapshots and persisted file parts with snapshots', (): void => {
     const inputPart: ChatMessageFilePartInput = {
       type: 'file',

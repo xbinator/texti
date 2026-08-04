@@ -108,6 +108,27 @@ const REQUEST = {
 };
 
 describe('PtyShellRunner cleanup', (): void => {
+  it('does not create a fixed deadline when timeoutMs is omitted', async (): Promise<void> => {
+    const controlled = createControlledPty();
+    const strategy = createStrategy(false);
+    const runner = createPtyShellRunner({
+      ptyFactory: { spawn: (): PtyProcess => controlled.process },
+      terminationStrategy: strategy,
+      gracePeriodMs: 5
+    });
+    const runPromise = runner.run({ ...REQUEST, commandId: 'pty-runtime-managed', timeoutMs: undefined });
+
+    await controlled.ready();
+    await new Promise<void>((resolve): void => {
+      setTimeout(resolve, 20);
+    });
+    controlled.emitExit({ exitCode: 0 });
+    const result = await runPromise;
+
+    expect(strategy.interruptTree).not.toHaveBeenCalled();
+    expect(result.termination).toEqual({ kind: 'exit', exitCode: 0 });
+  });
+
   it('emits finished exactly once, disposes subscriptions, and ignores later PTY events', async (): Promise<void> => {
     const controlled = createControlledPty();
     const ptyFactory: PtyProcessFactory = { spawn: (): PtyProcess => controlled.process };
@@ -231,7 +252,9 @@ describe('PtyShellRunner cleanup', (): void => {
 
     const terminalEvents = events.filter((event: ShellRunEventEnvelope): boolean => event.event.type === 'terminal_update');
     expect(terminalEvents.length).toBeGreaterThan(0);
-    expect(terminalEvents.length).toBeLessThanOrEqual(2);
+    const updateTimes = terminalEvents.map((event: ShellRunEventEnvelope): number => Date.parse(event.createdAt));
+    const throttledIntervals = updateTimes.slice(1, -1).map((createdAt, index): number => createdAt - (updateTimes[index] ?? createdAt));
+    expect(throttledIntervals.every((interval): boolean => interval >= 45)).toBe(true);
     expect(terminalEvents.at(-1)?.event).toMatchObject({ type: 'terminal_update', content: expect.stringContaining('20%') });
     expect(events.at(-1)?.event.type).toBe('finished');
   });

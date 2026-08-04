@@ -3,6 +3,7 @@
  * @description ChatRuntime renderer bridge 请求等待管理。
  */
 import type { ActiveChatRuntime, ChatRuntimeEventEmitter } from '../types.mjs';
+import type { AIToolExecutionError } from 'types/ai';
 import type {
   ChatRuntimeBridgeRequestEvent,
   ChatRuntimeBridgeResponseInput,
@@ -12,6 +13,30 @@ import type {
 import { nanoid } from 'nanoid';
 import { ChatRuntimeError } from '../errors.mjs';
 import { createRuntimeEventBase } from '../types.mjs';
+
+/** Watchdog 可通过 Bridge 等待传播的稳定中止码。 */
+const BRIDGE_ABORT_CODES: ReadonlySet<AIToolExecutionError['code']> = new Set([
+  'USER_CANCELLED',
+  'TOOL_UNRESPONSIVE',
+  'EXTERNAL_WAIT_TIMEOUT',
+  'RUNTIME_INTERRUPTED'
+]);
+
+/**
+ * 从中止信号构建保留 Watchdog 原因的 Bridge 结果。
+ * @param signal - Bridge 等待使用的中止信号
+ * @returns 结构化 Bridge 失败结果
+ */
+function createAbortedBridgeResult(signal?: AbortSignal): ChatRuntimeBridgeResult {
+  const reason: unknown = signal?.reason;
+  if (typeof reason === 'object' && reason !== null && 'code' in reason && 'message' in reason) {
+    const { code, message } = reason;
+    if (typeof code === 'string' && BRIDGE_ABORT_CODES.has(code as AIToolExecutionError['code']) && typeof message === 'string') {
+      return { status: 'failure', error: { code: code as AIToolExecutionError['code'], message } };
+    }
+  }
+  return { status: 'failure', error: { code: 'USER_CANCELLED', message: 'Renderer bridge request was aborted' } };
+}
 
 /** 活跃 runtime 读取函数。 */
 export type RuntimeLookup = (runtimeId: string) => ActiveChatRuntime | undefined;
@@ -105,7 +130,7 @@ export function createRuntimeBridgeRequests(dependencies: RuntimeBridgeRequestsD
      */
     request(input: RuntimeBridgeRequestInput): Promise<ChatRuntimeBridgeResult> {
       if (input.signal?.aborted) {
-        return Promise.resolve({ status: 'failure', error: { code: 'TOOL_TIMEOUT', message: 'Renderer bridge request was aborted' } });
+        return Promise.resolve(createAbortedBridgeResult(input.signal));
       }
       const runtime = dependencies.getRuntime(input.runtimeId);
       if (!runtime) {
@@ -126,7 +151,7 @@ export function createRuntimeBridgeRequests(dependencies: RuntimeBridgeRequestsD
         const resolveAborted = (): void => {
           pendingBridgeRequests.delete(key);
           clearTimeout(timeoutId);
-          resolve({ status: 'failure', error: { code: 'TOOL_TIMEOUT', message: 'Renderer bridge request was aborted' } });
+          resolve(createAbortedBridgeResult(input.signal));
         };
         timeoutId = setTimeout((): void => {
           pendingBridgeRequests.delete(key);

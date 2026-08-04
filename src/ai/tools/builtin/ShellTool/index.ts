@@ -53,6 +53,8 @@ export interface RunShellCommandInput {
   interactionMode?: unknown;
   /** Runtime 注入的本地执行中止信号，不进入模型 schema。 */
   abortSignal?: unknown;
+  /** 是否由 Runtime Watchdog 管理总生命周期，不进入模型 schema。 */
+  runtimeManaged?: unknown;
 }
 
 /**
@@ -85,9 +87,14 @@ function isSupportedShell(value: unknown): value is ElectronShellCommandShell {
 /**
  * 归一化命令超时时间。
  * @param timeoutMs - 原始超时时间
+ * @param runtimeManaged - 是否由 Runtime Watchdog 管理生命周期
  * @returns 归一化超时时间
  */
-function normalizeTimeoutMs(timeoutMs: unknown): number {
+function normalizeTimeoutMs(timeoutMs: unknown, runtimeManaged: unknown): number | undefined {
+  if (runtimeManaged === true) {
+    return undefined;
+  }
+
   if (timeoutMs === undefined) {
     return DEFAULT_TIMEOUT_MS;
   }
@@ -190,10 +197,16 @@ function formatSafetyFailureMessage(safety: ElectronShellCommandSafetyReport): s
  * @param safety - 安全分析报告
  * @returns 确认描述
  */
-function formatConfirmationDescription(shell: ElectronShellCommandShell, cwd: string, timeoutMs: number, safety: ElectronShellCommandSafetyReport): string {
+function formatConfirmationDescription(
+  shell: ElectronShellCommandShell,
+  cwd: string,
+  timeoutMs: number | undefined,
+  safety: ElectronShellCommandSafetyReport
+): string {
   const findingText = safety.findings.map((finding) => `- [${finding.severity}] ${finding.message}`).join('\n');
+  const timeoutText = timeoutMs === undefined ? '由 Runtime 活性监控' : `${timeoutMs}ms`;
 
-  return [`Shell: ${shell}`, `执行目录: ${cwd}`, `Timeout: ${timeoutMs}ms`, `安全风险:`, findingText].join('\n');
+  return [`Shell: ${shell}`, `执行目录: ${cwd}`, `Timeout: ${timeoutText}`, `安全风险:`, findingText].join('\n');
 }
 
 /**
@@ -314,7 +327,7 @@ export function createBuiltinShellCommandTool(options: CreateBuiltinShellCommand
           shell: { type: 'string', enum: ['bash', 'powershell'], description: '命令使用的 shell。' },
           command: { type: 'string', description: '要执行的命令文本。' },
           cwd: { type: 'string', description: '可选执行目录，必须位于 Tibis 工作区内；默认工作区目录。' },
-          timeoutMs: { type: 'number', description: '可选超时时间，默认 30000ms，范围 1000-120000ms。' },
+          timeoutMs: { type: 'number', description: '可选超时时间；直接调用默认 30000ms，Runtime 调用由活性监控管理。' },
           ...(initialCapability.enabled
             ? {
                 interactionMode: {
@@ -345,10 +358,10 @@ export function createBuiltinShellCommandTool(options: CreateBuiltinShellCommand
         return createToolFailureResult(RUN_SHELL_COMMAND_TOOL_NAME, 'ACTION_NOT_SUPPORTED', '当前构建尚未通过 Shell auto-default release gate');
       }
 
-      let timeoutMs: number;
+      let timeoutMs: number | undefined;
       let interactionMode: ElectronShellInteractionMode;
       try {
-        timeoutMs = normalizeTimeoutMs(input.timeoutMs);
+        timeoutMs = normalizeTimeoutMs(input.timeoutMs, input.runtimeManaged);
         interactionMode = normalizeInteractionMode(input.interactionMode);
       } catch (error) {
         return createToolFailureResult(RUN_SHELL_COMMAND_TOOL_NAME, 'INVALID_INPUT', error instanceof Error ? error.message : 'Shell 参数无效');
@@ -409,8 +422,8 @@ export function createBuiltinShellCommandTool(options: CreateBuiltinShellCommand
           command,
           cwd,
           workspaceRoot: resolvedWorkspaceRoot,
-          timeoutMs,
           interactionMode,
+          ...(timeoutMs === undefined ? {} : { timeoutMs }),
           ...(hasSafetyFindings ? { confirmedSafetyFindingCodes: safety.findings.map((finding): string => finding.code) } : {})
         })
       );

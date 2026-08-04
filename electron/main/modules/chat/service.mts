@@ -2,6 +2,7 @@
  * @file service.mts
  * @description 主进程聊天会话管理器，封装会话与消息的全部持久化逻辑。
  */
+import { realpathSync, statSync } from 'node:fs';
 import type { AIUsage } from 'types/ai';
 import type {
   ChatMessageFile,
@@ -17,7 +18,6 @@ import type {
   SessionCursor,
   SessionPaginationParams
 } from 'types/chat';
-import { realpathSync, statSync } from 'node:fs';
 import dayjs from 'dayjs';
 import { nanoid } from 'nanoid';
 import { dbExecute, dbSelect, transaction } from '../database/service.mjs';
@@ -125,12 +125,15 @@ const SELECT_ALL_MESSAGES_BY_SESSION_SQL = `
   FROM chat_messages
   WHERE session_id = ?
 `;
-const SELECT_PENDING_COMPACTION_MESSAGES_SQL = `
+const SELECT_PENDING_RUNTIME_MESSAGES_SQL = `
   SELECT id, session_id, role, content, parts_json, thinking, files_json, usage_json, created_at, loading, finished,
          agent_id, runtime_id, parent_runtime_id
   FROM chat_messages
-  WHERE parts_json LIKE '%"type":"compaction"%'
-    AND parts_json LIKE '%"status":"pending"%'
+  WHERE (parts_json LIKE '%"type":"compaction"%' AND parts_json LIKE '%"status":"pending"%')
+     OR (
+       parts_json LIKE '%"type":"tool"%'
+       AND (parts_json LIKE '%"status":"inputting"%' OR parts_json LIKE '%"status":"executing"%')
+     )
 `;
 const UPSERT_MESSAGE_SQL = `
   INSERT OR REPLACE INTO chat_messages
@@ -713,16 +716,26 @@ class ChatSessionManager {
   }
 
   /**
-   * 扫描可能包含遗留 pending checkpoint 的消息。
-   * @returns 仍实际包含 pending compaction Part 的完整消息
+   * 扫描可能包含遗留非终态 Runtime Part 的消息。
+   * @returns 仍实际包含 pending compaction 或未完成工具 Part 的完整消息
    */
-  listPendingCompactionMessages(): ChatMessageRecord[] {
-    const rows = dbSelect<ChatMessageRow>(SELECT_PENDING_COMPACTION_MESSAGES_SQL);
+  listPendingRuntimeMessages(): ChatMessageRecord[] {
+    const rows = dbSelect<ChatMessageRow>(SELECT_PENDING_RUNTIME_MESSAGES_SQL);
     return rows
       .map(mapMessageRow)
       .filter((message: ChatMessageRecord): boolean =>
-        message.parts.some((part: ChatMessagePart): boolean => part.type === 'compaction' && part.status === 'pending')
+        message.parts.some(
+          (part: ChatMessagePart): boolean => (part.type === 'compaction' && part.status === 'pending') || (part.type === 'tool' && part.status !== 'done')
+        )
       );
+  }
+
+  /**
+   * 保留旧调用名并复用完整 Runtime 恢复扫描。
+   * @returns 遗留非终态 Runtime 消息
+   */
+  listPendingCompactionMessages(): ChatMessageRecord[] {
+    return this.listPendingRuntimeMessages();
   }
 
   /**

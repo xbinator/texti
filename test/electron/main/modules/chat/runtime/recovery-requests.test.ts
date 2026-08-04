@@ -28,6 +28,154 @@ function createRuntime(): ActiveChatRuntime {
 }
 
 describe('chat runtime recovery request projections', (): void => {
+  it('preserves the structured cancellation reason while aborting a pending confirmation', async (): Promise<void> => {
+    const runtime = createRuntime();
+    const controller = new AbortController();
+    const requests = createRuntimeConfirmationRequests({ emit: vi.fn(), getRuntime: () => runtime });
+    const result = requests.request({
+      runtimeId: runtime.runtimeId,
+      confirmationId: 'confirmation-cancelled',
+      request: { toolName: 'write_file', title: '写入文件', description: '是否写入？', riskLevel: 'write' },
+      signal: controller.signal
+    });
+    const rejection = expect(result).rejects.toMatchObject({ code: 'USER_CANCELLED', message: '用户停止了工具调用' });
+
+    controller.abort({ code: 'USER_CANCELLED', message: '用户停止了工具调用' });
+
+    await rejection;
+    expect(requests.listPending(runtime.runtimeId)).toEqual([]);
+  });
+
+  it('preserves the structured cancellation reason while aborting a pending bridge', async (): Promise<void> => {
+    const runtime = createRuntime();
+    const controller = new AbortController();
+    const requests = createRuntimeBridgeRequests({ emit: vi.fn(), getRuntime: () => runtime, timeoutMs: 30_000 });
+    const result = requests.request({
+      runtimeId: runtime.runtimeId,
+      requestId: 'bridge-cancelled',
+      kind: 'document-snapshot',
+      signal: controller.signal
+    });
+
+    controller.abort({ code: 'USER_CANCELLED', message: '用户停止了工具调用' });
+
+    await expect(result).resolves.toMatchObject({ status: 'failure', error: { code: 'USER_CANCELLED', message: '用户停止了工具调用' } });
+    expect(requests.listPending(runtime.runtimeId)).toEqual([]);
+  });
+
+  it('marks persisted non-terminal tool parts interrupted without reviving execution', async (): Promise<void> => {
+    const messages: ChatMessageRecord[] = [
+      {
+        id: 'assistant-interrupted-tool',
+        sessionId: 'session-tool',
+        role: 'assistant',
+        content: '',
+        parts: [
+          {
+            id: 'tool-part-1',
+            type: 'tool',
+            toolCallId: 'tool-call-1',
+            toolName: 'grep',
+            status: 'executing',
+            input: { pattern: 'needle' },
+            activity: {
+              state: 'running_idle',
+              sequence: 7,
+              lastProgressAt: 1_000,
+              progress: { phase: 'scanning', completed: 64, updatedAt: 1_000 }
+            }
+          }
+        ],
+        createdAt: '2026-07-16T00:00:00.000Z',
+        loading: true,
+        finished: false
+      }
+    ];
+    const updateMessage = vi.fn(async (message: ChatMessageRecord): Promise<void> => {
+      messages[0] = structuredClone(message);
+    });
+    const streamExecutor = vi.fn();
+    const service = createChatRuntimeService({
+      emit: vi.fn(),
+      streamExecutor,
+      messageReader: { getMessages: (): ChatMessageRecord[] => [] },
+      messageWriter: { addMessage: vi.fn(), updateMessage },
+      listPendingRuntimeMessages: (): ChatMessageRecord[] => structuredClone(messages)
+    });
+
+    await service.recoverInterruptedCompactions();
+
+    expect(updateMessage).toHaveBeenCalledOnce();
+    expect(streamExecutor).not.toHaveBeenCalled();
+    expect(messages[0]).toMatchObject({ loading: false, finished: true });
+    expect(messages[0].parts[0]).toMatchObject({
+      status: 'done',
+      activity: {
+        state: 'interrupted',
+        sequence: 7,
+        lastProgressAt: 1_000,
+        progress: { phase: 'scanning', completed: 64, updatedAt: 1_000 }
+      },
+      result: {
+        toolName: 'grep',
+        status: 'failure',
+        error: { code: 'RUNTIME_INTERRUPTED' }
+      }
+    });
+  });
+
+  it('does not recover a non-terminal message that still belongs to an active runtime', async (): Promise<void> => {
+    let finishStream: (() => void) | undefined;
+    const streamOutcome = new Promise<void>((resolve): void => {
+      finishStream = resolve;
+    });
+    const pendingMessage: ChatMessageRecord = {
+      id: 'assistant-active-tool',
+      sessionId: 'session-active-tool',
+      role: 'assistant',
+      content: '',
+      parts: [
+        {
+          id: 'part-active-tool',
+          type: 'tool',
+          toolCallId: 'tool-active',
+          toolName: 'grep',
+          status: 'executing',
+          input: { pattern: 'needle' }
+        }
+      ],
+      runtimeId: 'runtime-active-tool',
+      createdAt: '2026-08-04T00:00:00.000Z',
+      loading: false,
+      finished: false
+    };
+    const updateMessage = vi.fn();
+    const service = createChatRuntimeService({
+      emit: vi.fn(),
+      messageReader: { getMessages: (): ChatMessageRecord[] => [] },
+      messageWriter: { addMessage: vi.fn(), updateMessage },
+      listPendingRuntimeMessages: (): ChatMessageRecord[] => [structuredClone(pendingMessage)],
+      streamExecutor: async (): Promise<{}> => {
+        await streamOutcome;
+        return {};
+      }
+    });
+
+    await service.send({
+      runtimeId: 'runtime-active-tool',
+      sessionId: 'session-active-tool',
+      turnId: 'turn-active-tool',
+      clientId: 'bchat',
+      agentId: 'primary',
+      rootRuntimeId: 'runtime-active-tool',
+      content: 'keep running'
+    });
+    await service.recoverInterruptedCompactions();
+
+    expect(updateMessage).not.toHaveBeenCalledWith(expect.objectContaining({ id: pendingMessage.id, finished: true }));
+    finishStream?.();
+  });
+
   it('marks interrupted pending compactions failed while preserving successful checkpoints', async (): Promise<void> => {
     const messages: ChatMessageRecord[] = [
       {

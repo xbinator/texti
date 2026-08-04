@@ -4,12 +4,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  AI_REQUEST_TIMEOUT,
-  AI_RUNTIME_TOOL_LOOP_TIMEOUT,
+  AI_DIRECT_REQUEST_TIMEOUT,
+  AI_LEGACY_TOOL_TIMEOUT_MS,
+  AI_RUNTIME_STREAM_TIMEOUT,
   createRequestTimeout,
   createRuntimeToolLoopTimeout,
-  getLoopStopReason,
-  getTaskTimeout
+  getLoopStopReason
 } from '../../../../../electron/main/modules/ai/tool-loop-policy.mjs';
 
 describe('tool loop policy', (): void => {
@@ -69,33 +69,22 @@ describe('tool loop policy', (): void => {
   });
 
   it('uses the fixed internal timeout policy', (): void => {
-    expect(AI_REQUEST_TIMEOUT).toEqual({
+    expect(AI_DIRECT_REQUEST_TIMEOUT).toEqual({
       totalMs: 300_000,
       chunkMs: 90_000,
       toolMs: 60_000
     });
   });
 
-  it('caps every SDK call by the remaining task deadline', (): void => {
-    expect(createRequestTimeout(12_345)).toEqual({
-      totalMs: 12_345,
-      chunkMs: 90_000,
-      toolMs: 60_000
-    });
-    expect(createRequestTimeout(600_000)).toEqual(AI_REQUEST_TIMEOUT);
+  it('uses one fixed protection for every direct SDK call', (): void => {
+    expect(createRequestTimeout()).toEqual(AI_DIRECT_REQUEST_TIMEOUT);
   });
 
   it('omits SDK total timeout when ChatRuntime owns the tool loop', (): void => {
-    expect(AI_RUNTIME_TOOL_LOOP_TIMEOUT).toEqual({
-      chunkMs: 90_000,
-      toolMs: 60_000
-    });
-    expect(createRuntimeToolLoopTimeout()).toEqual(AI_RUNTIME_TOOL_LOOP_TIMEOUT);
+    expect(AI_RUNTIME_STREAM_TIMEOUT).toEqual({ chunkMs: 90_000 });
+    expect(AI_LEGACY_TOOL_TIMEOUT_MS).toBe(60_000);
+    expect(createRuntimeToolLoopTimeout()).toEqual(AI_RUNTIME_STREAM_TIMEOUT);
     expect(createRuntimeToolLoopTimeout()).not.toHaveProperty('totalMs');
-  });
-
-  it('calculates the fixed task-wide remaining time', (): void => {
-    expect(getTaskTimeout(1_000, 121_000)).toBe(180_000);
-    expect(getTaskTimeout(1_000, 301_000)).toBe(0);
+    expect(createRuntimeToolLoopTimeout()).not.toHaveProperty('toolMs');
   });
 });

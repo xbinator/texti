@@ -9,7 +9,7 @@ import type {
   RuntimeToolInputStartChunk,
   RuntimeToolResultChunk
 } from './types.mjs';
-import type { AIUsage } from 'types/ai';
+import type { AIUsage, ChatToolActivitySnapshot } from 'types/ai';
 import type { ChatMessageRecord, ChatMessageToolPart } from 'types/chat';
 import { nanoid } from 'nanoid';
 
@@ -142,6 +142,23 @@ export function appendToolCall(message: ChatMessageRecord, chunk: RuntimeToolCal
 }
 
 /**
+ * 将 Watchdog 安全活动快照投影到目标工具 Part。
+ * @param message - assistant 消息
+ * @param toolCallId - 工具调用 ID
+ * @param activity - Watchdog 已验证的活动快照
+ * @returns 是否找到并更新了目标 Part
+ */
+export function applyToolActivity(message: ChatMessageRecord, toolCallId: string, activity: ChatToolActivitySnapshot): boolean {
+  const toolPart = message.parts.find((part): part is ChatMessageToolPart => part.type === 'tool' && part.toolCallId === toolCallId);
+  if (!toolPart || toolPart.status === 'done') return false;
+
+  toolPart.activity = structuredClone(activity);
+  message.loading = false;
+  message.finished = false;
+  return true;
+}
+
+/**
  * 写入工具结果片段。
  * @param message - assistant 消息
  * @param chunk - 工具结果 chunk
@@ -150,6 +167,7 @@ export function appendToolResult(message: ChatMessageRecord, chunk: RuntimeToolR
   const toolPart = ensureToolPart(message, chunk.toolCallId, chunk.toolName);
   toolPart.status = 'done';
   toolPart.result = chunk.result;
+  delete toolPart.activity;
   message.finished = false;
 }
 

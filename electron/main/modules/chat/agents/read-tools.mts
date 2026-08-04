@@ -18,7 +18,6 @@ import {
   DEFAULT_GREP_LINE_TEXT_LIMIT,
   DEFAULT_GREP_STDERR_LIMIT_BYTES,
   DEFAULT_GREP_STDOUT_LIMIT_BYTES,
-  DEFAULT_GREP_TIMEOUT_MS,
   runGlobSearch,
   runGrepSearch
 } from '../runtime/tools/file-search.mjs';
@@ -381,7 +380,6 @@ async function executeAuthorized(toolName: string, authorization: ChildReadAutho
       limit: DEFAULT_FILE_SEARCH_LIMIT,
       batchSize: DEFAULT_GREP_BATCH_SIZE,
       excludedDirs: DEFAULT_FILE_SEARCH_EXCLUDED_DIRS,
-      timeoutMs: DEFAULT_GREP_TIMEOUT_MS,
       stdoutLimitBytes: DEFAULT_GREP_STDOUT_LIMIT_BYTES,
       stderrLimitBytes: DEFAULT_GREP_STDERR_LIMIT_BYTES,
       lineTextLimit: DEFAULT_GREP_LINE_TEXT_LIMIT,

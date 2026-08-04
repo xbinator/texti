@@ -8,12 +8,14 @@ import type {
   ChatRuntimeBridgeResponseInput,
   ChatRuntimeCompactInput,
   ChatRuntimeContinueInput,
+  ChatRuntimeControlToolInput,
   ChatRuntimeEstimateContextInput,
   ChatRuntimeHandlerResult,
   ChatRuntimeRecoverySnapshot,
   ChatRuntimeSendInput,
   ChatRuntimeSubmitConfirmationInput,
   ChatRuntimeSubmitMessagePartInput,
+  ChatRuntimeSubmitToolActivityInput,
   ChatRuntimeSubmitUserChoiceInput,
   ChatRuntimeSubmitToolResultInput
 } from 'types/chat-runtime';
@@ -139,6 +141,16 @@ export function registerChatRuntimeHandlers(): void {
   ipcMain.handle(
     'chat:runtime:tool-result',
     wrapRuntimeHandler((_event, input) => chatRuntimeService.submitToolResult(input as ChatRuntimeSubmitToolResultInput))
+  );
+
+  ipcMain.handle(
+    'chat:runtime:tool-activity',
+    wrapRuntimeHandler((_event, input) => chatRuntimeService.submitToolActivity(input as ChatRuntimeSubmitToolActivityInput))
+  );
+
+  ipcMain.handle(
+    'chat:runtime:tool-control',
+    wrapRuntimeHandler((_event, input) => chatRuntimeService.controlTool(input as ChatRuntimeControlToolInput))
   );
 
   ipcMain.handle(

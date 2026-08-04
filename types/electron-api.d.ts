@@ -50,6 +50,7 @@ import type {
   ChatRuntimeCompactInput,
   ChatRuntimeConfirmationRequestEvent,
   ChatRuntimeContinueInput,
+  ChatRuntimeControlToolInput,
   ChatRuntimeContextUsageEvent,
   ChatRuntimeContextUsageSnapshot,
   ChatRuntimeEstimateContextInput,
@@ -62,6 +63,7 @@ import type {
   ChatRuntimeStartResult,
   ChatRuntimeSubmitConfirmationInput,
   ChatRuntimeSubmitMessagePartInput,
+  ChatRuntimeSubmitToolActivityInput,
   ChatRuntimeSubmitUserChoiceInput,
   ChatRuntimeSubmitToolResultInput,
   ChatRuntimeToolCancelledEvent,
@@ -284,8 +286,8 @@ export interface ElectronShellCommandRunRequest {
   cwd: string;
   /** 工作区根目录。 */
   workspaceRoot: string;
-  /** 超时时间，单位毫秒。 */
-  timeoutMs: number;
+  /** 超时时间，单位毫秒；缺省时由上层 Runtime Watchdog 管理。 */
+  timeoutMs?: number;
   /** 最终输出最大字符数。 */
   maxOutputChars?: number;
   /** 交互模式，缺省时使用普通管道模式。 */
@@ -629,6 +631,8 @@ export interface ElectronAPI {
   chatRuntimeAutoName: (input: ChatRuntimeAutoNameInput) => Promise<ChatRuntimeHandlerResult<ChatRuntimeAutoNameResult>>;
   chatRuntimeAbort: (input: ChatRuntimeAbortInput) => Promise<ChatRuntimeHandlerResult<ChatRuntimeAbortResult>>;
   chatRuntimeSubmitToolResult: (input: ChatRuntimeSubmitToolResultInput) => Promise<ChatRuntimeHandlerResult<void>>;
+  chatRuntimeSubmitToolActivity: (input: ChatRuntimeSubmitToolActivityInput) => Promise<ChatRuntimeHandlerResult<void>>;
+  chatRuntimeControlTool: (input: ChatRuntimeControlToolInput) => Promise<ChatRuntimeHandlerResult<void>>;
   chatRuntimeSubmitMessagePart: (input: ChatRuntimeSubmitMessagePartInput) => Promise<ChatRuntimeHandlerResult<void>>;
   chatRuntimeOnMessageCreated: (callback: (event: ChatRuntimeMessageEvent) => void) => () => void;
   chatRuntimeOnMessageUpdated: (callback: (event: ChatRuntimeMessageEvent) => void) => () => void;

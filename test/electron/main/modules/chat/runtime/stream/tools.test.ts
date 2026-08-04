@@ -5,11 +5,14 @@
 import type { ActiveChatRuntime, ChatRuntimeRendererToolExecutor } from '../../../../../../../electron/main/modules/chat/runtime/types.mjs';
 import type { AIToolExecutionResult } from 'types/ai';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createToolWatchdogs } from '../../../../../../../electron/main/modules/chat/runtime/controllers/tool-watchdog.mjs';
 import {
+  createToolFailureResultFromError,
   executeRendererToolSafely,
   shouldContinueAfterToolResult,
   shouldStopStreamAfterToolResult
 } from '../../../../../../../electron/main/modules/chat/runtime/stream/tools.mjs';
+import { createBridgeFailureResult } from '../../../../../../../electron/main/modules/chat/runtime/tools/results.mjs';
 
 /** 测试用 Runtime。 */
 const runtime: ActiveChatRuntime = {
@@ -30,8 +33,34 @@ afterEach((): void => {
 });
 
 describe('runtime tool timeout', (): void => {
-  it('aborts the execution signal when the renderer tool times out', async (): Promise<void> => {
+  it('preserves every stable tool error code exposed by an executor', (): void => {
+    const error = Object.assign(new Error('子进程未确认退出'), { code: 'PROCESS_CLEANUP_FAILED' as const });
+
+    expect(createToolFailureResultFromError('grep', error)).toMatchObject({
+      status: 'failure',
+      error: { code: 'PROCESS_CLEANUP_FAILED', message: '子进程未确认退出' }
+    });
+  });
+
+  it('keeps an executor abort as a terminal cancellation instead of a continuable failure', (): void => {
+    const error = Object.assign(new Error('用户停止了工具调用'), { code: 'USER_CANCELLED' as const });
+
+    expect(createToolFailureResultFromError('write_file', error)).toMatchObject({
+      status: 'cancelled',
+      error: { code: 'USER_CANCELLED', message: '用户停止了工具调用' }
+    });
+  });
+
+  it('converts a cancelled bridge wait to a terminal tool cancellation', (): void => {
+    expect(createBridgeFailureResult('write_file', { code: 'USER_CANCELLED', message: '用户停止了工具调用' })).toMatchObject({
+      status: 'cancelled',
+      error: { code: 'USER_CANCELLED', message: '用户停止了工具调用' }
+    });
+  });
+
+  it('aborts the execution signal when the renderer tool loses liveness', async (): Promise<void> => {
     vi.useFakeTimers();
+    vi.setSystemTime(0);
     let receivedSignal: AbortSignal | undefined;
     const executeTool: ChatRuntimeRendererToolExecutor = async (input) => {
       receivedSignal = input.signal;
@@ -40,11 +69,13 @@ describe('runtime tool timeout', (): void => {
       });
     };
 
-    const resultPromise = executeRendererToolSafely(executeTool, { runtime, toolCallId: 'tool-call-timeout', toolName: 'slow_tool', input: {} }, 100);
+    const watchdogs = createToolWatchdogs({ livenessMs: 100, idleMs: 1_000 });
+    const lease = watchdogs.start({ runtimeId: runtime.runtimeId, toolCallId: 'tool-call-timeout', toolName: 'slow_tool' });
+    const resultPromise = executeRendererToolSafely(executeTool, { runtime, toolCallId: 'tool-call-timeout', toolName: 'slow_tool', input: {} }, lease);
     await vi.advanceTimersByTimeAsync(100);
     const result = await resultPromise;
 
-    expect(result).toMatchObject({ status: 'failure', error: { code: 'TOOL_TIMEOUT' } });
+    expect(result).toMatchObject({ status: 'failure', error: { code: 'TOOL_UNRESPONSIVE' } });
     expect(receivedSignal?.aborted).toBe(true);
   });
 });

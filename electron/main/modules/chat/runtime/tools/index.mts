@@ -18,18 +18,18 @@ import { executeWebviewTool, isWebviewTool } from './WebviewTool/index.mjs';
  */
 export function createMainToolExecutor(deps: MainToolsDependencies): MainToolExecutor {
   return async (input: ChatRuntimeMainToolExecutionInput) => {
-    // 工具无需逐个手动透传 signal；确认请求等待用户时暂停外层执行超时。
+    // 工具无需逐个手动透传 signal；确认等待通过活动协议暂停 Watchdog。
     const toolDeps: MainToolsDependencies =
-      input.signal || input.timeoutControls
+      input.signal || input.activity
         ? {
             ...deps,
             requestBridge: (request) => deps.requestBridge({ ...request, signal: input.signal }),
             requestConfirmation: async (request) => {
-              input.timeoutControls?.pause();
+              input.activity?.waitUser(request.request.description);
               try {
                 return await deps.requestConfirmation({ ...request, signal: input.signal });
               } finally {
-                input.timeoutControls?.resume();
+                input.activity?.resume();
               }
             }
           }
