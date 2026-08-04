@@ -17,7 +17,7 @@ vi.mock('@/hooks/useNavigate', () => ({ useNavigate: () => ({ openFile: vi.fn() 
  * @returns Shell 工具气泡组件源码
  */
 function readBubbleSource(): string {
-  return readFileSync(resolvePath(process.cwd(), 'src/components/BChat/components/MessageBubble/BubblePartTool/index.vue'), 'utf8');
+  return readFileSync(resolvePath(process.cwd(), 'src/components/BChat/components/MessageBubble/BubblePartTool/ToolShellDisplay.vue'), 'utf8');
 }
 
 describe('BubblePartTool Shell display', (): void => {

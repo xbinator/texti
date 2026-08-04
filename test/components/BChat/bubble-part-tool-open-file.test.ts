@@ -11,8 +11,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import BubblePartTool from '@/components/BChat/components/MessageBubble/BubblePartTool/index.vue';
 
 const openFileMock = vi.hoisted(() => vi.fn<(_options: { filePath?: string | null }) => Promise<void>>().mockResolvedValue(undefined));
-/** 工具气泡组件源码。 */
-const bubblePartToolSource = readFileSync('src/components/BChat/components/MessageBubble/BubblePartTool/index.vue', 'utf8');
+/** 工具摘要组件源码。 */
+const toolSummarySource = readFileSync('src/components/BChat/components/MessageBubble/BubblePartTool/ToolSummary.vue', 'utf8');
 
 vi.mock('@/hooks/useNavigate', () => ({
   useNavigate: () => ({
@@ -85,6 +85,6 @@ describe('BubblePartTool open file summary tag', (): void => {
   });
 
   it('preserves summary text line breaks for readable descriptions', (): void => {
-    expect(bubblePartToolSource).toMatch(/\.bubble-part-tool__summary-text\s*\{[\s\S]*white-space:\s*pre-wrap;/);
+    expect(toolSummarySource).toMatch(/\.bubble-part-tool__summary-text\s*\{[\s\S]*white-space:\s*pre-wrap;/);
   });
 });
