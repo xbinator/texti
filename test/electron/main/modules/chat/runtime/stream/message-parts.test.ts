@@ -5,7 +5,12 @@
 import type { ChatMessageRecord } from 'types/chat';
 import { describe, expect, it } from 'vitest';
 import { createDefaultWidgetData } from '@/components/BWidget/utils/widgetData';
-import { appendToolCall, appendToolResult, applyToolActivity } from '../../../../../../../electron/main/modules/chat/runtime/stream/message-parts.mjs';
+import {
+  appendToolCall,
+  appendToolResult,
+  applyToolActivity,
+  findRendererHistory
+} from '../../../../../../../electron/main/modules/chat/runtime/stream/message-parts.mjs';
 
 /**
  * 创建 assistant 测试消息。
@@ -25,6 +30,22 @@ function createAssistantMessage(): ChatMessageRecord {
 }
 
 describe('runtime stream message parts', (): void => {
+  it('finds history metadata only for the exact runtime renderer tool name', (): void => {
+    const capabilities = {
+      rendererTools: [
+        { name: 'inspect_future_page', history: { mode: 'latest-only' as const, placeholder: 'Previous observation omitted.' } },
+        { name: 'read_only_page' }
+      ]
+    };
+
+    expect(findRendererHistory(capabilities, 'inspect_future_page')).toEqual({
+      mode: 'latest-only',
+      placeholder: 'Previous observation omitted.'
+    });
+    expect(findRendererHistory(capabilities, 'read_only_page')).toBeUndefined();
+    expect(findRendererHistory(capabilities, 'unknown_page_tool')).toBeUndefined();
+  });
+
   it('projects activity only onto the matching tool and clears it on result', (): void => {
     const message = createAssistantMessage();
     appendToolCall(message, { type: 'tool-call', toolCallId: 'tool-1', toolName: 'search_files', input: {} });
@@ -48,6 +69,25 @@ describe('runtime stream message parts', (): void => {
       result: { toolName: 'search_files', status: 'success', data: { matches: [] } }
     });
     expect(message.parts[0]).not.toHaveProperty('activity');
+  });
+
+  it('persists the renderer history snapshot with the tool call', (): void => {
+    const message = createAssistantMessage();
+
+    appendToolCall(
+      message,
+      { type: 'tool-call', toolCallId: 'tool-history', toolName: 'inspect_future_page', input: {} },
+      { mode: 'latest-only', placeholder: 'Previous observation omitted.', redactInputPaths: ['payload.secret'] }
+    );
+
+    expect(message.parts[0]).toMatchObject({
+      type: 'tool',
+      rendererHistory: {
+        mode: 'latest-only',
+        placeholder: 'Previous observation omitted.',
+        redactInputPaths: ['payload.secret']
+      }
+    });
   });
 
   it('does not change assistant loading when appending an awaiting tool result', (): void => {

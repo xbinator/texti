@@ -8,11 +8,7 @@ import {
   CONDITIONAL_BUILTIN_WRITABLE_TOOL_NAMES,
   createBuiltinTools,
   DEFAULT_BUILTIN_READONLY_TOOL_NAMES,
-  DEFAULT_BUILTIN_WRITABLE_TOOL_NAMES,
-  OPERATE_WEBPAGE_TOOL_NAME,
-  READ_CURRENT_DOCUMENT_TOOL_NAME,
-  READ_CURRENT_WEBPAGE_TOOL_NAME,
-  READ_CURRENT_WIDGET_TOOL_NAME
+  DEFAULT_BUILTIN_WRITABLE_TOOL_NAMES
 } from '@/ai/tools/builtin';
 import { DELEGATE_TASK_TOOL_NAME, GLOB_TOOL_NAME, GREP_TOOL_NAME } from '@/ai/tools/catalog/runtimeTools';
 import { getToolNamesByExposure } from '../../../shared/ai/tools/index.js';
@@ -35,9 +31,7 @@ describe('builtin tools index', (): void => {
   it('keeps page-scoped schemas out of the core builtin factory', (): void => {
     const toolNames = createBuiltinTools().map((tool) => tool.definition.name);
 
-    expect(toolNames).not.toEqual(
-      expect.arrayContaining([READ_CURRENT_DOCUMENT_TOOL_NAME, READ_CURRENT_WEBPAGE_TOOL_NAME, READ_CURRENT_WIDGET_TOOL_NAME, OPERATE_WEBPAGE_TOOL_NAME])
-    );
+    expect(toolNames).not.toEqual(expect.arrayContaining(['read_current_document', 'read_current_webpage', 'read_current_widget', 'operate_webpage']));
   });
 
   it('keeps workspace file search tools available when a workspace exists', (): void => {

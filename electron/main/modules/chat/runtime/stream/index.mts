@@ -31,6 +31,7 @@ import {
   appendToolInputStart,
   appendToolResult,
   applyToolActivity,
+  findRendererHistory,
   finishAssistantMessage
 } from './message-parts.mjs';
 import { createRuntimeStreamRequest } from './request.mjs';
@@ -215,12 +216,16 @@ export function createRuntimeStreamExecutor(dependencies: RuntimeStreamExecutorD
      * @param toolResult - 规范化工具结果
      */
     function applyToolResult(toolCallId: string, toolName: string, toolResult: AIToolExecutionResult): void {
-      appendToolResult(assistantMessage, {
-        type: 'tool-result',
-        toolCallId,
-        toolName,
-        result: toolResult
-      });
+      appendToolResult(
+        assistantMessage,
+        {
+          type: 'tool-result',
+          toolCallId,
+          toolName,
+          result: toolResult
+        },
+        findRendererHistory(runtime.capabilities, toolName)
+      );
       executedToolCount += 1;
       allToolsContinueable = allToolsContinueable && shouldContinueAfterToolResult(toolResult);
       anyToolStopped = anyToolStopped || shouldStopStreamAfterToolResult(toolResult);
@@ -264,7 +269,7 @@ export function createRuntimeStreamExecutor(dependencies: RuntimeStreamExecutorD
         if (isDeferredToolName(chunk.toolName)) {
           deferredToolCallIds.add(chunk.toolCallId);
         }
-        appendToolInputStart(assistantMessage, chunk);
+        appendToolInputStart(assistantMessage, chunk, findRendererHistory(runtime.capabilities, chunk.toolName));
         await persistAssistant();
       } else if (chunk.type === 'tool-input-delta') {
         appendToolInputDelta(assistantMessage, chunk);
@@ -273,7 +278,7 @@ export function createRuntimeStreamExecutor(dependencies: RuntimeStreamExecutorD
         appendToolInputEnd(assistantMessage, chunk);
         await persistAssistant();
       } else if (chunk.type === 'tool-call') {
-        appendToolCall(assistantMessage, chunk);
+        appendToolCall(assistantMessage, chunk, findRendererHistory(runtime.capabilities, chunk.toolName));
         applyPendingActivity(chunk.toolCallId);
         const completedCall = inheritToolMetadata(assistantMessage, chunk);
         getObservedTool(observedTools, chunk.toolCallId).calls.push(completedCall);

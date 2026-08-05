@@ -5,7 +5,7 @@
 import type { AIToolExecutionError } from 'types/ai';
 import type { ChatRuntimeBridgeRequestEvent } from 'types/chat-runtime';
 import type { OpenDraftInput, OpenDraftResult } from '@/ai/tools/shared/types';
-import type { ChatBridgeDispatchResult } from '@/hooks/useChat/useToolContext';
+import type { ChatBridgeDispatchResult } from '@/hooks/useChat/useChatContextRegistry';
 import { isDocumentRecord } from '@/shared/storage';
 import type { StoredDocumentRecord } from '@/shared/storage/files/types';
 import { asyncTo } from '@/utils/asyncTo';
@@ -45,7 +45,7 @@ export interface BChatRuntimeApplySettingResult {
 /** BChat runtime bridge 依赖。 */
 export interface BChatRuntimeBridgeDependencies {
   /** 向 Runtime 启动时绑定的页面工具上下文分发请求。 */
-  dispatchToolBridge?: (event: ChatRuntimeBridgeRequestEvent) => Promise<ChatBridgeDispatchResult>;
+  dispatchAppBridge?: (event: ChatRuntimeBridgeRequestEvent) => Promise<ChatBridgeDispatchResult>;
   /** 通过最近文件 ID 获取文件记录。 */
   getRecentFileById?: (fileId: string) => StoredDocumentRecord | undefined | Promise<StoredDocumentRecord | undefined>;
   /** 更新最近文件记录。 */
@@ -159,11 +159,11 @@ function unwrapBridgeError(error: unknown): unknown {
  * @returns 页面分发结果
  */
 async function requestPageBridge(event: ChatRuntimeBridgeRequestEvent, dependencies: BChatRuntimeBridgeDependencies): Promise<ChatBridgeDispatchResult> {
-  if (!dependencies.dispatchToolBridge) {
+  if (!dependencies.dispatchAppBridge) {
     throw createBridgeError('EDITOR_UNAVAILABLE', 'Runtime 未绑定可用的页面工具上下文');
   }
 
-  const [error, result] = await asyncTo(dependencies.dispatchToolBridge(event));
+  const [error, result] = await asyncTo(dependencies.dispatchAppBridge(event));
   if (error) {
     // Registry 错误可能经过多层 asyncTo，沿 cause 链恢复稳定业务码。
     throw unwrapBridgeError(error);
@@ -384,8 +384,8 @@ export async function handleBChatRuntimeBridgeRequest(event: ChatRuntimeBridgeRe
   }
 
   if (event.kind === 'write-file-content') {
-    if (dependencies.dispatchToolBridge) {
-      const [dispatchError, result] = await asyncTo(dependencies.dispatchToolBridge(event));
+    if (dependencies.dispatchAppBridge) {
+      const [dispatchError, result] = await asyncTo(dependencies.dispatchAppBridge(event));
       if (dispatchError) {
         const originalError = unwrapBridgeError(dispatchError);
         if (readBridgeErrorCode(originalError) !== 'EDITOR_UNAVAILABLE') throw originalError;

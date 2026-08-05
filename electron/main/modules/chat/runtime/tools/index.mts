@@ -9,7 +9,6 @@ import { executeReadTool, isReadTool } from './ReadTool/index.mjs';
 import { executeResourceTool, isResourceTool } from './ResourceTool/index.mjs';
 import { createMainToolFailureResult } from './results.mjs';
 import { executeSettingsTool, isSettingsTool } from './SettingsTool/index.mjs';
-import { executeWebviewTool, isWebviewTool } from './WebviewTool/index.mjs';
 
 /**
  * 创建主进程工具执行器。
@@ -39,8 +38,6 @@ export function createMainToolExecutor(deps: MainToolsDependencies): MainToolExe
     if (isFileTool(input.toolName)) return executeFileTool(input, toolDeps);
     if (isSettingsTool(input.toolName)) return executeSettingsTool(input, toolDeps);
     if (isResourceTool(input.toolName)) return executeResourceTool(input, toolDeps);
-    if (isWebviewTool(input.toolName)) return executeWebviewTool(input, toolDeps);
-
     return createMainToolFailureResult(input.toolName, 'TOOL_NOT_FOUND', `Unsupported main-process tool: ${input.toolName}`);
   };
 }

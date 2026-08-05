@@ -24,6 +24,28 @@ const base = {
 };
 
 describe('runtime factories', (): void => {
+  it('rejects duplicate and unsafe renderer capability metadata at the main-process boundary', (): void => {
+    const createWithCapabilities = (rendererTools: NonNullable<ChatRuntimeSendInput['capabilities']>['rendererTools']): void => {
+      createSendRuntime(
+        {
+          ...base,
+          rootRuntimeId: 'send',
+          runtimeId: 'send',
+          sessionId: 'session-1',
+          content: 'hello',
+          capabilities: { rendererTools }
+        } satisfies ChatRuntimeSendInput,
+        'send',
+        'session-1'
+      );
+    };
+
+    expect(() => createWithCapabilities([{ name: 'inspect_page' }, { name: 'inspect_page' }])).toThrow('Duplicate renderer tool descriptor: inspect_page');
+    expect(() => createWithCapabilities([{ name: 'inspect_page', history: { mode: 'keep', redactInputPaths: ['payload.__proto__.token'] } }])).toThrow(
+      'Invalid renderer history redact path for tool: inspect_page'
+    );
+  });
+
   it('copies the requested model into every active runtime', (): void => {
     const send = createSendRuntime(
       { ...base, rootRuntimeId: 'send', runtimeId: 'send', sessionId: 'session-1', content: 'hello' } satisfies ChatRuntimeSendInput,

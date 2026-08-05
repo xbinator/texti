@@ -13,7 +13,7 @@ import { createOpenWidgetTool, createWidgetTool } from '@/ai/tools/builtin/Widge
 import type { AIToolConfirmationAdapter } from '@/ai/tools/confirmation';
 import { createWidgetHttpClient, executeWidgetRuntime, type WidgetConsoleLevel, type WidgetLogLevel } from '@/components/BWidget/utils/widgetRuntime';
 import { formatWidgetLogArgs } from '@/components/BWidget/utils/widgetRuntime/logger';
-import { useActiveToolContext } from '@/hooks/useChat/useToolContext';
+import { useActiveChatContext } from '@/hooks/useChat/useChatContextRegistry';
 import { useNavigate } from '@/hooks/useNavigate';
 import { logger } from '@/shared/logger';
 import { native } from '@/shared/platform';
@@ -65,6 +65,17 @@ function validateToolNames(tools: AIToolExecutor[]): AIToolExecutor[] {
 }
 
 /**
+ * 禁止页面通过 hidden names 掩盖并覆盖应用级工具。
+ * @param applicationTools - 隐藏过滤前的应用级工具
+ * @param pageTools - 当前 binding 注册的页面工具
+ */
+function assertNoPageOverrides(applicationTools: AIToolExecutor[], pageTools: AIToolExecutor[]): void {
+  const applicationNames = new Set(applicationTools.map((tool: AIToolExecutor): string => tool.definition.name));
+  const conflict = pageTools.find((tool: AIToolExecutor): boolean => applicationNames.has(tool.definition.name));
+  if (conflict) throw new Error(`Page tool conflicts with application tool: ${conflict.definition.name}`);
+}
+
+/**
  * Runtime 工具 hook 配置。
  */
 interface UseRuntimeToolsOptions {
@@ -110,7 +121,7 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
   const widgetStore = useWidgetStore();
   const toolSettingsStore = useToolSettingsStore();
   const recentStore = useRecentStore();
-  const activeChatTools = useActiveToolContext();
+  const activeChatTools = useActiveChatContext();
   const { openDraft, openFileByPath } = useNavigate();
   /** open_widget 前置执行阶段复用的托管 HTTP 客户端。 */
   const widgetHttpClient = createWidgetHttpClient();
@@ -211,7 +222,8 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
    */
   function getActiveTools(binding?: RuntimeToolDiscoveryBinding): AIToolExecutor[] {
     const pageBinding = resolveToolBinding(binding);
-    const pageTools = pageBinding ? activeChatTools.getBoundTools(pageBinding) : [];
+    const runtimeBinding = isRuntimeToolBinding(binding) ? binding : undefined;
+    const pageTools = pageBinding ? activeChatTools.getBoundTools(pageBinding, { confirmation: options.createConfirmationAdapter(runtimeBinding) }) : [];
     const hiddenNames = new Set(pageBinding ? activeChatTools.getHiddenToolNames(pageBinding) : []);
     const coreTools = createBoundTools(binding);
     const hasWorkspace = Boolean(binding && binding.workspaceRoot !== undefined ? binding.workspaceRoot : options.workspaceRoot.value);
@@ -240,13 +252,15 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
       );
     }
 
-    const applicationTools = [...baseBuiltinTools, ...dynamicTools].filter((tool: AIToolExecutor): boolean => !hiddenNames.has(tool.definition.name));
-    const tools = [...applicationTools, ...pageTools].filter((tool: AIToolExecutor): boolean => {
+    const applicationCandidates = [...baseBuiltinTools, ...dynamicTools];
+    assertNoPageOverrides(applicationCandidates, pageTools);
+    const applicationTools = applicationCandidates.filter((tool: AIToolExecutor): boolean => {
+      if (hiddenNames.has(tool.definition.name)) return false;
       if (!isBuiltinToolName(tool.definition.name)) return false;
       if (tool.definition.name === READ_DIRECTORY_TOOL_NAME && !hasWorkspace) return false;
       return true;
     });
-    return validateToolNames(tools);
+    return validateToolNames([...applicationTools, ...pageTools]);
   }
 
   /**

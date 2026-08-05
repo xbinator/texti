@@ -9,6 +9,7 @@ import type { ChatMessageToolPart } from 'types/chat';
 import { mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import BubblePartTool from '@/components/BChat/components/MessageBubble/BubblePartTool/index.vue';
+import { toolContextRegistry } from '@/hooks/useChat/lib/registry';
 
 const openFileMock = vi.hoisted(() => vi.fn<(_options: { filePath?: string | null }) => Promise<void>>().mockResolvedValue(undefined));
 /** 工具摘要组件源码。 */
@@ -56,6 +57,10 @@ function mountTool(part: ChatMessageToolPart): VueWrapper {
         BTruncateText: {
           props: ['text'],
           template: '<span>{{ text }}</span>'
+        },
+        BMessage: {
+          props: ['content'],
+          template: '<pre>{{ content }}</pre>'
         }
       }
     }
@@ -65,6 +70,7 @@ function mountTool(part: ChatMessageToolPart): VueWrapper {
 describe('BubblePartTool open file summary tag', (): void => {
   afterEach((): void => {
     openFileMock.mockClear();
+    toolContextRegistry.clear();
   });
 
   it('opens the file when the write_file summary file tag is clicked', async (): Promise<void> => {
@@ -86,5 +92,114 @@ describe('BubblePartTool open file summary tag', (): void => {
 
   it('preserves summary text line breaks for readable descriptions', (): void => {
     expect(toolSummarySource).toMatch(/\.bubble-part-tool__summary-text\s*\{[\s\S]*white-space:\s*pre-wrap;/);
+  });
+
+  it('uses page-registered presentation without a BChat tool-name mapping', (): void => {
+    toolContextRegistry.register({
+      binding: { providerId: 'future-page', resourceId: 'page-a' },
+      getTools: () => [
+        {
+          definition: {
+            name: 'future_page_tool',
+            description: '读取未来页面',
+            source: 'builtin',
+            riskLevel: 'read',
+            parameters: { type: 'object', properties: {} }
+          },
+          execute: () => ({ toolName: 'future_page_tool', status: 'success', data: { value: 'done' } }),
+          presentation: {
+            label: '读取未来页面',
+            summarize: (): string => '已读取未来页面'
+          },
+          history: { mode: 'keep' }
+        }
+      ],
+      hiddenToolNames: [],
+      appBridgeHandlers: {}
+    });
+    const wrapper = mountTool(createToolPart('future_page_tool', { value: 'done' }));
+
+    expect(wrapper.text()).toContain('读取未来页面');
+    expect(wrapper.text()).toContain('已读取未来页面');
+    wrapper.unmount();
+  });
+
+  it('falls back safely when page presentations disagree for the same tool name', (): void => {
+    toolContextRegistry.register({
+      binding: { providerId: 'future-page', resourceId: 'page-a' },
+      getTools: () => [
+        {
+          definition: {
+            name: 'ambiguous_page_tool',
+            description: 'Inspect page A',
+            source: 'builtin',
+            riskLevel: 'read',
+            parameters: { type: 'object', properties: {} }
+          },
+          execute: () => ({ toolName: 'ambiguous_page_tool', status: 'success', data: { value: 'a' } }),
+          presentation: { label: '页面 A' }
+        }
+      ],
+      hiddenToolNames: [],
+      appBridgeHandlers: {}
+    });
+    const active = toolContextRegistry.register({
+      binding: { providerId: 'other-page', resourceId: 'page-b' },
+      getTools: () => [
+        {
+          definition: {
+            name: 'ambiguous_page_tool',
+            description: 'Inspect page B',
+            source: 'builtin',
+            riskLevel: 'read',
+            parameters: { type: 'object', properties: {} }
+          },
+          execute: () => ({ toolName: 'ambiguous_page_tool', status: 'success', data: { value: 'b' } }),
+          presentation: { label: '页面 B' }
+        }
+      ],
+      hiddenToolNames: [],
+      appBridgeHandlers: {}
+    });
+    active.activate();
+
+    const wrapper = mountTool(createToolPart('ambiguous_page_tool', { value: 'done' }));
+
+    expect(wrapper.text()).toContain('ambiguous_page_tool');
+    expect(wrapper.text()).not.toContain('页面 A');
+    expect(wrapper.text()).not.toContain('页面 B');
+    wrapper.unmount();
+  });
+
+  it('falls back to raw output when a page result summarizer throws', (): void => {
+    toolContextRegistry.register({
+      binding: { providerId: 'future-page', resourceId: 'page-a' },
+      getTools: () => [
+        {
+          definition: {
+            name: 'throwing_page_tool',
+            description: 'Inspect future page',
+            source: 'builtin',
+            riskLevel: 'read',
+            parameters: { type: 'object', properties: {} }
+          },
+          execute: () => ({ toolName: 'throwing_page_tool', status: 'success', data: { value: 'done' } }),
+          presentation: {
+            label: '读取未来页面',
+            summarize: (): string => {
+              throw new Error('broken presentation');
+            }
+          }
+        }
+      ],
+      hiddenToolNames: [],
+      appBridgeHandlers: {}
+    });
+
+    const wrapper = mountTool(createToolPart('throwing_page_tool', { value: 'done' }));
+
+    expect(wrapper.text()).toContain('读取未来页面');
+    expect(wrapper.text()).toContain('done');
+    wrapper.unmount();
   });
 });

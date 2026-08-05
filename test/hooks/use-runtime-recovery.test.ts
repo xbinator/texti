@@ -38,7 +38,7 @@ function createSnapshot(): ChatRuntimeRecoverySnapshot {
     phase: 'streaming',
     createdAt: 1,
     capabilities: {
-      rendererToolNames: ['read_current_document'],
+      rendererTools: [{ name: 'read_current_document' }],
       toolContext: { providerId: 'editor', resourceId: 'document-1' }
     },
     pendingRequests: [

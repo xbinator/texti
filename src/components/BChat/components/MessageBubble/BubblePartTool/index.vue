@@ -64,6 +64,8 @@ import { isPlainObject, isString } from 'lodash-es';
 import type { QuestionItemInput, QuestionToolInput } from '@/ai/tools/builtin/QuestionTool';
 import type { SubmitAction } from '@/components/BChat/utils/submitAction';
 import { createToolControl } from '@/components/BChat/utils/submitAction';
+import { useActiveChatContext } from '@/hooks/useChat/useChatContextRegistry';
+import type { ToolContextPresentation } from '@/hooks/useChat/useChatContextRegistry';
 import type { TodoItem } from '@/stores/chat/todo';
 import { asyncTo } from '@/utils/asyncTo';
 import { createNamespace } from '@/utils/namespace';
@@ -104,6 +106,8 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const [, bem] = createNamespace('', 'bubble-part-tool');
+/** 当前页面注册的通用工具展示能力。 */
+const activeChatTools = useActiveChatContext();
 /** 当前卡片正在提交的单工具控制动作。 */
 const controlPending = ref<ChatRuntimeControlToolInput['action'] | null>(null);
 
@@ -205,6 +209,21 @@ function hasDoneIcon(status: string | undefined): status is keyof typeof ICON_MA
   return Boolean(status && status in ICON_MAP.done);
 }
 
+/**
+ * 仅读取所有已注册页面都能一致解释的工具展示能力。
+ * @param toolName - 页面工具名称
+ * @returns 无歧义的展示能力
+ */
+function resolvePresentation(toolName: string): ToolContextPresentation | undefined {
+  try {
+    // 显式订阅 Registry 修订号，使页面注册和注销可立即更新历史消息展示。
+    if (activeChatTools.revision.value < 0) return undefined;
+    return activeChatTools.getPresentationByTool(toolName);
+  } catch {
+    return undefined;
+  }
+}
+
 /** 根据工具执行状态计算显示的图标。 */
 const icon = computed<string>(() => {
   const { status } = props.part;
@@ -249,7 +268,8 @@ const lastProgressText = computed<string>(() => {
 /** 工具标题：文件操作显示文件路径，skill 显示技能名称，其余显示工具别名。 */
 const title = computed<string>(() => {
   const { part } = props;
-  const { alias } = getActionLabel(part.toolName);
+  const presentation = resolvePresentation(part.toolName);
+  const alias = presentation?.label ?? getActionLabel(part.toolName).alias;
 
   if ((part.toolName === 'write_file' || part.toolName === 'edit_file') && isRecord(part.input)) {
     const { path } = part.input;
@@ -308,6 +328,14 @@ const todoWriteCompletedCount = computed<number | null>(() => {
 /** 工具执行完成时的人可读摘要，支持成功/失败/取消状态。 */
 const summary = computed<ToolResultSummary | null>(() => {
   if (props.part.status !== 'done' || !props.part.result) return null;
+  const presentation = resolvePresentation(props.part.toolName);
+  if (props.part.result.status === 'success' && presentation?.summarize) {
+    try {
+      return { text: presentation.summarize(props.part.result) };
+    } catch {
+      return getToolResultSummary(props.part.toolName, props.part.result);
+    }
+  }
   return getToolResultSummary(props.part.toolName, props.part.result);
 });
 

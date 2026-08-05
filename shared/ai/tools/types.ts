@@ -39,13 +39,15 @@ export interface SharedToolDefinition {
   permissionCategory?: 'document' | 'settings' | 'system';
   /** 此写入工具是否可以自动批准并记住。 */
   safeAutoApprove?: boolean;
+  /** 此工具是否允许用户在手动确认后记住授权。 */
+  allowPermissionRemember?: boolean;
 }
 
 /** 工具运行时归属。 */
 export type ToolRuntimeOwner = 'main' | 'renderer' | 'sdk' | 'coordinator';
 
 /** 主进程工具分组。 */
-export type ToolRuntimeGroup = 'read' | 'file' | 'settings' | 'resource' | 'webview' | 'agent';
+export type ToolRuntimeGroup = 'read' | 'file' | 'settings' | 'resource' | 'agent';
 
 /** 工具暴露策略。 */
 export type ToolExposure = 'default-readonly' | 'default-writable' | 'conditional-readonly' | 'conditional-writable' | 'internal';

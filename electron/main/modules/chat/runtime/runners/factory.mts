@@ -4,6 +4,7 @@
  */
 import type { ActiveChatRuntime, ChatRuntimePrimaryContinuationContext } from '../types.mjs';
 import type { ChatRuntimeCompactInput, ChatRuntimeContinueInput, ChatRuntimeSendInput, ChatRuntimeSubmitUserChoiceInput } from 'types/chat-runtime';
+import { normalizeRuntimeCapabilities } from '../capabilities.mjs';
 
 /** 支持创建 ActiveChatRuntime 的请求输入。 */
 type RuntimeFactoryInput = ChatRuntimeSendInput | ChatRuntimeContinueInput | ChatRuntimeCompactInput | ChatRuntimeSubmitUserChoiceInput;
@@ -74,7 +75,7 @@ function createRuntimeBase(input: RuntimeFactoryInput, runtimeId: string, sessio
     rootRuntimeId: input.rootRuntimeId,
     continuationOfRuntimeId: input.continuationOfRuntimeId,
     model: input.model,
-    capabilities: input.capabilities,
+    capabilities: normalizeRuntimeCapabilities(input.capabilities),
     contextWindow: input.contextWindow,
     system: input.system,
     workspaceRoot: input.workspaceRoot,

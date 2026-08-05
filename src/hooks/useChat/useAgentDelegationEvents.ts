@@ -85,7 +85,7 @@ function unwrapAgentResult<T>(result: ChatAgentHandlerResult<T>): T {
 function createResumeCapabilities(): RuntimeExecutionCapabilities {
   return {
     tools: [],
-    descriptor: { rendererToolNames: [] },
+    descriptor: { rendererTools: [] },
     getToolContext: (): undefined => undefined,
     handleBridgeRequest: async (): Promise<never> => {
       throw new Error('Primary continuation has no renderer bridge capability');

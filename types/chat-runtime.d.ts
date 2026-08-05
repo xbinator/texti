@@ -86,10 +86,28 @@ export interface ChatToolBinding {
   readonly resourceId: string;
 }
 
+/** Renderer 工具的声明式历史投影策略。 */
+export interface ChatRendererToolHistoryPolicy {
+  /** 完整保留，或只保留该工具最新一次完整结果。 */
+  readonly mode: 'keep' | 'latest-only';
+  /** 旧结果被裁剪后的稳定说明。 */
+  readonly placeholder?: string;
+  /** 工具输入中需要从模型历史移除的自有属性路径。 */
+  readonly redactInputPaths?: readonly string[];
+}
+
+/** Runtime 冻结的 Renderer 工具能力。 */
+export interface ChatRendererToolDescriptor {
+  /** 冻结的工具名称。 */
+  readonly name: string;
+  /** 可选的通用历史投影策略。 */
+  readonly history?: ChatRendererToolHistoryPolicy;
+}
+
 /** Cloneable renderer capability identity retained by the main-process runtime. */
 export interface ChatRuntimeCapabilityDescriptor {
-  /** Renderer tool names exposed when the runtime started. */
-  readonly rendererToolNames: readonly string[];
+  /** Renderer tools exposed when the runtime started. */
+  readonly rendererTools: readonly ChatRendererToolDescriptor[];
   /** Workspace root captured when renderer tool executors were registered. */
   workspaceRoot?: string;
   /** Page tool resource captured when the runtime started. */

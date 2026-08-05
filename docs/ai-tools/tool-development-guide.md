@@ -2,9 +2,9 @@
 
 日期：2026-06-25
 
-更新：2026-07-27
+更新：2026-08-05
 
-本文档说明如何在当前工具架构下新增或修改 AI 工具。现在工具定义和执行拆成两层：
+本文档说明如何在当前工具架构下新增或修改 AI 工具。应用级工具的定义和执行拆成两层，页面绑定工具则由页面完整自注册：
 
 - `shared/ai/tools/index.ts` 是已迁移 ChatRuntime 工具的统一聚合入口，导出工具名、`TOOL_REGISTRY` 和 registry 查询函数。
 - `shared/ai/tools/<PascalCaseTool>/index.ts` 是单个工具领域的元数据文件，维护该领域的工具名、schema、风险等级、运行时归属、分组和暴露策略。
@@ -12,6 +12,7 @@
 - `electron/main/modules/chat/runtime/tools/**/index.mts` 是已迁移工具的主进程执行入口。
 - `src/ai/tools/catalog/runtimeTools.ts` 只为 renderer 暴露 schema-only 工具，执行时会提示该工具已迁移到主进程。
 - `src/ai/tools/builtin/**/index.ts` 只保留仍需 renderer 本地状态或本地交互的工具。
+- `src/hooks/useChat/useChatContextRegistry.ts` 是页面绑定工具的通用注册与消费入口；工具定义、真实 executor、确认、展示和历史策略归属各页面的 `useChatContext`。
 
 新增工具前，先判断工具属于哪一类，再决定写在哪里。
 
@@ -34,7 +35,7 @@
 - 共享工具 helper：`electron/main/modules/chat/runtime/tools/*.mts`
 - renderer schema-only wrapper：通常由 `src/ai/tools/catalog/runtimeTools.ts` 从 registry 自动派生，不要重复写 schema 字面量。
 
-### Renderer-local 工具
+### 应用级 Renderer-local 工具
 
 仅当工具必须依赖 renderer 本地状态时使用。当前包括：
 
@@ -43,6 +44,7 @@
 - `MemoryTool`
 - `ShellTool`
 - `SkillTool`
+- `WidgetTool`，负责聊天级 Widget 发现与打开，不是 Widget 编辑页的 `read_current_widget`。
 
 代码落点：
 
@@ -50,6 +52,26 @@
 - `src/ai/tools/builtin/index.ts`
 
 不要把已经能在主进程完成的工具继续放进 renderer-local 目录。
+
+### 页面绑定 Renderer 工具
+
+工具必须读取或操作某个具体页面实例，且 Runtime 启动后仍必须绑定该实例时，使用页面自注册。当前包括：
+
+- Editor 的 `read_current_document`。
+- WebView 的 `read_current_webpage` 和 `operate_webpage`。
+- Widget 编辑页的 `read_current_widget`。
+
+代码落点：
+
+- Editor：`src/components/BEditor/hooks/useChatContext.ts`
+- WebView：`src/views/webview/web/hooks/useChatContext.ts`
+- Widget：`src/views/widget/hooks/useChatContext.ts`
+- 新页面：该页面模块自己的 `hooks/useChatContext.ts`
+- 通用注册 Hook：`src/hooks/useChat/useChatContextRegistry.ts`
+- 页面领域输入、结果校验：与页面 `useChatContext` 相邻放置
+- 测试：页面测试目录及 `test/integration/chat-page-tool-self-registration.test.ts`
+
+页面工具不进入 `shared/ai/tools`、`src/ai/tools/catalog/runtimeTools.ts` 或 Electron 主进程工具分支。BChat 只捕获当前页面 binding 和通用 Renderer 工具描述符，不引用页面类型或工具名。
 
 ### SDK-managed 工具
 
@@ -63,6 +85,7 @@
 shared/ai/tools/
   index.ts
   types.ts
+  AgentStagedFileTool/index.ts
   DelegateTaskTool/index.ts
   DocumentTool/index.ts
   EnvironmentTool/index.ts
@@ -73,12 +96,12 @@ shared/ai/tools/
   MCPSettingsTool/index.ts
   OpenResourceTool/index.ts
   SettingsTool/index.ts
-  WebviewTool/index.ts
 ```
 
 目录职责：
 
-- `DocumentTool`：当前文档读取、文档草稿创建等文档级工具。
+- `AgentStagedFileTool`：Child Task 私有 overlay 的内部暂存文件写入与编辑工具。
+- `DocumentTool`：应用级文档草稿创建工具；当前 Editor 文档读取归属 Editor 页面 `useChatContext`。
 - `DelegateTaskTool`：Main Coordinator 拥有的内部延迟委派契约；不进入普通 main/renderer 工具执行器。
 - `EnvironmentTool`：当前时间等环境信息工具。
 - `FileReadTool`：文件、目录读取工具。
@@ -88,7 +111,6 @@ shared/ai/tools/
 - `MCPSettingsTool`：MCP 配置读取、增删改和 discovery 刷新工具。
 - `SettingsTool`：应用设置读取和修改工具。
 - `OpenResourceTool`：打开文件、网页或外部资源工具。
-- `WebviewTool`：当前 WebView 读取和操作工具。
 
 如果新增工具能归入现有领域，就追加到对应目录。只有当工具有新的清晰领域时，才新增 `<PascalCaseTool>/index.ts` 目录。
 
@@ -101,7 +123,6 @@ shared/ai/tools/
 - `FileReadTool`
 - `FileWriteTool`
 - `SettingsTool`
-- `WebviewTool`
 
 每个目录至少导出：
 
@@ -205,11 +226,10 @@ export const TOOL_REGISTRY = [
 
 主进程执行逻辑按目录分组：
 
-- `ReadTool`：只读环境、当前文档、日志等只读工具。
+- `ReadTool`：主进程环境等只读工具。
 - `FileTool`：文件和目录读取、创建、写入、编辑。
 - `SettingsTool`：应用设置和 MCP server 配置写入。
 - `ResourceTool`：打开文件、网页或其他资源。
-- `WebviewTool`：当前 WebView 页面读取和操作。
 
 共享元数据目录和主进程执行目录不必一一对应。例如：
 
@@ -253,12 +273,12 @@ export const TOOL_REGISTRY = [
 
 主进程无法直接读取 renderer 状态时，通过 `requestBridge`，例如：
 
-- 当前编辑器内容
-- 未保存草稿内容
-- 当前 WebView 页面快照
+- 未保存草稿内容的读写。
 - 让 renderer 打开资源或创建草稿
 
 bridge 不是第二套工具运行时，只是主进程向 renderer 请求 UI 状态或 UI 动作的受控 RPC。
+
+页面绑定工具的正常执行不使用 bridge。只有应用级工具确实需要已绑定页面参与时，页面才在 `appBridgeHandlers` 中提供受控拦截，例如 Editor 处理匹配自身的 `write-file-content`。
 
 #### 文件内容读写边界
 
@@ -308,7 +328,173 @@ bridge 不是第二套工具运行时，只是主进程向 renderer 请求 UI �
 - `test/ai/tools/builtin-main-process-tool.test.ts`
 - registry / constants 对齐相关测试
 
-## Renderer-local 工具新增步骤
+## 页面绑定工具新增步骤
+
+只有工具必须跟随具体页面实例时才走这条路径。页面存在且可用时注册，失活时仅退出“当前页面”发现，卸载后注销。已启动 Runtime 始终使用启动时冻结的 `providerId + resourceId`，切页不会漂移到新页面。
+
+### 1. 在页面目录创建 `useChatContext`
+
+页面 Hook 统一命名为 `useChatContext`，不按 Editor、WebView 或 Widget 派生不同 Hook 名。页面在本模块内定义工具名、Schema、真实 handler、确认、展示和历史策略。
+
+页面入口必须在 Vue `setup` 顶层同步调用本页面的 `useChatContext`，不要放进条件分支。是否注册交给响应式的 `available` 和非空 `resourceId`，是否成为当前页面交给 `active`；`resourceId` 变化会注销旧 binding 并注册新 binding。
+
+最小模板：
+
+```ts
+/**
+ * @file useChatContext.ts
+ * @description 将示例页面能力注册为 ChatRuntime 页面工具。
+ */
+import type { AIToolContext, AIToolExecutionMetadata, AIToolExecutionResult } from 'types/ai';
+import type { Ref } from 'vue';
+import { createToolFailureResult, createToolSuccessResult } from '@/ai/tools/results';
+import { useChatContextProvider, type ToolContextTool } from '@/hooks/useChat/useChatContextRegistry';
+import { asyncTo } from '@/utils/asyncTo';
+
+/** 示例页面工具上下文。 */
+interface ExamplePageContext {
+  /** 读取当前页面快照。 */
+  readSnapshot(signal?: AbortSignal): Promise<{ title: string; content: string }>;
+}
+
+/** 示例页面 Chat Context 选项。 */
+interface UseChatContextOptions {
+  /** 页面稳定资源标识。 */
+  resourceId: Readonly<Ref<string>>;
+  /** 页面能力是否就绪。 */
+  available: Readonly<Ref<boolean>>;
+  /** 页面是否为当前激活页面。 */
+  active: Readonly<Ref<boolean>>;
+  /** 页面强类型 Context。 */
+  context: ExamplePageContext;
+}
+
+/** 示例页面读取工具名称。 */
+const INSPECT_EXAMPLE_PAGE_TOOL_NAME = 'inspect_example_page';
+
+/**
+ * 注册示例页面 Chat Context。
+ * @param options - 页面注册选项
+ */
+export function useChatContext(options: UseChatContextOptions): void {
+  /**
+   * 创建完整页面工具契约。
+   * @returns 示例页面读取工具
+   */
+  function createInspectTool(): ToolContextTool {
+    return {
+      definition: {
+        name: INSPECT_EXAMPLE_PAGE_TOOL_NAME,
+        description: '读取当前示例页面的标题和内容。',
+        source: 'builtin',
+        riskLevel: 'read',
+        // 页面工具从冻结 binding 解析 Context，不依赖旧 Editor context 注入。
+        requiresActiveDocument: false,
+        parameters: { type: 'object', properties: {}, additionalProperties: false }
+      },
+      execute: async (
+        _input: unknown,
+        _context?: AIToolContext,
+        metadata?: AIToolExecutionMetadata
+      ): Promise<AIToolExecutionResult> => {
+        metadata?.activity?.progress({ phase: 'reading', completed: 0, total: 1, message: '正在读取示例页面' });
+        const [error, snapshot] = await asyncTo(options.context.readSnapshot(metadata?.abortSignal));
+        if (metadata?.abortSignal?.aborted) {
+          return createToolFailureResult(INSPECT_EXAMPLE_PAGE_TOOL_NAME, 'RUNTIME_INTERRUPTED', '页面工具执行已中断');
+        }
+        if (error) return createToolFailureResult(INSPECT_EXAMPLE_PAGE_TOOL_NAME, 'EXECUTION_FAILED', error.message);
+        return createToolSuccessResult(INSPECT_EXAMPLE_PAGE_TOOL_NAME, snapshot);
+      },
+      presentation: {
+        label: '读取示例页面',
+        summarize: (): string => '已读取示例页面'
+      },
+      history: {
+        mode: 'latest-only',
+        placeholder: '历史页面快照已裁剪，请重新读取。'
+      }
+    };
+  }
+
+  useChatContextProvider({
+    providerId: 'example-page',
+    resourceId: options.resourceId,
+    available: options.available,
+    active: options.active,
+    getTools: (): ToolContextTool[] => [createInspectTool()],
+    hiddenToolNames: [],
+    appBridgeHandlers: {}
+  });
+}
+```
+
+### 2. 保持注册元数据稳定
+
+`getTools` 可返回新的工具对象，但同一次注册内的以下元数据必须语义稳定：
+
+- `definition`，包括工具名、描述、Schema、风险和权限字段。
+- `presentation.label` 以及是否提供 `summarize`。
+- `history`。
+
+Registry 会结构化克隆工具定义；函数、DOM、Vue Proxy 或其他不可克隆值会导致注册被拒绝。若元数据需要改变，通过页面生命周期重新注册，不要在同一 registration owner 内静默漂移。
+
+executor 可以读取页面的最新内存状态，但必须始终只访问注册 binding 对应的资源，不回退当前页面或其他同类资源。
+
+### 3. 处理权限和确认
+
+- `read` 工具默认直接执行。
+- `write` 和 `dangerous` 工具统一经过页面工具权限包装器。
+- 写工具通过 `createConfirmation(input)` 生成准确的标题、描述和 before/after 预览。该函数也是弹窗前的最后输入校验边界。
+- `safeAutoApprove: true` 只用于确实可安全自动执行的写工具。
+- 只允许用户记住手动授权、但不允许自动安全执行时，使用 `allowPermissionRemember: true` 和 `safeAutoApprove: false`。
+- `dangerous` 工具始终不允许记住授权。
+
+页面不得在确认内容中降低 `definition.riskLevel`，也不得绕过通用确认适配器直接执行写操作。
+
+### 4. 处理中断和活动上报
+
+Registry 会在确认前和确认后检查 `metadata.abortSignal`，已中断时不进入页面 handler。对于已经启动的异步读取、导航、DOM 操作或长任务，handler 仍必须把 signal 传入底层操作并尽快结算 pending Promise。
+
+`metadata.activity` 只用于受限的 `heartbeat`、`progress`、`waitUser`、`waitExternal` 和 `resume` 上报。不要把 activity reporter 放进工具结果、历史或其他可枚举对象。
+
+### 5. 声明展示和历史策略
+
+`presentation` 只留在 Renderer，BChat 通过通用 Registry 读取，不需要在 `toolLabels.ts` 或 `toolResultSummary.ts` 添加工具名。`summarize` 应返回短文本，不抛出异常；模块未加载、同名展示存在歧义或摘要抛错时，BChat 会安全回退。
+
+`history` 只能使用声明式可克隆字段：
+
+- `mode: 'keep'`：保留工具结果。
+- `mode: 'latest-only'`：只保留该工具最新一次完整结果，历史结果替换为 `placeholder`。
+- `redactInputPaths`：模型历史投影时移除过期句柄、用户输入或其他不应回放的自有属性路径。
+
+不要把 sanitizer、projector 函数或页面类型传入主进程。Electron 只解释通用 history 字段，非法策略 fail-closed。
+
+### 6. 限制 `hiddenToolNames` 和 `appBridgeHandlers`
+
+`hiddenToolNames` 只用于当前页面不应暴露的应用级候选工具。页面不能先隐藏应用工具，再用同名页面工具覆盖；最终合并会拒绝名称冲突。
+
+`appBridgeHandlers` 不是页面工具 executor 配置。绝大多数页面应传空对象；只有应用级工具必须让冻结页面参与时才按 bridge kind 注册受控 handler。
+
+### 7. 测试与零中心配置检查
+
+至少覆盖：
+
+- 页面可用时注册，失活后保留后台 Runtime 能力，卸载后旧 executor 返回 `EDITOR_UNAVAILABLE`。
+- 真实 handler 的成功、稳定失败、输入无效、确认拒绝和 abort。
+- presentation 与 history descriptor。
+- 同 binding owner 替换、工具消失和恢复 Runtime。
+
+新增第四页面时，生产代码只应修改该页面 `useChatContext` 及相邻领域模块。不应修改：
+
+- `shared/ai/tools/index.ts`
+- `src/ai/tools/catalog/runtimeTools.ts`
+- `src/ai/tools/builtin/index.ts`
+- `src/components/BChat` 的工具名、页面类型或展示分支
+- Electron 主进程工具 registry、执行分支或历史 projector
+
+通用协议回归门禁见 `test/integration/chat-page-tool-self-registration.test.ts`，完整设计见 `docs/superpowers/specs/2026-08-05-chat-tool-context-design.md`。
+
+## 应用级 Renderer-local 工具新增步骤
 
 只有工具必须依赖 renderer 本地执行时才走这条路径。
 
@@ -356,14 +542,16 @@ renderer-local 工具不要写入 `shared/ai/tools/<PascalCaseTool>/index.ts`，
 
 ### exposure
 
-registry 的 `exposure` 决定聊天侧默认是否暴露：
+`shared/ai/tools` registry 的 `exposure` 只决定应用级工具在聊天侧是否默认暴露：
 
 - `default-readonly`：默认只读工具。
 - `default-writable`：默认写工具。
 - `conditional-readonly`：条件启用的只读工具。
 - `conditional-writable`：条件启用的写工具。
 
-不要在其他地方再维护重复默认清单。
+页面绑定工具不声明 `exposure`，也不加入应用级默认清单。页面激活时，BChat 从当前 binding 读取工具定义；Runtime 启动时再冻结该 binding、Renderer 工具 allowlist 和 history descriptor。页面失活或切换不会把已运行任务迁移到另一页面，资源卸载后旧 executor 会失败关闭。
+
+不要在其他地方维护重复默认清单，也不要为了暴露页面工具而修改 `TOOL_REGISTRY`。
 
 ## 参数和结果约束
 
@@ -436,26 +624,49 @@ export async function executeExampleTool(input: ChatRuntimeMainToolExecutionInpu
 
 ## 开发检查清单
 
-- 工具是否真的需要 renderer-local？能主进程化就主进程化。
+先确认归属：
+
+- 纯系统、文件、设置或外部资源能力：主进程工具。
+- 必须绑定某个具体页面实例：页面绑定工具。
+- 必须依赖应用级 Renderer 状态或交互，但不归属某个页面：应用级 Renderer-local 工具。
+- 由 AI SDK 或 provider 托管：SDK-managed 工具。
+
+主进程工具检查：
+
 - 工具名是否只在 `shared/ai/tools/<PascalCaseTool>/index.ts` 定义一次？
 - 是否已从 `shared/ai/tools/index.ts` 导出工具名并加入 `TOOL_REGISTRY`？
 - registry 的 `runtime`、`group`、`exposure`、`riskLevel` 是否正确？
-- `executionClass` 与 runtime owner 是否有真实执行/协调协议支撑，而不是依赖 pending Promise？
-- schema 是否和输入归一化一致？
-- 主进程执行结果是否使用 `electron/main/modules/chat/runtime/tools/results.mts` helper？
-- 写操作、工作区外路径、危险读取是否有确认？
+- `executionClass` 与 runtime owner 是否有真实执行或协调协议支撑，而不是依赖 pending Promise？
+- 执行结果是否使用 `electron/main/modules/chat/runtime/tools/results.mts` helper？
 - 真实文件写工具是否只在磁盘持久化完成后返回成功？
 - 真实文件写工具是否在确认后重新验证版本，并按真实目的地复核符号链接边界？
 - `unsaved://` 是否作为草稿例外通过 bridge 处理？
-- bridge 失败是否返回稳定错误，而不是抛出到 runtime 外层？
-- 结果是否可结构化克隆？
-- 是否补测试？
+- bridge 失败是否返回稳定错误，而不是抛出到 Runtime 外层？
+
+页面绑定工具检查：
+
+- 工具名、Schema、真实 handler、确认、展示和 history 是否只归属页面 `useChatContext`？
+- `requiresActiveDocument` 是否显式设为 `false`，避免依赖旧 Editor context 注入？
+- `providerId + resourceId` 是否稳定、唯一，executor 是否只访问该 binding 对应资源？
+- `definition`、presentation 元数据和 history 是否可克隆且不会在同一 owner 内漂移？
+- 异步 handler 是否使用 `asyncTo`，并继续向底层传递 `metadata.abortSignal`？
+- 写工具是否使用准确的 `riskLevel`、`createConfirmation`、`safeAutoApprove` 和 `allowPermissionRemember`？
+- 页面工具是否没有被加入 `shared/ai/tools`、builtin 中央列表、BChat 页面分支或 Electron 工具分支？
+- `hiddenToolNames` 和 `appBridgeHandlers` 是否只用于明确的应用级工具协作，而不是页面工具执行？
+- 页面卸载后，已捕获 executor 是否返回稳定失败，且不会回退到其他页面？
+
+所有工具共同检查：
+
+- Schema 是否和输入归一化一致？
+- 写操作、工作区外路径和危险读取是否有确认？
+- 结果是否可结构化克隆并可 JSON 序列化？
+- 是否覆盖成功、失败、无效输入、权限拒绝和中断测试？
 - 是否更新 `docs/development/chat-runtime-architecture-map.md` 或相关 README？
 - 是否记录到当天 changelog？
 
 ## 推荐阅读顺序
 
-第一次接触这块代码，建议按顺序读：
+第一次接触应用级主进程工具，建议按顺序读：
 
 1. `shared/ai/tools/index.ts`
 2. `shared/ai/tools/types.ts`
@@ -470,4 +681,17 @@ export async function executeExampleTool(input: ChatRuntimeMainToolExecutionInpu
 11. Coordinator 工具额外阅读 `shared/ai/tools/DelegateTaskTool/index.ts`、`electron/main/modules/chat/agents/service.mts`、`coordinator.mts`、`plan-compiler.mts`、`executor.mts` 与 `read-tools.mts`
 12. `src/components/BChat/utils/runtimeBridge.ts`
 
-这样能先建立“Tool 目录定义 -> `shared/ai/tools/index.ts` 聚合 -> renderer schema-only 暴露 -> 主进程执行 -> 必要时 bridge 到 renderer”的完整链路。
+这条路径是“Tool 目录定义 -> `shared/ai/tools/index.ts` 聚合 -> Renderer schema-only 暴露 -> 主进程执行 -> 必要时 bridge 到 Renderer”。
+
+第一次接触页面绑定工具，建议按顺序读：
+
+1. `src/hooks/useChat/useChatContextRegistry.ts`
+2. `src/hooks/useChat/lib/types.ts`
+3. `src/hooks/useChat/lib/registry.ts`
+4. 一个页面实例，例如 `src/components/BEditor/hooks/useChatContext.ts`
+5. 页面调用入口，例如 `src/components/BEditor/index.vue`
+6. `src/components/BChat/hooks/useRuntimeTools.ts`
+7. `test/integration/chat-page-tool-self-registration.test.ts`
+8. `docs/superpowers/specs/2026-08-05-chat-tool-context-design.md`
+
+这条路径是“页面 `useChatContext` 完整声明 -> 通用 Registry 注册 -> BChat 捕获当前 binding -> Runtime 冻结 Renderer allowlist 与 history -> 精确调用原页面 executor”。新增页面不需要在这条路径之外增加页面名或工具名配置。

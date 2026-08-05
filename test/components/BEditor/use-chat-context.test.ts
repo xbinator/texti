@@ -7,13 +7,15 @@
 import type { ChatRuntimeBridgeRequestEvent } from 'types/chat-runtime';
 import type { VNode } from 'vue';
 import { defineComponent, h, ref } from 'vue';
+import { createPinia, setActivePinia } from 'pinia';
 import { mount } from '@vue/test-utils';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { executeToolCall } from '@/ai/tools/stream';
 import { createNoopEditorController, type EditorController } from '@/components/BEditor/adapters/types';
 import { useChatContext } from '@/components/BEditor/hooks/useChatContext';
 import type { EditorState } from '@/components/BEditor/types';
 import { toolContextRegistry } from '@/hooks/useChat/lib/registry';
-import { useActiveToolContext } from '@/hooks/useChat/useToolContext';
+import { useActiveChatContext } from '@/hooks/useChat/useChatContextRegistry';
 
 /**
  * 创建 Editor provider 测试 Bridge 请求。
@@ -36,9 +38,14 @@ function createEvent(kind: string, payload?: unknown): ChatRuntimeBridgeRequestE
 }
 
 describe('useChatContext', (): void => {
+  beforeEach((): void => {
+    localStorage.clear();
+    setActivePinia(createPinia());
+  });
+
   afterEach((): void => toolContextRegistry.clear());
 
-  it('registers document tools and serves the bound document bridge', async (): Promise<void> => {
+  it('registers and directly executes the bound document tool', async (): Promise<void> => {
     const editorState = ref<EditorState>({
       id: 'document-a',
       name: 'Draft',
@@ -63,28 +70,40 @@ describe('useChatContext', (): void => {
       }
     });
     const wrapper = mount(Host);
-    const tools = useActiveToolContext();
+    const tools = useActiveChatContext();
     const binding = { providerId: 'editor', resourceId: 'document-a' };
 
-    expect(tools.getBoundTools(binding).map((tool) => tool.definition.name)).toEqual(['read_current_document']);
-    await expect(tools.dispatchBridge(binding, createEvent('document-snapshot'))).resolves.toEqual({
-      handled: true,
-      data: expect.objectContaining({
-        id: 'document-a',
-        title: 'Draft.md',
-        content: '# Draft',
-        locator: 'unsaved://document-a/Draft.md'
-      })
-    });
+    const documentTool = tools.getBoundTools(binding, { confirmation: { confirm: vi.fn(async (): Promise<boolean> => true) } })[0];
+    if (!documentTool) throw new Error('document tool should exist');
+    expect(documentTool.definition.name).toBe('read_current_document');
     await expect(
-      tools.dispatchBridge(binding, createEvent('write-file-content', { path: 'unsaved://document-a/Draft.md', content: '# Updated' }))
+      executeToolCall({ toolCallId: 'tool-call-document', toolName: 'read_current_document', input: {} }, [documentTool], undefined)
+    ).resolves.toMatchObject({
+      result: {
+        toolName: 'read_current_document',
+        status: 'success',
+        data: {
+          id: 'document-a',
+          artifactId: 'document-a',
+          title: 'Draft.md',
+          content: '# Draft',
+          path: 'unsaved://document-a/Draft.md',
+          selected: { content: '' }
+        }
+      }
+    });
+    expect(tools.getPresentation(binding, 'read_current_document')).toEqual(expect.objectContaining({ label: '读取当前文档' }));
+    expect(tools.getRendererTools(binding)).toEqual([{ name: 'read_current_document', history: { mode: 'keep' } }]);
+    await expect(tools.dispatchAppBridge(binding, createEvent('document-snapshot'))).resolves.toEqual({ handled: false });
+    await expect(
+      tools.dispatchAppBridge(binding, createEvent('write-file-content', { path: 'unsaved://document-a/Draft.md', content: '# Updated' }))
     ).resolves.toEqual({
       handled: true,
       data: { artifactId: 'document-a', path: 'unsaved://document-a/Draft.md', content: '# Updated' }
     });
     expect(replaceDocument).toHaveBeenCalledWith('# Updated');
     await expect(
-      tools.dispatchBridge(binding, createEvent('write-file-content', { path: 'unsaved://document-b/Other.md', content: '# Other' }))
+      tools.dispatchAppBridge(binding, createEvent('write-file-content', { path: 'unsaved://document-b/Other.md', content: '# Other' }))
     ).resolves.toEqual({ handled: false });
     wrapper.unmount();
   });
@@ -113,10 +132,10 @@ describe('useChatContext', (): void => {
       }
     });
     const wrapper = mount(Host);
-    const tools = useActiveToolContext();
+    const tools = useActiveChatContext();
 
     await expect(
-      tools.dispatchBridge(
+      tools.dispatchAppBridge(
         { providerId: 'editor', resourceId: 'document-a' },
         createEvent('write-file-content', { path: 'unsaved://document-a/Draft.md', content: '# Updated' })
       )

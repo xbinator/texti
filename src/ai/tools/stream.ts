@@ -3,7 +3,7 @@
  * @description AI 工具流式执行相关函数
  */
 import type { JSONValue, ModelMessage } from 'ai';
-import type { AIToolActivityReporter, AIToolContext, AIToolExecutionResult, AIToolExecutor, AIStreamToolCallChunk, AITransportTool } from 'types/ai';
+import type { AIToolContext, AIToolExecutionMetadata, AIToolExecutionResult, AIToolExecutor, AIStreamToolCallChunk, AITransportTool } from 'types/ai';
 import { isFunction } from 'lodash-es';
 import { createToolFailureResult } from './results';
 import { createShellCommandId } from './shellCommandId';
@@ -16,14 +16,7 @@ const TODO_WRITE_TOOL_NAME = 'todowrite';
 /**
  * 工具执行元数据。
  */
-export interface ToolExecutionMetadata {
-  /** 触发工具请求的 runtime ID */
-  runtimeId?: string;
-  /** Renderer 本地工具中止信号。 */
-  abortSignal?: AbortSignal;
-  /** Renderer 本地工具的受限活动上报器。 */
-  activity?: AIToolActivityReporter;
-}
+export type ToolExecutionMetadata = AIToolExecutionMetadata;
 
 /**
  * 已执行的工具调用
@@ -169,7 +162,7 @@ export async function executeToolCall(
   // 执行工具，等待用户输入结果仍作为普通终态 tool-result 进入消息历史。
   const executionInput = createExecutionInput(call.toolName, call.input, call.toolCallId, metadata);
   const enrichedContext = context ? { ...context, toolCallId: call.toolCallId, activity: metadata.activity } : undefined;
-  const rawResult = await executor.execute(executionInput, enrichedContext);
+  const rawResult = await executor.execute(executionInput, enrichedContext, metadata);
 
   return {
     toolCallId: call.toolCallId,

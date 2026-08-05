@@ -36,7 +36,7 @@ import type { Message } from '@/components/BChat/utils/types';
 import type { FileMentionOption } from '@/components/BSmart/types';
 import { toolContextRegistry } from '@/hooks/useChat/lib/registry';
 import { useProvideActorSystem } from '@/hooks/useChat/useActorSystem';
-import type { ChatBridgeDispatchResult, ChatBridgeHandler, ToolContextHandle } from '@/hooks/useChat/useToolContext';
+import type { ChatBridgeDispatchResult, ChatBridgeHandler, ToolContextHandle, ToolContextTool } from '@/hooks/useChat/useChatContextRegistry';
 import { emitChatFileReferenceInsert } from '@/shared/chat/fileReference';
 import { native } from '@/shared/platform';
 import type { ReadWorkspaceDirectoryResult } from '@/shared/platform/native/types';
@@ -645,18 +645,33 @@ function createRuntimeTool(name: string): AIToolExecutor {
 }
 
 /**
+ * 创建测试页面注册使用的完整工具。
+ * @param name - 工具名称
+ * @returns 页面工具
+ */
+function createPageRuntimeTool(name: string): ToolContextTool {
+  const executor = createRuntimeTool(name);
+  const { description } = executor.definition;
+  if (typeof description !== 'string') throw new Error(`Page tool description must be a string: ${name}`);
+  return {
+    definition: { ...executor.definition, description },
+    execute: executor.execute
+  };
+}
+
+/**
  * 注册测试页面工具资源。
  * @param binding - 页面 binding
  * @param toolNames - 页面工具名称
- * @param bridgeHandlers - 页面 Bridge handlers
+ * @param appBridgeHandlers - 页面 Bridge handlers
  * @returns 注册控制句柄
  */
-function registerPageTools(binding: ChatToolBinding, toolNames: string[], bridgeHandlers: Readonly<Record<string, ChatBridgeHandler>>): ChatContextHandle {
-  return chatContextRegistry.register({
+function registerPageTools(binding: ChatToolBinding, toolNames: string[], appBridgeHandlers: Readonly<Record<string, ChatBridgeHandler>>): ToolContextHandle {
+  return toolContextRegistry.register({
     binding,
-    getTools: (): AIToolExecutor[] => toolNames.map(createRuntimeTool),
+    getTools: (): ToolContextTool[] => toolNames.map(createPageRuntimeTool),
     hiddenToolNames: [],
-    bridgeHandlers
+    appBridgeHandlers
   });
 }
 
@@ -3438,7 +3453,7 @@ describe('BChat sessionId runtime', (): void => {
       expect.objectContaining({
         system: 'Remember user prefers concise answers.',
         capabilities: {
-          rendererToolNames: expect.any(Array),
+          rendererTools: expect.any(Array),
           workspaceRoot: '/workspace'
         },
         tavily: { enabled: true, apiKey: 'tvly-test' },

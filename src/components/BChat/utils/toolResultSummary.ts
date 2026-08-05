@@ -327,7 +327,7 @@ function summarizeWriteFile(data: Record<string, unknown>): ToolResultSummary {
 }
 
 /**
- * 格式化 read_file / read_current_document 工具的结果。
+ * 格式化 read_file 工具的结果。
  * @param data - 工具结果数据
  * @returns 读取文件摘要
  */
@@ -348,119 +348,6 @@ function summarizeReadFile(data: Record<string, unknown>): ToolResultSummary {
     tags
   };
 }
-
-/**
- * 格式化 read_current_widget 工具的结果。
- * @param data - 工具结果数据
- * @returns 当前 Widget 摘要
- */
-function summarizeReadCurrentWidget(data: Record<string, unknown>): ToolResultSummary {
-  const title = typeof data.title === 'string' ? data.title : '';
-  const filePath = typeof data.path === 'string' ? data.path : '';
-  const tags: ToolSummaryTag[] = [];
-
-  if (title) {
-    tags.push({ label: '标题', value: title });
-  }
-  if (filePath) {
-    tags.push(createOpenFileTag(filePath));
-  }
-
-  return {
-    text: title ? `已读取当前 Widget: ${title}` : '已读取当前 Widget',
-    tags
-  };
-}
-
-/**
- * 判断网页快照中是否存在截断字段。
- * @param value - 网页快照截断信息
- * @returns 任一字段被截断时返回 true
- */
-function hasTruncatedWebpageField(value: unknown): boolean {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-
-  return Object.values(value as Record<string, unknown>).some((item) => item === true);
-}
-
-/**
- * 格式化 read_current_webpage 工具的结果。
- * @param data - 工具结果数据
- * @returns 当前网页摘要
- */
-function summarizeReadCurrentWebpage(data: Record<string, unknown>): ToolResultSummary {
-  const url = typeof data.url === 'string' ? data.url : '';
-  const title = typeof data.title === 'string' ? data.title : '';
-  const content = typeof data.content === 'string' ? data.content : '';
-  const selectedText = typeof data.selectedText === 'string' ? data.selectedText : '';
-  const headings = Array.isArray(data.headings) ? data.headings : [];
-  const links = Array.isArray(data.links) ? data.links : [];
-  const tags: ToolSummaryTag[] = [];
-
-  if (url) {
-    tags.push({ label: '网址', value: url });
-  }
-
-  tags.push({ label: '页面标题数', value: String(headings.length) });
-  tags.push({ label: '页面链接数', value: String(links.length) });
-
-  if (content.trim()) {
-    tags.push({ label: '结构内容', value: '有' });
-  }
-
-  const viewport = typeof data.viewport === 'object' && data.viewport !== null ? (data.viewport as Record<string, unknown>) : null;
-  const topLayer = viewport && typeof viewport.topLayer === 'object' && viewport.topLayer !== null ? (viewport.topLayer as Record<string, unknown>) : null;
-  if (topLayer) {
-    const topLayerLabel = typeof topLayer.label === 'string' ? topLayer.label : '';
-    tags.push({ label: '顶层浮层', value: topLayerLabel || '有' });
-  }
-
-  const selectedElement = typeof data.selectedElement === 'object' && data.selectedElement !== null ? (data.selectedElement as Record<string, unknown>) : null;
-  if (selectedElement) {
-    const selectedElementText = typeof selectedElement.text === 'string' ? selectedElement.text.trim() : '';
-    const selector = typeof selectedElement.selector === 'string' ? selectedElement.selector.trim() : '';
-    const matchedIndex = typeof selectedElement.matchedIndex === 'number' ? selectedElement.matchedIndex : null;
-    const value = matchedIndex !== null ? `#${matchedIndex} ${selectedElementText || selector || '已选中'}` : selectedElementText || selector || '有';
-    tags.push({ label: '选中元素', value });
-  }
-
-  if (selectedText.trim()) {
-    tags.push({ label: '选中文本', value: '有' });
-  }
-
-  if (hasTruncatedWebpageField(data.truncated)) {
-    tags.push({ label: '内容已截断', value: '是' });
-  }
-
-  return {
-    text: `已读取网页: ${title || url || '未命名网页'}`,
-    tags
-  };
-}
-
-/** WebView 操作动作的中文映射。 */
-const WEBPAGE_ACTION_LABEL_MAP: Record<string, string> = {
-  click: '点击',
-  input: '输入',
-  select: '选择',
-  press: '按键',
-  scroll: '滚动',
-  navigate: '导航',
-  wait: '等待'
-};
-
-/** WebView 操作结果文本映射。 */
-const WEBPAGE_ACTION_TEXT_MAP: Record<string, string> = {
-  click: '已点击网页元素',
-  input: '已输入网页内容',
-  select: '已选择网页选项',
-  press: '已按下网页按键',
-  scroll: '已滚动网页',
-  navigate: '已打开网页',
-  wait: '已等待网页更新'
-};
 
 /**
  * 判断值是否为对象记录。
@@ -567,88 +454,6 @@ function summarizeWidget(data: Record<string, unknown>): ToolResultSummary {
 }
 
 /**
- * 读取 WebView 操作目标摘要。
- * @param value - 工具结果中的目标对象
- * @returns 目标摘要
- */
-function readWebpageTargetLabel(value: unknown): string {
-  if (!isRecord(value)) {
-    return '';
-  }
-
-  const index = typeof value.index === 'number' ? `#${value.index}` : '';
-  const label = typeof value.label === 'string' ? value.label : '';
-  return [index, label].filter(Boolean).join(' ');
-}
-
-/**
- * 读取 WebView 滚动坐标。
- * @param value - 滚动坐标对象
- * @returns 坐标字符串
- */
-function readWebpageScrollPosition(value: unknown): string {
-  if (!isRecord(value) || typeof value.x !== 'number' || typeof value.y !== 'number') {
-    return '';
-  }
-
-  return `${value.x},${value.y}`;
-}
-
-/**
- * 读取 WebView 滚动目标类型标签。
- * @param value - 滚动目标类型
- * @returns 中文滚动目标
- */
-function readWebpageScrollTargetType(value: unknown): string {
-  if (value === 'element') {
-    return '元素';
-  }
-
-  if (value === 'window') {
-    return '页面';
-  }
-
-  return '';
-}
-
-/**
- * 格式化 operate_webpage 工具的结果。
- * @param data - 工具结果数据
- * @returns 网页操作摘要
- */
-function summarizeOperateWebpage(data: Record<string, unknown>): ToolResultSummary {
-  const action = typeof data.action === 'string' ? data.action : '';
-  const tags: ToolSummaryTag[] = [];
-  const actionLabel = WEBPAGE_ACTION_LABEL_MAP[action] ?? action;
-
-  if (actionLabel) {
-    tags.push({ label: '动作', value: actionLabel });
-  }
-
-  const targetLabel = readWebpageTargetLabel(data.target);
-  if (targetLabel) {
-    tags.push({ label: '目标', value: targetLabel });
-  }
-
-  if (isRecord(data.scroll)) {
-    const targetType = readWebpageScrollTargetType(data.scroll.targetType);
-    const before = readWebpageScrollPosition(data.scroll.before);
-    const after = readWebpageScrollPosition(data.scroll.after);
-    if (targetType) {
-      tags.push({ label: '滚动目标', value: targetType });
-    }
-    if (before && after) {
-      tags.push({ label: '位置', value: `${before} → ${after}` });
-    }
-  }
-
-  return {
-    text: data.message === 'no scroll movement' ? '网页未滚动' : WEBPAGE_ACTION_TEXT_MAP[action] ?? '已操作网页',
-    tags
-  };
-}
-
-/**
  * 格式化 edit_file 工具的结果。
  * @param data - 工具结果数据
  * @returns 编辑文件摘要
@@ -730,10 +535,6 @@ const TOOL_SUMMARIZERS: Record<string, (data: unknown) => ToolResultSummary> = {
   read_file: (data) => summarizeReadFile(data as Record<string, unknown>),
   read_directory: (data) => summarizeReadDirectory(data as Record<string, unknown>),
   grep: (data) => summarizeGrep(data as Record<string, unknown>),
-  read_current_document: (data) => summarizeReadFile(data as Record<string, unknown>),
-  read_current_widget: (data) => summarizeReadCurrentWidget(data as Record<string, unknown>),
-  read_current_webpage: (data) => summarizeReadCurrentWebpage(data as Record<string, unknown>),
-  operate_webpage: (data) => summarizeOperateWebpage(data as Record<string, unknown>),
   edit_file: (data) => summarizeEditFile(data as Record<string, unknown>),
   edit_memory: (data) => summarizeEditMemory(data as Record<string, unknown>),
   open_resource: (data) => summarizeOpenResource(data as Record<string, unknown>)

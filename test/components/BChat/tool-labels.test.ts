@@ -6,8 +6,9 @@ import { describe, expect, it } from 'vitest';
 import { getActionLabel } from '@/components/BChat/utils/toolLabels';
 
 describe('toolLabels', (): void => {
-  it('labels operate_webpage as a current webpage operation', (): void => {
-    expect(getActionLabel('operate_webpage')).toEqual({ alias: '操作当前网页' });
+  it('does not centrally label page-scoped tools', (): void => {
+    expect(getActionLabel('operate_webpage')).toEqual({ alias: 'operate_webpage' });
+    expect(getActionLabel('read_current_widget')).toEqual({ alias: 'read_current_widget' });
   });
 
   it('labels grep as content search', (): void => {
@@ -17,7 +18,6 @@ describe('toolLabels', (): void => {
   it('labels remaining builtin tool names with readable aliases', (): void => {
     expect(getActionLabel('glob')).toEqual({ alias: '查找文件' });
     expect(getActionLabel('delegate_task')).toEqual({ alias: '委派任务' });
-    expect(getActionLabel('read_current_widget')).toEqual({ alias: '读取当前 Widget' });
     expect(getActionLabel('open_widget')).toEqual({ alias: '打开小组件' });
     expect(getActionLabel('stage_file_write')).toEqual({ alias: '暂存写入文件' });
     expect(getActionLabel('stage_file_edit')).toEqual({ alias: '暂存修改文件' });

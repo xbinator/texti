@@ -2,11 +2,12 @@
  * @file useChatContext.ts
  * @description 将 Widget 编辑页会话注册为 ChatRuntime 可读取的页面上下文。
  */
+import type { AIToolExecutionResult } from 'types/ai';
 import type { ComputedRef, Ref } from 'vue';
 import { computed } from 'vue';
-import { createReadCurrentWidgetTool } from '@/ai/tools/catalog/runtimeTools';
+import { createToolSuccessResult } from '@/ai/tools/results';
 import type { WidgetData } from '@/components/BWidget/types';
-import { useToolContext, type ChatBridgeDispatchResult } from '@/hooks/useChat/useToolContext';
+import { useChatContextProvider, type ToolContextTool } from '@/hooks/useChat/useChatContextRegistry';
 import type { FileState } from '@/shared/platform/native/types';
 
 /**
@@ -25,6 +26,9 @@ interface UseChatContextOptions {
   data: Ref<WidgetData>;
 }
 
+/** Widget 页面读取工具名称。 */
+const READ_CURRENT_WIDGET_TOOL_NAME = 'read_current_widget';
+
 /**
  * 将 WidgetData 序列化为模型可读 JSON。
  * @param data - 当前 WidgetData ref
@@ -41,27 +45,49 @@ function serializeData(data: Ref<WidgetData>): string {
 export function useChatContext(options: UseChatContextOptions): void {
   const available = computed<boolean>((): boolean => Boolean(options.fileId.value));
 
-  /** 读取 Widget 快照。 */
-  function readSnapshot(): ChatBridgeDispatchResult {
+  /**
+   * 直接读取当前 Widget 编辑页工具结果。
+   * @returns 当前 Widget 内存快照
+   */
+  function readWidget(): AIToolExecutionResult {
+    return createToolSuccessResult(READ_CURRENT_WIDGET_TOOL_NAME, {
+      title: options.currentTitle.value,
+      path: options.fileState.value.path,
+      content: serializeData(options.data)
+    });
+  }
+
+  /**
+   * 创建 Widget 页面完整工具。
+   * @returns 当前 Widget 读取工具
+   */
+  function createWidgetTool(): ToolContextTool {
     return {
-      handled: true,
-      data: {
-        title: options.currentTitle.value,
-        path: options.fileState.value.path,
-        content: serializeData(options.data)
-      }
+      definition: {
+        name: READ_CURRENT_WIDGET_TOOL_NAME,
+        description: '读取当前打开的 Widget 编辑页快照，返回文件路径、标题和编辑器内存中的 WidgetData JSON。',
+        source: 'builtin',
+        riskLevel: 'read',
+        requiresActiveDocument: false,
+        permissionCategory: 'system',
+        parameters: { type: 'object', properties: {}, additionalProperties: false }
+      },
+      execute: (): AIToolExecutionResult => readWidget(),
+      presentation: {
+        label: '读取当前 Widget',
+        summarize: (): string => '已读取当前 Widget'
+      },
+      history: { mode: 'keep' }
     };
   }
 
-  useToolContext({
+  useChatContextProvider({
     providerId: 'widget',
     resourceId: options.fileId,
     available,
     active: options.isActive,
-    getTools: () => [createReadCurrentWidgetTool()],
+    getTools: () => [createWidgetTool()],
     hiddenToolNames: [],
-    bridgeHandlers: {
-      'widget-snapshot': (): ChatBridgeDispatchResult => readSnapshot()
-    }
+    appBridgeHandlers: {}
   });
 }

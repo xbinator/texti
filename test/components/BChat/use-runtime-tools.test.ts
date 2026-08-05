@@ -59,7 +59,7 @@ const activeChatToolsMock = vi.hoisted(() => ({
   getActiveBinding: vi.fn<() => ChatToolBinding | undefined>(() => undefined),
   getBoundTools: vi.fn<(_binding: ChatToolBinding) => AIToolExecutor[]>(() => []),
   getHiddenToolNames: vi.fn<(_binding: ChatToolBinding) => readonly string[]>(() => []),
-  dispatchBridge: vi.fn()
+  dispatchAppBridge: vi.fn()
 }));
 
 const storeMockState = vi.hoisted(() => ({
@@ -162,8 +162,8 @@ vi.mock('@/components/BWidget/utils/widgetRuntime', () => ({
   executeWidgetRuntime: widgetRuntimeMockState.executeWidgetRuntime
 }));
 
-vi.mock('@/hooks/useChat/useToolContext', () => ({
-  useActiveToolContext: () => activeChatToolsMock
+vi.mock('@/hooks/useChat/useChatContextRegistry', () => ({
+  useActiveChatContext: () => activeChatToolsMock
 }));
 
 vi.mock('@/hooks/useNavigate', () => ({
@@ -347,6 +347,23 @@ describe('useRuntimeTools', () => {
     expect(activeChatToolsMock.getActiveBinding).not.toHaveBeenCalled();
   });
 
+  it('accepts a newly registered page tool without a central builtin-name entry', (): void => {
+    const binding = { providerId: 'test-page', resourceId: 'page-a' };
+    activeChatToolsMock.getBoundTools.mockReturnValue([builtinMockState.createExecutor('inspect_test_page')]);
+    const runtimeTools = createRuntimeTools();
+
+    const activeToolNames = runtimeTools
+      .getActiveTools({
+        sessionId: 'session-a',
+        runtimeId: 'runtime-a',
+        workspaceRoot: '/workspace-a',
+        toolContext: binding
+      })
+      .map((tool) => tool.definition.name);
+
+    expect(activeToolNames).toContain('inspect_test_page');
+  });
+
   it('applies page hidden names to application tools created dynamically', (): void => {
     const binding = { providerId: 'future-page', resourceId: 'page-a' };
     storeMockState.widgetStore.initialized = true;
@@ -398,7 +415,23 @@ describe('useRuntimeTools', () => {
         workspaceRoot: '/workspace-a',
         toolContext: binding
       })
-    ).toThrow('Duplicate Chat context tool name: open_resource');
+    ).toThrow('Page tool conflicts with application tool: open_resource');
+  });
+
+  it('does not let hidden names disguise a page override of an application tool', (): void => {
+    const binding = { providerId: 'future-page', resourceId: 'page-a' };
+    activeChatToolsMock.getBoundTools.mockReturnValue([builtinMockState.createExecutor('open_resource')]);
+    activeChatToolsMock.getHiddenToolNames.mockReturnValue(['open_resource']);
+    const runtimeTools = createRuntimeTools();
+
+    expect(() =>
+      runtimeTools.getActiveTools({
+        sessionId: 'session-a',
+        runtimeId: 'runtime-a',
+        workspaceRoot: '/workspace-a',
+        toolContext: binding
+      })
+    ).toThrow('Page tool conflicts with application tool: open_resource');
   });
 
   it('dynamically exposes widget tools after widget store is initialized', (): void => {

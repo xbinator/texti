@@ -1929,6 +1929,7 @@ describe('chat runtime service shell', (): void => {
             toolName: 'read_current_webpage',
             status: 'done',
             input: {},
+            rendererHistory: { mode: 'latest-only', placeholder: '历史网页快照已裁剪，请重新读取当前网页。' },
             result: {
               toolName: 'read_current_webpage',
               status: 'success',
@@ -1964,6 +1965,10 @@ describe('chat runtime service shell', (): void => {
               },
               action: { type: 'click', index: 2 }
             },
+            rendererHistory: {
+              mode: 'keep',
+              redactInputPaths: ['snapshotId', 'step', 'action.text', 'action.url', 'action.optionText']
+            },
             result: { toolName: 'operate_webpage', status: 'success', data: { ok: true, action: 'click' } }
           },
           {
@@ -1973,6 +1978,7 @@ describe('chat runtime service shell', (): void => {
             toolName: 'read_current_webpage',
             status: 'done',
             input: {},
+            rendererHistory: { mode: 'latest-only', placeholder: '历史网页快照已裁剪，请重新读取当前网页。' },
             result: {
               toolName: 'read_current_webpage',
               status: 'success',
@@ -2018,16 +2024,11 @@ describe('chat runtime service shell', (): void => {
     expect(serialized).not.toContain('OLD_DOM_SENTINEL');
     expect(serialized).not.toContain('OLD_SNAPSHOT_SENTINEL');
     expect(serialized).not.toContain('<button>');
-    expect(serialized).toContain('稳定事实：商品价格 ¥820');
+    expect(serialized).not.toContain('稳定事实：商品价格 ¥820');
     expect(serialized).toContain('CURRENT_DOM_SENTINEL');
     expect(serialized).toContain('CURRENT_SNAPSHOT_SENTINEL');
     expect(projectedAssistant?.parts[0]).toMatchObject({ result: { data: { pruned: true } } });
-    expect(projectedAssistant?.parts[1]).toMatchObject({
-      input: {
-        step: { evaluation: '', memory: '稳定事实：商品价格 ¥820', nextGoal: '读取更新后的页面' },
-        action: { type: 'click', index: 2 }
-      }
-    });
+    expect(projectedAssistant?.parts[1]).toMatchObject({ input: { action: { type: 'click', index: 2 } } });
   });
 
   it('continues after more than 300 seconds without a task-wide Runtime deadline', async (): Promise<void> => {
@@ -2487,14 +2488,17 @@ describe('chat runtime service shell', (): void => {
       streamExecutor: createNoopStreamExecutor(),
       keepRuntimeOpenForTest: true
     });
-    const result = await service.send(
-      createInput({
-        capabilities: {
-          rendererToolNames: ['read_current_document'],
-          toolContext: { providerId: 'editor', resourceId: 'document-1' }
+    const capabilities = {
+      rendererTools: [
+        {
+          name: 'read_current_document',
+          history: { mode: 'latest-only' as const, redactInputPaths: ['payload.secret'] }
         }
-      })
-    );
+      ],
+      toolContext: { providerId: 'editor', resourceId: 'document-1' }
+    };
+    const result = await service.send(createInput({ capabilities }));
+    capabilities.rendererTools[0]?.history.redactInputPaths.push('payload.changed');
     const decisionPromise = service.requestConfirmation({
       runtimeId: result.runtimeId,
       confirmationId: 'confirmation-recovery',
@@ -2508,7 +2512,12 @@ describe('chat runtime service shell', (): void => {
       expect.objectContaining({
         runtimeId: result.runtimeId,
         capabilities: {
-          rendererToolNames: ['read_current_document'],
+          rendererTools: [
+            {
+              name: 'read_current_document',
+              history: { mode: 'latest-only', redactInputPaths: ['payload.secret'] }
+            }
+          ],
           toolContext: { providerId: 'editor', resourceId: 'document-1' }
         },
         pendingRequests: expect.arrayContaining([
@@ -2771,7 +2780,7 @@ describe('chat runtime service shell', (): void => {
     ).toBe(false);
   });
 
-  it('projects historical WebView snapshots only in the model request', async (): Promise<void> => {
+  it('projects older declarative Renderer snapshots only in the model request', async (): Promise<void> => {
     const collector = createEventCollector();
     const updatedMessages: ChatMessageRecord[] = [];
     const oldAssistant: ChatMessageRecord = {
@@ -2787,6 +2796,7 @@ describe('chat runtime service shell', (): void => {
           toolName: 'read_current_webpage',
           status: 'done',
           input: {},
+          rendererHistory: { mode: 'latest-only', placeholder: '历史网页快照已裁剪，请重新读取当前网页。' },
           result: {
             toolName: 'read_current_webpage',
             status: 'success',
@@ -2806,6 +2816,20 @@ describe('chat runtime service shell', (): void => {
               snapshotId: 'webview-snapshot-SNAPSHOT_SENTINEL',
               elements: []
             }
+          }
+        },
+        {
+          id: 'current-webview-part',
+          type: 'tool',
+          toolCallId: 'current-webview-call',
+          toolName: 'read_current_webpage',
+          status: 'done',
+          input: {},
+          rendererHistory: { mode: 'latest-only', placeholder: '历史网页快照已裁剪，请重新读取当前网页。' },
+          result: {
+            toolName: 'read_current_webpage',
+            status: 'success',
+            data: { summary: 'CURRENT_RENDERER_RESULT', snapshotId: 'current-snapshot' }
           }
         }
       ],
@@ -2845,8 +2869,9 @@ describe('chat runtime service shell', (): void => {
     expect(serialized).not.toContain('SNAPSHOT_SENTINEL');
     expect(projectedOldAssistant?.parts[0]).toMatchObject({
       type: 'tool',
-      result: { data: { pruned: true, pruneReason: 'historical_webview_snapshot' } }
+      result: { data: { pruned: true, pruneReason: 'renderer_history_latest_only' } }
     });
+    expect(serialized).toContain('CURRENT_RENDERER_RESULT');
     expect(persistedMessages).toEqual(original);
     expect(updatedMessages.some((message) => message.id === 'old-webview-assistant')).toBe(false);
     expect(

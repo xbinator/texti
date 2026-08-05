@@ -794,7 +794,11 @@ export function createChatRuntimeService(
    */
   function initializeArtifactRegistry(runtime: ActiveChatRuntime, messages: ChatMessageRecord[]): void {
     if (runtime.artifactRegistry) return;
-    const projection = projectContext({ messages, skillContentHashes: runtime.skillContentHashes });
+    const projection = projectContext({
+      messages,
+      skillContentHashes: runtime.skillContentHashes,
+      rendererTools: runtime.capabilities?.rendererTools
+    });
     const checkpoint = projection.checkpointId
       ? messages.flatMap((message: ChatMessageRecord): ChatMessagePart[] => message.parts).find((part): boolean => part.id === projection.checkpointId)
       : undefined;
@@ -860,7 +864,8 @@ export function createChatRuntimeService(
       messages: applyRuntimeContext(currentRawMessages, runtime),
       system: runtime.system,
       tools: runtime.tools,
-      skillContentHashes: runtime.skillContentHashes
+      skillContentHashes: runtime.skillContentHashes,
+      rendererTools: runtime.capabilities?.rendererTools
     });
     if (!runtime.contextWindow || runtime.contextWindow < 1) return projection.messages;
 
@@ -892,7 +897,8 @@ export function createChatRuntimeService(
             modelSnapshot,
             system: runtime.system,
             tools: runtime.tools,
-            skillContentHashes: runtime.skillContentHashes
+            skillContentHashes: runtime.skillContentHashes,
+            rendererTools: runtime.capabilities?.rendererTools
           })
         ]);
         activeCompactionSources.delete(runtime.runtimeId);
@@ -909,6 +915,7 @@ export function createChatRuntimeService(
         system: runtime.system,
         tools: runtime.tools,
         skillContentHashes: runtime.skillContentHashes,
+        rendererTools: runtime.capabilities?.rendererTools,
         activeTurnToolPruneMode: 'preserve-latest'
       });
       if (exceedsHardLimit(projection.estimatedTokens, thresholdBudget)) {
@@ -917,6 +924,7 @@ export function createChatRuntimeService(
           system: runtime.system,
           tools: runtime.tools,
           skillContentHashes: runtime.skillContentHashes,
+          rendererTools: runtime.capabilities?.rendererTools,
           activeTurnToolPruneMode: 'all-complete'
         });
       }
@@ -1042,7 +1050,8 @@ export function createChatRuntimeService(
       messages: createContinuationSourceMessages(currentSourceMessages, assistantMessage),
       system: runtime.system,
       tools: runtime.tools,
-      skillContentHashes: runtime.skillContentHashes
+      skillContentHashes: runtime.skillContentHashes,
+      rendererTools: runtime.capabilities?.rendererTools
     });
     emitContextUsage(runtime, completedProjection.estimatedTokens);
 
@@ -1180,7 +1189,8 @@ export function createChatRuntimeService(
           modelSnapshot,
           system: runtime.system,
           tools: runtime.tools,
-          skillContentHashes: runtime.skillContentHashes
+          skillContentHashes: runtime.skillContentHashes,
+          rendererTools: runtime.capabilities?.rendererTools
         })
       ]);
       if (executionResult.status === 'rejected' && !assistantMessage.parts.some((part: ChatMessagePart): boolean => part.type === 'compaction')) {
@@ -1202,7 +1212,8 @@ export function createChatRuntimeService(
         messages: [...capturedMessages, assistantMessage],
         system: runtime.system,
         tools: runtime.tools,
-        skillContentHashes: runtime.skillContentHashes
+        skillContentHashes: runtime.skillContentHashes,
+        rendererTools: runtime.capabilities?.rendererTools
       });
       emitContextUsage(runtime, projection.estimatedTokens);
     }
@@ -1874,7 +1885,7 @@ export function createChatRuntimeService(
             ...createRuntimeEventBase(runtime),
             phase: runtime.phase,
             createdAt: runtime.createdAt,
-            capabilities: runtime.capabilities ? { ...runtime.capabilities, rendererToolNames: [...runtime.capabilities.rendererToolNames] } : undefined,
+            capabilities: runtime.capabilities ? structuredClone(runtime.capabilities) : undefined,
             pendingRequests: [
               ...rendererToolRequests.listPending(runtime.runtimeId),
               ...confirmationRequests.listPending(runtime.runtimeId),

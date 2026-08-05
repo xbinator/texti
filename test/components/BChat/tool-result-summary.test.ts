@@ -21,103 +21,8 @@ function successResult(toolName: string, data: Record<string, unknown>): AIToolE
 }
 
 describe('toolResultSummary open file metadata', (): void => {
-  it('summarizes read_current_webpage with simplified DOM metadata', (): void => {
-    const summary = getToolResultSummary(
-      'read_current_webpage',
-      successResult('read_current_webpage', {
-        url: 'https://example.com/register',
-        title: '挂号',
-        header: 'Page info: 800x600px [Start of page]',
-        content: '[1]<button>搜索</button>',
-        footer: '[End of page]',
-        text: '搜索',
-        selectedText: '',
-        headings: [{ level: 1, text: '挂号' }],
-        links: [],
-        capturedAt: 1,
-        truncated: { text: false, content: false, headings: false, links: false, selectedText: false }
-      })
-    );
-
-    expect(summary).toEqual({
-      text: '已读取网页: 挂号',
-      tags: [
-        { label: '网址', value: 'https://example.com/register' },
-        { label: '页面标题数', value: '1' },
-        { label: '页面链接数', value: '0' },
-        { label: '结构内容', value: '有' }
-      ]
-    });
-  });
-
-  it('summarizes read_current_webpage with top layer metadata', (): void => {
-    const summary = getToolResultSummary(
-      'read_current_webpage',
-      successResult('read_current_webpage', {
-        url: 'https://example.com/register',
-        title: '挂号',
-        header: 'Page info: 800x600px [Start of page]',
-        content: '[1]<button>确认</button>',
-        footer: '[End of page]',
-        text: '温馨提示 确认',
-        selectedText: '',
-        headings: [],
-        links: [],
-        capturedAt: 1,
-        truncated: { text: false, content: false, headings: false, links: false, selectedText: false },
-        viewport: {
-          width: 800,
-          height: 600,
-          scrollX: 0,
-          scrollY: 0,
-          topLayer: {
-            kind: 'dialog',
-            label: '温馨提示',
-            text: '医生在多个院区/科室出诊，请确认预约信息',
-            rect: { x: 80, y: 140, width: 640, height: 360 },
-            elementIndexes: [1],
-            primaryActionIndex: 1,
-            dimmed: true
-          },
-          elements: []
-        }
-      })
-    );
-
-    expect(summary?.tags).toContainEqual({ label: '顶层浮层', value: '温馨提示' });
-  });
-
-  it('summarizes read_current_webpage with manually selected element metadata', (): void => {
-    const summary = getToolResultSummary(
-      'read_current_webpage',
-      successResult('read_current_webpage', {
-        url: 'https://example.com/register',
-        title: '挂号',
-        header: 'Page info: 800x600px [Start of page]',
-        content: '[1]<button>确认</button>',
-        footer: '[End of page]',
-        text: '确认',
-        selectedText: '',
-        headings: [],
-        links: [],
-        capturedAt: 1,
-        truncated: { text: false, content: false, headings: false, links: false, selectedText: false },
-        selectedElement: {
-          tagName: 'BUTTON',
-          id: 'confirm-button',
-          className: 'primary-action',
-          text: '确认',
-          selector: 'button#confirm-button',
-          attributes: [],
-          ancestors: [],
-          computedStyles: {},
-          rect: { x: 20, y: 30, width: 120, height: 40 },
-          matchedIndex: 1
-        }
-      })
-    );
-
-    expect(summary?.tags).toContainEqual({ label: '选中元素', value: '#1 确认' });
+  it('leaves successful page-scoped results to registered presentation metadata', (): void => {
+    expect(getToolResultSummary('read_current_webpage', successResult('read_current_webpage', { title: 'Example' }))).toBeNull();
   });
 
   it('marks write_file file tag as openable when a file is created', (): void => {
@@ -126,25 +31,6 @@ describe('toolResultSummary open file metadata', (): void => {
     expect(summary).toEqual({
       text: '已创建文件',
       tags: [{ label: '文件', value: 'report.md', action: 'openFile', path: '/workspace/docs/report.md' }]
-    });
-  });
-
-  it('summarizes read_current_widget with title and openable file metadata', (): void => {
-    const summary = getToolResultSummary(
-      'read_current_widget',
-      successResult('read_current_widget', {
-        title: 'aether-weather',
-        path: '/home/user/.tibis/widgets/aether-weather/widget.json',
-        content: JSON.stringify({ name: 'aether-weather', elements: [] }, null, 2)
-      })
-    );
-
-    expect(summary).toEqual({
-      text: '已读取当前 Widget: aether-weather',
-      tags: [
-        { label: '标题', value: 'aether-weather' },
-        { label: '文件', value: 'widget.json', action: 'openFile', path: '/home/user/.tibis/widgets/aether-weather/widget.json' }
-      ]
     });
   });
 
@@ -219,83 +105,6 @@ describe('toolResultSummary open file metadata', (): void => {
         { label: '结果', value: '已截断' },
         { label: '状态', value: '部分结果' },
         { label: '警告', value: '4' }
-      ]
-    });
-  });
-
-  it('summarizes operate_webpage click results with the target element', (): void => {
-    const summary = getToolResultSummary(
-      'operate_webpage',
-      successResult('operate_webpage', {
-        ok: true,
-        action: 'click',
-        target: { index: 2, label: '预约挂号', tagName: 'BUTTON' },
-        message: 'executed',
-        navigationStarted: false,
-        pageChanged: true,
-        shouldReadAgain: true
-      })
-    );
-
-    expect(summary).toEqual({
-      text: '已点击网页元素',
-      tags: [
-        { label: '动作', value: '点击' },
-        { label: '目标', value: '#2 预约挂号' }
-      ]
-    });
-  });
-
-  it('summarizes operate_webpage press results with the target element', (): void => {
-    const summary = getToolResultSummary(
-      'operate_webpage',
-      successResult('operate_webpage', {
-        ok: true,
-        action: 'press',
-        target: { index: 1, label: '搜索医院', tagName: 'INPUT' },
-        message: 'executed',
-        navigationStarted: false,
-        pageChanged: true,
-        shouldReadAgain: true
-      })
-    );
-
-    expect(summary).toEqual({
-      text: '已按下网页按键',
-      tags: [
-        { label: '动作', value: '按键' },
-        { label: '目标', value: '#1 搜索医院' }
-      ]
-    });
-  });
-
-  it('summarizes operate_webpage scroll results with movement details', (): void => {
-    const summary = getToolResultSummary(
-      'operate_webpage',
-      successResult('operate_webpage', {
-        ok: true,
-        action: 'scroll',
-        target: { index: 1, label: '列表', tagName: 'DIV' },
-        message: 'executed',
-        navigationStarted: false,
-        pageChanged: true,
-        shouldReadAgain: true,
-        scroll: {
-          targetType: 'element',
-          before: { x: 0, y: 0 },
-          after: { x: 0, y: 240 },
-          changed: true
-        }
-      })
-    );
-
-    expect(summary).toEqual({
-      text: '已滚动网页',
-      tags: [
-        { label: '动作', value: '滚动' },
-        { label: '目标', value: '#1 列表' },
-        { label: '滚动目标', value: '元素' },
-        { label: '位置', value: '0,0 → 0,240' }
       ]
     });
   });

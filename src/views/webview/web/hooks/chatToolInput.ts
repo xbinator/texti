@@ -1,9 +1,57 @@
 /**
- * @file input.mts
- * @description WebView 页面操作输入的共享清理与严格归一化。
+ * @file chatToolInput.ts
+ * @description WebView 页面 Chat 工具操作输入的严格归一化。
  */
-import type { RuntimeWebpageOperateAction, RuntimeWebpageOperateInput } from '../types.mjs';
-import { SUPPORTED_WEBPAGE_PRESS_KEYS, SUPPORTED_WEBPAGE_SCROLL_DIRECTIONS, WEBPAGE_OPERATION_LIMITS } from '../constants.mjs';
+import type { WebviewOperateAction, WebviewOperateInput, WebviewPressKey } from '../types';
+
+/** WebView 支持模拟的按键。 */
+export const SUPPORTED_WEBPAGE_PRESS_KEYS = [
+  'Enter',
+  'Tab',
+  'Escape',
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight'
+] as const satisfies readonly WebviewPressKey[];
+
+/** WebView 支持的操作动作。 */
+export const SUPPORTED_WEBPAGE_ACTION_TYPES = [
+  'click',
+  'input',
+  'select',
+  'press',
+  'scroll',
+  'navigate',
+  'wait'
+] as const satisfies readonly WebviewOperateAction['type'][];
+
+/** WebView 支持的滚动方向。 */
+export const SUPPORTED_WEBPAGE_SCROLL_DIRECTIONS = ['up', 'down', 'left', 'right'] as const;
+
+/** 网页操作可变长度字段上限。 */
+export const WEBPAGE_OPERATION_LIMITS = {
+  /** 元素句柄最大安全整数。 */
+  elementIndex: Number.MAX_SAFE_INTEGER,
+  /** 快照 ID 最大长度。 */
+  snapshotId: 256,
+  /** 输入动作文本最大长度。 */
+  inputText: 4_000,
+  /** 下拉选项文本最大长度。 */
+  optionText: 500,
+  /** 导航地址最大长度。 */
+  url: 2_048
+} as const;
+
+/** 网页操作步骤记忆字段上限。 */
+export const WEBPAGE_STEP_LIMITS = {
+  /** 上一步评估最大长度。 */
+  evaluation: 500,
+  /** 跨步骤记忆最大长度。 */
+  memory: 1_200,
+  /** 本次目标最大长度。 */
+  nextGoal: 300
+} as const;
 
 /**
  * 判断值是否为对象记录。
@@ -57,8 +105,8 @@ function isScrollDirection(value: unknown): value is (typeof SUPPORTED_WEBPAGE_S
  * @param value - 待判断值
  * @returns 是否为支持的网页按键
  */
-function isPressKey(value: unknown): value is (typeof SUPPORTED_WEBPAGE_PRESS_KEYS)[number] {
-  return typeof value === 'string' && SUPPORTED_WEBPAGE_PRESS_KEYS.includes(value as (typeof SUPPORTED_WEBPAGE_PRESS_KEYS)[number]);
+function isPressKey(value: unknown): value is WebviewPressKey {
+  return typeof value === 'string' && SUPPORTED_WEBPAGE_PRESS_KEYS.includes(value as WebviewPressKey);
 }
 
 /**
@@ -68,10 +116,7 @@ function isPressKey(value: unknown): value is (typeof SUPPORTED_WEBPAGE_PRESS_KE
  */
 export function sanitizeWebpageAction(value: unknown): Record<string, unknown> | undefined {
   if (!isRecord(value) || typeof value.type !== 'string') return undefined;
-
-  if (value.type === 'click') {
-    return { type: value.type, ...(isElementIndex(value.index) ? { index: value.index } : {}) };
-  }
+  if (value.type === 'click') return { type: value.type, ...(isElementIndex(value.index) ? { index: value.index } : {}) };
   if (value.type === 'input') {
     return {
       type: value.type,
@@ -108,7 +153,6 @@ export function sanitizeWebpageAction(value: unknown): Record<string, unknown> |
   if (value.type === 'wait') {
     return { type: value.type, ...(isNumberInRange(value.seconds, 0.1, 5) ? { seconds: value.seconds } : {}) };
   }
-
   return undefined;
 }
 
@@ -117,7 +161,7 @@ export function sanitizeWebpageAction(value: unknown): Record<string, unknown> |
  * @param value - 原始网页动作
  * @returns 完整合法动作，无效时返回 undefined
  */
-export function normalizeWebpageAction(value: unknown): RuntimeWebpageOperateAction | undefined {
+export function normalizeWebpageAction(value: unknown): WebviewOperateAction | undefined {
   if (!isRecord(value) || typeof value.type !== 'string') return undefined;
   if (value.type === 'input' && typeof value.text === 'string' && value.text.length > WEBPAGE_OPERATION_LIMITS.inputText) return undefined;
   if (value.type === 'input' && value.clear !== undefined && typeof value.clear !== 'boolean') return undefined;
@@ -129,32 +173,27 @@ export function normalizeWebpageAction(value: unknown): RuntimeWebpageOperateAct
   const action = sanitizeWebpageAction(value);
   if (!action) return undefined;
 
-  if (action.type === 'click' && isElementIndex(action.index)) return action as RuntimeWebpageOperateAction;
-  if (action.type === 'input' && isElementIndex(action.index) && typeof action.text === 'string') return action as RuntimeWebpageOperateAction;
-  if (action.type === 'select' && isElementIndex(action.index) && typeof action.optionText === 'string') return action as RuntimeWebpageOperateAction;
-  if (action.type === 'press' && isElementIndex(action.index) && isPressKey(action.key)) return action as RuntimeWebpageOperateAction;
-  if (action.type === 'scroll' && isScrollDirection(action.direction)) return action as RuntimeWebpageOperateAction;
-  if (action.type === 'navigate' && typeof action.url === 'string' && action.url.trim()) return action as RuntimeWebpageOperateAction;
-  if (action.type === 'wait') return action as RuntimeWebpageOperateAction;
-
+  if (action.type === 'click' && isElementIndex(action.index)) return action as WebviewOperateAction;
+  if (action.type === 'input' && isElementIndex(action.index) && typeof action.text === 'string') return action as WebviewOperateAction;
+  if (action.type === 'select' && isElementIndex(action.index) && typeof action.optionText === 'string') return action as WebviewOperateAction;
+  if (action.type === 'press' && isElementIndex(action.index) && isPressKey(action.key)) return action as WebviewOperateAction;
+  if (action.type === 'scroll' && isScrollDirection(action.direction)) return action as WebviewOperateAction;
+  if (action.type === 'navigate' && typeof action.url === 'string' && action.url.trim()) return action as WebviewOperateAction;
+  if (action.type === 'wait') return action as WebviewOperateAction;
   return undefined;
 }
 
 /**
  * 严格归一化当前要执行的网页操作输入。
  * @param value - 原始工具输入
- * @returns Renderer 可消费的输入，无效时返回 undefined
+ * @returns 页面可消费的输入，无效时返回 undefined
  */
-export function normalizeWebpageInput(value: unknown): RuntimeWebpageOperateInput | undefined {
+export function normalizeWebpageInput(value: unknown): WebviewOperateInput | undefined {
   if (!isRecord(value)) return undefined;
   const action = normalizeWebpageAction(value.action);
   if (!action) return undefined;
   const snapshotId = typeof value.snapshotId === 'string' ? value.snapshotId : undefined;
   if (snapshotId !== undefined && (snapshotId.length > WEBPAGE_OPERATION_LIMITS.snapshotId || !snapshotId.trim())) return undefined;
   if (action.type !== 'navigate' && !snapshotId) return undefined;
-
-  return {
-    ...(snapshotId ? { snapshotId } : {}),
-    action
-  };
+  return { ...(snapshotId ? { snapshotId } : {}), action };
 }

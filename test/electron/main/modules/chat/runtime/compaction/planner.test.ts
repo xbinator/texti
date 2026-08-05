@@ -55,6 +55,7 @@ function createWebviewReadPart(content: string): ChatMessageToolPart {
     toolName: 'read_current_webpage',
     status: 'done',
     input: {},
+    rendererHistory: { mode: 'latest-only', placeholder: '历史网页快照已裁剪，请重新读取当前网页。' },
     result: {
       toolName: 'read_current_webpage',
       status: 'success',
@@ -269,7 +270,7 @@ describe('compaction planner', (): void => {
     expect(JSON.stringify(result.plan.sourceSnapshot)).not.toContain('SNAPSHOT_SENTINEL');
     expect(result.plan.sourceSnapshot.sourceParts[0].part).toMatchObject({
       type: 'tool',
-      result: { data: { pruned: true, pruneReason: 'historical_webview_snapshot' } }
+      result: { data: { pruned: true, pruneReason: 'renderer_history_latest_only' } }
     });
     expect(JSON.stringify(result.plan.fingerprintSources)).toContain('DOM_SENTINEL');
     expect(JSON.stringify(result.plan.fingerprintSources)).toContain('SNAPSHOT_SENTINEL');
@@ -306,6 +307,10 @@ describe('compaction planner', (): void => {
           step: { evaluation: '[2] 已出现', memory: '最低价格为 ¥820', nextGoal: '点击 [3]' },
           action: { type: 'click', index: 3 }
         },
+        rendererHistory: {
+          mode: 'keep',
+          redactInputPaths: ['snapshotId', 'step', 'action.text', 'action.url', 'action.optionText']
+        },
         inputText: '{"rawDom":"SUMMARY_INPUT_TEXT_DOM_SENTINEL"}',
         providerMetadata: { rawRequest: '<button>SUMMARY_PROVIDER_DOM_SENTINEL</button>' },
         result: { toolName: 'operate_webpage', status: 'success', data: { ok: true } }
@@ -322,7 +327,7 @@ describe('compaction planner', (): void => {
     expect(serialized).not.toContain('[3]');
     expect(serialized).not.toContain('SUMMARY_INPUT_TEXT_DOM_SENTINEL');
     expect(serialized).not.toContain('SUMMARY_PROVIDER_DOM_SENTINEL');
-    expect(serialized).toContain('最低价格为 ¥820');
+    expect(serialized).not.toContain('最低价格为 ¥820');
     expect(serialized).toContain('"action":{"type":"click","index":3}');
     expect(JSON.stringify(result.plan.fingerprintSources)).toContain('SNAPSHOT_SENTINEL');
     expect(JSON.stringify(result.plan.fingerprintSources)).toContain('SUMMARY_INPUT_TEXT_DOM_SENTINEL');

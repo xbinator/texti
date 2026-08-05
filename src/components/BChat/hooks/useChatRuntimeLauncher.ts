@@ -11,6 +11,7 @@ import type {
   ChatRuntimeAddress,
   ChatRuntimeBridgeRequestEvent,
   ChatRuntimeCapabilityDescriptor,
+  ChatRendererToolDescriptor,
   ChatRuntimeStartResult,
   ChatRuntimeUserInputPart,
   ChatToolBinding
@@ -19,7 +20,7 @@ import type { Ref } from 'vue';
 import { nextTick, watch } from 'vue';
 import { nanoid } from 'nanoid';
 import type { ChatActorSystem } from '@/ai/chat/actorSystem';
-import { useActiveToolContext } from '@/hooks/useChat/useToolContext';
+import { useActiveChatContext } from '@/hooks/useChat/useChatContextRegistry';
 
 /** Runtime 请求准备函数。 */
 type PrepareRuntimeRequest = ReturnType<typeof useRuntimeRequestConfig>['prepareRuntimeRequest'];
@@ -46,6 +47,8 @@ interface UseChatRuntimeLauncherOptions {
 interface RuntimeResourceSnapshot {
   /** 预检开始时的页面工具 binding。 */
   readonly toolContext?: ChatToolBinding;
+  /** 预检开始时页面声明的 Renderer 元数据。 */
+  readonly rendererTools: readonly ChatRendererToolDescriptor[];
 }
 
 /**
@@ -66,8 +69,15 @@ function createResourceBinding(resources: RuntimeResourceSnapshot): RuntimeToolD
  * @returns 可由主进程持有的 capability 描述
  */
 function createCapabilityDescriptor(prepared: PreparedRuntimeRequest, resources: RuntimeResourceSnapshot): ChatRuntimeCapabilityDescriptor {
+  const pageTools = new Map(resources.rendererTools.map((tool: ChatRendererToolDescriptor): [string, ChatRendererToolDescriptor] => [tool.name, tool]));
   return {
-    rendererToolNames: prepared.rendererTools.map((tool): string => tool.definition.name),
+    rendererTools: prepared.rendererTools.map((tool): ChatRendererToolDescriptor => {
+      const pageTool = pageTools.get(tool.definition.name);
+      return {
+        name: tool.definition.name,
+        ...(pageTool?.history ? { history: pageTool.history } : {})
+      };
+    }),
     workspaceRoot: prepared.config.workspaceRoot,
     toolContext: resources.toolContext
   };
@@ -79,11 +89,15 @@ function createCapabilityDescriptor(prepared: PreparedRuntimeRequest, resources:
  * @returns Runtime 准备与生命周期操作
  */
 export function useChatRuntimeLauncher(options: UseChatRuntimeLauncherOptions) {
-  const activeChatTools = useActiveToolContext();
+  const activeChatTools = useActiveChatContext();
 
   /** 捕获预检开始时的页面资源。 */
   function captureRuntimeResources(): RuntimeResourceSnapshot {
-    return Object.freeze({ toolContext: activeChatTools.getActiveBinding() });
+    const toolContext = activeChatTools.getActiveBinding();
+    return Object.freeze({
+      toolContext,
+      rendererTools: toolContext ? activeChatTools.getRendererTools(toolContext) : Object.freeze([] as ChatRendererToolDescriptor[])
+    });
   }
 
   /** 为请求补充 capability 描述，并丢弃过期准备结果。 */
@@ -110,7 +124,7 @@ export function useChatRuntimeLauncher(options: UseChatRuntimeLauncherOptions) {
     const descriptor = recoveredCapabilities?.descriptor;
     if (!address || !descriptor || address.sessionId !== options.activeSessionId.value) return;
 
-    const allowedToolNames = new Set(descriptor.rendererToolNames);
+    const allowedToolNames = new Set(descriptor.rendererTools.map((tool: ChatRendererToolDescriptor): string => tool.name));
     const binding: RuntimeToolBinding = Object.freeze({
       sessionId: address.sessionId,
       runtimeId: address.runtimeId,

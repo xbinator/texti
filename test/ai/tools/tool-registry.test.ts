@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import * as runtimeTools from '@/ai/tools/catalog/runtimeTools';
 import { GLOB_TOOL_NAME, GREP_TOOL_NAME, READ_FILE_TOOL_NAME, createGlobTool, createGrepTool, createReadFileTool } from '@/ai/tools/catalog/runtimeTools';
 import { stageFileEditToolRegistryEntry, stageFileWriteToolRegistryEntry } from '../../../shared/ai/tools/AgentStagedFileTool/index.js';
-import { createDocumentToolRegistryEntry, readCurrentDocumentToolRegistryEntry } from '../../../shared/ai/tools/DocumentTool/index.js';
+import { createDocumentToolRegistryEntry } from '../../../shared/ai/tools/DocumentTool/index.js';
 import { getCurrentTimeToolRegistryEntry } from '../../../shared/ai/tools/EnvironmentTool/index.js';
 import { editFileToolRegistryEntry } from '../../../shared/ai/tools/FileEditTool/index.js';
 import {
@@ -21,8 +21,6 @@ import { writeFileToolRegistryEntry } from '../../../shared/ai/tools/FileWriteTo
 import {
   DELEGATE_TASK_TOOL_NAME,
   EDIT_FILE_TOOL_NAME,
-  OPERATE_WEBPAGE_TOOL_NAME,
-  OPEN_RESOURCE_TOOL_NAME,
   READ_DIRECTORY_TOOL_NAME,
   TOOL_REGISTRY,
   WRITE_FILE_TOOL_NAME,
@@ -41,8 +39,6 @@ import {
 } from '../../../shared/ai/tools/MCPSettingsTool/index.js';
 import { openResourceToolRegistryEntry } from '../../../shared/ai/tools/OpenResourceTool/index.js';
 import { getSettingsToolRegistryEntry, updateSettingsToolRegistryEntry } from '../../../shared/ai/tools/SettingsTool/index.js';
-import { operateWebpageToolRegistryEntry, readCurrentWebpageToolRegistryEntry } from '../../../shared/ai/tools/WebviewTool/index.js';
-import { READ_CURRENT_WIDGET_TOOL_NAME, readCurrentWidgetToolRegistryEntry } from '../../../shared/ai/tools/WidgetTool/index.js';
 
 /** SettingsTool 源码，用于约束说明片段复用结构。 */
 const settingsToolSource = readFileSync(new URL('../../../shared/ai/tools/SettingsTool/index.ts', import.meta.url), 'utf8');
@@ -60,7 +56,6 @@ describe('toolRegistry', (): void => {
 
   it('assembles registry entries from one Tool directory per tool domain', (): void => {
     expect(TOOL_REGISTRY).toEqual([
-      readCurrentDocumentToolRegistryEntry,
       createDocumentToolRegistryEntry,
       getCurrentTimeToolRegistryEntry,
       readFileToolRegistryEntry,
@@ -80,9 +75,6 @@ describe('toolRegistry', (): void => {
       removeMcpServerToolRegistryEntry,
       refreshMcpDiscoveryToolRegistryEntry,
       openResourceToolRegistryEntry,
-      readCurrentWebpageToolRegistryEntry,
-      operateWebpageToolRegistryEntry,
-      readCurrentWidgetToolRegistryEntry,
       getToolRegistryEntry(DELEGATE_TASK_TOOL_NAME)
     ]);
   });
@@ -117,107 +109,23 @@ describe('toolRegistry', (): void => {
     expect(fileToolNames).toEqual(expect.arrayContaining(['read_file', 'read_directory', 'glob', 'grep', 'create_document', 'write_file', 'edit_file']));
   });
 
-  it('can derive WebView tool names by runtime group', (): void => {
-    const webviewToolNames = getToolNamesByRuntimeGroup('main', 'webview');
-
-    expect(webviewToolNames).toEqual(expect.arrayContaining(['read_current_webpage', 'operate_webpage']));
-  });
-
-  it('prefers operate_webpage for active WebView navigation', (): void => {
-    const operateDefinition = getToolDefinitionByName(OPERATE_WEBPAGE_TOOL_NAME);
-    const openResourceDefinition = getToolDefinitionByName(OPEN_RESOURCE_TOOL_NAME);
-    const actionSchema = operateDefinition?.parameters.properties.action as { oneOf?: Array<{ properties?: { type?: { enum?: string[] } } }> };
-    const actionTypes = actionSchema.oneOf?.flatMap((schema) => schema.properties?.type?.enum ?? []) ?? [];
-
-    expect(actionTypes).toContain('navigate');
-    expect(String(operateDefinition?.description)).toContain('navigate');
-    expect(String(openResourceDefinition?.description)).toContain('没有激活 WebView');
-  });
-
-  it('exposes operate_webpage press action in the public schema', (): void => {
-    const operateDefinition = getToolDefinitionByName(OPERATE_WEBPAGE_TOOL_NAME);
-    const actionSchema = operateDefinition?.parameters.properties.action as {
-      oneOf?: Array<{ properties?: { type?: { enum?: string[] }; key?: { enum?: string[] } } }>;
-    };
-    const pressSchema = actionSchema.oneOf?.find((schema) => schema.properties?.type?.enum?.includes('press'));
-
-    expect(pressSchema?.properties?.key?.enum).toEqual(expect.arrayContaining(['Enter']));
-    expect(String(operateDefinition?.description)).toContain('press');
-  });
-
-  it('allows operate_webpage navigate without a snapshot id in the public schema', (): void => {
-    const operateDefinition = getToolDefinitionByName(OPERATE_WEBPAGE_TOOL_NAME);
-    const snapshotIdSchema = operateDefinition?.parameters.properties.snapshotId as { description?: string } | undefined;
-
-    expect(operateDefinition?.parameters.required).toEqual(['step', 'action']);
-    expect(snapshotIdSchema?.description).toContain('非 navigate');
-  });
-
-  it('requires bounded step memory for operate_webpage', (): void => {
-    const definition = getToolDefinitionByName(OPERATE_WEBPAGE_TOOL_NAME);
-    const stepSchema = definition?.parameters.properties.step as {
-      required?: string[];
-      additionalProperties?: boolean;
-      properties?: Record<string, { maxLength?: number; description?: string }>;
-    };
-
-    expect(definition?.parameters.required).toEqual(['step', 'action']);
-    expect(stepSchema.required).toEqual(['evaluation', 'memory', 'nextGoal']);
-    expect(stepSchema.additionalProperties).toBe(false);
-    expect(stepSchema.properties?.evaluation?.maxLength).toBe(500);
-    expect(stepSchema.properties?.memory?.maxLength).toBe(1_200);
-    expect(stepSchema.properties?.nextGoal?.maxLength).toBe(300);
-    expect(stepSchema.properties?.memory?.description).toContain('不得包含 [N]');
-  });
-
-  it('bounds variable-length operate_webpage action fields', (): void => {
-    const definition = getToolDefinitionByName(OPERATE_WEBPAGE_TOOL_NAME);
-    const snapshotIdSchema = definition?.parameters.properties.snapshotId as { minLength?: number; maxLength?: number } | undefined;
-    const actionSchema = definition?.parameters.properties.action as {
-      oneOf?: Array<{
-        properties?: {
-          type?: { enum?: string[] };
-          index?: { type?: string; minimum?: number; maximum?: number };
-          text?: { maxLength?: number };
-          optionText?: { maxLength?: number };
-          url?: { minLength?: number; maxLength?: number };
-        };
-      }>;
-    };
-    const clickSchema = actionSchema.oneOf?.find((schema) => schema.properties?.type?.enum?.includes('click'));
-    const inputSchema = actionSchema.oneOf?.find((schema) => schema.properties?.type?.enum?.includes('input'));
-    const selectSchema = actionSchema.oneOf?.find((schema) => schema.properties?.type?.enum?.includes('select'));
-    const navigateSchema = actionSchema.oneOf?.find((schema) => schema.properties?.type?.enum?.includes('navigate'));
-
-    expect(snapshotIdSchema).toMatchObject({ minLength: 1, maxLength: 256 });
-    expect(clickSchema?.properties?.index).toMatchObject({ type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
-    expect(inputSchema?.properties?.text?.maxLength).toBe(4_000);
-    expect(selectSchema?.properties?.optionText?.maxLength).toBe(500);
-    expect(navigateSchema?.properties?.url).toMatchObject({ minLength: 1, maxLength: 2_048 });
-  });
-
-  it('documents navigate as address-bar navigation instead of a DOM action substitute', (): void => {
-    const operateDefinition = getToolDefinitionByName(OPERATE_WEBPAGE_TOOL_NAME);
-    const actionSchema = operateDefinition?.parameters.properties.action as {
-      oneOf?: Array<{ properties?: { type?: { enum?: string[] }; url?: { description?: string } } }>;
-    };
-    const navigateSchema = actionSchema.oneOf?.find((schema) => schema.properties?.type?.enum?.includes('navigate'));
-
-    expect(String(operateDefinition?.description)).toContain('navigate 仅用于用户明确提供 URL');
-    expect(String(operateDefinition?.description)).toContain('页面内可操作项必须使用 read_current_webpage 返回的 [N]');
-    expect(navigateSchema?.properties?.url?.description).toContain('不要替代页面内可操作项的 [N]');
+  it('keeps every page-scoped tool out of the shared main-process registry', (): void => {
+    expect(getToolRegistryEntry('read_current_document')).toBeUndefined();
+    expect(getToolRegistryEntry('read_current_widget')).toBeUndefined();
+    expect(getToolRegistryEntry('read_current_webpage')).toBeUndefined();
+    expect(getToolRegistryEntry('operate_webpage')).toBeUndefined();
   });
 
   it('can derive tool names by renderer exposure policy', (): void => {
     expect(getToolNamesByExposure('default-readonly')).toEqual(
-      expect.arrayContaining(['read_current_document', 'get_current_time', 'read_file', 'get_settings', 'query_logs', 'open_resource'])
+      expect.arrayContaining(['get_current_time', 'read_file', 'get_settings', 'query_logs', 'open_resource'])
     );
+    expect(getToolNamesByExposure('default-readonly')).not.toContain('read_current_document');
     expect(getToolNamesByExposure('default-writable')).toEqual(expect.arrayContaining(['create_document', 'edit_file', 'write_file', 'update_settings']));
-    expect(getToolNamesByExposure('conditional-readonly')).toEqual(
-      expect.arrayContaining(['read_directory', 'glob', 'grep', 'get_mcp_settings', 'read_current_webpage', READ_CURRENT_WIDGET_TOOL_NAME])
-    );
+    expect(getToolNamesByExposure('conditional-readonly')).toEqual(expect.arrayContaining(['read_directory', 'glob', 'grep', 'get_mcp_settings']));
+    expect(getToolNamesByExposure('conditional-readonly')).not.toContain('read_current_widget');
     expect(getToolNamesByExposure('conditional-writable')).toEqual(
-      expect.arrayContaining(['add_mcp_server', 'update_mcp_server', 'remove_mcp_server', 'refresh_mcp_discovery', 'operate_webpage'])
+      expect.arrayContaining(['add_mcp_server', 'update_mcp_server', 'remove_mcp_server', 'refresh_mcp_discovery'])
     );
     expect(getToolNamesByExposure('chat-default').sort()).toEqual(
       [...getToolNamesByExposure('default-readonly'), ...getToolNamesByExposure('default-writable')].sort()

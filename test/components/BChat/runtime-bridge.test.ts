@@ -5,7 +5,7 @@
 import type { ChatRuntimeBridgeRequestEvent } from 'types/chat-runtime';
 import { describe, expect, it, vi } from 'vitest';
 import { handleBChatRuntimeBridgeRequest } from '@/components/BChat/utils/runtimeBridge';
-import type { ChatBridgeDispatchResult } from '@/hooks/useChat/useToolContext';
+import type { ChatBridgeDispatchResult } from '@/hooks/useChat/useChatContextRegistry';
 
 /**
  * 创建完整 Runtime Bridge 请求事件。
@@ -30,23 +30,23 @@ function createEvent(kind: string, payload?: unknown): ChatRuntimeBridgeRequestE
 describe('handleBChatRuntimeBridgeRequest', (): void => {
   it('dispatches page bridge requests through the registered context', async (): Promise<void> => {
     const event = createEvent('document-snapshot');
-    const dispatchToolBridge = vi.fn(
+    const dispatchAppBridge = vi.fn(
       async (): Promise<ChatBridgeDispatchResult> => ({
         handled: true,
         data: { id: 'doc-1', content: 'hello document' }
       })
     );
 
-    const result = await handleBChatRuntimeBridgeRequest(event, { dispatchToolBridge });
+    const result = await handleBChatRuntimeBridgeRequest(event, { dispatchAppBridge });
 
-    expect(dispatchToolBridge).toHaveBeenCalledWith(event);
+    expect(dispatchAppBridge).toHaveBeenCalledWith(event);
     expect(result).toEqual({ id: 'doc-1', content: 'hello document' });
   });
 
   it('returns a stable unsupported error when the bound page declines a request', async (): Promise<void> => {
-    const dispatchToolBridge = vi.fn(async (): Promise<ChatBridgeDispatchResult> => ({ handled: false }));
+    const dispatchAppBridge = vi.fn(async (): Promise<ChatBridgeDispatchResult> => ({ handled: false }));
 
-    await expect(handleBChatRuntimeBridgeRequest(createEvent('future-page-snapshot'), { dispatchToolBridge })).rejects.toMatchObject({
+    await expect(handleBChatRuntimeBridgeRequest(createEvent('future-page-snapshot'), { dispatchAppBridge })).rejects.toMatchObject({
       code: 'ACTION_NOT_SUPPORTED'
     });
   });
@@ -60,9 +60,9 @@ describe('handleBChatRuntimeBridgeRequest', (): void => {
   it('preserves a stable page error through nested normalization causes', async (): Promise<void> => {
     const stableError = Object.assign(new Error('网页快照已过期'), { code: 'STALE_SNAPSHOT' as const });
     const nestedError = new Error('网页快照已过期', { cause: new Error('网页快照已过期', { cause: stableError }) });
-    const dispatchToolBridge = vi.fn(async (): Promise<ChatBridgeDispatchResult> => Promise.reject(nestedError));
+    const dispatchAppBridge = vi.fn(async (): Promise<ChatBridgeDispatchResult> => Promise.reject(nestedError));
 
-    await expect(handleBChatRuntimeBridgeRequest(createEvent('webview-snapshot'), { dispatchToolBridge })).rejects.toMatchObject({
+    await expect(handleBChatRuntimeBridgeRequest(createEvent('webview-snapshot'), { dispatchAppBridge })).rejects.toMatchObject({
       code: 'STALE_SNAPSHOT',
       message: '网页快照已过期'
     });
@@ -106,7 +106,7 @@ describe('handleBChatRuntimeBridgeRequest', (): void => {
   });
 
   it('lets the bound page handle an in-memory file write first', async (): Promise<void> => {
-    const dispatchToolBridge = vi.fn(
+    const dispatchAppBridge = vi.fn(
       async (): Promise<ChatBridgeDispatchResult> => ({
         handled: true,
         data: { artifactId: 'draft-1', path: 'unsaved://draft-1/note.md', content: 'next draft' }
@@ -115,15 +115,15 @@ describe('handleBChatRuntimeBridgeRequest', (): void => {
     const updateRecentFileById = vi.fn();
     const event = createEvent('write-file-content', { path: 'unsaved://draft-1/note.md', content: 'next draft' });
 
-    const result = await handleBChatRuntimeBridgeRequest(event, { dispatchToolBridge, updateRecentFileById });
+    const result = await handleBChatRuntimeBridgeRequest(event, { dispatchAppBridge, updateRecentFileById });
 
-    expect(dispatchToolBridge).toHaveBeenCalledWith(event);
+    expect(dispatchAppBridge).toHaveBeenCalledWith(event);
     expect(updateRecentFileById).not.toHaveBeenCalled();
     expect(result).toEqual({ artifactId: 'draft-1', path: 'unsaved://draft-1/note.md', content: 'next draft' });
   });
 
   it('falls back to the recent store when the bound page declines an unsaved write', async (): Promise<void> => {
-    const dispatchToolBridge = vi.fn(async (): Promise<ChatBridgeDispatchResult> => ({ handled: false }));
+    const dispatchAppBridge = vi.fn(async (): Promise<ChatBridgeDispatchResult> => ({ handled: false }));
     const updateRecentFileById = vi.fn().mockResolvedValue({
       id: 'draft-1',
       type: 'file',
@@ -134,7 +134,7 @@ describe('handleBChatRuntimeBridgeRequest', (): void => {
     });
 
     const result = await handleBChatRuntimeBridgeRequest(createEvent('write-file-content', { path: 'unsaved://draft-1/note.md', content: 'next draft' }), {
-      dispatchToolBridge,
+      dispatchAppBridge,
       updateRecentFileById
     });
 
@@ -148,7 +148,7 @@ describe('handleBChatRuntimeBridgeRequest', (): void => {
 
   it('falls back to the recent store when the bound page was unregistered', async (): Promise<void> => {
     const unavailableError = Object.assign(new Error('page unavailable'), { code: 'EDITOR_UNAVAILABLE' as const });
-    const dispatchToolBridge = vi.fn(async (): Promise<ChatBridgeDispatchResult> => Promise.reject(unavailableError));
+    const dispatchAppBridge = vi.fn(async (): Promise<ChatBridgeDispatchResult> => Promise.reject(unavailableError));
     const updateRecentFileById = vi.fn().mockResolvedValue({
       id: 'draft-1',
       type: 'file',
@@ -159,7 +159,7 @@ describe('handleBChatRuntimeBridgeRequest', (): void => {
     });
 
     const result = await handleBChatRuntimeBridgeRequest(createEvent('write-file-content', { path: 'unsaved://draft-1/note.md', content: 'recovered draft' }), {
-      dispatchToolBridge,
+      dispatchAppBridge,
       updateRecentFileById
     });
 
@@ -174,7 +174,7 @@ describe('handleBChatRuntimeBridgeRequest', (): void => {
   it('falls back through nested unavailable errors from a bound page', async (): Promise<void> => {
     const unavailableError = Object.assign(new Error('page unavailable'), { code: 'EDITOR_UNAVAILABLE' as const });
     const nestedError = new Error('page unavailable', { cause: new Error('page unavailable', { cause: unavailableError }) });
-    const dispatchToolBridge = vi.fn(async (): Promise<ChatBridgeDispatchResult> => Promise.reject(nestedError));
+    const dispatchAppBridge = vi.fn(async (): Promise<ChatBridgeDispatchResult> => Promise.reject(nestedError));
     const updateRecentFileById = vi.fn().mockResolvedValue({
       id: 'draft-1',
       type: 'file',
@@ -185,7 +185,7 @@ describe('handleBChatRuntimeBridgeRequest', (): void => {
     });
 
     const result = await handleBChatRuntimeBridgeRequest(createEvent('write-file-content', { path: 'unsaved://draft-1/note.md', content: 'recovered draft' }), {
-      dispatchToolBridge,
+      dispatchAppBridge,
       updateRecentFileById
     });
 

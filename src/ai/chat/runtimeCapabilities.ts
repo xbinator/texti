@@ -3,7 +3,42 @@
  * @description 按 Runtime ID 冻结 renderer 工具与 Bridge 能力。
  */
 import type { AIToolContext, AIToolExecutor } from 'types/ai';
-import type { ChatRuntimeBridgeRequestEvent, ChatRuntimeCapabilityDescriptor } from 'types/chat-runtime';
+import type {
+  ChatRendererToolDescriptor,
+  ChatRendererToolHistoryPolicy,
+  ChatRuntimeBridgeRequestEvent,
+  ChatRuntimeCapabilityDescriptor
+} from 'types/chat-runtime';
+
+/**
+ * 深度复制并冻结 Renderer 历史策略。
+ * @param history - 原始历史策略
+ * @returns 不可变历史策略
+ */
+function freezeHistory(history: ChatRendererToolHistoryPolicy | undefined): ChatRendererToolHistoryPolicy | undefined {
+  if (!history) return undefined;
+  return Object.freeze({
+    mode: history.mode,
+    ...(history.placeholder !== undefined ? { placeholder: history.placeholder } : {}),
+    ...(history.redactInputPaths ? { redactInputPaths: Object.freeze([...history.redactInputPaths]) } : {})
+  });
+}
+
+/**
+ * 复制并冻结 Renderer 工具描述符。
+ * @param tools - 原始描述符列表
+ * @returns 不可变描述符列表
+ */
+function freezeRendererTools(tools: readonly ChatRendererToolDescriptor[]): readonly ChatRendererToolDescriptor[] {
+  const names = new Set<string>();
+  return Object.freeze(
+    tools.map((tool: ChatRendererToolDescriptor): ChatRendererToolDescriptor => {
+      if (names.has(tool.name)) throw new Error(`Duplicate renderer tool descriptor: ${tool.name}`);
+      names.add(tool.name);
+      return Object.freeze({ name: tool.name, ...(tool.history ? { history: freezeHistory(tool.history) } : {}) });
+    })
+  );
+}
 
 /**
  * Runtime 启动时捕获的 renderer 能力。
@@ -50,7 +85,7 @@ export function createRuntimeCapabilityRegistry(): RuntimeCapabilityRegistry {
           descriptor: capabilities.descriptor
             ? Object.freeze({
                 ...capabilities.descriptor,
-                rendererToolNames: Object.freeze([...capabilities.descriptor.rendererToolNames]),
+                rendererTools: freezeRendererTools(capabilities.descriptor.rendererTools ?? []),
                 toolContext: capabilities.descriptor.toolContext ? Object.freeze({ ...capabilities.descriptor.toolContext }) : undefined
               })
             : undefined

@@ -110,6 +110,8 @@ export interface AIToolDefinition {
   permissionCategory?: 'document' | 'settings' | 'system';
   /** 此写入工具是否可以在首次权限模型中自动批准并记住。 */
   safeAutoApprove?: boolean;
+  /** 此工具是否允许用户在手动确认后记住授权，但不因此启用自动安全执行。 */
+  allowPermissionRemember?: boolean;
 }
 
 /**
@@ -193,6 +195,19 @@ export interface AIToolActivityReporter {
   waitExternal(wait: ChatToolExternalWait): void;
   /** 从等待状态恢复执行。 */
   resume(): void;
+}
+
+/**
+ * Renderer 工具调用的 Runtime 元数据。
+ * @description 与文档上下文解耦，确保页面工具在无编辑器时仍可接收中止与活动能力。
+ */
+export interface AIToolExecutionMetadata {
+  /** 触发工具请求的 Runtime ID。 */
+  runtimeId?: string;
+  /** Renderer 本地工具中止信号。 */
+  abortSignal?: AbortSignal;
+  /** Renderer 本地工具的受限活动上报器。 */
+  activity?: AIToolActivityReporter;
 }
 
 /**
@@ -352,9 +367,10 @@ export interface AIToolExecutor<TInput = unknown, TResult = unknown> {
    * 执行工具。
    * @param input - 工具输入。
    * @param context - 执行上下文，不需要活动文档的工具可省略。
+   * @param metadata - 与文档无关的 Runtime 执行元数据。
    * @returns 工具执行结果。
    */
-  execute(input: TInput, context?: AIToolContext): Promise<AIToolExecutionResult<TResult>>;
+  execute(input: TInput, context?: AIToolContext, metadata?: AIToolExecutionMetadata): Promise<AIToolExecutionResult<TResult>>;
 }
 
 export interface AICreateOptions {

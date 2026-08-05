@@ -396,13 +396,15 @@ export interface WebviewOperateResult {
 export interface WebviewToolContext {
   /**
    * 读取当前网页快照。
+   * @param signal - Runtime 中断信号
    * @returns 当前网页快照
    */
-  readPageSnapshot(): Promise<WebviewPageSnapshot>;
+  readPageSnapshot(signal?: AbortSignal): Promise<WebviewPageSnapshot>;
   /**
    * 操作当前网页。
    * @param input - 网页操作输入
+   * @param signal - Runtime 中断信号
    * @returns 网页操作结果
    */
-  operatePage(input: WebviewOperateInput): Promise<WebviewOperateResult>;
+  operatePage(input: WebviewOperateInput, signal?: AbortSignal): Promise<WebviewOperateResult>;
 }

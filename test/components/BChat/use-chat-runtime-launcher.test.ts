@@ -69,13 +69,20 @@ const activeToolsMock = vi.hoisted(() => ({
   revision: null as unknown as Ref<number>
 }));
 
-vi.mock('@/hooks/useChat/useToolContext', () => ({
-  useActiveToolContext: () => ({
+vi.mock('@/hooks/useChat/useChatContextRegistry', () => ({
+  useActiveChatContext: () => ({
     revision: activeToolsMock.revision,
     getActiveBinding: () => activeToolsMock.activeBinding,
     getBoundTools: () => [],
     getHiddenToolNames: () => [],
-    dispatchBridge: vi.fn()
+    getRendererTools: () => [
+      {
+        name: 'read_current_widget',
+        history: { mode: 'latest-only', placeholder: '已保留最新 Widget 快照' }
+      }
+    ],
+    getPresentation: () => undefined,
+    dispatchAppBridge: vi.fn()
   })
 }));
 
@@ -134,7 +141,12 @@ describe('useChatRuntimeLauncher', (): void => {
       getRuntimeCapabilities: vi.fn(() => ({
         tools: [],
         descriptor: {
-          rendererToolNames: ['read_current_widget'],
+          rendererTools: [
+            {
+              name: 'read_current_widget',
+              history: { mode: 'latest-only', placeholder: '已保留最新 Widget 快照' }
+            }
+          ],
           workspaceRoot: '/workspace',
           toolContext: { providerId: 'widget', resourceId: 'widget-a' }
         },
@@ -182,5 +194,37 @@ describe('useChatRuntimeLauncher', (): void => {
         descriptor: expect.objectContaining({ toolContext: { providerId: 'widget', resourceId: 'widget-a' } })
       })
     );
+  });
+
+  it('captures page history metadata without knowing the page provider', async (): Promise<void> => {
+    const pageTool = createPageTool();
+    const prepared = {
+      config: {
+        model: { providerId: 'provider', modelId: 'model' },
+        contextWindow: 8000,
+        workspaceRoot: '/workspace',
+        skillContentHashes: {}
+      },
+      rendererTools: [pageTool],
+      editMemoryExposed: false
+    } as PreparedRuntimeRequest;
+    const launcher = useChatRuntimeLauncher({
+      activeSessionId: ref('session-a'),
+      actorSystem: createActorSystem(),
+      sessionActor: createSessionActor(),
+      getActiveTools: vi.fn(() => [pageTool]),
+      prepareRuntimeRequest: vi.fn(async (): Promise<PreparedRuntimeRequest> => prepared),
+      createBridgeHandler: vi.fn(() => async (): Promise<unknown> => undefined),
+      isCurrentOperation: vi.fn(() => true)
+    });
+
+    const result = await launcher.prepare(1);
+
+    expect(result?.config.capabilities?.rendererTools).toEqual([
+      {
+        name: 'read_current_widget',
+        history: { mode: 'latest-only', placeholder: '已保留最新 Widget 快照' }
+      }
+    ]);
   });
 });

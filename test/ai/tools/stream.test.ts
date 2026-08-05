@@ -86,11 +86,52 @@ describe('createToolResultMessages', (): void => {
       runtimeId: 'runtime-b'
     });
 
-    expect(execute).toHaveBeenNthCalledWith(1, expect.objectContaining({ commandId: '9:runtime-a:same-call', toolCallId: 'same-call' }), undefined);
-    expect(execute).toHaveBeenNthCalledWith(2, expect.objectContaining({ commandId: '9:runtime-b:same-call', toolCallId: 'same-call' }), undefined);
+    expect(execute).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ commandId: '9:runtime-a:same-call', toolCallId: 'same-call' }),
+      undefined,
+      expect.objectContaining({ runtimeId: 'runtime-a', abortSignal: controller.signal })
+    );
+    expect(execute).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ commandId: '9:runtime-b:same-call', toolCallId: 'same-call' }),
+      undefined,
+      expect.objectContaining({ runtimeId: 'runtime-b' })
+    );
     const runtimeInput = execute.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
     expect(runtimeInput).toMatchObject({ runtimeManaged: true, abortSignal: controller.signal });
     expect(Object.keys(runtimeInput ?? {})).not.toContain('runtimeManaged');
     expect(Object.keys(runtimeInput ?? {})).not.toContain('abortSignal');
+  });
+
+  it('forwards abort and activity metadata to renderer tools without a document context', async (): Promise<void> => {
+    const execute = vi.fn(
+      async (): Promise<{ toolName: string; status: 'success'; data: null }> => ({
+        toolName: 'inspect_test_page',
+        status: 'success',
+        data: null
+      })
+    );
+    const tool: AIToolExecutor = {
+      definition: {
+        name: 'inspect_test_page',
+        description: 'Inspect a test page',
+        parameters: { type: 'object', properties: {} },
+        source: 'builtin',
+        riskLevel: 'read',
+        requiresActiveDocument: false
+      },
+      execute
+    };
+    const controller = new AbortController();
+    const activity = { heartbeat: vi.fn(), progress: vi.fn(), waitUser: vi.fn(), waitExternal: vi.fn(), resume: vi.fn() };
+
+    await executeToolCall({ toolCallId: 'page-call', toolName: 'inspect_test_page', input: {} }, [tool], undefined, {
+      runtimeId: 'runtime-page',
+      abortSignal: controller.signal,
+      activity
+    });
+
+    expect(execute).toHaveBeenCalledWith({}, undefined, expect.objectContaining({ runtimeId: 'runtime-page', abortSignal: controller.signal, activity }));
   });
 });

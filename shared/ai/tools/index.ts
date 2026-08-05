@@ -5,7 +5,7 @@
 import type { SharedToolDefinition, ToolExposureQuery, ToolRegistryEntry, ToolRuntimeGroup, ToolRuntimeOwner } from './types.js';
 import { stageFileEditToolRegistryEntry, stageFileWriteToolRegistryEntry } from './AgentStagedFileTool/index.js';
 import { delegateTaskToolRegistryEntry } from './DelegateTaskTool/index.js';
-import { createDocumentToolRegistryEntry, readCurrentDocumentToolRegistryEntry } from './DocumentTool/index.js';
+import { createDocumentToolRegistryEntry } from './DocumentTool/index.js';
 import { getCurrentTimeToolRegistryEntry } from './EnvironmentTool/index.js';
 import { editFileToolRegistryEntry } from './FileEditTool/index.js';
 import { globToolRegistryEntry, grepToolRegistryEntry, readDirectoryToolRegistryEntry, readFileToolRegistryEntry } from './FileReadTool/index.js';
@@ -20,8 +20,6 @@ import {
 } from './MCPSettingsTool/index.js';
 import { openResourceToolRegistryEntry } from './OpenResourceTool/index.js';
 import { getSettingsToolRegistryEntry, updateSettingsToolRegistryEntry } from './SettingsTool/index.js';
-import { operateWebpageToolRegistryEntry, readCurrentWebpageToolRegistryEntry } from './WebviewTool/index.js';
-import { readCurrentWidgetToolRegistryEntry } from './WidgetTool/index.js';
 
 export type {
   AgentToolEffectMetadata,
@@ -39,7 +37,7 @@ export type {
 } from './types.js';
 export { AGENT_FILE_COMMIT_ADAPTER, STAGE_FILE_EDIT_TOOL_NAME, STAGE_FILE_WRITE_TOOL_NAME } from './AgentStagedFileTool/index.js';
 export { DELEGATE_TASK_TOOL_NAME } from './DelegateTaskTool/index.js';
-export { CREATE_DOCUMENT_TOOL_NAME, READ_CURRENT_DOCUMENT_TOOL_NAME } from './DocumentTool/index.js';
+export { CREATE_DOCUMENT_TOOL_NAME } from './DocumentTool/index.js';
 export { GET_CURRENT_TIME_TOOL_NAME } from './EnvironmentTool/index.js';
 export { EDIT_FILE_TOOL_NAME } from './FileEditTool/index.js';
 export { GLOB_TOOL_NAME, GREP_TOOL_NAME, READ_DIRECTORY_TOOL_NAME, READ_FILE_TOOL_NAME } from './FileReadTool/index.js';
@@ -54,20 +52,9 @@ export {
 } from './MCPSettingsTool/index.js';
 export { OPEN_RESOURCE_TOOL_NAME } from './OpenResourceTool/index.js';
 export { GET_SETTINGS_TOOL_NAME, UPDATE_SETTINGS_TOOL_NAME } from './SettingsTool/index.js';
-export {
-  OPERATE_WEBPAGE_TOOL_NAME,
-  READ_CURRENT_WEBPAGE_TOOL_NAME,
-  SUPPORTED_WEBPAGE_ACTION_TYPES,
-  SUPPORTED_WEBPAGE_PRESS_KEYS,
-  SUPPORTED_WEBPAGE_SCROLL_DIRECTIONS,
-  WEBPAGE_OPERATION_LIMITS,
-  WEBPAGE_STEP_LIMITS
-} from './WebviewTool/index.js';
-export { READ_CURRENT_WIDGET_TOOL_NAME } from './WidgetTool/index.js';
 
 /** 已迁移到主进程的工具 registry。 */
 export const TOOL_REGISTRY = [
-  readCurrentDocumentToolRegistryEntry,
   createDocumentToolRegistryEntry,
   getCurrentTimeToolRegistryEntry,
   readFileToolRegistryEntry,
@@ -87,9 +74,6 @@ export const TOOL_REGISTRY = [
   removeMcpServerToolRegistryEntry,
   refreshMcpDiscoveryToolRegistryEntry,
   openResourceToolRegistryEntry,
-  readCurrentWebpageToolRegistryEntry,
-  operateWebpageToolRegistryEntry,
-  readCurrentWidgetToolRegistryEntry,
   delegateTaskToolRegistryEntry
 ] as const satisfies ToolRegistryEntry[];
 

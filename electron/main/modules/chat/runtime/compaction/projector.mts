@@ -5,9 +5,10 @@
 import type { ActiveTurnToolPruneMode } from '../context/tool-output-prune.mjs';
 import type { AITransportTool } from 'types/ai';
 import type { ChatMessageCompactionPart, ChatMessagePart, ChatMessageRecord } from 'types/chat';
+import type { ChatRendererToolDescriptor } from 'types/chat-runtime';
 import { invalidateStaleSkillToolResults } from '../context/model-message.mjs';
+import { projectRendererToolOutputs } from '../context/renderer-tool-output.mjs';
 import { findToolOutputPruneProtectedStartIndex, pruneActiveTurnToolOutputs, pruneMessageToolOutputs } from '../context/tool-output-prune.mjs';
-import { projectWebviewToolOutputs } from '../context/webview-tool-output.mjs';
 import { estimateRequestTokens } from './token-estimator.mjs';
 import { indexMessageParts, validatePartTopology } from './topology.mjs';
 
@@ -23,6 +24,8 @@ export interface ContextProjectionInput {
   tools?: AITransportTool[];
   /** 当前 Skill 内容版本。 */
   skillContentHashes?: Record<string, string>;
+  /** 迁移前工具 Part 使用的 Renderer 历史策略。 */
+  rendererTools?: readonly ChatRendererToolDescriptor[];
   /** 上下文高压时裁剪当前 Agent 轮次完整工具结果的级别。 */
   activeTurnToolPruneMode?: ActiveTurnToolPruneMode;
 }
@@ -193,8 +196,8 @@ export function projectContext(input: ContextProjectionInput): ContextProjection
   const boundary = located?.checkpoint.boundaryPartId ? findPartLocation(input.messages, located.checkpoint.boundaryPartId) : undefined;
   const rawMessages = located && boundary ? [createSummaryMessage(located), ...createRawTail(input.messages, boundary)] : createRawProjection(input.messages);
   const skillProjectedMessages = invalidateStaleSkillToolResults(rawMessages, input.skillContentHashes);
-  const webviewProjectedMessages = projectWebviewToolOutputs(skillProjectedMessages);
-  const oldToolPrunedMessages = pruneProjection(webviewProjectedMessages);
+  const rendererProjectedMessages = projectRendererToolOutputs(skillProjectedMessages, input.rendererTools);
+  const oldToolPrunedMessages = pruneProjection(rendererProjectedMessages);
   const messages = input.activeTurnToolPruneMode ? pruneActiveTurnToolOutputs(oldToolPrunedMessages, input.activeTurnToolPruneMode) : oldToolPrunedMessages;
   const estimatedTokens = estimateRequestTokens({
     messages,

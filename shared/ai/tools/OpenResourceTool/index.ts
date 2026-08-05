@@ -21,8 +21,7 @@ export const openResourceToolRegistryEntry = {
   definition: {
     name: OPEN_RESOURCE_TOOL_NAME,
     description:
-      '根据用户指令打开文件或外部链接。文件路径支持相对工作区路径或绝对路径（外部路径需用户确认）；mailto/ftp 链接使用系统默认程序打开；' +
-      '仅当没有激活 WebView 且用户要创建新的内置浏览器页时，才用它打开 http/https 网址。若当前已有激活 WebView 且用户明确给出 URL，要在地址栏导航请使用 operate_webpage 的 navigate 动作。',
+      '根据用户指令打开文件、内置网页或外部链接。文件路径支持相对工作区路径或绝对路径（外部路径需用户确认）；http/https 可打开内置网页，mailto/ftp 链接使用系统默认程序打开。',
     source: 'builtin',
     riskLevel: 'read',
     requiresActiveDocument: false,

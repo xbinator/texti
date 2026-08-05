@@ -4,7 +4,7 @@
  */
 import type { RuntimeToolBinding } from './useRuntimeTools';
 import type { ChatRuntimeBridgeRequestEvent } from 'types/chat-runtime';
-import { useActiveToolContext } from '@/hooks/useChat/useToolContext';
+import { useActiveChatContext } from '@/hooks/useChat/useChatContextRegistry';
 import type { useNavigate } from '@/hooks/useNavigate';
 import { native } from '@/shared/platform';
 import type { StoredDocumentRecord } from '@/shared/storage/files/types';
@@ -34,7 +34,7 @@ type RuntimeBridgeHandler = (event: ChatRuntimeBridgeRequestEvent) => Promise<un
  */
 export function useRuntimeBridgeHandler(options: UseRuntimeBridgeHandlerOptions): (binding?: RuntimeToolBinding) => RuntimeBridgeHandler {
   const recentStore = useRecentStore();
-  const activeChatTools = useActiveToolContext();
+  const activeChatTools = useActiveChatContext();
   const { getSettingsSnapshot, applyRuntimeSetting } = useRuntimeSettings();
 
   /**
@@ -48,7 +48,7 @@ export function useRuntimeBridgeHandler(options: UseRuntimeBridgeHandlerOptions)
     /** 执行当前 Runtime 的资源绑定 Bridge 请求。 */
     async function handleRuntimeBridgeRequest(event: ChatRuntimeBridgeRequestEvent): Promise<unknown> {
       return handleBChatRuntimeBridgeRequest(event, {
-        dispatchToolBridge: toolContext ? (request: ChatRuntimeBridgeRequestEvent) => activeChatTools.dispatchBridge(toolContext, request) : undefined,
+        dispatchAppBridge: toolContext ? (request: ChatRuntimeBridgeRequestEvent) => activeChatTools.dispatchAppBridge(toolContext, request) : undefined,
         getRecentFileById: (fileId: string) => recentStore.getFileById(fileId),
         updateRecentFileById: (fileId: string, updates: Partial<StoredDocumentRecord>) => recentStore.updateFile(fileId, updates),
         getSettingsSnapshot,

@@ -1858,18 +1858,18 @@ describe('runtime stream executor', (): void => {
     expect(result).toEqual({ totalUsage: { inputTokens: 8, outputTokens: 5, totalTokens: 13 } });
   });
 
-  it('executes read_current_document through the main-process tool executor', async (): Promise<void> => {
+  it('executes read_current_document through the generic renderer-managed tool executor', async (): Promise<void> => {
     const assistantMessage = createAssistantMessage();
     const updates: ChatMessageRecord[] = [];
-    const executeMainTool = vi.fn().mockResolvedValue({
+    const executeRendererTool = vi.fn().mockResolvedValue({
       toolName: 'read_current_document',
       status: 'success',
       data: { id: 'doc-1', title: 'index.md', path: '/tmp/index.md', content: '# Hello' }
     });
-    const executeRendererTool = vi.fn().mockResolvedValue({
+    const executeMainTool = vi.fn().mockResolvedValue({
       toolName: 'read_current_document',
       status: 'failure',
-      error: { code: 'EXECUTION_FAILED', message: 'renderer should not run' }
+      error: { code: 'EXECUTION_FAILED', message: 'main process should not run' }
     });
     const observeMainTool = vi.fn();
     const resolve = vi.fn().mockResolvedValue({
@@ -1899,24 +1899,14 @@ describe('runtime stream executor', (): void => {
       }
     );
 
-    expect(executeMainTool).toHaveBeenCalledWith({
+    expect(executeRendererTool).toHaveBeenCalledWith({
       runtime: expect.objectContaining({ runtimeId: 'runtime-1', tools: expect.arrayContaining([expect.objectContaining({ name: 'read_current_document' })]) }),
       toolCallId: 'tool-call-1',
       toolName: 'read_current_document',
       input: {}
     });
-    expect(executeRendererTool).not.toHaveBeenCalled();
-    expect(observeMainTool).toHaveBeenCalledOnce();
-    expect(observeMainTool).toHaveBeenCalledWith({
-      runtime: expect.objectContaining({ runtimeId: 'runtime-1' }),
-      toolCallId: 'tool-call-1',
-      toolName: 'read_current_document',
-      result: {
-        toolName: 'read_current_document',
-        status: 'success',
-        data: { id: 'doc-1', title: 'index.md', path: '/tmp/index.md', content: '# Hello' }
-      }
-    });
+    expect(executeMainTool).not.toHaveBeenCalled();
+    expect(observeMainTool).not.toHaveBeenCalled();
     expect(result).toEqual({ totalUsage: { inputTokens: 6, outputTokens: 4, totalTokens: 10 }, shouldContinue: true });
     expect(updates.at(-1)).toMatchObject({
       parts: [
@@ -2196,7 +2186,7 @@ describe('runtime stream executor', (): void => {
     });
   });
 
-  it('executes read_current_webpage through the main-process tool executor', async (): Promise<void> => {
+  it('executes read_current_webpage through the generic renderer-managed tool executor', async (): Promise<void> => {
     const assistantMessage = createAssistantMessage();
     const updates: ChatMessageRecord[] = [];
     const webpageSnapshot = {
@@ -2209,15 +2199,15 @@ describe('runtime stream executor', (): void => {
       capturedAt: 1,
       truncated: { text: false, headings: false, links: false, selectedText: false }
     };
-    const executeMainTool = vi.fn().mockResolvedValue({
+    const executeRendererTool = vi.fn().mockResolvedValue({
       toolName: 'read_current_webpage',
       status: 'success',
       data: webpageSnapshot
     });
-    const executeRendererTool = vi.fn().mockResolvedValue({
+    const executeMainTool = vi.fn().mockResolvedValue({
       toolName: 'read_current_webpage',
       status: 'failure',
-      error: { code: 'EXECUTION_FAILED', message: 'renderer should not run' }
+      error: { code: 'EXECUTION_FAILED', message: 'main process should not run' }
     });
     const resolve = vi.fn().mockResolvedValue({
       createOptions: {
@@ -2246,13 +2236,13 @@ describe('runtime stream executor', (): void => {
       }
     );
 
-    expect(executeMainTool).toHaveBeenCalledWith({
+    expect(executeRendererTool).toHaveBeenCalledWith({
       runtime: expect.objectContaining({ runtimeId: 'runtime-1', tools: expect.arrayContaining([expect.objectContaining({ name: 'read_current_webpage' })]) }),
       toolCallId: 'tool-call-1',
       toolName: 'read_current_webpage',
       input: {}
     });
-    expect(executeRendererTool).not.toHaveBeenCalled();
+    expect(executeMainTool).not.toHaveBeenCalled();
     expect(result).toEqual({ totalUsage: { inputTokens: 9, outputTokens: 4, totalTokens: 13 }, shouldContinue: true });
     expect(updates.at(-1)).toMatchObject({
       parts: [

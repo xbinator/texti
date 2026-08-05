@@ -22,6 +22,7 @@ import {
   normalizeWebviewPageOperationError,
   normalizeWebviewPageReadError,
   normalizeWebviewPageSnapshot,
+  withWebviewAbort,
   withWebviewPageOperationTimeout,
   withWebviewPageReadTimeout
 } from '@/views/webview/web/automation/normalize';
@@ -550,15 +551,19 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
 
   /**
    * 读取当前网页快照。
+   * @param signal - Runtime 中断信号
    * @returns 当前网页快照
    */
-  async function readPageSnapshot(): Promise<WebviewPageSnapshot> {
+  async function readPageSnapshot(signal?: AbortSignal): Promise<WebviewPageSnapshot> {
+    if (signal?.aborted) {
+      throw createWebviewOperationError('RUNTIME_INTERRUPTED');
+    }
     if (state.value.isLoading) {
       throw new Error('当前页面正在导航，请稍后重试');
     }
 
     if (pendingPageSnapshotRead) {
-      return pendingPageSnapshotRead;
+      return withWebviewAbort(pendingPageSnapshotRead, signal);
     }
 
     const instance = webviewRef.value;
@@ -602,15 +607,19 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
         pendingPageSnapshotRead = null;
       });
 
-    return pendingPageSnapshotRead;
+    return withWebviewAbort(pendingPageSnapshotRead, signal);
   }
 
   /**
    * 操作当前网页。
    * @param input - WebView 操作输入
+   * @param signal - Runtime 中断信号
    * @returns WebView 操作结果
    */
-  async function operatePage(input: WebviewOperateInput): Promise<WebviewOperateResult> {
+  async function operatePage(input: WebviewOperateInput, signal?: AbortSignal): Promise<WebviewOperateResult> {
+    if (signal?.aborted) {
+      throw createWebviewOperationError('RUNTIME_INTERRUPTED');
+    }
     const instance = webviewRef.value;
     const executeJavaScript = instance?.executeJavaScript;
     if (!instance || typeof executeJavaScript !== 'function') {
@@ -657,7 +666,7 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
     startAgentActivity('operating', '正在操作网页');
     try {
       const rawOperation = executeJavaScript.call(instance, createPageOperationScript(input, activeSnapshot.elements)) as Promise<unknown>;
-      const result = await withWebviewPageOperationTimeout(rawOperation);
+      const result = await withWebviewAbort(withWebviewPageOperationTimeout(rawOperation), signal);
       if (!isWebviewOperateResult(result)) {
         throw createWebviewOperationError('EXECUTION_FAILED', '页面操作结果格式无效');
       }

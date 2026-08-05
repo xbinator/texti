@@ -6,8 +6,9 @@ import type { CompactionSourceSnapshot, ImmutableChatPart } from './types.mjs';
 import type { ActiveTurnToolPruneMode } from '../context/tool-output-prune.mjs';
 import type { AITransportTool } from 'types/ai';
 import type { ChatMessageCompactionPart, ChatMessagePart, ChatMessageRecord, CompactionBudgetSnapshot, CompactionModelSnapshot } from 'types/chat';
+import type { ChatRendererToolDescriptor } from 'types/chat-runtime';
+import { projectHistoricalRendererPart } from '../context/renderer-tool-output.mjs';
 import { pruneActiveTurnToolOutputs, pruneMessageToolOutputs } from '../context/tool-output-prune.mjs';
-import { projectHistoricalWebviewPart } from '../context/webview-tool-output.mjs';
 import { findSafeBoundary } from './boundary.mjs';
 import { canGenerateSummary, createCompactionBudget, hasSummaryCapacity, shouldAutoCompact } from './budget.mjs';
 import { buildSourceFingerprint, createFingerprintInput } from './fingerprint.mjs';
@@ -44,6 +45,8 @@ export interface CompactionPlanInput {
   tools?: AITransportTool[];
   /** 当前 Skill 内容版本。 */
   skillContentHashes?: Record<string, string>;
+  /** 迁移前工具 Part 使用的 Renderer 历史策略。 */
+  rendererTools?: readonly ChatRendererToolDescriptor[];
 }
 
 /**
@@ -172,15 +175,16 @@ function estimateSummaryTokens(snapshot: CompactionSourceSnapshot): number {
 }
 
 /**
- * 将摘要源中的 WebView 工具 Part 全部投影为历史语义。
+ * 将摘要源中的 Renderer 工具 Part 全部投影为声明式历史语义。
  * @param sourceParts - 原始冻结源
- * @returns 不含完整网页快照和瞬时句柄的摘要源 clone
+ * @param rendererTools - 迁移前 Part 使用的 Runtime fallback 描述符
+ * @returns 不含页面声明敏感字段和 latest-only 完整结果的摘要源 clone
  */
-function projectSummarySources(sourceParts: ImmutableChatPart[]): ImmutableChatPart[] {
+function projectSummarySources(sourceParts: ImmutableChatPart[], rendererTools: readonly ChatRendererToolDescriptor[] = []): ImmutableChatPart[] {
   return sourceParts.map(
     (source): ImmutableChatPart => ({
       messageId: source.messageId,
-      part: projectHistoricalWebviewPart(source.part)
+      part: projectHistoricalRendererPart(source.part, rendererTools)
     })
   );
 }
@@ -258,7 +262,8 @@ export function createCompactionPlan(input: CompactionPlanInput): CompactionPlan
     messages: input.messages,
     system: input.system,
     tools: input.tools,
-    skillContentHashes: input.skillContentHashes
+    skillContentHashes: input.skillContentHashes,
+    rendererTools: input.rendererTools
   });
   if (input.trigger === 'automatic' && !shouldAutoCompact(projection.estimatedTokens, budgetSnapshot)) {
     return { status: 'skipped', reason: 'BELOW_THRESHOLD' };
@@ -308,7 +313,7 @@ export function createCompactionPlan(input: CompactionPlanInput): CompactionPlan
   }
 
   const parentSummary = parent?.part.summary ? structuredClone(parent.part.summary) : undefined;
-  let summarySources = projectSummarySources(fingerprintSources);
+  let summarySources = projectSummarySources(fingerprintSources, input.rendererTools);
   let sourceSnapshot: CompactionSourceSnapshot = {
     parentCheckpoint: parentSummary,
     sourceParts: summarySources,

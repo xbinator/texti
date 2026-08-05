@@ -1,20 +1,25 @@
 /**
- * @file useToolContext.ts
+ * @file useChatContextRegistry.ts
  * @description 将页面工具上下文绑定到 Vue 生命周期，并提供 BChat 消费入口。
  */
-import type { ActiveToolContext, ToolContextHandle, UseToolContextOptions } from './lib/types';
+import type { ActiveChatContext, ChatContextProviderOptions, ToolContextHandle } from './lib/types';
 import { onActivated, onDeactivated, onScopeDispose, readonly, ref, watch } from 'vue';
 import { toolContextRegistry } from './lib/registry';
 
 export type {
-  ActiveToolContext,
+  ActiveChatContext,
+  ChatContextProviderOptions,
   ChatBridgeDispatchResult,
   ChatBridgeHandler,
   ChatToolBinding,
   ToolContextHandle,
+  ToolContextConfirmation,
+  ToolContextDefinition,
+  ToolContextPresentation,
   ToolContextRegistration,
   ToolContextRegistry,
-  UseToolContextOptions
+  ToolContextRuntimeServices,
+  ToolContextTool
 } from './lib/types';
 
 /** Registry 状态变化的 Vue 修订投影。 */
@@ -27,7 +32,7 @@ toolContextRegistry.subscribe((): void => {
  * 注册页面提供给 ChatRuntime 的上下文能力。
  * @param options - 页面工具上下文注册选项
  */
-export function useToolContext(options: UseToolContextOptions): void {
+export function useChatContextProvider(options: ChatContextProviderOptions): void {
   let handle: ToolContextHandle | undefined;
   /** KeepAlive 生命周期是否允许当前页面成为激活资源。 */
   let lifecycleActive = true;
@@ -61,7 +66,7 @@ export function useToolContext(options: UseToolContextOptions): void {
       binding: { providerId: options.providerId, resourceId },
       getTools: options.getTools,
       hiddenToolNames: options.hiddenToolNames ?? [],
-      bridgeHandlers: options.bridgeHandlers
+      appBridgeHandlers: options.appBridgeHandlers ?? {}
     });
     syncActive();
   }
@@ -84,12 +89,15 @@ export function useToolContext(options: UseToolContextOptions): void {
  * 获取 BChat 使用的通用页面工具能力。
  * @returns 页面工具查询和 Bridge 分发能力
  */
-export function useActiveToolContext(): ActiveToolContext {
+export function useActiveChatContext(): ActiveChatContext {
   return {
     revision: readonly(registryRevision),
     getActiveBinding: toolContextRegistry.getActiveBinding,
     getBoundTools: toolContextRegistry.getBoundTools,
     getHiddenToolNames: toolContextRegistry.getHiddenToolNames,
-    dispatchBridge: toolContextRegistry.dispatchBridge
+    getPresentation: toolContextRegistry.getPresentation,
+    getPresentationByTool: toolContextRegistry.getPresentationByTool,
+    getRendererTools: toolContextRegistry.getRendererTools,
+    dispatchAppBridge: toolContextRegistry.dispatchAppBridge
   };
 }

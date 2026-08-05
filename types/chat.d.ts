@@ -3,6 +3,7 @@
  * @description 聊天会话、消息与附件类型定义
  */
 import type { AIProviderType, AIToolExecutionResult, AIUsage, ChatToolActivitySnapshot } from './ai';
+import type { ChatRendererToolHistoryPolicy } from './chat-runtime';
 import type { WidgetSubmitPayload } from './widget';
 
 /**
@@ -448,6 +449,8 @@ export interface ChatMessageToolPart extends ChatMessagePartBase {
   inputText?: string;
   /** 工具执行结果，仅 status === 'done' 时存在 */
   result?: AIToolExecutionResult;
+  /** 工具调用创建时冻结的 Renderer 历史策略。 */
+  rendererHistory?: ChatRendererToolHistoryPolicy;
   /** Watchdog 验证并持久化的最后活动快照。 */
   activity?: ChatToolActivitySnapshot;
   /** Shell 命令实时输出缓冲，仅 run_shell_command 使用 */

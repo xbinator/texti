@@ -4,15 +4,15 @@
  * @vitest-environment jsdom
  */
 /* eslint-disable vue/one-component-per-file */
-import type { ChatRuntimeBridgeRequestEvent } from 'types/chat-runtime';
 import type { Ref, VNode } from 'vue';
 import { computed, defineComponent, h, nextTick, ref } from 'vue';
+import { createPinia, setActivePinia } from 'pinia';
 import { mount, type VueWrapper } from '@vue/test-utils';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WidgetData } from '@/components/BWidget/types';
 import { createDefaultWidgetData } from '@/components/BWidget/utils/widgetData';
 import { toolContextRegistry } from '@/hooks/useChat/lib/registry';
-import { useActiveToolContext } from '@/hooks/useChat/useToolContext';
+import { useActiveChatContext } from '@/hooks/useChat/useChatContextRegistry';
 import type { FileState } from '@/shared/platform/native/types';
 import { useChatContext } from '@/views/widget/hooks/useChatContext';
 
@@ -79,55 +79,47 @@ function createHarness(): WidgetContextHarness {
   };
 }
 
-/**
- * 创建 Widget provider 测试 Bridge 请求。
- * @param kind - Bridge kind
- * @returns Bridge 请求
- */
-function createEvent(kind: string): ChatRuntimeBridgeRequestEvent {
-  return {
-    runtimeId: 'runtime-a',
-    sessionId: 'session-a',
-    turnId: 'turn-a',
-    clientId: 'bchat',
-    agentId: 'primary',
-    rootRuntimeId: 'runtime-a',
-    requestId: `request-${kind}`,
-    kind
-  };
-}
-
 describe('useChatContext', (): void => {
+  beforeEach((): void => {
+    localStorage.clear();
+    setActivePinia(createPinia());
+  });
+
   afterEach((): void => toolContextRegistry.clear());
 
   it('registers the active Widget editor and reads latest in-memory WidgetData JSON', async (): Promise<void> => {
     const harness = createHarness();
-    const tools = useActiveToolContext();
+    const tools = useActiveChatContext();
     const binding = { providerId: 'widget', resourceId: 'widget-context-test-a' };
 
     expect(tools.getActiveBinding()).toEqual(binding);
-    expect(tools.getBoundTools(binding).map((tool) => tool.definition.name)).toEqual(['read_current_widget']);
+    const widgetTool = tools.getBoundTools(binding, { confirmation: { confirm: vi.fn(async (): Promise<boolean> => true) } })[0];
+    if (!widgetTool) throw new Error('widget tool should exist');
+    expect(widgetTool.definition.name).toBe('read_current_widget');
 
     harness.data.value.description = 'Updated Weather board';
     harness.title.value = 'weather-custom';
     await nextTick();
 
-    await expect(tools.dispatchBridge(binding, createEvent('widget-snapshot'))).resolves.toEqual({
-      handled: true,
+    await expect(widgetTool.execute({})).resolves.toEqual({
+      toolName: 'read_current_widget',
+      status: 'success',
       data: expect.objectContaining({
         title: 'weather-custom',
         path: '/home/user/.tibis/widgets/aether-weather/widget.json',
         content: expect.stringContaining('"description": "Updated Weather board"')
       })
     });
+    expect(tools.getPresentation(binding, 'read_current_widget')).toEqual(expect.objectContaining({ label: '读取当前 Widget' }));
+    expect(tools.getRendererTools(binding)).toEqual([{ name: 'read_current_widget', history: { mode: 'keep' } }]);
 
     harness.isActive.value = false;
     await nextTick();
 
     expect(tools.getActiveBinding()).toBeUndefined();
-    expect(tools.getBoundTools(binding)).toHaveLength(1);
+    expect(tools.getBoundTools(binding, { confirmation: { confirm: async (): Promise<boolean> => true } })).toHaveLength(1);
 
     harness.wrapper.unmount();
-    expect(tools.getBoundTools(binding)).toEqual([]);
+    expect(tools.getBoundTools(binding, { confirmation: { confirm: async (): Promise<boolean> => true } })).toEqual([]);
   });
 });

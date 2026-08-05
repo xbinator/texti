@@ -13,12 +13,8 @@ import {
   GET_CURRENT_TIME_TOOL_NAME,
   GET_MCP_SETTINGS_TOOL_NAME,
   GET_SETTINGS_TOOL_NAME,
-  OPERATE_WEBPAGE_TOOL_NAME,
   OPEN_RESOURCE_TOOL_NAME,
   QUERY_LOGS_TOOL_NAME,
-  READ_CURRENT_DOCUMENT_TOOL_NAME,
-  READ_CURRENT_WEBPAGE_TOOL_NAME,
-  READ_CURRENT_WIDGET_TOOL_NAME,
   READ_DIRECTORY_TOOL_NAME,
   READ_FILE_TOOL_NAME,
   REFRESH_MCP_DISCOVERY_TOOL_NAME,
@@ -41,12 +37,8 @@ export {
   GET_CURRENT_TIME_TOOL_NAME,
   GET_MCP_SETTINGS_TOOL_NAME,
   GET_SETTINGS_TOOL_NAME,
-  OPERATE_WEBPAGE_TOOL_NAME,
   OPEN_RESOURCE_TOOL_NAME,
   QUERY_LOGS_TOOL_NAME,
-  READ_CURRENT_DOCUMENT_TOOL_NAME,
-  READ_CURRENT_WEBPAGE_TOOL_NAME,
-  READ_CURRENT_WIDGET_TOOL_NAME,
   READ_DIRECTORY_TOOL_NAME,
   READ_FILE_TOOL_NAME,
   REFRESH_MCP_DISCOVERY_TOOL_NAME,
@@ -122,11 +114,6 @@ function getRuntimeToolFactory(toolName: string): () => AIToolExecutor {
 
   return factory;
 }
-
-/**
- * 创建 read_current_document schema-only 工具。
- */
-export const createReadCurrentDocumentTool = getRuntimeToolFactory(READ_CURRENT_DOCUMENT_TOOL_NAME);
 
 /**
  * 创建 create_document schema-only 工具。
@@ -208,15 +195,6 @@ export const createRefreshMcpDiscoveryTool = getRuntimeToolFactory(REFRESH_MCP_D
 
 /** 创建 open_resource schema-only 工具。 */
 export const createOpenResourceTool = getRuntimeToolFactory(OPEN_RESOURCE_TOOL_NAME);
-
-/** 创建 read_current_webpage schema-only 工具。 */
-export const createReadCurrentWebpageTool = getRuntimeToolFactory(READ_CURRENT_WEBPAGE_TOOL_NAME);
-
-/** 创建 read_current_widget schema-only 工具。 */
-export const createReadCurrentWidgetTool = getRuntimeToolFactory(READ_CURRENT_WIDGET_TOOL_NAME);
-
-/** 创建 operate_webpage schema-only 工具。 */
-export const createOperateWebpageTool = getRuntimeToolFactory(OPERATE_WEBPAGE_TOOL_NAME);
 
 /** 创建内部 delegate_task schema-only 工具。 */
 export const createDelegateTaskTool = getRuntimeToolFactory(DELEGATE_TASK_TOOL_NAME);

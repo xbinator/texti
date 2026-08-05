@@ -11,7 +11,18 @@ import type {
 } from './types.mjs';
 import type { AIUsage, ChatToolActivitySnapshot } from 'types/ai';
 import type { ChatMessageRecord, ChatMessageToolPart } from 'types/chat';
+import type { ChatRendererToolHistoryPolicy, ChatRuntimeCapabilityDescriptor } from 'types/chat-runtime';
 import { nanoid } from 'nanoid';
+
+/**
+ * 查找当前 Runtime 为指定 Renderer 工具冻结的历史策略。
+ * @param capabilities - Runtime 能力描述符
+ * @param toolName - 工具名称
+ * @returns 精确工具的历史策略
+ */
+export function findRendererHistory(capabilities: ChatRuntimeCapabilityDescriptor | undefined, toolName: string): ChatRendererToolHistoryPolicy | undefined {
+  return capabilities?.rendererTools.find((tool): boolean => tool.name === toolName)?.history;
+}
 
 /**
  * 将文本增量写入 assistant 消息。
@@ -56,10 +67,16 @@ export function appendReasoningDelta(message: ChatMessageRecord, thinking: strin
  * @param toolName - 工具名称
  * @returns 工具片段
  */
-function ensureToolPart(message: ChatMessageRecord, toolCallId: string, toolName: string): ChatMessageToolPart {
+function ensureToolPart(
+  message: ChatMessageRecord,
+  toolCallId: string,
+  toolName: string,
+  rendererHistory?: ChatRendererToolHistoryPolicy
+): ChatMessageToolPart {
   const existingPart = message.parts.find((part): part is ChatMessageToolPart => part.type === 'tool' && part.toolCallId === toolCallId);
   if (existingPart) {
     existingPart.toolName = toolName;
+    if (rendererHistory) existingPart.rendererHistory = structuredClone(rendererHistory);
     return existingPart;
   }
 
@@ -70,7 +87,8 @@ function ensureToolPart(message: ChatMessageRecord, toolCallId: string, toolName
     toolName,
     status: 'inputting',
     input: null,
-    inputText: ''
+    inputText: '',
+    ...(rendererHistory ? { rendererHistory: structuredClone(rendererHistory) } : {})
   };
   message.parts.push(toolPart);
 
@@ -82,8 +100,8 @@ function ensureToolPart(message: ChatMessageRecord, toolCallId: string, toolName
  * @param message - assistant 消息
  * @param chunk - 工具输入开始 chunk
  */
-export function appendToolInputStart(message: ChatMessageRecord, chunk: RuntimeToolInputStartChunk): void {
-  const toolPart = ensureToolPart(message, chunk.toolCallId, chunk.toolName);
+export function appendToolInputStart(message: ChatMessageRecord, chunk: RuntimeToolInputStartChunk, rendererHistory?: ChatRendererToolHistoryPolicy): void {
+  const toolPart = ensureToolPart(message, chunk.toolCallId, chunk.toolName, rendererHistory);
   if (chunk.providerMetadata !== undefined) {
     toolPart.providerMetadata = chunk.providerMetadata;
   }
@@ -130,8 +148,8 @@ export function appendToolInputEnd(message: ChatMessageRecord, chunk: RuntimeToo
  * @param message - assistant 消息
  * @param chunk - 工具调用 chunk
  */
-export function appendToolCall(message: ChatMessageRecord, chunk: RuntimeToolCallChunk): void {
-  const toolPart = ensureToolPart(message, chunk.toolCallId, chunk.toolName);
+export function appendToolCall(message: ChatMessageRecord, chunk: RuntimeToolCallChunk, rendererHistory?: ChatRendererToolHistoryPolicy): void {
+  const toolPart = ensureToolPart(message, chunk.toolCallId, chunk.toolName, rendererHistory);
   toolPart.status = 'executing';
   toolPart.input = chunk.input;
   if (chunk.providerMetadata !== undefined) {
@@ -163,8 +181,8 @@ export function applyToolActivity(message: ChatMessageRecord, toolCallId: string
  * @param message - assistant 消息
  * @param chunk - 工具结果 chunk
  */
-export function appendToolResult(message: ChatMessageRecord, chunk: RuntimeToolResultChunk): void {
-  const toolPart = ensureToolPart(message, chunk.toolCallId, chunk.toolName);
+export function appendToolResult(message: ChatMessageRecord, chunk: RuntimeToolResultChunk, rendererHistory?: ChatRendererToolHistoryPolicy): void {
+  const toolPart = ensureToolPart(message, chunk.toolCallId, chunk.toolName, rendererHistory);
   toolPart.status = 'done';
   toolPart.result = chunk.result;
   delete toolPart.activity;

@@ -12,6 +12,7 @@ import type {
   CompactionValidationErrorCode,
   StructuredContextSummary
 } from 'types/chat';
+import type { ChatRendererToolDescriptor } from 'types/chat-runtime';
 import { isImmutablePart } from './boundary.mjs';
 import { buildSourceFingerprint, createFingerprintInput } from './fingerprint.mjs';
 import { createCompactionPlan, type CompactionPlan, type CompactionPlanErrorCode, type CompactionPlanInput, type CompactionSkipReason } from './planner.mjs';
@@ -68,6 +69,8 @@ export interface CompactionExecuteInput {
   tools?: AITransportTool[];
   /** 当前 Skill 内容版本。 */
   skillContentHashes?: Record<string, string>;
+  /** 迁移前工具 Part 使用的 Renderer 历史策略。 */
+  rendererTools?: readonly ChatRendererToolDescriptor[];
 }
 
 /** executor 结果。 */
@@ -515,7 +518,8 @@ export function createCompactionExecutor(dependencies: CompactionExecutorDepende
       modelSnapshot: input.modelSnapshot,
       system: input.system,
       tools: input.tools,
-      skillContentHashes: input.skillContentHashes
+      skillContentHashes: input.skillContentHashes,
+      rendererTools: input.rendererTools
     };
     dependencies.onStage?.('plan');
     const planResult = createCompactionPlan(planInput);
@@ -648,6 +652,7 @@ export function createCompactionExecutor(dependencies: CompactionExecutorDepende
       system: input.system,
       tools: input.tools,
       skillContentHashes: input.skillContentHashes,
+      rendererTools: input.rendererTools,
       activeTurnToolPruneMode: 'preserve-latest'
     });
     if (projected.estimatedTokens > plan.budgetSnapshot.targetTokens) {
@@ -656,6 +661,7 @@ export function createCompactionExecutor(dependencies: CompactionExecutorDepende
         system: input.system,
         tools: input.tools,
         skillContentHashes: input.skillContentHashes,
+        rendererTools: input.rendererTools,
         activeTurnToolPruneMode: 'all-complete'
       });
     }

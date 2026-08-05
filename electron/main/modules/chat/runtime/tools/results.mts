@@ -3,47 +3,9 @@
  * @description ChatRuntime 主进程工具结果 helper。
  */
 import type { AIAwaitingUserChoiceItem, AIAwaitingUserChoiceQuestion, AIToolExecutionError, AIToolExecutionResult } from 'types/ai';
+import { isToolExecutionErrorCode } from '../../../../../../shared/ai/toolExecutionErrors.js';
 
-/** 允许跨执行边界保留的完整工具错误码集合。 */
-const TOOL_RESULT_ERROR_CODES: ReadonlySet<AIToolExecutionError['code']> = new Set([
-  'TOOL_NOT_FOUND',
-  'INVALID_INPUT',
-  'NO_ACTIVE_DOCUMENT',
-  'NO_SELECTION',
-  'NO_CURSOR',
-  'PERMISSION_DENIED',
-  'USER_CANCELLED',
-  'EDITOR_UNAVAILABLE',
-  'STALE_CONTEXT',
-  'STALE_SNAPSHOT',
-  'PAGE_LOADING',
-  'ELEMENT_NOT_FOUND',
-  'ACTION_NOT_SUPPORTED',
-  'OPTION_AMBIGUOUS',
-  'SCROLL_TARGET_NOT_FOUND',
-  'BRIDGE_TIMEOUT',
-  'TOOL_TIMEOUT',
-  'TOOL_UNRESPONSIVE',
-  'EXTERNAL_WAIT_TIMEOUT',
-  'RUNTIME_INTERRUPTED',
-  'INTERACTION_TIMEOUT',
-  'INTERACTION_LIMIT_EXCEEDED',
-  'UNSUPPORTED_INTERACTION',
-  'PROCESS_CLEANUP_FAILED',
-  'UNSUPPORTED_PROVIDER',
-  'CONFIRMATION_DISMISSED',
-  'protocol_error',
-  'EXECUTION_FAILED'
-]);
-
-/**
- * 判断未知值是否为稳定工具错误码。
- * @param value - 原始错误码
- * @returns 是否属于共享工具错误联合
- */
-export function isToolExecutionErrorCode(value: unknown): value is AIToolExecutionError['code'] {
-  return typeof value === 'string' && TOOL_RESULT_ERROR_CODES.has(value as AIToolExecutionError['code']);
-}
+export { isToolExecutionErrorCode } from '../../../../../../shared/ai/toolExecutionErrors.js';
 
 /**
  * 判断未知值是否为非数组对象。

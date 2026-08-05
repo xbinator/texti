@@ -9,6 +9,7 @@ import { createToolWatchdogs } from '../../../../../../../electron/main/modules/
 import {
   createToolFailureResultFromError,
   executeRendererToolSafely,
+  isRendererManagedTool,
   shouldContinueAfterToolResult,
   shouldStopStreamAfterToolResult
 } from '../../../../../../../electron/main/modules/chat/runtime/stream/tools.mjs';
@@ -97,5 +98,24 @@ describe('runtime tool continuation policy', (): void => {
     expect(shouldStopStreamAfterToolResult(deniedResult)).toBe(false);
     expect(shouldContinueAfterToolResult(cancelledResult)).toBe(false);
     expect(shouldStopStreamAfterToolResult(cancelledResult)).toBe(true);
+  });
+});
+
+describe('renderer tool routing', (): void => {
+  it('routes only non-main tools frozen in the runtime tool schema list', (): void => {
+    const runtimeWithTools: ActiveChatRuntime = {
+      ...runtime,
+      tools: [
+        {
+          name: 'inspect_future_page',
+          description: 'Inspect an arbitrary future page',
+          parameters: { type: 'object', properties: {} }
+        }
+      ]
+    };
+
+    expect(isRendererManagedTool(runtimeWithTools, 'inspect_future_page')).toBe(true);
+    expect(isRendererManagedTool(runtimeWithTools, 'unregistered_page_tool')).toBe(false);
+    expect(isRendererManagedTool(runtimeWithTools, 'read_file')).toBe(false);
   });
 });

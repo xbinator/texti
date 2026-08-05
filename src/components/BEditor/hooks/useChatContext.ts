@@ -3,12 +3,12 @@
  * @description 将 BEditor 文档能力注册为 ChatRuntime 页面上下文。
  */
 import type { EditorController, EditorState } from '../types';
-import type { AIToolContext, AIToolExecutionError } from 'types/ai';
+import type { AIToolContext, AIToolExecutionError, AIToolExecutionResult } from 'types/ai';
 import type { ChatRuntimeBridgeRequestEvent } from 'types/chat-runtime';
 import type { Ref } from 'vue';
 import { computed } from 'vue';
-import { createReadCurrentDocumentTool } from '@/ai/tools/catalog/runtimeTools';
-import { useToolContext, type ChatBridgeDispatchResult } from '@/hooks/useChat/useToolContext';
+import { createToolSuccessResult } from '@/ai/tools/results';
+import { useChatContextProvider, type ChatBridgeDispatchResult, type ToolContextTool } from '@/hooks/useChat/useChatContextRegistry';
 import { asyncTo } from '@/utils/asyncTo';
 import { parseUnsavedPath } from '@/utils/file/unsaved';
 import { createEditorToolContext } from './useEditorToolContext';
@@ -22,6 +22,9 @@ interface UseChatContextOptions {
   /** 获取当前编辑器控制器。 */
   readonly getController: () => EditorController | null;
 }
+
+/** Editor 页面读取工具名称。 */
+const READ_CURRENT_DOCUMENT_TOOL_NAME = 'read_current_document';
 
 /**
  * 创建稳定工具错误。
@@ -61,19 +64,43 @@ export function useChatContext(options: UseChatContextOptions): void {
     });
   }
 
-  /** 读取文档快照。 */
-  function readSnapshot(): ChatBridgeDispatchResult {
+  /**
+   * 直接读取当前文档工具结果。
+   * @returns 当前编辑器文档与选区
+   */
+  function readDocument(): AIToolExecutionResult {
     const context = getContext();
+    return createToolSuccessResult(READ_CURRENT_DOCUMENT_TOOL_NAME, {
+      id: context.document.id,
+      artifactId: context.document.id,
+      title: context.document.title,
+      path: context.document.path ?? context.document.locator ?? `unsaved://${context.document.id}/${context.document.title}`,
+      content: context.document.getContent(),
+      selected: { content: context.editor.getSelection()?.text ?? '' }
+    });
+  }
+
+  /**
+   * 创建 Editor 页面完整工具。
+   * @returns 当前文档读取工具
+   */
+  function createDocumentTool(): ToolContextTool {
     return {
-      handled: true,
-      data: {
-        id: context.document.id,
-        title: context.document.title,
-        path: context.document.path,
-        ...(context.document.locator ? { locator: context.document.locator } : {}),
-        content: context.document.getContent(),
-        selection: context.editor.getSelection()
-      }
+      definition: {
+        name: READ_CURRENT_DOCUMENT_TOOL_NAME,
+        description: '读取当前编辑器文档的标题、路径、Markdown 内容和用户选中的内容。',
+        source: 'builtin',
+        riskLevel: 'read',
+        requiresActiveDocument: false,
+        permissionCategory: 'document',
+        parameters: { type: 'object', properties: {}, additionalProperties: false }
+      },
+      execute: (): AIToolExecutionResult => readDocument(),
+      presentation: {
+        label: '读取当前文档',
+        summarize: (): string => '已读取当前文档'
+      },
+      history: { mode: 'keep' }
     };
   }
 
@@ -95,15 +122,14 @@ export function useChatContext(options: UseChatContextOptions): void {
     return { handled: true, data: { artifactId: context.document.id, path, content } };
   }
 
-  useToolContext({
+  useChatContextProvider({
     providerId: 'editor',
     resourceId,
     available,
     active: options.active,
-    getTools: () => [createReadCurrentDocumentTool()],
+    getTools: () => [createDocumentTool()],
     hiddenToolNames: [],
-    bridgeHandlers: {
-      'document-snapshot': (): ChatBridgeDispatchResult => readSnapshot(),
+    appBridgeHandlers: {
       'write-file-content': writeContent
     }
   });

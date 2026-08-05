@@ -6,9 +6,6 @@
 /** 内置工具对应的用户可读动作文案。 */
 export const TOOL_ACTION_LABELS: Record<string, { alias: string }> = {
   read_file: { alias: '读取文件' },
-  read_current_document: { alias: '读取当前文档' },
-  read_current_webpage: { alias: '读取当前网页' },
-  read_current_widget: { alias: '读取当前 Widget' },
   read_directory: { alias: '读取目录' },
   glob: { alias: '查找文件' },
   grep: { alias: '搜索内容' },
@@ -19,7 +16,6 @@ export const TOOL_ACTION_LABELS: Record<string, { alias: string }> = {
   search_files: { alias: '搜索文件' },
   write_file: { alias: '写入文件' },
   edit_file: { alias: '修改文件' },
-  operate_webpage: { alias: '操作当前网页' },
   edit_memory: { alias: '管理记忆' },
   run_shell_command: { alias: '终端命令' },
   get_current_time: { alias: '获取当前时间' },

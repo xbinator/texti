@@ -1654,6 +1654,22 @@ describe('useWebView', () => {
     expect(result).toMatchObject({ ok: true, action: 'navigate', pageChanged: true, shouldReadAgain: true });
   });
 
+  it('does not start webpage reads or navigation after the runtime is interrupted', async (): Promise<void> => {
+    const webviewElement = createScriptableWebview([]);
+    webviewElement.loadURL = vi.fn<(_url: string) => Promise<void>>(() => Promise.resolve());
+    const controller = useWebView(ref<WebviewTag | null>(webviewElement));
+    const abortController = new AbortController();
+    abortController.abort();
+
+    await expect(controller.readPageSnapshot(abortController.signal)).rejects.toMatchObject({ code: 'RUNTIME_INTERRUPTED' });
+    await expect(controller.operatePage({ action: { type: 'navigate', url: 'example.org' } }, abortController.signal)).rejects.toMatchObject({
+      code: 'RUNTIME_INTERRUPTED'
+    });
+
+    expect(webviewElement.executeJavaScript).not.toHaveBeenCalled();
+    expect(webviewElement.loadURL).not.toHaveBeenCalled();
+  });
+
   it('rejects operation when the active snapshot becomes stale', async (): Promise<void> => {
     const webviewElement = createScriptableWebview([
       {

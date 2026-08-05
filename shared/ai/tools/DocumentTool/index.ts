@@ -4,31 +4,8 @@
  */
 import type { ToolRegistryEntry } from '../types.js';
 
-/** 读取当前文档工具名称。 */
-export const READ_CURRENT_DOCUMENT_TOOL_NAME = 'read_current_document';
-
 /** 创建文档工具名称。 */
 export const CREATE_DOCUMENT_TOOL_NAME = 'create_document';
-
-/** 读取当前文档工具 registry 条目。 */
-export const readCurrentDocumentToolRegistryEntry = {
-  runtime: 'main',
-  group: 'read',
-  exposure: 'default-readonly',
-  executionClass: 'direct',
-  effect: {
-    effect: 'pure_read',
-    resourceScopeResolver: 'active-document',
-    reversible: true
-  },
-  definition: {
-    name: READ_CURRENT_DOCUMENT_TOOL_NAME,
-    description: '读取当前编辑器文档的标题、路径、Markdown 内容和用户选中的内容。',
-    source: 'builtin',
-    riskLevel: 'read',
-    parameters: { type: 'object', properties: {}, additionalProperties: false }
-  }
-} satisfies ToolRegistryEntry;
 
 /** 创建文档工具 registry 条目。 */
 export const createDocumentToolRegistryEntry = {

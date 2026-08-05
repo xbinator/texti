@@ -52,6 +52,7 @@ export type WebviewOperationErrorCode = Extract<
   | 'OPTION_AMBIGUOUS'
   | 'SCROLL_TARGET_NOT_FOUND'
   | 'BRIDGE_TIMEOUT'
+  | 'RUNTIME_INTERRUPTED'
   | 'INVALID_INPUT'
   | 'EXECUTION_FAILED'
 >;
@@ -69,6 +70,7 @@ const WEBVIEW_OPERATION_ERROR_MESSAGES: Record<WebviewOperationErrorCode, string
   OPTION_AMBIGUOUS: '存在多个同名选项，请重新读取网页后选择更明确的目标',
   SCROLL_TARGET_NOT_FOUND: '目标元素没有可滚动容器',
   BRIDGE_TIMEOUT: '网页操作超时，请稍后重试',
+  RUNTIME_INTERRUPTED: '网页工具执行已中断',
   INVALID_INPUT: '网页操作参数无效',
   EXECUTION_FAILED: '网页操作失败'
 };
@@ -707,6 +709,29 @@ export function withWebviewPageOperationTimeout<T>(promise: Promise<T>): Promise
       .then(resolve)
       .catch(reject)
       .finally(() => globalThis.clearTimeout(timer));
+  });
+}
+
+/**
+ * 为 WebView 本地工具 Promise 添加 Runtime 中断保护。
+ * @description Electron executeJavaScript 无法取消已启动脚本，但可立即终结当前工具请求并忽略迟到结果。
+ * @param promise - WebView 本地操作 Promise
+ * @param signal - Runtime 中断信号
+ * @returns 可被 Runtime 中断的 Promise
+ */
+export function withWebviewAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(createWebviewOperationError('RUNTIME_INTERRUPTED'));
+
+  return new Promise<T>((resolve, reject) => {
+    /** 终结当前工具请求。 */
+    const handleAbort = (): void => {
+      signal.removeEventListener('abort', handleAbort);
+      reject(createWebviewOperationError('RUNTIME_INTERRUPTED'));
+    };
+
+    signal.addEventListener('abort', handleAbort, { once: true });
+    promise.then(resolve, reject).finally((): void => signal.removeEventListener('abort', handleAbort));
   });
 }
 
