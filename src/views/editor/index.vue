@@ -1,6 +1,8 @@
 <template>
   <div class="editor-content">
+    <div v-if="isLoading" class="editor-content-placeholder"></div>
     <BEditor
+      v-else
       ref="editorRef"
       :key="fileState.id"
       v-model:value="fileState"
@@ -121,5 +123,12 @@ watch(
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+}
+
+.editor-content-placeholder {
+  height: 100%;
+  background: var(--bg-primary);
+  border: var(--surface-border-width) solid var(--border-primary);
+  border-radius: var(--surface-radius);
 }
 </style>
