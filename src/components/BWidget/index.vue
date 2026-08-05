@@ -68,7 +68,7 @@
       @redo="board.onRedo"
       @zoom-in="viewport.zoomIn"
       @zoom-out="viewport.zoomOut"
-      @reset-zoom="viewport.resetZoom"
+      @fit-content="handleFitContentViewport"
       @set-center="viewport.setCenter"
       @set-zoom="viewport.setZoom"
     />
@@ -88,7 +88,8 @@ import type {
   WidgetPoint,
   WidgetSelectElementByIdOptions,
   WidgetSelectTarget,
-  WidgetSize
+  WidgetSize,
+  WidgetViewportInset
 } from './types';
 import type { WidgetCanvasPointProjection } from './utils/widgetGeometry';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
@@ -98,6 +99,7 @@ import InfiniteViewport from './components/InfiniteViewport.vue';
 import MoveableLayer from './components/MoveableLayer.vue';
 import SelectoLayer from './components/SelectoLayer.vue';
 import Toolbar from './components/Toolbar.vue';
+import { WIDGET_MAX_ZOOM } from './constants/viewport';
 import { getWidgetElementSchema } from './elements';
 import { useModelSync } from './hooks/useModelSync';
 import { provideRenderContext } from './hooks/useRenderContext';
@@ -181,8 +183,19 @@ interface WidgetContextMenuState {
   boardPoint: WidgetPoint;
 }
 
+/**
+ * Widget组件入参。
+ */
+interface Props {
+  /** 点击缩放文案适配内容时需要避让的可视区域遮挡 */
+  fitViewportInset?: Partial<WidgetViewportInset>;
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  fitViewportInset: (): Partial<WidgetViewportInset> => ({})
+});
 const dataItem = defineModel<WidgetData>('value', {
-  default: createDefaultWidgetData
+  default: (): WidgetData => createDefaultWidgetData()
 });
 /** 当前选中的绘图目标（元素或锚点），支持双向绑定。 */
 const selectedTarget = defineModel<WidgetSelectTarget>('select', { default: null });
@@ -495,6 +508,87 @@ function fitInitialContentViewport(): void {
   }
 
   viewport.setCenter(nextViewport.center);
+  viewport.setZoom(nextViewport.zoom);
+}
+
+/**
+ * 读取内容适配应使用的可视区域内边距。
+ * @returns 可视区域内边距
+ */
+function getFitViewportInset(): WidgetViewportInset {
+  const inset = props.fitViewportInset ?? {};
+
+  return {
+    top: Math.max(0, inset.top ?? 0),
+    right: Math.max(0, inset.right ?? 0),
+    bottom: Math.max(0, inset.bottom ?? 0),
+    left: Math.max(0, inset.left ?? 0)
+  };
+}
+
+/**
+ * 读取内容适配应使用的可视区域尺寸。
+ * @param inset - 可视区域内边距
+ * @returns 可视区域尺寸，无法适配时返回 null
+ */
+function getFitViewportSize(inset: WidgetViewportInset): WidgetSize | null {
+  const size = {
+    width: viewportSize.value.width - inset.left - inset.right,
+    height: viewportSize.value.height - inset.top - inset.bottom
+  };
+
+  if (size.width <= 0 || size.height <= 0) {
+    return null;
+  }
+
+  return size;
+}
+
+/**
+ * 将内容中心偏移到可视区域中心。
+ * @param center - 内容边界中心
+ * @param zoom - 适配后的缩放比例
+ * @param inset - 可视区域内边距
+ * @param fitSize - 可视区域尺寸
+ * @returns 修正后的视口中心
+ */
+function getFitViewportCenter(center: WidgetPoint, zoom: number, inset: WidgetViewportInset, fitSize: WidgetSize): WidgetPoint {
+  const visibleCenter = {
+    x: inset.left + fitSize.width / 2,
+    y: inset.top + fitSize.height / 2
+  };
+  const rootCenter = {
+    x: viewportSize.value.width / 2,
+    y: viewportSize.value.height / 2
+  };
+
+  return {
+    x: Number((center.x - (visibleCenter.x - rootCenter.x) / zoom).toFixed(2)),
+    y: Number((center.y - (visibleCenter.y - rootCenter.y) / zoom).toFixed(2))
+  };
+}
+
+/**
+ * 点击缩放文案时，将当前内容完整适配到视图中心。
+ */
+function handleFitContentViewport(): void {
+  const fitViewportInset = getFitViewportInset();
+  const fitViewportSize = getFitViewportSize(fitViewportInset);
+  if (!fitViewportSize) {
+    viewport.resetZoom();
+    return;
+  }
+
+  const nextViewport = createWidgetViewportForElements(board.state.value.elements, fitViewportSize, {
+    maxZoom: WIDGET_MAX_ZOOM
+  });
+
+  if (!nextViewport) {
+    viewport.resetZoom();
+    return;
+  }
+
+  viewport.setCenter(getFitViewportCenter(nextViewport.center, nextViewport.zoom, fitViewportInset, fitViewportSize));
   viewport.setZoom(nextViewport.zoom);
 }
 

@@ -23,7 +23,7 @@
       <BButton type="text" square size="small" aria-label="缩小" :disabled="!canZoomOut" @click="emit('zoom-out')">
         <BIcon icon="lucide:minus" :size="16" />
       </BButton>
-      <button class="b-widget-toolbar__zoom" type="button" @click="emit('reset-zoom')">
+      <button class="b-widget-toolbar__zoom" type="button" @click="emit('fit-content')">
         {{ zoomPercent }}
       </button>
       <BButton type="text" square size="small" aria-label="放大" :disabled="!canZoomIn" @click="emit('zoom-in')">
@@ -85,8 +85,8 @@ const emit = defineEmits<{
   'zoom-in': [];
   /** 缩小 */
   'zoom-out': [];
-  /** 重置缩放 */
-  'reset-zoom': [];
+  /** 适配内容 */
+  'fit-content': [];
   /** 设置视口中心 */
   'set-center': [center: WidgetPoint];
   /** 设置缩放比例 */

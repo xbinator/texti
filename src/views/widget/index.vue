@@ -14,6 +14,7 @@
     <template v-else>
       <PanelSidebar
         v-model:value="session.data.value"
+        v-model:size="sidebarWidth"
         :active-element-id="activeElementId"
         :elements="session.data.value.elements"
         :selected-element-ids="selectedElementIds"
@@ -28,6 +29,7 @@
       <section ref="canvasRef" class="widget-page__canvas">
         <BWidget
           ref="widgetRef"
+          :fit-viewport-inset="widgetFitViewportInset"
           :select="selectedTarget"
           :value="session.data.value"
           @selection-change="onSelectionUpdate"
@@ -55,6 +57,7 @@
 import type { WidgetComponentRef } from './hooks/types';
 import type { CSSProperties } from 'vue';
 import { computed, ref } from 'vue';
+import type { WidgetViewportInset } from '@/components/BWidget/types';
 import PanelSettings from './components/PanelSettings.vue';
 import PanelSidebar from './components/PanelSidebar.vue';
 import { useCanvasDrop } from './hooks/useCanvasDrop';
@@ -71,13 +74,24 @@ type WidgetPageStyle = CSSProperties & {
   '--widget-page-settings-width': string;
 };
 
+/** 左侧侧边栏页签列宽度，需与 PanelSidebar 样式变量保持一致。 */
+const WIDGET_SIDEBAR_TABS_WIDTH = 45;
+
 const widgetRef = ref<WidgetComponentRef>();
 const canvasRef = ref<HTMLElement | null>(null);
 const session = useSession();
+const sidebarWidth = ref(320);
 const settingsWidth = ref(300);
 const widgetPageStyle = computed<WidgetPageStyle>(
   (): WidgetPageStyle => ({
     '--widget-page-settings-width': `${settingsWidth.value}px`
+  })
+);
+/** BWidget 内容适配时应避让的实际可视区域边距。 */
+const widgetFitViewportInset = computed<Partial<WidgetViewportInset>>(
+  (): Partial<WidgetViewportInset> => ({
+    left: WIDGET_SIDEBAR_TABS_WIDTH + sidebarWidth.value,
+    right: settingsWidth.value
   })
 );
 const { selectedTarget, selectedElementIds, activeElementId, onDataUpdate, onSelectUpdate, onSelectionUpdate } = useSelection({

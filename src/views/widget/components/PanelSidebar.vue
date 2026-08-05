@@ -145,8 +145,8 @@ const SIDEBAR_MAX_SIZE = 440;
 /** 展开 / 收起动画时长，需与 Less 里的 transition 时长保持一致。 */
 const EXPAND_MOTION_DURATION = 360;
 
-/** 内容区宽度（内部状态），为 0 时表示侧栏已关闭。 */
-const size = ref(SIDEBAR_DEFAULT_SIZE);
+/** 内容区宽度（同步给页面层），为 0 时表示侧栏已关闭。 */
+const size = defineModel<number>('size', { default: SIDEBAR_DEFAULT_SIZE });
 
 /** 当前激活的侧栏 tab。 */
 const activeSidebarTab = ref<ActiveWidgetSidebarTabKey>('tools');

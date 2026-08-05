@@ -9,7 +9,7 @@ import { defineComponent, nextTick } from 'vue';
 import type { ComponentPublicInstance, PropType } from 'vue';
 import { shallowMount, type VueWrapper } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { WidgetData, WidgetElement, WidgetElementLoopConfig, WidgetSelectTarget } from '@/components/BWidget/types';
+import type { WidgetData, WidgetElement, WidgetElementLoopConfig, WidgetSelectTarget, WidgetViewportInset } from '@/components/BWidget/types';
 import { createDefaultWidgetData } from '@/components/BWidget/utils/widgetData';
 import { createDefaultWidgetElementLoopConfig } from '@/components/BWidget/utils/widgetLoop';
 import WidgetPage from '@/views/widget/index.vue';
@@ -187,6 +187,10 @@ function createBWidgetStub(): ReturnType<typeof defineComponent> {
       select: {
         type: Object as PropType<WidgetSelectTarget>,
         default: null
+      },
+      fitViewportInset: {
+        type: Object as PropType<Partial<WidgetViewportInset>>,
+        default: (): Partial<WidgetViewportInset> => ({})
       }
     },
     emits: ['selection-change', 'update:select', 'update:value'],
@@ -433,6 +437,34 @@ describe('WidgetPage', (): void => {
     expect(source).toContain('.widget-page :deep(.b-widget-toolbar__group--bottom-left)');
     expect(source).toContain('right: calc(var(--widget-page-settings-width) + 12px);');
 
+    wrapper.unmount();
+  });
+
+  it('passes visible viewport insets to the widget canvas', async (): Promise<void> => {
+    const wrapper = shallowMount(WidgetPage, {
+      global: {
+        stubs: {
+          BWidget: createBWidgetStub(),
+          BPanelSplitter: createBPanelSplitterStub(),
+          Icon: true
+        }
+      }
+    });
+    const panelSidebar = wrapper.findComponent({ name: 'PanelSidebar' });
+    const widget = wrapper.findComponent({ name: 'BWidget' });
+
+    expect(widget.props('fitViewportInset')).toEqual({
+      left: 365,
+      right: 300
+    });
+
+    panelSidebar.vm.$emit('update:size', 280);
+    await nextTick();
+
+    expect(widget.props('fitViewportInset')).toEqual({
+      left: 325,
+      right: 300
+    });
     wrapper.unmount();
   });
 

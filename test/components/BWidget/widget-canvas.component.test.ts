@@ -17,7 +17,8 @@ import { createDefaultWidgetElementLoopConfig } from '@/components/BWidget/utils
 vi.mock('@/components/BWidget/components/Toolbar.vue', () => ({
   default: defineComponent({
     name: 'ToolbarStub',
-    template: '<div class="toolbar-stub"></div>'
+    emits: ['fit-content'],
+    template: '<button class="toolbar-stub" type="button" @click="$emit(\'fit-content\')"></button>'
   })
 }));
 
@@ -349,6 +350,41 @@ describe('BWidget canvas component', (): void => {
     await flushWidgetUpdates();
 
     expect(wrapper.find('.b-widget-canvas__stage').attributes('style')).toContain('translate(-1100px, -650px)');
+    wrapper.unmount();
+  });
+
+  it('fits the full content when toolbar zoom label is clicked', async (): Promise<void> => {
+    const wrapper = mount(BWidget, {
+      props: {
+        value: createWidgetDataFixture()
+      },
+      attachTo: document.body
+    });
+    ResizeObserverMock.trigger(wrapper.element, { width: 800, height: 600 });
+    await flushWidgetUpdates();
+
+    await wrapper.find('.toolbar-stub').trigger('click');
+    await flushWidgetUpdates();
+
+    expect(wrapper.find('.b-widget-canvas__stage').attributes('style')).toContain('scale(2) translate(-114px, -72px)');
+    wrapper.unmount();
+  });
+
+  it('fits toolbar zoom content inside the visible viewport inset', async (): Promise<void> => {
+    const wrapper = mount(BWidget, {
+      props: {
+        fitViewportInset: { left: 365, right: 300 },
+        value: createWidgetDataFixture()
+      },
+      attachTo: document.body
+    });
+    ResizeObserverMock.trigger(wrapper.element, { width: 1200, height: 600 });
+    await flushWidgetUpdates();
+
+    await wrapper.find('.toolbar-stub').trigger('click');
+    await flushWidgetUpdates();
+
+    expect(wrapper.find('.b-widget-canvas__stage').attributes('style')).toContain('scale(1.57) translate(-93.3px, -72px)');
     wrapper.unmount();
   });
 

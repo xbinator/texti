@@ -216,6 +216,43 @@ describe('widgetGeometry', (): void => {
     });
   });
 
+  it('creates a bounded fit viewport when max zoom is provided', (): void => {
+    const viewport = createWidgetViewportForElements(
+      [createShapeElement('node-1')],
+      {
+        width: 800,
+        height: 600
+      },
+      { maxZoom: 2 }
+    );
+
+    expect(viewport).toEqual({
+      center: { x: 100, y: 100 },
+      zoom: 2
+    });
+  });
+
+  it('keeps fitted viewport zoom above the minimum zoom', (): void => {
+    const viewport = createWidgetViewportForElements(
+      [
+        {
+          ...createShapeElement('node-1'),
+          size: { width: 5000, height: 4000 }
+        }
+      ],
+      {
+        width: 800,
+        height: 600
+      },
+      { maxZoom: 2 }
+    );
+
+    expect(viewport).toEqual({
+      center: { x: 2540, y: 2060 },
+      zoom: 0.4
+    });
+  });
+
   it('queries DOM targets by widget element id', (): void => {
     const root = document.createElement('div');
     const node = document.createElement('div');

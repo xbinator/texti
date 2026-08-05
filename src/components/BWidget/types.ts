@@ -330,6 +330,20 @@ export interface WidgetViewport {
 }
 
 /**
+ * Widget视口可视区域内边距。
+ */
+export interface WidgetViewportInset {
+  /** 顶部被遮挡区域 */
+  top: number;
+  /** 右侧被遮挡区域 */
+  right: number;
+  /** 底部被遮挡区域 */
+  bottom: number;
+  /** 左侧被遮挡区域 */
+  left: number;
+}
+
+/**
  * Widget外部双向绑定数据。
  * @template TMetadata - Widget 顶层自定义元数据类型
  */

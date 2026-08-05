@@ -4,12 +4,14 @@
  */
 import type { WidgetRenderEvaluationOptions } from '../renderOptions';
 import type { WidgetElement, WidgetPoint, WidgetShapeElement, WidgetSize, WidgetViewport } from '../types';
-import { WIDGET_MIN_ZOOM, WIDGET_VIEWBOX_SIZE } from '../constants/viewport';
+import { WIDGET_MAX_ZOOM, WIDGET_MIN_ZOOM, WIDGET_VIEWBOX_SIZE } from '../constants/viewport';
 import { getWidgetElementSchema } from '../elements';
 import { flattenWidgetElementTree, type WidgetRenderTreeNode } from './widgetTree';
 
 /** Widget节点 DOM 查询选择器。 */
 const WIDGET_ELEMENT_TARGET_SELECTOR = '.b-widget-node';
+/** 适配内容视口默认留白。 */
+const DEFAULT_WIDGET_VIEWPORT_PADDING = 80;
 /** Widget节点 DOM 与元素 ID 的内部映射。 */
 const widgetElementIdByTarget = new WeakMap<Element, string>();
 
@@ -61,6 +63,16 @@ interface WidgetVisibleElement {
   element: WidgetElement;
   /** 渲染尺寸 */
   renderSize: WidgetSize;
+}
+
+/**
+ * Widget内容适配视口选项。
+ */
+export interface WidgetViewportFitOptions {
+  /** 内容周围留白 */
+  padding?: number;
+  /** 适配时允许使用的最大缩放比例 */
+  maxZoom?: number;
 }
 
 /**
@@ -166,29 +178,47 @@ function getWidgetContentBounds(elements: WidgetElement[]): WidgetContentBounds 
 }
 
 /**
+ * 限制内容适配缩放比例。
+ * @param zoom - 根据内容尺寸计算出的缩放比例
+ * @param maxZoom - 调用方允许的最大缩放比例
+ * @returns 限制在全局上下限内的缩放比例
+ */
+function clampFitZoom(zoom: number, maxZoom: number): number {
+  const boundedMaxZoom = Math.min(WIDGET_MAX_ZOOM, Math.max(WIDGET_MIN_ZOOM, maxZoom));
+
+  return Number(Math.max(WIDGET_MIN_ZOOM, Math.min(boundedMaxZoom, zoom)).toFixed(2));
+}
+
+/**
  * 创建能够完整展示现有内容的视口。
  * @param elements - Widget元素列表
  * @param viewportSize - Widget渲染尺寸
- * @param padding - 内容周围留白
+ * @param options - 内容适配选项
  * @returns 适配内容的视口，无内容时返回 null
  */
-export function createWidgetViewportForElements(elements: WidgetElement[], viewportSize: WidgetSize, padding = 80): WidgetViewport | null {
+export function createWidgetViewportForElements(
+  elements: WidgetElement[],
+  viewportSize: WidgetSize,
+  options: WidgetViewportFitOptions = {}
+): WidgetViewport | null {
   const bounds = getWidgetContentBounds(elements);
   if (!bounds) {
     return null;
   }
 
+  const padding = options.padding ?? DEFAULT_WIDGET_VIEWPORT_PADDING;
+  const maxZoom = options.maxZoom ?? 1;
   const size = viewportSize.width && viewportSize.height ? viewportSize : WIDGET_VIEWBOX_SIZE;
   const contentWidth = bounds.maxX - bounds.minX + padding * 2;
   const contentHeight = bounds.maxY - bounds.minY + padding * 2;
-  const fitZoom = Math.min(1, size.width / contentWidth, size.height / contentHeight);
+  const fitZoom = Math.min(size.width / contentWidth, size.height / contentHeight);
 
   return {
     center: {
       x: Number(((bounds.minX + bounds.maxX) / 2).toFixed(2)),
       y: Number(((bounds.minY + bounds.maxY) / 2).toFixed(2))
     },
-    zoom: Number(Math.max(WIDGET_MIN_ZOOM, fitZoom).toFixed(2))
+    zoom: clampFitZoom(fitZoom, maxZoom)
   };
 }
 
