@@ -51,19 +51,23 @@ export const menuGroups: MenuGroup[] = [
 export interface ProviderFormatOption {
   value: AIProviderType;
   label: string;
+  /** API 兼容协议名称，用于 baseUrl 填写提示文案 */
+  protocol: string;
+  /** 会被自动补充到 baseUrl 末尾的路径；为空表示路径与模型相关，不展示后缀提示 */
+  suffix?: string;
 }
 
 export const providerFormatOptions: ProviderFormatOption[] = [
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'google', label: 'Google' },
-  { value: 'deepseek', label: 'Deepseek' },
-  { value: 'alibaba', label: '阿里云' },
-  { value: 'volcengine', label: '火山引擎' },
-  { value: 'moonshot', label: 'Moonshot' },
-  { value: 'glm', label: 'GLM' },
-  { value: 'minimax', label: 'MiniMax' },
-  { value: 'mimo', label: 'MiMo' }
+  { value: 'openai', label: 'OpenAI', protocol: 'OpenAI', suffix: '/chat/completions' },
+  { value: 'anthropic', label: 'Anthropic', protocol: 'Claude', suffix: '/v1/messages' },
+  { value: 'google', label: 'Google', protocol: 'Google AI' },
+  { value: 'deepseek', label: 'Deepseek', protocol: 'OpenAI', suffix: '/chat/completions' },
+  { value: 'alibaba', label: '阿里云', protocol: 'OpenAI', suffix: '/chat/completions' },
+  { value: 'volcengine', label: '火山引擎', protocol: 'OpenAI', suffix: '/chat/completions' },
+  { value: 'moonshot', label: 'Moonshot', protocol: 'OpenAI', suffix: '/chat/completions' },
+  { value: 'glm', label: 'GLM', protocol: 'OpenAI', suffix: '/chat/completions' },
+  { value: 'minimax', label: 'MiniMax', protocol: 'OpenAI', suffix: '/chat/completions' },
+  { value: 'mimo', label: 'MiMo', protocol: 'OpenAI', suffix: '/chat/completions' }
 ];
 
 export const providerFormatLabels = Object.fromEntries(providerFormatOptions.map((option) => [option.value, option.label]));

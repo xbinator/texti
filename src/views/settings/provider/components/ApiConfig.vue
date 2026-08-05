@@ -7,6 +7,8 @@
       <AFormItem label="API 代理地址">
         <AInput v-model:value="dataItem.baseUrl" placeholder="例如: https://api.example.com" />
       </AFormItem>
+
+      <AAlert v-if="baseUrlHint" class="base-url-alert" :message="baseUrlHint" />
     </AForm>
 
     <div class="connection-test">
@@ -33,6 +35,7 @@ import { Icon } from '@iconify/vue';
 import { message } from 'ant-design-vue';
 import BButton from '@/components/BButton/index.vue';
 import { useChat } from '@/hooks/useChat';
+import { providerFormatOptions } from '../../constants';
 
 interface Props {
   models: AIProviderModel[];
@@ -47,6 +50,23 @@ const testModel = ref<string | undefined>(undefined);
 const { agent } = useChat({ providerId: () => dataItem.value.id, ignoreEnabled: true });
 
 const loading = ref(false);
+
+/**
+ * 根据当前服务商请求格式计算的 baseUrl 填写提示文案
+ * @description 从 providerFormatOptions 查表，有 suffix 时补充"不要以斜杠结尾"与自动拼接的端点路径
+ */
+const baseUrlHint = computed<string>(() => {
+  const providerType = dataItem.value.type;
+  if (!providerType) return '';
+
+  const option = providerFormatOptions.find((item) => item.value === providerType);
+  if (!option) return '';
+
+  if (option.suffix) {
+    return `请填写兼容 ${option.protocol} API 的服务端点地址，不要以斜杠结尾。${option.suffix} 将会被补充到你填写的地址末尾`;
+  }
+  return `请填写兼容 ${option.protocol} API 的服务端点地址`;
+});
 
 const modelOptions = computed(() => {
   const _models = props.models.filter((model: AIProviderModel) => model.isEnabled);
@@ -107,6 +127,10 @@ watch(
 
 .config-section :deep(.ant-form-item:last-child) {
   margin-bottom: 0;
+}
+
+.config-section :deep(.base-url-alert .ant-alert-message) {
+  font-size: 12px;
 }
 
 .connection-test {
