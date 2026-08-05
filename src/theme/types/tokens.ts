@@ -213,10 +213,23 @@ export interface ThemeTokens {
   };
   /** 按钮级语义 Token */
   button: {
+    /** primary 按钮文字色，缺省时使用组件内置白色文字 */
+    primaryText?: string;
+    /** primary 按钮默认背景，缺省时使用 color.primary */
+    primaryBg?: string;
+    /** primary 按钮悬停背景，缺省时使用 color.primaryHover */
+    primaryHoverBg?: string;
+    /** primary 按钮按下背景，缺省时使用 color.primaryActive */
+    primaryActiveBg?: string;
+    /** 按钮边框色 */
     border: string;
+    /** 按钮边框宽度 */
     borderWidth: string;
+    /** 按钮默认阴影 */
     shadow: string;
+    /** 按钮激活阴影 */
     activeShadow: string;
+    /** 按钮按下阴影 */
     pressedShadow: string;
   };
   tag: {

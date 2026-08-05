@@ -60,6 +60,21 @@ describe('BButton', (): void => {
     expectRuleToContainDeclarations(source, '.b-button--danger.b-button--soft', ['color: var(--color-danger);', 'background: var(--color-danger-bg);']);
   });
 
+  it('使用按钮专属 Token 渲染 primary 填充色', (): void => {
+    const source = readButtonComponentSource();
+
+    expectRuleToContainDeclarations(source, '.b-button', [
+      'color: var(--button-primary-text, #fff);',
+      'background: var(--button-primary-bg, var(--color-primary));'
+    ]);
+    expectRuleToContainDeclarations(source, '&--primary', [
+      'color: var(--button-primary-text, #fff);',
+      'background: var(--button-primary-bg, var(--color-primary));'
+    ]);
+    expect(source).toContain('background: var(--button-primary-hover-bg, var(--color-primary-hover));');
+    expect(source).toContain('background: var(--button-primary-active-bg, var(--color-primary-active));');
+  });
+
   it('使用主题设计 Token 控制基础圆角与动效', (): void => {
     const source = readButtonComponentSource();
 

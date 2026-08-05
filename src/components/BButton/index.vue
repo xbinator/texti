@@ -143,11 +143,11 @@ export default defineComponent({
   padding: 0 16px;
   font-family: var(--font-display);
   font-size: 14px;
-  color: #fff;
+  color: var(--button-primary-text, #fff);
   white-space: nowrap;
   cursor: pointer;
   user-select: none;
-  background: var(--color-primary);
+  background: var(--button-primary-bg, var(--color-primary));
   border: var(--button-border-width) solid var(--button-border);
   border-radius: var(--control-radius);
   box-shadow: var(--button-shadow);
@@ -156,11 +156,11 @@ export default defineComponent({
     transform var(--motion-duration-fast) var(--motion-easing-press);
 
   &:hover:not(.b-button--disabled, .b-button--loading) {
-    background: var(--color-primary-hover);
+    background: var(--button-primary-hover-bg, var(--color-primary-hover));
   }
 
   &:active:not(.b-button--disabled, .b-button--loading) {
-    background: var(--color-primary-active);
+    background: var(--button-primary-active-bg, var(--color-primary-active));
     box-shadow: var(--button-pressed-shadow);
     transform: translate(var(--interaction-press-offset), var(--interaction-press-offset));
   }
@@ -228,16 +228,16 @@ export default defineComponent({
 
   // 类型
   &--primary {
-    color: #fff;
-    background: var(--color-primary);
+    color: var(--button-primary-text, #fff);
+    background: var(--button-primary-bg, var(--color-primary));
     border-color: var(--button-border);
 
     &:hover:not(.b-button--disabled, .b-button--loading) {
-      background: var(--color-primary-hover);
+      background: var(--button-primary-hover-bg, var(--color-primary-hover));
     }
 
     &:active:not(.b-button--disabled, .b-button--loading) {
-      background: var(--color-primary-active);
+      background: var(--button-primary-active-bg, var(--color-primary-active));
     }
   }
 

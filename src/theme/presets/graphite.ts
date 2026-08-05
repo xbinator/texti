@@ -7,6 +7,11 @@ import { createDefaultDesignTokens } from '../core/factory';
 import { registerPreset } from '../core/registry';
 
 /**
+ * Graphite 主题沿用默认按钮边框和阴影，只覆盖填充型 primary 的色彩语义。
+ */
+const DEFAULT_BUTTON_TOKENS = createDefaultDesignTokens().button;
+
+/**
  * 主题不变色——light 和 dark 中值完全相同的颜色。
  * 提取为常量避免改一边漏一边。
  */
@@ -254,7 +259,14 @@ const graphiteLight: ThemeTokens = {
     edge: 'rgb(31 31 31 / 72%)',
     edgeLabel: '#262626'
   },
-  ...createDefaultDesignTokens()
+  ...createDefaultDesignTokens(),
+  button: {
+    ...DEFAULT_BUTTON_TOKENS,
+    primaryText: '#ffffff',
+    primaryBg: '#1f1f1f',
+    primaryHoverBg: '#3a3a3a',
+    primaryActiveBg: '#000000'
+  }
 };
 
 /**
@@ -494,7 +506,14 @@ const graphiteDark: ThemeTokens = {
     edge: 'rgb(245 245 245 / 72%)',
     edgeLabel: '#e8e8e8'
   },
-  ...createDefaultDesignTokens()
+  ...createDefaultDesignTokens(),
+  button: {
+    ...DEFAULT_BUTTON_TOKENS,
+    primaryText: '#f5f5f5',
+    primaryBg: '#2f2f2f',
+    primaryHoverBg: '#3a3a3a',
+    primaryActiveBg: '#242424'
+  }
 };
 
 /**

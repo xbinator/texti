@@ -38,6 +38,14 @@ interface DesignTokenProbe {
   };
   /** 按钮语义 Token */
   button: {
+    /** primary 按钮文字色 */
+    primaryText: string;
+    /** primary 按钮默认背景 */
+    primaryBg: string;
+    /** primary 按钮悬停背景 */
+    primaryHoverBg: string;
+    /** primary 按钮按下背景 */
+    primaryActiveBg: string;
     /** 按钮边框色 */
     border: string;
     /** 按钮边框宽度 */
@@ -133,6 +141,7 @@ describe('theme preset registry', (): void => {
     const lightTokens = getResolvedTokens('default', 'light');
     const darkTokens = getResolvedTokens('default', 'dark');
     const lightCssVars = toCssVars(lightTokens);
+    const darkCssVars = toCssVars(darkTokens);
 
     expect(lightTokens.bg.primary).toBe('#ffffff');
     expect(lightTokens.bg.secondary).toBe('#f4f4f4');
@@ -141,9 +150,15 @@ describe('theme preset registry', (): void => {
     expect(lightTokens.border.primary).toBe('#e5e5e5');
     expect(lightCssVars['--button-border-width']).toBe('0px');
     expect(lightCssVars['--button-border']).toBe('transparent');
+    expect(lightCssVars['--button-primary-bg']).toBe('#1f1f1f');
     expect(darkTokens.bg.primary).toBe('#121212');
     expect(darkTokens.bg.secondary).toBe('#1a1a1a');
     expect(darkTokens.color.primary).toBe('#f5f5f5');
+    expect(darkCssVars['--button-primary-text']).toBe('#f5f5f5');
+    expect(darkCssVars['--button-primary-bg']).toBe('#2f2f2f');
+    expect(darkCssVars['--button-primary-hover-bg']).toBe('#3a3a3a');
+    expect(darkCssVars['--button-primary-active-bg']).toBe('#242424');
+    expect(darkCssVars['--button-primary-bg']).not.toBe(darkCssVars['--color-primary']);
     expect(lightCssVars['--color-primary']).toBe('#1f1f1f');
   });
 
