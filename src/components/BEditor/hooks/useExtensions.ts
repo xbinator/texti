@@ -50,6 +50,7 @@ import { Search, type SearchScrollContext } from '../extensions/editorSearch';
 import { InlineCommentMark } from '../extensions/inlineCommentMark';
 import { RichInlineCompletion } from '../extensions/richInlineCompletion';
 import { parseFrontMatterData, parseFrontMatterYaml, serializeFrontMatterData, serializeFrontMatterYaml, type FrontMatterData } from '../hooks/useFrontMatter';
+import { getReferenceLinkRaw, INLINE_HTML_MARK_TAGS, INLINE_HTML_SUPPORTED_TAGS, isExplicitLinkToken } from '../utils/markdownInlineSemantics';
 import { registerRichCodeBlockLowlightAliases } from '../utils/richCodeBlockLowlight';
 
 const lowlight = createLowlight(common);
@@ -403,9 +404,6 @@ interface HtmlInlineMarkAttributes {
   title?: string | null;
 }
 
-const INLINE_HTML_MARK_TAGS = new Set(['abbr', 'kbd', 'small', 'sub', 'sup']);
-const INLINE_HTML_SUPPORTED_TAGS = new Set(['abbr', 'br', 'kbd', 'mark', 'small', 'sub', 'sup', 'u']);
-
 /**
  * 生成普通段落节点。
  * @param content - 段落行内内容
@@ -747,25 +745,6 @@ function consumeInlineCommentTokenGroup(
   };
 }
 
-function getReferenceStyleLinkRaw(token: MarkdownToken): string | null {
-  if (token.type !== 'link' || typeof token.raw !== 'string') {
-    return null;
-  }
-
-  const raw = token.raw.trim();
-  return /^\[[^\]]+\]\[[^\]]+\]$/.test(raw) ? raw : null;
-}
-
-/**
- * 判断链接 token 是否来自显式 Markdown 链接语法。
- * @param token - 当前 Markdown token
- * @returns 是否应保留为富文本链接
- */
-function isExplicitMarkdownLinkToken(token: MarkdownToken): boolean {
-  const raw = typeof token.raw === 'string' ? token.raw.trim() : '';
-  return raw.startsWith('[') || /^<https?:\/\/[^>\s]+>$/i.test(raw);
-}
-
 /**
  * 解析行内 token，并保留安全 HTML 标签的富文本语义。
  * @param tokens - marked 行内 token 列表
@@ -805,7 +784,7 @@ function parseInlineTokensWithHtmlMarks(tokens: MarkdownToken[], helpers: Markdo
       }
     }
 
-    const raw = getReferenceStyleLinkRaw(token);
+    const raw = getReferenceLinkRaw(token);
     const parsed = raw ? [helpers.createTextNode(raw)] : helpers.parseInline([token]);
     content.push(...applyInlineMarkdownMarks(parsed, activeMarks));
   }
@@ -1397,7 +1376,7 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
 
   const MarkdownLink = Link.extend({
     parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
-      if (!isExplicitMarkdownLinkToken(token)) {
+      if (!isExplicitLinkToken(token)) {
         return helpers.createTextNode(typeof token.raw === 'string' ? token.raw : token.text ?? '');
       }
 
@@ -1819,7 +1798,7 @@ export function createRichMarkdownSchemaExtensions(
 
   const MarkdownLink = Link.extend({
     parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers): MarkdownParseResult => {
-      if (!isExplicitMarkdownLinkToken(token)) {
+      if (!isExplicitLinkToken(token)) {
         return helpers.createTextNode(typeof token.raw === 'string' ? token.raw : token.text ?? '');
       }
 

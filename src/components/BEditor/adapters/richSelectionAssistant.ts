@@ -363,17 +363,19 @@ export function createRichSelectionAssistantAdapter(editor: Editor, context: Sel
 
     /**
      * 构造文件引用载荷，计算源码行号。
-     * 优先使用基于 Markdown 原文的精确行号映射，回退到基于 ProseMirror node attr 的方案。
+     * Markdown 原文存在时只接受精确映射，避免映射失败后混用不完整的 ProseMirror 属性坐标。
+     * 仅无 Markdown 原文时允许使用节点属性回退。
      * @param range - 当前选区范围
      * @returns 文件引用载荷，无法构造时返回 null
      */
     buildSelectionReference(range: SelectionAssistantRange): SelectionReferencePayload | null {
       const { editorState } = context;
 
-      // 优先使用基于 Markdown lexer 的精确行号，回退到基于 attrs 的方案
-      const sourceLineRange =
-        getSelectionSourceLineRangeFromMarkdown(editor.state.doc, range.from, range.to, editorState.content || '') ||
-        getSelectionSourceLineRange(editor.state.doc, range.from, range.to);
+      // 原文存在时失败关闭为无行号引用，防止把渲染坐标误报为 Markdown 物理行号。
+      const markdown = editorState.content || '';
+      const sourceLineRange = markdown.trim()
+        ? getSelectionSourceLineRangeFromMarkdown(editor.state.doc, range.from, range.to, markdown)
+        : getSelectionSourceLineRange(editor.state.doc, range.from, range.to);
 
       const { id = '', ext = '', path: filePath, name: fileName } = editorState;
       const { startLine = 0, endLine = 0 } = sourceLineRange || {};

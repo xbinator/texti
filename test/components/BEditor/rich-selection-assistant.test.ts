@@ -52,6 +52,33 @@ function createTestDoc(): PMNode {
 }
 
 /**
+ * 创建带有解析器回退行号的 ProseMirror 测试文档。
+ * @returns 段落属性行号固定为 59 的文档节点
+ */
+function createSourceLineDoc(): PMNode {
+  const schema = new Schema({
+    nodes: {
+      doc: { content: 'block+' },
+      paragraph: {
+        content: 'text*',
+        group: 'block',
+        attrs: {
+          sourceLineStart: { default: null },
+          sourceLineEnd: { default: null }
+        },
+        parseDOM: [{ tag: 'p' }],
+        toDOM: () => ['p', 0]
+      },
+      text: { group: 'inline' }
+    },
+    marks: {}
+  });
+  const paragraph = schema.node('paragraph', { sourceLineStart: 59, sourceLineEnd: 59 }, schema.text('目标文本'));
+
+  return schema.node('doc', null, [paragraph]);
+}
+
+/**
  * 创建包含 2x2 表格的 ProseMirror 测试文档。
  * @returns ProseMirror 表格文档节点
  */
@@ -117,6 +144,30 @@ function createAdapterHarness(): {
   adapter.restoreSelection = vi.fn<(range: SelectionAssistantRange) => void>();
 
   return { chain, adapter };
+}
+
+/**
+ * 创建仅用于构造文件引用的 Rich 选区适配器。
+ * @param doc - ProseMirror 测试文档
+ * @param content - 适配器可见的 Markdown 原文
+ * @returns Rich 选区适配器
+ */
+function createReferenceAdapter(doc: PMNode, content: string): ReturnType<typeof createRichSelectionAssistantAdapter> {
+  const editor = {
+    state: EditorState.create({ doc })
+  } as unknown as TiptapEditor;
+  const editorState: BEditorState = {
+    content,
+    name: 'note.md',
+    path: '/tmp/note.md',
+    id: 'rich-reference-test',
+    ext: 'md'
+  };
+
+  return createRichSelectionAssistantAdapter(editor, {
+    editorState,
+    overlayRoot: document.createElement('div')
+  });
 }
 
 describe('resolveRichSelectionRange', (): void => {
@@ -217,5 +268,19 @@ describe('createRichSelectionAssistantAdapter', (): void => {
     await adapter.applyGeneratedContent(range, '### Title\n\n**bold**');
 
     expect(chain.insertContentAt).toHaveBeenCalledWith({ from: 1, to: 4 }, '### Title\n\n**bold**', { contentType: 'markdown' });
+  });
+
+  it('does not use parser attribute lines when non-empty source Markdown cannot be aligned', (): void => {
+    const adapter = createReferenceAdapter(createSourceLineDoc(), '# 不同内容');
+    const payload = adapter.buildSelectionReference({ from: 1, to: 5, text: '目标文本', docVersion: 8 });
+
+    expect(payload).toMatchObject({ startLine: 0, endLine: 0 });
+  });
+
+  it('uses parser attribute lines when source Markdown is unavailable', (): void => {
+    const adapter = createReferenceAdapter(createSourceLineDoc(), '');
+    const payload = adapter.buildSelectionReference({ from: 1, to: 5, text: '目标文本', docVersion: 8 });
+
+    expect(payload).toMatchObject({ startLine: 59, endLine: 59 });
   });
 });

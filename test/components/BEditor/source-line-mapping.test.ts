@@ -8,6 +8,7 @@ import { getSchema } from '@tiptap/core';
 import { Schema } from '@tiptap/pm/model';
 import { describe, expect, it } from 'vitest';
 import {
+  captureSourceLineRange,
   createSourceLineTracker,
   getSelectionSourceLineRange,
   getSelectionSourceLineRangeFromMarkdown,
@@ -57,6 +58,18 @@ function createMismatchedDoc(): PMNode {
   const schema = createMappingSchema();
   const beforeHeading = schema.nodes.heading.create({ level: 1, sourceLineStart: 1, sourceLineEnd: 1 }, schema.text('Before'));
   const codeHeading = schema.nodes.heading.create({ level: 2, sourceLineStart: 8, sourceLineEnd: 8 }, schema.text('Code'));
+
+  return schema.node('doc', null, [beforeHeading, codeHeading]);
+}
+
+/**
+ * 创建带有过期 attrs 行号的 Rich 文档，模拟 Markdown 精确 token 未对齐时的危险回退。
+ * @returns 第二个标题 attrs 错误指向源码第 3 行的文档
+ */
+function createStaleLineDoc(): PMNode {
+  const schema = createMappingSchema();
+  const beforeHeading = schema.nodes.heading.create({ level: 1, sourceLineStart: 1, sourceLineEnd: 1 }, schema.text('Before'));
+  const codeHeading = schema.nodes.heading.create({ level: 2, sourceLineStart: 3, sourceLineEnd: 3 }, schema.text('Code'));
 
   return schema.node('doc', null, [beforeHeading, codeHeading]);
 }
@@ -132,6 +145,22 @@ function createTaskListBeforeCodeMarkdown(): string {
     '```'
   ].join('\n');
 }
+
+/**
+ * 创建包含 98 行前缀以及跨行内联语法段落的 Markdown。
+ * 目标段落首行固定为第 99 行，用于复现 Rich 文本去除 Markdown 标记后无法与源码 token 对齐的问题。
+ * @returns 行内语法映射回归测试 Markdown
+ */
+function createInlineSyntaxMarkdown(): string {
+  const prefixLines = Array.from({ length: 49 }, (_value, index): string[] => [`## 分段 ${index + 1}`, '']).flat();
+
+  return [
+    ...prefixLines,
+    '已生成**行程地图**（[高德](https://ditu.amap.com)）：',
+    '`amapuri://workInAmap/createWithToken?polymericId=source-line-regression&from=MCP`'
+  ].join('\n');
+}
+
 /**
  * 将 rich parser JSON 转为 ProseMirror 文档节点。
  * @param json - rich parser 输出 JSON
@@ -187,7 +216,47 @@ function getWholeBlockSelection(blockPosition: BlockPosition): { from: number; t
   return { from, to };
 }
 
+/**
+ * 按渲染文本查找块内 ProseMirror 选区。
+ * @param doc - ProseMirror 文档节点
+ * @param text - 目标渲染文本
+ * @returns 目标文本的选区起止位置
+ */
+function findTextSelection(doc: PMNode, text: string): { from: number; to: number } {
+  let selection: { from: number; to: number } | null = null;
+
+  doc.descendants((node: PMNode, pos: number): boolean => {
+    if (!node.isBlock) {
+      return true;
+    }
+
+    const textOffset = node.textContent.indexOf(text);
+    if (textOffset < 0) {
+      return true;
+    }
+
+    selection = {
+      from: pos + 1 + textOffset,
+      to: pos + 1 + textOffset + text.length
+    };
+    return false;
+  });
+
+  if (!selection) {
+    throw new Error(`Text not found: ${text}`);
+  }
+
+  return selection;
+}
+
 describe('source line mapping', (): void => {
+  it('counts CRLF as one physical newline when capturing node attributes', (): void => {
+    const tracker = createSourceLineTracker();
+
+    expect(captureSourceLineRange(tracker, 'FIRST\r\nTARGET')).toEqual({ startLine: 1, endLine: 2 });
+    expect(tracker.currentLine).toBe(3);
+  });
+
   it('aligns matching top-level Markdown tokens even when earlier mixed lists split', (): void => {
     const doc = createMismatchedDoc();
     const markdown = createMismatchedMarkdown();
@@ -205,6 +274,21 @@ describe('source line mapping', (): void => {
     const mappedRange = mapSourceLineRangeToProseMirrorRange(doc, 3, 3, markdown);
 
     expect(mappedRange).toBeNull();
+  });
+
+  it('does not reverse-map through stale attrs when non-empty Markdown is available', (): void => {
+    const mappedRange = mapSourceLineRangeToProseMirrorRange(createStaleLineDoc(), 3, 3, createMismatchedMarkdown());
+
+    expect(mappedRange).toBeNull();
+  });
+
+  it('does not reverse-map a Markdown blank line onto a visible Rich block', async (): Promise<void> => {
+    const markdown = 'FIRST\n\nTARGET';
+    const editorInstanceId = 'source-line-blank-reverse-test';
+    const { json } = await parseMarkdownForRichLoad(markdown, editorInstanceId, '1');
+    const doc = createRichDoc(json, editorInstanceId);
+
+    expect(mapSourceLineRangeToProseMirrorRange(doc, 2, 2, markdown)).toBeNull();
   });
 
   it('reverse-maps matched Markdown tokens after skipped list tokens', (): void => {
@@ -231,6 +315,18 @@ describe('source line mapping', (): void => {
 
     expect(fallbackRange).toEqual({ startLine: 15, endLine: 15 });
   });
+
+  it('maps rendered inline Markdown text to its physical source line', async (): Promise<void> => {
+    const markdown = createInlineSyntaxMarkdown();
+    const editorInstanceId = 'source-line-inline-syntax-test';
+    const { json } = await parseMarkdownForRichLoad(markdown, editorInstanceId, '1');
+    const doc = createRichDoc(json, editorInstanceId);
+    const selection = findTextSelection(doc, '已生成行程地图（高德）：');
+    const markdownRange = getSelectionSourceLineRangeFromMarkdown(doc, selection.from, selection.to, markdown);
+
+    expect(markdownRange).toEqual({ startLine: 99, endLine: 99 });
+  });
+
   it('reverse-maps task list snippets before code blocks to the clicked source lines', async (): Promise<void> => {
     const markdown = createTaskListBeforeCodeMarkdown();
     const editorInstanceId = 'source-line-task-list-test';
