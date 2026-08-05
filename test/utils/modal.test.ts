@@ -50,4 +50,32 @@ describe('Modal', (): void => {
 
     expect(result).toEqual([true, false]);
   });
+
+  it('resolves alert when the modal is dismissed', async (): Promise<void> => {
+    let resolved = false;
+    const alert = Modal.alert('提示', '无法继续');
+    alert.then((): void => {
+      resolved = true;
+    });
+    await nextTick();
+
+    document.querySelector<HTMLButtonElement>('.modal-dismiss')?.click();
+    await nextTick();
+
+    expect(resolved).toBe(true);
+  });
+
+  it('resolves input as cancelled when the modal is dismissed', async (): Promise<void> => {
+    let result: [false, string] | [true] | undefined;
+    const input = Modal.input('重命名', { defaultValue: '旧文件名' });
+    input.then((value: [false, string] | [true]): void => {
+      result = value;
+    });
+    await nextTick();
+
+    document.querySelector<HTMLButtonElement>('.modal-dismiss')?.click();
+    await nextTick();
+
+    expect(result).toEqual([true]);
+  });
 });

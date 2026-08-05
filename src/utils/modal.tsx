@@ -1,3 +1,7 @@
+/**
+ * @file modal.tsx
+ * @description 命令式弹窗工具，提供提示、确认、删除和输入弹窗能力。
+ */
 import type { DefineComponent, VNode } from 'vue';
 import { createApp, h, ref, withDirectives } from 'vue';
 import { Input } from 'ant-design-vue';
@@ -147,8 +151,17 @@ function FooterButtons({ onCancel, onConfirm, confirmText = '确定', cancelText
 function RenderAlertModal({ content, title, width, confirmText }: Omit<ConfirmModalOptions, 'danger'>): Promise<void> {
   return new Promise((resolve) => {
     let instance: ModalInstance;
+    let settled = false;
 
-    const onConfirm = (): void => {
+    /**
+     * 结束提示弹窗流程，避免关闭事件与按钮事件重复结算。
+     */
+    const finish = (): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
       resolve();
       instance.close();
     };
@@ -156,10 +169,11 @@ function RenderAlertModal({ content, title, width, confirmText }: Omit<ConfirmMo
     instance = createModalInstance((controlProps) =>
       h(RenderModal, {
         ...controlProps,
+        onClose: finish,
         title,
         width,
         content: () => <div style={{ marginBottom: '16px' }}>{content}</div>,
-        footer: () => <FooterButtons onConfirm={onConfirm} confirmText={confirmText || '知道了'} />
+        footer: () => <FooterButtons onConfirm={finish} confirmText={confirmText || '知道了'} />
       })
     );
   });
@@ -209,15 +223,28 @@ function RenderInputModal(title: string, options: InputOptions = {}): Promise<[f
 
   return new Promise((resolve) => {
     let instance: ModalInstance;
+    let settled = false;
     const inputValue = ref(defaultValue);
 
-    const onCancel = (): void => {
-      resolve([true]);
+    /**
+     * 结束输入弹窗流程，确保关闭按钮、遮罩和底部按钮只结算一次。
+     * @param result - 输入弹窗结果
+     */
+    const finish = (result: [false, string] | [true]): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      resolve(result);
       instance.close();
     };
+
+    const onCancel = (): void => {
+      finish([true]);
+    };
     const onConfirm = (): void => {
-      resolve([false, inputValue.value.trim()]);
-      instance.close();
+      finish([false, inputValue.value.trim()]);
     };
 
     instance = createModalInstance((controlProps) => {
@@ -231,6 +258,7 @@ function RenderInputModal(title: string, options: InputOptions = {}): Promise<[f
       });
       return h(RenderModal, {
         ...controlProps,
+        onClose: onCancel,
         title,
         content: () => (autofocus ? withDirectives(inputVNode, [[vFocus, true]]) : inputVNode),
         footer: () => <FooterButtons onCancel={onCancel} onConfirm={onConfirm} confirmText={okText} />
