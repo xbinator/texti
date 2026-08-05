@@ -9,6 +9,7 @@ export type {
   ToolSettingsState,
   MCPTransportType,
   MCPServerConfig,
+  MCPRuntimeServerConfig,
   MCPToolSelector,
   AIMCPRequestConfig,
   MCPToolSettings,

@@ -48,6 +48,8 @@ export interface MCPServerConfig {
   name: string;
   /** 是否启用 */
   enabled: boolean;
+  /** 用户在编辑器中提交的原始 JSON 文本 */
+  editorJsonText?: string;
   /** transport 类型 */
   transport: MCPTransportType;
   /** HTTP/SSE 端点 URL（streamableHTTP / sse 必填） */
@@ -71,6 +73,11 @@ export interface MCPServerConfig {
   /** 单次工具调用超时 */
   toolCallTimeoutMs: number;
 }
+
+/**
+ * MCP server 运行时请求配置。
+ */
+export type MCPRuntimeServerConfig = Omit<MCPServerConfig, 'editorJsonText'>;
 
 // ─── MCP Tool Selector ──────────────────────────────────────────────────────
 
@@ -101,7 +108,7 @@ export interface MCPToolSettings {
  */
 export interface AIMCPRequestConfig {
   /** 当前请求携带的 MCP server 配置快照 */
-  servers: MCPServerConfig[];
+  servers: MCPRuntimeServerConfig[];
   /** 当前请求启用的 server ID */
   enabledServerIds: string[];
   /** 当前请求允许的 tool 标识 */

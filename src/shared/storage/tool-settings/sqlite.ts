@@ -87,6 +87,7 @@ function normalizeMCPServerConfig(value: unknown): MCPServerConfig | null {
     id: source.id.trim(),
     name: source.name?.trim() || source.command?.trim() || 'Unnamed MCP Server',
     enabled: Boolean(source.enabled),
+    ...(isString(source.editorJsonText) ? { editorJsonText: source.editorJsonText } : {}),
     transport,
     url: transport !== 'stdio' && isString(source.url) ? source.url.trim() : undefined,
     command: isString(source.command) ? source.command.trim() : '',

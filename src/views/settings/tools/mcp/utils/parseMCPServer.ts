@@ -117,6 +117,9 @@ export function parseMCPServerEditorDraft(jsonText: string): MCPServerDraftParse
     if (entries.length === 0) {
       return { draft: null, error: 'mcpServers 中未包含任何 server 配置。' };
     }
+    if (entries.length > 1) {
+      return { draft: null, error: 'mcpServers 一次只能包含一个 server 配置，请拆分后分别添加。' };
+    }
     const [firstKey, firstValue] = entries[0];
     if (!firstValue || typeof firstValue !== 'object' || Array.isArray(firstValue)) {
       return { draft: null, error: `mcpServers["${firstKey}"] 不是有效的 server 配置对象。` };

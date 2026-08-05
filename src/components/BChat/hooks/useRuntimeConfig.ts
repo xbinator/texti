@@ -85,11 +85,20 @@ export function useRuntimeConfig(): UseRuntimeConfigReturn {
    */
   function resolveRuntimeMcpRequestConfig(): AIMCPRequestConfig | undefined {
     const servers = toolSettingsStore.mcp.servers.filter(isRuntimeEnabledMcpServer).map((server) => ({
-      ...server,
+      id: server.id,
+      name: server.name,
+      enabled: server.enabled,
+      transport: server.transport,
+      url: server.url,
+      command: server.command,
       args: [...server.args],
       env: { ...server.env },
       headers: { ...server.headers },
-      toolAllowlist: [...server.toolAllowlist]
+      toolAllowlist: [...server.toolAllowlist],
+      oauth: server.oauth ? { ...server.oauth } : undefined,
+      watchToolChanges: server.watchToolChanges,
+      connectTimeoutMs: server.connectTimeoutMs,
+      toolCallTimeoutMs: server.toolCallTimeoutMs
     }));
     if (!servers.length) return undefined;
 

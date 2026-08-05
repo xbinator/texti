@@ -40,6 +40,7 @@ import {
   normalizeRuntimeMcpTimeoutMs,
   normalizeRuntimeStringArray,
   normalizeRuntimeStringRecord,
+  redactMcpEditorJson,
   readRuntimeMcpSettings,
   updateRuntimeMcpSettings
 } from '../settings-file.mjs';
@@ -463,7 +464,7 @@ export async function executeSettingsTool(input: ChatRuntimeMainToolExecutionInp
   if (input.toolName === UPDATE_SETTINGS_TOOL_NAME) return executeUpdateSettingsTool(input, deps);
   if (input.toolName === GET_MCP_SETTINGS_TOOL_NAME) {
     const settings = await readRuntimeMcpSettings();
-    return createMainToolSuccessResult(GET_MCP_SETTINGS_TOOL_NAME, { settings: normalizeRuntimeMcpSettings(settings) });
+    return createMainToolSuccessResult(GET_MCP_SETTINGS_TOOL_NAME, { settings: redactMcpEditorJson(normalizeRuntimeMcpSettings(settings)) });
   }
   if (input.toolName === ADD_MCP_SERVER_TOOL_NAME) return executeAddMcpServerTool(input, deps);
   if (input.toolName === UPDATE_MCP_SERVER_TOOL_NAME) return executeUpdateMcpServerTool(input, deps);

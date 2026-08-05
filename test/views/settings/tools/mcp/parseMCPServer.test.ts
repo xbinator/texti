@@ -39,4 +39,24 @@ describe('parseMCPServerEditorDraft', () => {
       Authorization: 'Bearer test-token'
     });
   });
+
+  it('rejects wrapped MCP server config with multiple servers', (): void => {
+    const result = parseMCPServerEditorDraft(
+      JSON.stringify({
+        mcpServers: {
+          first: {
+            command: 'npx',
+            args: ['first-server']
+          },
+          second: {
+            command: 'npx',
+            args: ['second-server']
+          }
+        }
+      })
+    );
+
+    expect(result.draft).toBeNull();
+    expect(result.error).toBe('mcpServers 一次只能包含一个 server 配置，请拆分后分别添加。');
+  });
 });

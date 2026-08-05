@@ -115,6 +115,7 @@ function normalizeRuntimeMcpServer(value: unknown): MCPServerConfig | null {
     id: value.id.trim(),
     name,
     enabled: value.enabled === true,
+    ...(typeof value.editorJsonText === 'string' ? { editorJsonText: value.editorJsonText } : {}),
     transport,
     ...(transport !== 'stdio' && typeof value.url === 'string' ? { url: value.url.trim() } : {}),
     command,
@@ -146,6 +147,22 @@ export function normalizeRuntimeMcpSettings(value: unknown): MCPToolSettings {
 
   return {
     servers: value.servers.map((server: unknown) => normalizeRuntimeMcpServer(server)).filter((server): server is MCPServerConfig => server !== null)
+  };
+}
+
+/**
+ * 移除仅供编辑器回显使用的 MCP server 原始 JSON。
+ * @param settings - MCP 设置
+ * @returns 可安全返回给 AI 工具的 MCP 设置
+ */
+export function redactMcpEditorJson(settings: MCPToolSettings): MCPToolSettings {
+  return {
+    servers: settings.servers.map((server): MCPServerConfig => {
+      const runtimeServer: MCPServerConfig = { ...server };
+      delete runtimeServer.editorJsonText;
+
+      return runtimeServer;
+    })
   };
 }
 

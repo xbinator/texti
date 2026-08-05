@@ -87,6 +87,19 @@ describe('useRuntimeConfig', (): void => {
     });
   });
 
+  it('omits editor JSON from MCP request config servers', (): void => {
+    toolSettingsStoreMock.mcp.servers = [
+      createMcpServer({
+        editorJsonText: '{ "mcpServers": { "server-1": { "command": "node" } } }'
+      })
+    ];
+
+    const { resolveRuntimeMcpRequestConfig } = useRuntimeConfig();
+    const requestConfig = resolveRuntimeMcpRequestConfig();
+
+    expect(requestConfig?.servers[0]).not.toHaveProperty('editorJsonText');
+  });
+
   it('passes memory selection context to the memory store', async (): Promise<void> => {
     const selection: MemorySelectionContext = {
       userMessage: '帮我优化 tibis memory',

@@ -22,7 +22,7 @@
 
 <script setup lang="ts">
 /**
- * @file ServerEditorModal.vue
+ * @file ServerEditor.vue
  * @description MCP Server 添加/编辑弹窗，内置 Monaco JSON 编辑器，点击保存时校验。
  */
 import { computed, nextTick, ref, watch } from 'vue';
@@ -81,6 +81,10 @@ const MCP_SERVER_JSON_PLACEHOLDER = `{
 function serializeMCPServerEditorDraft(server: MCPServerConfig | null): string {
   if (!server) {
     return MCP_SERVER_JSON_PLACEHOLDER;
+  }
+
+  if (server.editorJsonText) {
+    return server.editorJsonText;
   }
 
   const isRemote = server.transport === 'streamableHTTP' || server.transport === 'sse';

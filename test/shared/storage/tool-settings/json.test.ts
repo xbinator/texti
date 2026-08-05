@@ -91,4 +91,44 @@ describe('toolSettingsStorage', () => {
       }
     });
   });
+
+  it('preserves MCP server editor JSON while normalizing settings', async (): Promise<void> => {
+    const editorJsonText = `{
+  "mcpServers": {
+    "my-coffee": {
+      "type": "streamablehttp",
+      "url": "https://gwmcp.lkcoffee.com/order/user/mcp",
+      "x-vendor-field": "kept"
+    }
+  }
+}`;
+
+    mockSettingsFileStorage.read.mockResolvedValue(
+      createSettingsFile({ enabled: false, apiKey: '' }, {
+        servers: [
+          {
+            id: 'coffee-server',
+            name: 'Coffee Server',
+            enabled: true,
+            transport: 'streamableHTTP',
+            url: 'https://gwmcp.lkcoffee.com/order/user/mcp',
+            command: '',
+            args: [],
+            env: {},
+            headers: {},
+            toolAllowlist: [],
+            connectTimeoutMs: 30000,
+            toolCallTimeoutMs: 60000,
+            editorJsonText
+          }
+        ]
+      } as unknown as MCPToolSettings)
+    );
+
+    const settings = await toolSettingsStorage.loadSettings();
+
+    expect(settings.mcp.servers[0]).toMatchObject({
+      editorJsonText
+    });
+  });
 });

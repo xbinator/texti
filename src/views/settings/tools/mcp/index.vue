@@ -175,13 +175,16 @@ function handleRemoveServer(serverId: string): void {
  * @returns 普通 JS 对象副本
  */
 function toPlainMcpServer(server: MCPServerConfig): MCPServerConfig {
+  const runtimeServer: MCPServerConfig = { ...server };
+  delete runtimeServer.editorJsonText;
+
   return {
-    ...server,
-    args: [...server.args],
-    env: { ...server.env },
-    headers: { ...server.headers },
-    toolAllowlist: [...server.toolAllowlist],
-    oauth: server.oauth ? { ...server.oauth } : undefined
+    ...runtimeServer,
+    args: [...runtimeServer.args],
+    env: { ...runtimeServer.env },
+    headers: { ...runtimeServer.headers },
+    toolAllowlist: [...runtimeServer.toolAllowlist],
+    oauth: runtimeServer.oauth ? { ...runtimeServer.oauth } : undefined
   };
 }
 
@@ -278,6 +281,7 @@ async function handleConfirmAdd(jsonText: string): Promise<void> {
     const serverId = editingServerId.value;
     await store.updateMcpServer(editingServerId.value, {
       ...draft,
+      editorJsonText: jsonText,
       oauth: isRemote && draft.enableOAuth ? {} : undefined
     });
     const updatedServer = store.getMcpServerById(serverId);
@@ -293,6 +297,7 @@ async function handleConfirmAdd(jsonText: string): Promise<void> {
     id: nanoid(),
     enabled: true,
     connectTimeoutMs: DEFAULT_MCP_CONNECT_TIMEOUT_MS,
+    editorJsonText: jsonText,
     toolCallTimeoutMs: draft.toolCallTimeoutMs ?? DEFAULT_MCP_TOOL_CALL_TIMEOUT_MS,
     oauth: isRemote && draft.enableOAuth ? {} : undefined
   };
