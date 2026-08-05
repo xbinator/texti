@@ -133,6 +133,47 @@ describe('createMainToolExecutor', (): void => {
     ]);
   });
 
+  it('routes read_current_widget through Widget editor bridge', async (): Promise<void> => {
+    const bridgeRequests: MainToolBridgeRequest[] = [];
+    const executeMainTool = createMainToolExecutor({
+      ...createMainToolDependencies(bridgeRequests),
+      async requestBridge(input: MainToolBridgeRequest) {
+        bridgeRequests.push(input);
+        return {
+          status: 'success',
+          data: {
+            title: 'aether-weather',
+            path: '/home/user/.tibis/widgets/aether-weather/widget.json',
+            content: JSON.stringify({ name: 'aether-weather', elements: [] }, null, 2)
+          }
+        };
+      }
+    });
+
+    const result = await executeMainTool({
+      runtime,
+      toolCallId: 'tool-call-widget-1',
+      toolName: 'read_current_widget',
+      input: {}
+    });
+
+    expect(result.status).toBe('success');
+    expect(result.toolName).toBe('read_current_widget');
+    expect(result.data).toMatchObject({
+      title: 'aether-weather',
+      path: '/home/user/.tibis/widgets/aether-weather/widget.json',
+      content: expect.stringContaining('"name": "aether-weather"')
+    });
+    expect(bridgeRequests).toEqual([
+      {
+        runtimeId: 'runtime-1',
+        toolCallId: 'tool-call-widget-1',
+        kind: 'widget-snapshot',
+        payload: {}
+      }
+    ]);
+  });
+
   it('routes read_current_webpage through WebviewTool bridge', async (): Promise<void> => {
     const bridgeRequests: MainToolBridgeRequest[] = [];
     const executeMainTool = createMainToolExecutor({

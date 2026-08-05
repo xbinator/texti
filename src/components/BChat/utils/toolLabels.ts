@@ -8,6 +8,7 @@ export const TOOL_ACTION_LABELS: Record<string, { alias: string }> = {
   read_file: { alias: '读取文件' },
   read_current_document: { alias: '读取当前文档' },
   read_current_webpage: { alias: '读取当前网页' },
+  read_current_widget: { alias: '读取当前 Widget' },
   read_directory: { alias: '读取目录' },
   glob: { alias: '查找文件' },
   grep: { alias: '搜索内容' },

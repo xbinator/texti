@@ -129,6 +129,25 @@ describe('toolResultSummary open file metadata', (): void => {
     });
   });
 
+  it('summarizes read_current_widget with title and openable file metadata', (): void => {
+    const summary = getToolResultSummary(
+      'read_current_widget',
+      successResult('read_current_widget', {
+        title: 'aether-weather',
+        path: '/home/user/.tibis/widgets/aether-weather/widget.json',
+        content: JSON.stringify({ name: 'aether-weather', elements: [] }, null, 2)
+      })
+    );
+
+    expect(summary).toEqual({
+      text: '已读取当前 Widget: aether-weather',
+      tags: [
+        { label: '标题', value: 'aether-weather' },
+        { label: '文件', value: 'widget.json', action: 'openFile', path: '/home/user/.tibis/widgets/aether-weather/widget.json' }
+      ]
+    });
+  });
+
   it('marks edit_file file tag as openable', (): void => {
     const summary = getToolResultSummary('edit_file', successResult('edit_file', { path: '/workspace/src/app.ts', replacedCount: 2 }));
 

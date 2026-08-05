@@ -103,6 +103,50 @@ describe('handleBChatRuntimeBridgeRequest', (): void => {
     });
   });
 
+  it('returns the current Widget editor snapshot', async (): Promise<void> => {
+    const result = await handleBChatRuntimeBridgeRequest(
+      {
+        runtimeId: 'runtime-1',
+        sessionId: 'session-1',
+        clientId: 'bchat',
+        agentId: 'default',
+        requestId: 'bridge-widget-1',
+        kind: 'widget-snapshot'
+      },
+      {
+        getEditorContext: () => undefined,
+        getWebviewContext: () => undefined,
+        getWidgetContext: () => ({
+          widget: {
+            title: 'aether-weather',
+            path: '/home/user/.tibis/widgets/aether-weather/widget.json',
+            getContent: () =>
+              JSON.stringify(
+                {
+                  name: 'aether-weather',
+                  description: 'Weather board',
+                  inputSchema: { type: 'object', properties: {}, required: [] },
+                  outputSchema: { type: 'object', properties: {}, required: [] },
+                  dataSchema: { type: 'object', properties: {}, required: [] },
+                  execute: { enabled: true, code: '' },
+                  metadata: { width: 980, height: 990 },
+                  elements: []
+                },
+                null,
+                2
+              )
+          }
+        })
+      }
+    );
+
+    expect(result).toEqual({
+      title: 'aether-weather',
+      path: '/home/user/.tibis/widgets/aether-weather/widget.json',
+      content: expect.stringContaining('"name": "aether-weather"')
+    });
+  });
+
   it('dispatches webview operation to the active WebView context', async (): Promise<void> => {
     const operatePage = vi.fn(async () => ({
       ok: true,

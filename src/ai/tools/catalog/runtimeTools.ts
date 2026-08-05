@@ -18,6 +18,7 @@ import {
   QUERY_LOGS_TOOL_NAME,
   READ_CURRENT_DOCUMENT_TOOL_NAME,
   READ_CURRENT_WEBPAGE_TOOL_NAME,
+  READ_CURRENT_WIDGET_TOOL_NAME,
   READ_DIRECTORY_TOOL_NAME,
   READ_FILE_TOOL_NAME,
   REFRESH_MCP_DISCOVERY_TOOL_NAME,
@@ -45,6 +46,7 @@ export {
   QUERY_LOGS_TOOL_NAME,
   READ_CURRENT_DOCUMENT_TOOL_NAME,
   READ_CURRENT_WEBPAGE_TOOL_NAME,
+  READ_CURRENT_WIDGET_TOOL_NAME,
   READ_DIRECTORY_TOOL_NAME,
   READ_FILE_TOOL_NAME,
   REFRESH_MCP_DISCOVERY_TOOL_NAME,
@@ -209,6 +211,9 @@ export const createOpenResourceTool = getRuntimeToolFactory(OPEN_RESOURCE_TOOL_N
 
 /** 创建 read_current_webpage schema-only 工具。 */
 export const createReadCurrentWebpageTool = getRuntimeToolFactory(READ_CURRENT_WEBPAGE_TOOL_NAME);
+
+/** 创建 read_current_widget schema-only 工具。 */
+export const createReadCurrentWidgetTool = getRuntimeToolFactory(READ_CURRENT_WIDGET_TOOL_NAME);
 
 /** 创建 operate_webpage schema-only 工具。 */
 export const createOperateWebpageTool = getRuntimeToolFactory(OPERATE_WEBPAGE_TOOL_NAME);

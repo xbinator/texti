@@ -29,6 +29,7 @@ import { flushPromises, mount, shallowMount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BuildMemoryContextOptions } from '@/ai/memory/types';
 import { webviewToolContextRegistry, type WebviewToolContext } from '@/ai/tools/context/webview';
+import { widgetToolContextRegistry } from '@/ai/tools/context/widget';
 import type { ToastItem } from '@/components/BChat/components/InteractionContainer/types';
 import BChat from '@/components/BChat/index.vue';
 import { type AdaptedUserMessageInput, type SubmitAction, createUserChoice } from '@/components/BChat/utils/submitAction';
@@ -301,6 +302,7 @@ vi.mock('@/ai/tools/builtin', () => ({
   OPEN_WIDGET_TOOL_NAME: 'open_widget',
   OPERATE_WEBPAGE_TOOL_NAME: 'operate_webpage',
   READ_CURRENT_WEBPAGE_TOOL_NAME: 'read_current_webpage',
+  READ_CURRENT_WIDGET_TOOL_NAME: 'read_current_widget',
   READ_DIRECTORY_TOOL_NAME: 'read_directory',
   SKILL_TOOL_NAME: 'skill',
   WIDGET_TOOL_NAME: 'widget'
@@ -319,7 +321,7 @@ vi.mock('@/shared/platform', () => ({
     onShellCommandOutput: vi.fn(() => vi.fn()),
     onShellRunEvent: vi.fn(() => vi.fn()),
     openExternal: vi.fn(),
-    getHomeDir: vi.fn(() => '/Users/test'),
+    getHomeDir: vi.fn(() => '/home/user'),
     readFile: vi.fn(() => ({ content: '' })),
     readWorkspaceFile: vi.fn(),
     readWorkspaceDirectory: vi.fn(() => []),
@@ -852,6 +854,8 @@ describe('BChat sessionId runtime', (): void => {
     actorSystemMockState.registerRuntime.mockReset();
     webviewToolContextRegistry.unregister('webview-a');
     webviewToolContextRegistry.unregister('webview-b');
+    widgetToolContextRegistry.unregister('widget-a');
+    widgetToolContextRegistry.unregister('widget-b');
     agentTaskEventMockState.listener = undefined;
     agentTaskEventMockState.dispose.mockReset();
     chatStoreMock.getSessionMessages.mockResolvedValue([]);

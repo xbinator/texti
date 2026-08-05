@@ -18,6 +18,8 @@ const builtinMockState = vi.hoisted(() => {
     getWorkspaceRoot?: () => string | null;
     /** 读取绑定的 WebView 上下文。 */
     getWebviewContext?: () => unknown;
+    /** 读取绑定的 Widget 编辑器上下文。 */
+    getWidgetContext?: () => unknown;
   }
 
   /**
@@ -51,6 +53,7 @@ const builtinMockState = vi.hoisted(() => {
     createExecutor,
     createBuiltinTools: vi.fn<(options?: BuiltinToolOptionsFixture) => ReturnType<typeof createExecutor>[]>(() => [
       createExecutor('read_current_webpage'),
+      createExecutor('read_current_widget'),
       createExecutor('operate_webpage'),
       createExecutor('open_resource'),
       createExecutor('read_directory')
@@ -64,6 +67,10 @@ const registryMockState = vi.hoisted(() => ({
     getContext: vi.fn(() => undefined)
   },
   webviewToolContextRegistry: {
+    getCurrentContext: vi.fn((): unknown => undefined),
+    getContext: vi.fn<(id: string) => unknown>()
+  },
+  widgetToolContextRegistry: {
     getCurrentContext: vi.fn((): unknown => undefined),
     getContext: vi.fn<(id: string) => unknown>()
   }
@@ -125,11 +132,12 @@ const widgetRuntimeMockState = vi.hoisted(() => {
 vi.mock('@/ai/tools/builtin', () => ({
   createBuiltinTools: builtinMockState.createBuiltinTools,
   isBuiltinToolName: vi.fn((toolName: string): boolean =>
-    ['read_current_webpage', 'operate_webpage', 'open_resource', 'read_directory', 'skill', 'widget', 'open_widget'].includes(toolName)
+    ['read_current_webpage', 'read_current_widget', 'operate_webpage', 'open_resource', 'read_directory', 'skill', 'widget', 'open_widget'].includes(toolName)
   ),
   OPERATE_WEBPAGE_TOOL_NAME: 'operate_webpage',
   OPEN_RESOURCE_TOOL_NAME: 'open_resource',
   READ_CURRENT_WEBPAGE_TOOL_NAME: 'read_current_webpage',
+  READ_CURRENT_WIDGET_TOOL_NAME: 'read_current_widget',
   READ_DIRECTORY_TOOL_NAME: 'read_directory',
   OPEN_WIDGET_TOOL_NAME: 'open_widget',
   SKILL_TOOL_NAME: 'skill',
@@ -174,6 +182,10 @@ vi.mock('@/ai/tools/context/editor', () => ({
 
 vi.mock('@/ai/tools/context/webview', () => ({
   webviewToolContextRegistry: registryMockState.webviewToolContextRegistry
+}));
+
+vi.mock('@/ai/tools/context/widget', () => ({
+  widgetToolContextRegistry: registryMockState.widgetToolContextRegistry
 }));
 
 vi.mock('@/hooks/useNavigate', () => ({
@@ -262,6 +274,8 @@ describe('useRuntimeTools', () => {
     vi.clearAllMocks();
     registryMockState.webviewToolContextRegistry.getCurrentContext.mockReturnValue(undefined);
     registryMockState.webviewToolContextRegistry.getContext.mockReturnValue(undefined);
+    registryMockState.widgetToolContextRegistry.getCurrentContext.mockReturnValue(undefined);
+    registryMockState.widgetToolContextRegistry.getContext.mockReturnValue(undefined);
     storeMockState.skillStore.initialized = false;
     storeMockState.skillStore.getEnabledSkills.mockReturnValue([]);
     storeMockState.skillStore.resolveLatestSkill.mockReset();
@@ -300,6 +314,23 @@ describe('useRuntimeTools', () => {
     workspaceRoot.value = '/private/tmp/project';
 
     expect(readActiveToolNames(runtimeTools.getActiveTools)).toContain('read_directory');
+  });
+
+  it('only exposes the current Widget reader while a Widget editor context is active', (): void => {
+    const runtimeTools = createRuntimeTools();
+
+    expect(readActiveToolNames(runtimeTools.getActiveTools)).not.toContain('read_current_widget');
+
+    const widgetContext = {
+      widget: {
+        title: 'weather',
+        path: '/widgets/weather/widget.json',
+        getContent: () => '{}'
+      }
+    };
+    registryMockState.widgetToolContextRegistry.getCurrentContext.mockReturnValue(widgetContext);
+
+    expect(readActiveToolNames(runtimeTools.getActiveTools)).toContain('read_current_widget');
   });
 
   it('binds builtin callbacks to the immutable Runtime session and workspace', (): void => {
@@ -342,6 +373,102 @@ describe('useRuntimeTools', () => {
 
     const boundOptions = builtinMockState.createBuiltinTools.mock.calls.at(-1)?.[0];
     expect(boundOptions?.getWebviewContext?.()).toBe(webviewA);
+  });
+
+  it('does not expose WebView tools for a bound Runtime without a captured WebView identity', (): void => {
+    const webviewContext: WebviewToolContext = {
+      readPageSnapshot: vi.fn(),
+      operatePage: vi.fn()
+    };
+    registryMockState.webviewToolContextRegistry.getCurrentContext.mockReturnValue(webviewContext);
+    const runtimeTools = createRuntimeTools();
+
+    const activeToolNames = readActiveToolNames(() =>
+      runtimeTools.getActiveTools({
+        sessionId: 'session-a',
+        runtimeId: 'runtime-a',
+        workspaceRoot: '/workspace-a'
+      })
+    );
+
+    expect(activeToolNames).not.toEqual(expect.arrayContaining(['read_current_webpage', 'operate_webpage']));
+    expect(activeToolNames).toContain('open_resource');
+  });
+
+  it('binds Widget callbacks to the immutable Runtime resource', (): void => {
+    const widgetA = {
+      widget: {
+        title: 'weather-a',
+        path: '/widgets/a/widget.json',
+        getContent: () => '{}'
+      }
+    };
+    const widgetB = {
+      widget: {
+        title: 'weather-b',
+        path: '/widgets/b/widget.json',
+        getContent: () => '{}'
+      }
+    };
+    registryMockState.widgetToolContextRegistry.getCurrentContext.mockReturnValue(widgetB);
+    registryMockState.widgetToolContextRegistry.getContext.mockImplementation((id: string): unknown => (id === 'widget-a' ? widgetA : undefined));
+    const runtimeTools = createRuntimeTools();
+
+    runtimeTools.getActiveTools({
+      sessionId: 'session-a',
+      runtimeId: 'runtime-a',
+      workspaceRoot: '/workspace-a',
+      widgetId: 'widget-a'
+    });
+
+    const boundOptions = builtinMockState.createBuiltinTools.mock.calls.at(-1)?.[0];
+    expect(boundOptions?.getWidgetContext?.()).toBe(widgetA);
+  });
+
+  it('does not expose the Widget reader for a bound Runtime without a captured Widget identity', (): void => {
+    const widgetContext = {
+      widget: {
+        title: 'weather',
+        path: '/widgets/weather/widget.json',
+        getContent: () => '{}'
+      }
+    };
+    registryMockState.widgetToolContextRegistry.getCurrentContext.mockReturnValue(widgetContext);
+    const runtimeTools = createRuntimeTools();
+
+    const activeToolNames = readActiveToolNames(() =>
+      runtimeTools.getActiveTools({
+        sessionId: 'session-a',
+        runtimeId: 'runtime-a',
+        workspaceRoot: '/workspace-a'
+      })
+    );
+
+    expect(activeToolNames).not.toContain('read_current_widget');
+  });
+
+  it('exposes the Widget reader for a bound Runtime with a registered captured Widget identity', (): void => {
+    const widgetContext = {
+      widget: {
+        title: 'weather',
+        path: '/widgets/weather/widget.json',
+        getContent: () => '{}'
+      }
+    };
+    registryMockState.widgetToolContextRegistry.getCurrentContext.mockReturnValue(undefined);
+    registryMockState.widgetToolContextRegistry.getContext.mockImplementation((id: string): unknown => (id === 'widget-a' ? widgetContext : undefined));
+    const runtimeTools = createRuntimeTools();
+
+    const activeToolNames = readActiveToolNames(() =>
+      runtimeTools.getActiveTools({
+        sessionId: 'session-a',
+        runtimeId: 'runtime-a',
+        workspaceRoot: '/workspace-a',
+        widgetId: 'widget-a'
+      })
+    );
+
+    expect(activeToolNames).toContain('read_current_widget');
   });
 
   it('dynamically exposes widget tools after widget store is initialized', (): void => {

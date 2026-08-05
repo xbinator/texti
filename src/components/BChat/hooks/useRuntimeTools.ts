@@ -14,6 +14,7 @@ import {
   OPERATE_WEBPAGE_TOOL_NAME,
   OPEN_RESOURCE_TOOL_NAME,
   READ_CURRENT_WEBPAGE_TOOL_NAME,
+  READ_CURRENT_WIDGET_TOOL_NAME,
   READ_DIRECTORY_TOOL_NAME,
   SKILL_TOOL_NAME,
   WIDGET_TOOL_NAME
@@ -23,6 +24,7 @@ import { createOpenWidgetTool, createWidgetTool } from '@/ai/tools/builtin/Widge
 import type { AIToolConfirmationAdapter } from '@/ai/tools/confirmation';
 import { editorToolContextRegistry } from '@/ai/tools/context/editor';
 import { webviewToolContextRegistry } from '@/ai/tools/context/webview';
+import { widgetToolContextRegistry } from '@/ai/tools/context/widget';
 import { createWidgetHttpClient, executeWidgetRuntime, type WidgetConsoleLevel, type WidgetLogLevel } from '@/components/BWidget/utils/widgetRuntime';
 import { formatWidgetLogArgs } from '@/components/BWidget/utils/widgetRuntime/logger';
 import { useNavigate } from '@/hooks/useNavigate';
@@ -34,19 +36,30 @@ import { useWidgetStore } from '@/stores/ai/widget';
 import { useRecentStore } from '@/stores/workspace/recent';
 import { createRuntimeError } from '../utils/runtimeError';
 
+/** Runtime 工具发现时冻结的资源身份。 */
+export interface RuntimeToolResourceBinding {
+  /** 请求准备时冻结的工作区根目录。 */
+  readonly workspaceRoot?: string | null;
+  /** 请求准备时冻结的文档 ID。 */
+  readonly documentId?: string;
+  /** 请求准备时冻结的 WebView 标签 ID。 */
+  readonly webviewId?: string;
+  /** 请求准备时冻结的 Widget 编辑页 ID。 */
+  readonly widgetId?: string;
+}
+
 /** Runtime 工具绑定后不可变的执行身份。 */
-export interface RuntimeToolBinding {
+export interface RuntimeToolBinding extends RuntimeToolResourceBinding {
   /** 持久化会话 ID。 */
   readonly sessionId: string;
   /** 主进程 Runtime ID。 */
   readonly runtimeId: string;
   /** 请求准备时冻结的工作区根目录。 */
   readonly workspaceRoot: string | null;
-  /** 请求准备时冻结的文档 ID。 */
-  readonly documentId?: string;
-  /** 请求准备时冻结的 WebView 标签 ID。 */
-  readonly webviewId?: string;
 }
+
+/** Runtime 工具发现或执行可接受的绑定输入。 */
+export type RuntimeToolDiscoveryBinding = RuntimeToolResourceBinding | RuntimeToolBinding;
 
 /** 待回答 Question 的最小快照。 */
 interface PendingQuestionSnapshot {
@@ -79,7 +92,7 @@ interface UseRuntimeToolsOptions {
  */
 interface UseRuntimeToolsReturn {
   /** 动态获取当前可用工具列表。 */
-  getActiveTools: (binding?: RuntimeToolBinding) => AIToolExecutor[];
+  getActiveTools: (binding?: RuntimeToolDiscoveryBinding) => AIToolExecutor[];
   /** 发送请求前同步 Skill 与 Widget 磁盘定义。 */
   syncAIResources: () => Promise<void>;
   /** 获取当前已启用 Skill 的内容版本。 */
@@ -131,13 +144,27 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
   };
 
   /**
+   * 判断工具绑定是否包含可执行 Runtime 身份。
+   * @param binding - 工具发现或执行绑定
+   * @returns 是否为完整 Runtime 工具绑定
+   */
+  function isRuntimeToolBinding(binding: RuntimeToolDiscoveryBinding | undefined): binding is RuntimeToolBinding {
+    return Boolean(
+      binding && 'sessionId' in binding && 'runtimeId' in binding && typeof binding.sessionId === 'string' && typeof binding.runtimeId === 'string'
+    );
+  }
+
+  /**
    * 为候选工具创建本次调用专属的内置执行器。
    * @param binding - 可选的不可变 Runtime 身份；缺省时仅用于请求前工具发现
    * @returns 新创建的内置工具执行器
    */
-  function createBoundTools(binding?: RuntimeToolBinding): AIToolExecutor[] {
-    const getSessionId = binding ? (): string => binding.sessionId : options.getSessionId;
-    const getWorkspaceRoot = binding ? (): string | null => binding.workspaceRoot : options.getWorkspaceRoot;
+  function createBoundTools(binding?: RuntimeToolDiscoveryBinding): AIToolExecutor[] {
+    const runtimeBinding = isRuntimeToolBinding(binding) ? binding : undefined;
+    const boundSessionId = runtimeBinding?.sessionId;
+    const boundWorkspaceRoot = binding?.workspaceRoot;
+    const getSessionId = boundSessionId ? (): string => boundSessionId : options.getSessionId;
+    const getWorkspaceRoot = binding && boundWorkspaceRoot !== undefined ? (): string | null => boundWorkspaceRoot : options.getWorkspaceRoot;
 
     /** @returns Runtime 绑定的 WebView 上下文；未绑定时读取当前上下文。 */
     function getWebviewContext(): unknown {
@@ -146,8 +173,15 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
       return webviewToolContextRegistry.getContext(binding.webviewId);
     }
 
+    /** @returns Runtime 绑定的 Widget 编辑器上下文；未绑定时读取当前上下文。 */
+    function getWidgetContext(): unknown {
+      if (!binding) return widgetToolContextRegistry.getCurrentContext();
+      if (!binding.widgetId) return undefined;
+      return widgetToolContextRegistry.getContext(binding.widgetId);
+    }
+
     return createBuiltinTools({
-      confirm: options.createConfirmationAdapter(binding),
+      confirm: options.createConfirmationAdapter(runtimeBinding),
       skillStore,
       widgetStore,
       mcpStore: toolSettingsStore,
@@ -173,6 +207,7 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
         return editorToolContextRegistry.getContext(documentId);
       },
       getWebviewContext,
+      getWidgetContext,
       openDraft,
       openFileByPath,
       /**
@@ -202,11 +237,18 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
    * 每次调用时根据运行时状态（编辑器、MCP、Skill、Widget）过滤条件工具。
    * @returns 当前可用工具列表
    */
-  function getActiveTools(binding?: RuntimeToolBinding): AIToolExecutor[] {
+  function getActiveTools(binding?: RuntimeToolDiscoveryBinding): AIToolExecutor[] {
     const allBuiltinTools = createBoundTools(binding);
-    const hasActiveEditor = Boolean(editorToolContextRegistry.getCurrentContext());
-    const hasActiveWebview = Boolean(webviewToolContextRegistry.getCurrentContext());
-    const hasWorkspace = Boolean(binding ? binding.workspaceRoot : options.workspaceRoot.value);
+    const hasActiveEditor = binding
+      ? Boolean(binding.documentId && editorToolContextRegistry.getContext(binding.documentId))
+      : Boolean(editorToolContextRegistry.getCurrentContext());
+    const hasActiveWebview = binding
+      ? Boolean(binding.webviewId && webviewToolContextRegistry.getContext(binding.webviewId))
+      : Boolean(webviewToolContextRegistry.getCurrentContext());
+    const hasActiveWidget = binding
+      ? Boolean(binding.widgetId && widgetToolContextRegistry.getContext(binding.widgetId))
+      : Boolean(widgetToolContextRegistry.getCurrentContext());
+    const hasWorkspace = Boolean(binding && binding.workspaceRoot !== undefined ? binding.workspaceRoot : options.workspaceRoot.value);
     const enabledWidgets = widgetStore.initialized ? widgetStore.getEnabledWidgets() : [];
     const hasActiveWidgets = widgetStore.initialized && enabledWidgets.length > 0;
     const baseBuiltinTools = hasActiveWidgets
@@ -236,10 +278,9 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
 
     return [...baseBuiltinTools, ...dynamicTools].filter((tool: AIToolExecutor): boolean => {
       if (!isBuiltinToolName(tool.definition.name)) return false;
-      // 绑定阶段只重建执行器；最终能力严格由准备阶段 allowlist 决定。
-      if (binding) return tool.definition.name !== READ_DIRECTORY_TOOL_NAME || hasWorkspace;
       if (tool.definition.name === 'read_current_document' && !hasActiveEditor) return false;
       if (tool.definition.name === READ_CURRENT_WEBPAGE_TOOL_NAME && !hasActiveWebview) return false;
+      if (tool.definition.name === READ_CURRENT_WIDGET_TOOL_NAME && !hasActiveWidget) return false;
       if (tool.definition.name === OPERATE_WEBPAGE_TOOL_NAME && !hasActiveWebview) return false;
       if (tool.definition.name === OPEN_RESOURCE_TOOL_NAME && hasActiveWebview) return false;
       if (tool.definition.name === READ_DIRECTORY_TOOL_NAME && !hasWorkspace) return false;

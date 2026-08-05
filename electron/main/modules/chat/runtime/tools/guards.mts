@@ -16,6 +16,7 @@ import type {
   RuntimeWebpageOperateTarget,
   RuntimeWebpageOperateResult,
   RuntimeUpdateSettingsResult,
+  RuntimeWidgetSnapshot,
   RuntimeWebpageSnapshot
 } from './types.mjs';
 import { SUPPORTED_SETTING_KEYS, SUPPORTED_WEBPAGE_ACTION_TYPES, WEBPAGE_OPERATION_LIMITS } from './constants.mjs';
@@ -53,6 +54,15 @@ export function isRuntimeDocumentSnapshot(value: unknown): value is RuntimeDocum
     typeof value.content === 'string' &&
     (value.selection === undefined || value.selection === null || isRuntimeDocumentSelection(value.selection))
   );
+}
+
+/**
+ * 判断 bridge payload 是否为 Widget 编辑页快照。
+ * @param value - bridge payload
+ * @returns 是否为 Widget 编辑页快照
+ */
+export function isRuntimeWidgetSnapshot(value: unknown): value is RuntimeWidgetSnapshot {
+  return isRecord(value) && typeof value.title === 'string' && (typeof value.path === 'string' || value.path === null) && typeof value.content === 'string';
 }
 
 /**

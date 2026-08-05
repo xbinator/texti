@@ -5,6 +5,7 @@
 import type { AIToolContext, AIToolExecutionError } from 'types/ai';
 import type { ChatRuntimeBridgeRequestEvent, ChatRuntimeEventBase } from 'types/chat-runtime';
 import type { WebviewOperateInput, WebviewPressKey, WebviewToolContext } from '@/ai/tools/context/webview';
+import type { WidgetToolContext } from '@/ai/tools/context/widget';
 import type { OpenDraftInput, OpenDraftResult } from '@/ai/tools/shared/types';
 import { isDocumentRecord } from '@/shared/storage';
 import type { StoredDocumentRecord } from '@/shared/storage/files/types';
@@ -59,6 +60,8 @@ export interface BChatRuntimeBridgeDependencies {
   updateRecentFileById?: (fileId: string, updates: Partial<StoredDocumentRecord>) => Promise<StoredDocumentRecord>;
   /** 获取当前 WebView 工具上下文。 */
   getWebviewContext: () => WebviewToolContext | undefined;
+  /** 获取当前 Widget 编辑器工具上下文。 */
+  getWidgetContext?: () => WidgetToolContext | undefined;
   /** 获取应用设置快照。 */
   getSettingsSnapshot?: () => BChatRuntimeSettingsSnapshot;
   /** 应用设置修改。 */
@@ -88,6 +91,16 @@ export interface BChatRuntimeDocumentSnapshot {
   content: string;
   /** 当前选区。 */
   selection: ReturnType<AIToolContext['editor']['getSelection']>;
+}
+
+/** Widget 编辑页 bridge 快照。 */
+export interface BChatRuntimeWidgetSnapshot {
+  /** Widget 标签栏标题。 */
+  title: string;
+  /** Widget 文件路径，未保存时为空。 */
+  path: string | null;
+  /** 当前内存中的 WidgetData JSON。 */
+  content: string;
 }
 
 /** 文件内容 bridge 快照。 */
@@ -253,6 +266,25 @@ function readDocumentSnapshot(dependencies: BChatRuntimeBridgeDependencies): BCh
     ...(context.document.locator ? { locator: context.document.locator } : {}),
     content: context.document.getContent(),
     selection: context.editor.getSelection()
+  };
+}
+
+/** Widget editor bridge handlers. */
+/**
+ * 读取当前 Widget 编辑页快照。
+ * @param dependencies - bridge 依赖
+ * @returns Widget 编辑页快照
+ */
+function readWidgetSnapshot(dependencies: BChatRuntimeBridgeDependencies): BChatRuntimeWidgetSnapshot {
+  const context = dependencies.getWidgetContext?.();
+  if (!context) {
+    throw createBridgeError('EDITOR_UNAVAILABLE', '当前没有可用的 Widget 编辑页');
+  }
+
+  return {
+    title: context.widget.title,
+    path: context.widget.path,
+    content: context.widget.getContent()
   };
 }
 
@@ -512,6 +544,10 @@ export async function handleBChatRuntimeBridgeRequest(event: BChatRuntimeBridgeR
       throw createBridgeError('EDITOR_UNAVAILABLE', '当前没有可用的网页');
     }
     return context.readPageSnapshot();
+  }
+
+  if (event.kind === 'widget-snapshot') {
+    return readWidgetSnapshot(dependencies);
   }
 
   if (event.kind === 'webview-operate') {

@@ -21,6 +21,7 @@ import {
   createQueryLogsTool,
   createReadCurrentDocumentTool,
   createReadCurrentWebpageTool,
+  createReadCurrentWidgetTool,
   createReadDirectoryTool,
   createReadFileTool,
   createRefreshMcpDiscoveryTool,
@@ -51,6 +52,7 @@ export {
   QUERY_LOGS_TOOL_NAME,
   READ_CURRENT_DOCUMENT_TOOL_NAME,
   READ_CURRENT_WEBPAGE_TOOL_NAME,
+  READ_CURRENT_WIDGET_TOOL_NAME,
   READ_DIRECTORY_TOOL_NAME,
   READ_FILE_TOOL_NAME,
   REFRESH_MCP_DISCOVERY_TOOL_NAME,
@@ -186,8 +188,6 @@ interface CreateBuiltinToolsOptions extends BuiltinToolBaseOptions {
   widgetStore?: WidgetStoreLike;
   /** 获取当前活跃会话 ID，用于 todowrite 工具 */
   getSessionId?: () => string | undefined;
-  /** 获取当前 WebView 上下文，保留给调用方传参兼容。 */
-  getWebviewContext?: () => unknown;
   /** 通过文件路径打开文件标签页，用于 open_resource 工具 */
   openFileByPath?: (filePath: string) => Promise<{ id: string } | null>;
   /** 在内置 webview 中打开 URL，用于 open_resource 工具 */
@@ -230,6 +230,7 @@ export function createBuiltinTools(options: CreateBuiltinToolsOptions = {}): AIT
   // 创建文档写工具 schema，实际执行在主进程。
   const createDocumentTool = createCreateDocumentTool();
   const readCurrentWebpageTool = createReadCurrentWebpageTool();
+  const readCurrentWidgetTool = createReadCurrentWidgetTool();
   const operateWebpageTool = createOperateWebpageTool();
 
   // 没有确认适配器时只返回只读工具 + 始终注册的写工具
@@ -240,6 +241,7 @@ export function createBuiltinTools(options: CreateBuiltinToolsOptions = {}): AIT
       ...fileSearchTools,
       ...(mcpReadTool ? [mcpReadTool] : []),
       readCurrentWebpageTool,
+      readCurrentWidgetTool,
       createBuiltinTodoWriteTool({ getSessionId: options.getSessionId ?? (() => undefined) }),
       createDocumentTool,
       operateWebpageTool,
@@ -292,6 +294,7 @@ export function createBuiltinTools(options: CreateBuiltinToolsOptions = {}): AIT
     ...fileSearchTools,
     ...(mcpReadTool ? [mcpReadTool] : []),
     readCurrentWebpageTool,
+    readCurrentWidgetTool,
     ...writableTools,
     ...mcpWriteTools,
     operateWebpageTool,

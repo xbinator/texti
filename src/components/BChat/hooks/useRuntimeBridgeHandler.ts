@@ -6,6 +6,7 @@ import type { RuntimeToolBinding } from './useRuntimeTools';
 import type { ChatRuntimeBridgeRequestEvent } from 'types/chat-runtime';
 import { editorToolContextRegistry } from '@/ai/tools/context/editor';
 import { webviewToolContextRegistry } from '@/ai/tools/context/webview';
+import { widgetToolContextRegistry } from '@/ai/tools/context/widget';
 import type { useNavigate } from '@/hooks/useNavigate';
 import { native } from '@/shared/platform';
 import type { StoredDocumentRecord } from '@/shared/storage/files/types';
@@ -72,6 +73,7 @@ export function useRuntimeBridgeHandler(options: UseRuntimeBridgeHandlerOptions)
   function createBridgeHandler(binding?: RuntimeToolBinding): RuntimeBridgeHandler {
     const documentId = binding?.documentId;
     const webviewId = binding?.webviewId;
+    const widgetId = binding?.widgetId;
     const workspaceRoot = binding?.workspaceRoot ?? null;
 
     /** 执行当前 Runtime 的资源绑定 Bridge 请求。 */
@@ -91,6 +93,7 @@ export function useRuntimeBridgeHandler(options: UseRuntimeBridgeHandlerOptions)
         getWebviewContext: binding
           ? () => (webviewId ? webviewToolContextRegistry.getContext(webviewId) : undefined)
           : webviewToolContextRegistry.getCurrentContext,
+        getWidgetContext: binding ? () => (widgetId ? widgetToolContextRegistry.getContext(widgetId) : undefined) : widgetToolContextRegistry.getCurrentContext,
         getSettingsSnapshot,
         applySetting: applyRuntimeSetting,
         openDraft: options.openDraft,

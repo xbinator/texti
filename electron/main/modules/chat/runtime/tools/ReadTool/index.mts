@@ -13,9 +13,10 @@ import {
   QUERY_LOGS_TOOL_NAME,
   READ_CURRENT_DOCUMENT_TOOL_NAME,
   READ_TOOL_NAMES,
+  READ_CURRENT_WIDGET_TOOL_NAME,
   DEFAULT_QUERY_LOG_LIMIT
 } from '../constants.mjs';
-import { isRuntimeDocumentSnapshot } from '../guards.mjs';
+import { isRuntimeDocumentSnapshot, isRuntimeWidgetSnapshot } from '../guards.mjs';
 import { createBridgeFailureResult, createMainToolFailureResult, createMainToolSuccessResult } from '../results.mjs';
 
 /**
@@ -217,6 +218,18 @@ export async function executeReadTool(input: ChatRuntimeMainToolExecutionInput, 
     if (bridgeResult.status === 'failure') return createBridgeFailureResult(input.toolName, bridgeResult.error);
     if (!isRuntimeDocumentSnapshot(bridgeResult.data)) return createMainToolFailureResult(input.toolName, 'INVALID_INPUT', '当前文档快照格式无效');
     return createReadCurrentDocumentSuccessResult(bridgeResult.data);
+  }
+
+  if (input.toolName === READ_CURRENT_WIDGET_TOOL_NAME) {
+    const bridgeResult = await deps.requestBridge({
+      runtimeId: input.runtime.runtimeId,
+      toolCallId: input.toolCallId,
+      kind: 'widget-snapshot',
+      payload: input.input
+    });
+    if (bridgeResult.status === 'failure') return createBridgeFailureResult(input.toolName, bridgeResult.error);
+    if (!isRuntimeWidgetSnapshot(bridgeResult.data)) return createMainToolFailureResult(input.toolName, 'INVALID_INPUT', '当前 Widget 快照格式无效');
+    return createMainToolSuccessResult(READ_CURRENT_WIDGET_TOOL_NAME, bridgeResult.data);
   }
 
   if (input.toolName === GET_CURRENT_TIME_TOOL_NAME) {

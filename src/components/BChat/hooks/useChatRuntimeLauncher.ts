@@ -4,7 +4,7 @@
  */
 import type { UseChatSessionActorReturn } from './useChatSessionActor';
 import type { PreparedRuntimeRequest, useRuntimeRequestConfig } from './useRuntimeRequestConfig';
-import type { RuntimeToolBinding } from './useRuntimeTools';
+import type { RuntimeToolBinding, RuntimeToolDiscoveryBinding } from './useRuntimeTools';
 import type { Message } from '../utils/types';
 import type { AIToolExecutor } from 'types/ai';
 import type {
@@ -20,6 +20,7 @@ import { nanoid } from 'nanoid';
 import type { ChatActorSystem } from '@/ai/chat/actorSystem';
 import { editorToolContextRegistry } from '@/ai/tools/context/editor';
 import { webviewToolContextRegistry } from '@/ai/tools/context/webview';
+import { widgetToolContextRegistry } from '@/ai/tools/context/widget';
 
 /** Runtime 请求准备函数。 */
 type PrepareRuntimeRequest = ReturnType<typeof useRuntimeRequestConfig>['prepareRuntimeRequest'];
@@ -33,7 +34,7 @@ interface UseChatRuntimeLauncherOptions {
   /** 当前 Session actor。 */
   sessionActor: UseChatSessionActorReturn;
   /** 当前 renderer 工具。 */
-  getActiveTools: (binding?: RuntimeToolBinding) => AIToolExecutor[];
+  getActiveTools: (binding?: RuntimeToolDiscoveryBinding) => AIToolExecutor[];
   /** 准备 Runtime 请求。 */
   prepareRuntimeRequest: PrepareRuntimeRequest;
   /** 按不可变 Runtime 身份创建 bridge 处理器。 */
@@ -48,6 +49,8 @@ interface RuntimeResourceSnapshot {
   readonly documentId?: string;
   /** 当前 WebView 标签 ID。 */
   readonly webviewId?: string;
+  /** 当前 Widget 编辑页 ID。 */
+  readonly widgetId?: string;
 }
 
 /**
@@ -57,7 +60,21 @@ interface RuntimeResourceSnapshot {
 function captureRuntimeResources(): RuntimeResourceSnapshot {
   return Object.freeze({
     documentId: editorToolContextRegistry.getCurrentContext()?.document.id,
-    webviewId: webviewToolContextRegistry.getCurrentId() ?? undefined
+    webviewId: webviewToolContextRegistry.getCurrentId() ?? undefined,
+    widgetId: widgetToolContextRegistry.getCurrentId() ?? undefined
+  });
+}
+
+/**
+ * 将捕获的 Renderer 资源转换为工具发现绑定。
+ * @param resources - 预检开始时冻结的 Renderer 资源
+ * @returns 工具发现绑定
+ */
+function createResourceBinding(resources: RuntimeResourceSnapshot): RuntimeToolDiscoveryBinding {
+  return Object.freeze({
+    documentId: resources.documentId,
+    webviewId: resources.webviewId,
+    widgetId: resources.widgetId
   });
 }
 
@@ -75,7 +92,8 @@ function createCapabilityDescriptor(
     rendererToolNames: prepared.rendererTools.map((tool): string => tool.definition.name),
     documentId: resources.documentId,
     workspaceRoot: prepared.config.workspaceRoot,
-    webviewId: resources.webviewId
+    webviewId: resources.webviewId,
+    widgetId: resources.widgetId
   };
 }
 
@@ -92,7 +110,7 @@ export function useChatRuntimeLauncher(options: UseChatRuntimeLauncherOptions) {
     selectionParts?: ChatRuntimeUserInputPart[]
   ): Promise<PreparedRuntimeRequest | null> {
     const resources = captureRuntimeResources();
-    const prepared = await options.prepareRuntimeRequest(selectionSource, selectionParts);
+    const prepared = await options.prepareRuntimeRequest(selectionSource, selectionParts, createResourceBinding(resources));
     if (!prepared || !options.isCurrentOperation(operationId)) return null;
     return {
       ...prepared,
@@ -115,7 +133,8 @@ export function useChatRuntimeLauncher(options: UseChatRuntimeLauncherOptions) {
       runtimeId: address.runtimeId,
       workspaceRoot: descriptor.workspaceRoot ?? null,
       documentId: descriptor.documentId,
-      webviewId: descriptor.webviewId
+      webviewId: descriptor.webviewId,
+      widgetId: descriptor.widgetId
     });
     const tools = options.getActiveTools(binding).filter((tool): boolean => allowedToolNames.has(tool.definition.name));
     const { documentId } = descriptor;
@@ -160,7 +179,8 @@ export function useChatRuntimeLauncher(options: UseChatRuntimeLauncherOptions) {
       runtimeId,
       workspaceRoot: prepared.config.workspaceRoot ?? null,
       documentId: descriptor.documentId,
-      webviewId: descriptor.webviewId
+      webviewId: descriptor.webviewId,
+      widgetId: descriptor.widgetId
     });
     const tools = options.getActiveTools(binding).filter((tool): boolean => allowedToolNames.has(tool.definition.name));
     const { documentId } = descriptor;

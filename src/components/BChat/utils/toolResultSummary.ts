@@ -350,6 +350,29 @@ function summarizeReadFile(data: Record<string, unknown>): ToolResultSummary {
 }
 
 /**
+ * 格式化 read_current_widget 工具的结果。
+ * @param data - 工具结果数据
+ * @returns 当前 Widget 摘要
+ */
+function summarizeReadCurrentWidget(data: Record<string, unknown>): ToolResultSummary {
+  const title = typeof data.title === 'string' ? data.title : '';
+  const filePath = typeof data.path === 'string' ? data.path : '';
+  const tags: ToolSummaryTag[] = [];
+
+  if (title) {
+    tags.push({ label: '标题', value: title });
+  }
+  if (filePath) {
+    tags.push(createOpenFileTag(filePath));
+  }
+
+  return {
+    text: title ? `已读取当前 Widget: ${title}` : '已读取当前 Widget',
+    tags
+  };
+}
+
+/**
  * 判断网页快照中是否存在截断字段。
  * @param value - 网页快照截断信息
  * @returns 任一字段被截断时返回 true
@@ -708,6 +731,7 @@ const TOOL_SUMMARIZERS: Record<string, (data: unknown) => ToolResultSummary> = {
   read_directory: (data) => summarizeReadDirectory(data as Record<string, unknown>),
   grep: (data) => summarizeGrep(data as Record<string, unknown>),
   read_current_document: (data) => summarizeReadFile(data as Record<string, unknown>),
+  read_current_widget: (data) => summarizeReadCurrentWidget(data as Record<string, unknown>),
   read_current_webpage: (data) => summarizeReadCurrentWebpage(data as Record<string, unknown>),
   operate_webpage: (data) => summarizeOperateWebpage(data as Record<string, unknown>),
   edit_file: (data) => summarizeEditFile(data as Record<string, unknown>),

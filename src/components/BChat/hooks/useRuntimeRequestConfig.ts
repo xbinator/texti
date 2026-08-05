@@ -2,7 +2,7 @@
  * @file useRuntimeRequestConfig.ts
  * @description ChatRuntime 请求准备 IO 与纯策略适配 hook。
  */
-import type { RuntimeToolBinding } from './useRuntimeTools';
+import type { RuntimeToolDiscoveryBinding } from './useRuntimeTools';
 import type { Message, ServiceConfig } from '../utils/types';
 import type { AIMCPRequestConfig, AITavilyRuntimeConfig, AIToolExecutor } from 'types/ai';
 import type { ChatRuntimeContext, ChatRuntimeSkillSnapshot, ChatRuntimeUserInputPart } from 'types/chat-runtime';
@@ -27,7 +27,7 @@ interface UseRuntimeRequestConfigOptions {
   /** 同步磁盘 AI 资源 */
   syncAIResources: () => Promise<void>;
   /** 读取当前候选工具 */
-  getActiveTools: (binding?: RuntimeToolBinding) => AIToolExecutor[];
+  getActiveTools: (binding?: RuntimeToolDiscoveryBinding) => AIToolExecutor[];
   /** 读取 Skill 内容版本 */
   getSkillContentHashes: () => Record<string, string>;
   /** 解析显式选择的 Skill 内容快照 */
@@ -54,13 +54,36 @@ export interface PreparedRuntimeRequest extends RuntimeRequestPolicyResult {
 }
 
 /**
+ * 将冻结的工作区根目录补入工具发现绑定。
+ * @param binding - 提交时冻结的工具资源身份
+ * @param workspaceRoot - Runtime 请求使用的工作区根目录
+ * @returns 带工作区根目录的工具发现绑定
+ */
+function createDiscoveryBinding(binding: RuntimeToolDiscoveryBinding | undefined, workspaceRoot: string | null): RuntimeToolDiscoveryBinding | undefined {
+  if (!binding) return undefined;
+
+  return Object.freeze({
+    ...binding,
+    workspaceRoot: binding.workspaceRoot !== undefined ? binding.workspaceRoot : workspaceRoot
+  });
+}
+
+/**
  * Runtime 请求准备 hook 返回值。
  */
 interface UseRuntimeRequestConfigReturn {
   /** 准备完整 Runtime 请求和 renderer capabilities */
-  prepareRuntimeRequest: (selectionSource?: Message | null, selectionParts?: ChatRuntimeUserInputPart[]) => Promise<PreparedRuntimeRequest | null>;
+  prepareRuntimeRequest: (
+    selectionSource?: Message | null,
+    selectionParts?: ChatRuntimeUserInputPart[],
+    toolBinding?: RuntimeToolDiscoveryBinding
+  ) => Promise<PreparedRuntimeRequest | null>;
   /** 兼容旧调用方，仅返回主进程请求配置 */
-  resolveRuntimeRequestConfig: (selectionSource?: Message | null, selectionParts?: ChatRuntimeUserInputPart[]) => Promise<ChatRuntimeRequestConfig | null>;
+  resolveRuntimeRequestConfig: (
+    selectionSource?: Message | null,
+    selectionParts?: ChatRuntimeUserInputPart[],
+    toolBinding?: RuntimeToolDiscoveryBinding
+  ) => Promise<ChatRuntimeRequestConfig | null>;
 }
 
 /**
@@ -84,11 +107,13 @@ export function useRuntimeRequestConfig(options: UseRuntimeRequestConfigOptions)
    * 解析完整 Runtime 请求。
    * @param selectionSource - Memory 选择使用的用户消息
    * @param selectionParts - Runtime 结构化输入
+   * @param toolBinding - 提交时冻结的工具资源身份
    * @returns 请求与 renderer 工具快照
    */
   async function prepareRuntimeRequest(
     selectionSource?: Message | null,
-    selectionParts: ChatRuntimeUserInputPart[] = []
+    selectionParts?: ChatRuntimeUserInputPart[],
+    toolBinding?: RuntimeToolDiscoveryBinding
   ): Promise<PreparedRuntimeRequest | null> {
     const serviceConfig = await options.resolveServiceConfig();
     if (!serviceConfig) {
@@ -97,8 +122,11 @@ export function useRuntimeRequestConfig(options: UseRuntimeRequestConfigOptions)
     }
 
     await options.assertWorkspaceAvailable?.();
+    const requestWorkspaceRoot = toolBinding?.workspaceRoot !== undefined ? toolBinding.workspaceRoot : options.workspaceRoot.value;
+    const discoveryBinding = createDiscoveryBinding(toolBinding, requestWorkspaceRoot);
     await options.syncAIResources();
-    const resolvedSkills = await options.resolveSkillSnapshots(collectSkillNames(selectionSource, selectionParts));
+    const runtimeSelectionParts = selectionParts ?? [];
+    const resolvedSkills = await options.resolveSkillSnapshots(collectSkillNames(selectionSource, runtimeSelectionParts));
     const runtimeContext: ChatRuntimeContext | undefined =
       resolvedSkills.length > 0 && selectionSource
         ? {
@@ -114,8 +142,8 @@ export function useRuntimeRequestConfig(options: UseRuntimeRequestConfigOptions)
       memorySelection = createMemorySelection({
         content: selectionSource.content,
         messageReferences: selectionSource.references?.map((reference) => reference.path) ?? [],
-        filePartReferences: selectionParts.filter((part) => part.type === 'file').map((part) => part.path),
-        workspaceRoot: options.workspaceRoot.value || undefined
+        filePartReferences: runtimeSelectionParts.filter((part) => part.type === 'file').map((part) => part.path),
+        workspaceRoot: requestWorkspaceRoot || undefined
       });
     }
     let memorySelectionDebugInfo: MemorySelectionDebugInfo | undefined;
@@ -126,8 +154,8 @@ export function useRuntimeRequestConfig(options: UseRuntimeRequestConfigOptions)
       model: { providerId: serviceConfig.providerId, modelId: serviceConfig.modelId },
       contextWindow: options.contextWindow.value,
       system,
-      workspaceRoot: options.workspaceRoot.value || undefined,
-      candidateTools: serviceConfig.toolSupport.supported ? options.getActiveTools() : [],
+      workspaceRoot: requestWorkspaceRoot || undefined,
+      candidateTools: serviceConfig.toolSupport.supported ? options.getActiveTools(discoveryBinding) : [],
       toolSupport: serviceConfig.toolSupport.supported,
       memoryMode: memorySelection?.mode,
       skillContentHashes: options.getSkillContentHashes(),
@@ -150,13 +178,15 @@ export function useRuntimeRequestConfig(options: UseRuntimeRequestConfigOptions)
    * 兼容旧 Runtime 调用方读取配置。
    * @param selectionSource - Memory 选择使用的用户消息
    * @param selectionParts - Runtime 结构化输入
+   * @param toolBinding - 提交时冻结的工具资源身份
    * @returns 主进程 Runtime 请求配置
    */
   async function resolveRuntimeRequestConfig(
     selectionSource?: Message | null,
-    selectionParts: ChatRuntimeUserInputPart[] = []
+    selectionParts?: ChatRuntimeUserInputPart[],
+    toolBinding?: RuntimeToolDiscoveryBinding
   ): Promise<ChatRuntimeRequestConfig | null> {
-    return (await prepareRuntimeRequest(selectionSource, selectionParts))?.config ?? null;
+    return (await prepareRuntimeRequest(selectionSource, selectionParts, toolBinding))?.config ?? null;
   }
 
   return { prepareRuntimeRequest, resolveRuntimeRequestConfig };

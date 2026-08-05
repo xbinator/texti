@@ -88,6 +88,8 @@ export interface ChatRuntimeCapabilityDescriptor {
   workspaceRoot?: string;
   /** WebView tab identity captured when webpage tools were registered. */
   webviewId?: string;
+  /** Widget editor identity captured when Widget reader tools were registered. */
+  widgetId?: string;
 }
 
 /** Renderer message snapshot accepted by runtime continuation commands. */

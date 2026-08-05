@@ -4,7 +4,7 @@
  */
 import type { UseChatSessionActorReturn } from './useChatSessionActor';
 import type { PreparedRuntimeRequest, useRuntimeRequestConfig } from './useRuntimeRequestConfig';
-import type { RuntimeToolBinding } from './useRuntimeTools';
+import type { RuntimeToolBinding, RuntimeToolDiscoveryBinding } from './useRuntimeTools';
 import type { Message } from '../utils/types';
 import type { AIServiceError, AIToolExecutor } from 'types/ai';
 import type { ChatMessageFile } from 'types/chat';
@@ -65,7 +65,7 @@ interface UseChatWorkflowOptions {
   /** 当前 Session actor API */
   sessionActor: UseChatSessionActorReturn;
   /** 当前可执行工具 */
-  getActiveTools: (binding?: RuntimeToolBinding) => AIToolExecutor[];
+  getActiveTools: (binding?: RuntimeToolDiscoveryBinding) => AIToolExecutor[];
   /** 准备 Runtime 请求 */
   prepareRuntimeRequest: PrepareRuntimeRequest;
   /** 解析兼容 Runtime 请求配置 */

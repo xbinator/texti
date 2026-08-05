@@ -21,6 +21,7 @@ import {
 import { openResourceToolRegistryEntry } from './OpenResourceTool/index.js';
 import { getSettingsToolRegistryEntry, updateSettingsToolRegistryEntry } from './SettingsTool/index.js';
 import { operateWebpageToolRegistryEntry, readCurrentWebpageToolRegistryEntry } from './WebviewTool/index.js';
+import { readCurrentWidgetToolRegistryEntry } from './WidgetTool/index.js';
 
 export type {
   AgentToolEffectMetadata,
@@ -62,6 +63,7 @@ export {
   WEBPAGE_OPERATION_LIMITS,
   WEBPAGE_STEP_LIMITS
 } from './WebviewTool/index.js';
+export { READ_CURRENT_WIDGET_TOOL_NAME } from './WidgetTool/index.js';
 
 /** 已迁移到主进程的工具 registry。 */
 export const TOOL_REGISTRY = [
@@ -87,6 +89,7 @@ export const TOOL_REGISTRY = [
   openResourceToolRegistryEntry,
   readCurrentWebpageToolRegistryEntry,
   operateWebpageToolRegistryEntry,
+  readCurrentWidgetToolRegistryEntry,
   delegateTaskToolRegistryEntry
 ] as const satisfies ToolRegistryEntry[];
 

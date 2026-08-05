@@ -7,6 +7,7 @@ import type { ChatRuntimeModelSelection } from 'types/chat-runtime';
 import { ref } from 'vue';
 import { describe, expect, it, vi } from 'vitest';
 import { useRuntimeRequestConfig } from '@/components/BChat/hooks/useRuntimeRequestConfig';
+import type { RuntimeToolDiscoveryBinding } from '@/components/BChat/hooks/useRuntimeTools';
 import type { Message } from '@/components/BChat/utils/types';
 
 /**
@@ -111,6 +112,59 @@ describe('useRuntimeRequestConfig', (): void => {
     expect(await hook.prepareRuntimeRequest(USER_MESSAGE)).toBeNull();
     expect(onMissingServiceConfig).toHaveBeenCalledOnce();
     expect(syncAIResources).not.toHaveBeenCalled();
+  });
+
+  it('uses the captured Runtime tool binding when discovering candidate tools', async (): Promise<void> => {
+    const toolBinding: RuntimeToolDiscoveryBinding = {
+      workspaceRoot: '/workspace',
+      widgetId: 'widget-a'
+    };
+    const getActiveTools = vi.fn((): AIToolExecutor[] => [createTool('read_current_widget')]);
+    const hook = useRuntimeRequestConfig({
+      contextWindow: ref(8000),
+      workspaceRoot: ref('/workspace'),
+      resolveServiceConfig: vi.fn(async () => ({ providerId: 'provider', modelId: 'model', toolSupport: { supported: true, reason: 'supported' } })),
+      syncAIResources: vi.fn(async (): Promise<void> => undefined),
+      getActiveTools,
+      getSkillContentHashes: vi.fn(() => ({})),
+      resolveSkillSnapshots: vi.fn(async () => []),
+      resolveRuntimeSystemPrompt: vi.fn(async () => undefined),
+      resolveRuntimeTavilyConfig: vi.fn(() => undefined),
+      resolveRuntimeMcpRequestConfig: vi.fn(() => undefined),
+      onMissingServiceConfig: vi.fn()
+    });
+
+    const prepared = await hook.prepareRuntimeRequest(USER_MESSAGE, [], toolBinding);
+
+    expect(getActiveTools).toHaveBeenCalledWith(toolBinding);
+    expect(prepared?.rendererTools.map((tool: AIToolExecutor): string => tool.definition.name)).toEqual(['read_current_widget']);
+  });
+
+  it('freezes the workspace root before asynchronous resource synchronization can drift it', async (): Promise<void> => {
+    const workspaceRoot = ref<string | null>('/workspace-a');
+    const toolBinding: RuntimeToolDiscoveryBinding = { widgetId: 'widget-a' };
+    const getActiveTools = vi.fn((): AIToolExecutor[] => [createTool('read_directory')]);
+    const hook = useRuntimeRequestConfig({
+      contextWindow: ref(8000),
+      workspaceRoot,
+      resolveServiceConfig: vi.fn(async () => ({ providerId: 'provider', modelId: 'model', toolSupport: { supported: true, reason: 'supported' } })),
+      assertWorkspaceAvailable: vi.fn(async (): Promise<void> => undefined),
+      syncAIResources: vi.fn(async (): Promise<void> => {
+        workspaceRoot.value = '/workspace-b';
+      }),
+      getActiveTools,
+      getSkillContentHashes: vi.fn(() => ({})),
+      resolveSkillSnapshots: vi.fn(async () => []),
+      resolveRuntimeSystemPrompt: vi.fn(async () => undefined),
+      resolveRuntimeTavilyConfig: vi.fn(() => undefined),
+      resolveRuntimeMcpRequestConfig: vi.fn(() => undefined),
+      onMissingServiceConfig: vi.fn()
+    });
+
+    const prepared = await hook.prepareRuntimeRequest(USER_MESSAGE, [], toolBinding);
+
+    expect(prepared?.config.workspaceRoot).toBe('/workspace-a');
+    expect(getActiveTools).toHaveBeenCalledWith({ widgetId: 'widget-a', workspaceRoot: '/workspace-a' });
   });
 
   it('resolves structured Skill references and targets only their source user message', async (): Promise<void> => {

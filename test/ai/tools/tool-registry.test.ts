@@ -42,6 +42,7 @@ import {
 import { openResourceToolRegistryEntry } from '../../../shared/ai/tools/OpenResourceTool/index.js';
 import { getSettingsToolRegistryEntry, updateSettingsToolRegistryEntry } from '../../../shared/ai/tools/SettingsTool/index.js';
 import { operateWebpageToolRegistryEntry, readCurrentWebpageToolRegistryEntry } from '../../../shared/ai/tools/WebviewTool/index.js';
+import { READ_CURRENT_WIDGET_TOOL_NAME, readCurrentWidgetToolRegistryEntry } from '../../../shared/ai/tools/WidgetTool/index.js';
 
 /** SettingsTool 源码，用于约束说明片段复用结构。 */
 const settingsToolSource = readFileSync(new URL('../../../shared/ai/tools/SettingsTool/index.ts', import.meta.url), 'utf8');
@@ -81,6 +82,7 @@ describe('toolRegistry', (): void => {
       openResourceToolRegistryEntry,
       readCurrentWebpageToolRegistryEntry,
       operateWebpageToolRegistryEntry,
+      readCurrentWidgetToolRegistryEntry,
       getToolRegistryEntry(DELEGATE_TASK_TOOL_NAME)
     ]);
   });
@@ -212,7 +214,7 @@ describe('toolRegistry', (): void => {
     );
     expect(getToolNamesByExposure('default-writable')).toEqual(expect.arrayContaining(['create_document', 'edit_file', 'write_file', 'update_settings']));
     expect(getToolNamesByExposure('conditional-readonly')).toEqual(
-      expect.arrayContaining(['read_directory', 'glob', 'grep', 'get_mcp_settings', 'read_current_webpage'])
+      expect.arrayContaining(['read_directory', 'glob', 'grep', 'get_mcp_settings', 'read_current_webpage', READ_CURRENT_WIDGET_TOOL_NAME])
     );
     expect(getToolNamesByExposure('conditional-writable')).toEqual(
       expect.arrayContaining(['add_mcp_server', 'update_mcp_server', 'remove_mcp_server', 'refresh_mcp_discovery', 'operate_webpage'])

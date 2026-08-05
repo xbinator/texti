@@ -78,6 +78,16 @@ export interface RuntimeDocumentSnapshot {
   selection?: RuntimeDocumentSelection | null;
 }
 
+/** Runtime Widget 编辑页快照。 */
+export interface RuntimeWidgetSnapshot {
+  /** Widget 标签栏标题。 */
+  title: string;
+  /** Widget 文件路径，未保存时为空。 */
+  path: string | null;
+  /** 当前内存中的 WidgetData JSON。 */
+  content: string;
+}
+
 /** Runtime 网页快照。 */
 export interface RuntimeWebpageSnapshot {
   /** 页面地址。 */
