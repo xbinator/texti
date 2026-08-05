@@ -264,7 +264,7 @@ bridge 不是第二套工具运行时，只是主进程向 renderer 请求 UI �
 
 文件工具必须先区分真实文件路径与 `unsaved://` 草稿路径：
 
-- `write_file` 和 `edit_file` 对真实文件只在主进程读取与写入磁盘，不通过 bridge 查询或修改编辑器内容。
+- `read_file`、`write_file` 和 `edit_file` 对真实文件只在主进程读写磁盘，不通过 bridge 查询或修改编辑器内容；bridge 仅服务 `unsaved://` 草稿。
 - 真实文件写操作只有在磁盘持久化完成后才能返回成功。
 - `write_file` 使用 `atomically.writeFile()` 创建缺失的父目录并原子写入完整内容。
 - `edit_file` 从磁盘读取已有文件，完成精确替换后使用同一原子写入能力写回；目标不存在时失败。

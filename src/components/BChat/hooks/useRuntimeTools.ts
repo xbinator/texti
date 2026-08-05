@@ -189,23 +189,6 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
       isFileInRecent: (filePath: string): boolean => {
         return Boolean(recentStore.recentFiles?.some((file): boolean => file.path === filePath));
       },
-      /**
-       * 通过文件绝对路径查找文件 ID。
-       * @param filePath - 文件绝对路径
-       * @returns 文件 ID，不存在时返回 null
-       */
-      findFileByPath: async (filePath: string): Promise<{ id: string } | null> => {
-        const file = await recentStore.getFileByPath(filePath);
-        return file ? { id: file.id } : null;
-      },
-      /**
-       * 通过文件 ID 获取编辑器上下文。
-       * @param documentId - 文档 ID
-       * @returns 对应编辑器上下文
-       */
-      getEditorContext: (documentId: string) => {
-        return editorToolContextRegistry.getContext(documentId);
-      },
       getWebviewContext,
       getWidgetContext,
       openDraft,

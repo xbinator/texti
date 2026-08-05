@@ -645,18 +645,8 @@ defineExpose({
 
       .ai-selection-highlight {
         vertical-align: baseline;
-        box-shadow: 0 0.34em 0 0 var(--selection-bg), 0 -0.38em 0 0 var(--selection-bg);
+        box-shadow: none;
       }
-    }
-
-    :not(pre) > code .ai-selection-highlight--code-start {
-      padding-left: 0.25em;
-      margin-left: -0.25em;
-    }
-
-    :not(pre) > code .ai-selection-highlight--code-end {
-      padding-right: 0.25em;
-      margin-right: -0.25em;
     }
 
     pre code .ai-selection-highlight {

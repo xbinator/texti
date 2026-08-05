@@ -1,6 +1,5 @@
 # Package manager
-.npmrc
-
+# 注意：.npmrc 仅存放 registry / 镜像等非敏感配置，禁止提交 _authToken 等凭据
 # Logs
 logs
 *.log
@@ -36,3 +35,9 @@ types/components.d.ts
 
 # Local development resources
 .dev-resources/
+
+# Environment files
+# 禁止提交真实密钥；使用 .env.example 作为模板
+.env
+.env.*
+!.env.example
