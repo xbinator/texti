@@ -4,9 +4,7 @@
  */
 import type { RuntimeToolBinding } from './useRuntimeTools';
 import type { ChatRuntimeBridgeRequestEvent } from 'types/chat-runtime';
-import { editorToolContextRegistry } from '@/ai/tools/context/editor';
-import { webviewToolContextRegistry } from '@/ai/tools/context/webview';
-import { widgetToolContextRegistry } from '@/ai/tools/context/widget';
+import { useActiveToolContext } from '@/hooks/useChat/useToolContext';
 import type { useNavigate } from '@/hooks/useNavigate';
 import { native } from '@/shared/platform';
 import type { StoredDocumentRecord } from '@/shared/storage/files/types';
@@ -36,30 +34,23 @@ type RuntimeBridgeHandler = (event: ChatRuntimeBridgeRequestEvent) => Promise<un
  */
 export function useRuntimeBridgeHandler(options: UseRuntimeBridgeHandlerOptions): (binding?: RuntimeToolBinding) => RuntimeBridgeHandler {
   const recentStore = useRecentStore();
+  const activeChatTools = useActiveToolContext();
   const { getSettingsSnapshot, applyRuntimeSetting } = useRuntimeSettings();
 
   /**
    * 创建只访问 Runtime 启动时资源身份的 Bridge 处理器。
-   * @param binding - 不可变 Runtime 身份；缺省时保留兼容的当前资源读取
+   * @param binding - 不可变 Runtime 身份
    * @returns Runtime Bridge 处理器
    */
   function createBridgeHandler(binding?: RuntimeToolBinding): RuntimeBridgeHandler {
-    const documentId = binding?.documentId;
-    const webviewId = binding?.webviewId;
-    const widgetId = binding?.widgetId;
+    const toolContext = binding?.toolContext;
 
     /** 执行当前 Runtime 的资源绑定 Bridge 请求。 */
     async function handleRuntimeBridgeRequest(event: ChatRuntimeBridgeRequestEvent): Promise<unknown> {
       return handleBChatRuntimeBridgeRequest(event, {
-        getEditorContext: binding
-          ? () => (documentId ? editorToolContextRegistry.getContext(documentId) : undefined)
-          : editorToolContextRegistry.getCurrentContext,
+        dispatchToolBridge: toolContext ? (request: ChatRuntimeBridgeRequestEvent) => activeChatTools.dispatchBridge(toolContext, request) : undefined,
         getRecentFileById: (fileId: string) => recentStore.getFileById(fileId),
         updateRecentFileById: (fileId: string, updates: Partial<StoredDocumentRecord>) => recentStore.updateFile(fileId, updates),
-        getWebviewContext: binding
-          ? () => (webviewId ? webviewToolContextRegistry.getContext(webviewId) : undefined)
-          : webviewToolContextRegistry.getCurrentContext,
-        getWidgetContext: binding ? () => (widgetId ? widgetToolContextRegistry.getContext(widgetId) : undefined) : widgetToolContextRegistry.getCurrentContext,
         getSettingsSnapshot,
         applySetting: applyRuntimeSetting,
         openDraft: options.openDraft,

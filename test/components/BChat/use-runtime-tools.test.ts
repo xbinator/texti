@@ -2,10 +2,11 @@
  * @file use-runtime-tools.test.ts
  * @description BChat Runtime 工具动态过滤测试。
  */
+import type { AIToolExecutor } from 'types/ai';
+import type { ChatToolBinding } from 'types/chat-runtime';
 import { ref } from 'vue';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createOpenWidgetTool, type OpenWidgetRuntimeState, type OpenWidgetToolOptions } from '@/ai/tools/builtin/WidgetTool';
-import type { WebviewToolContext } from '@/ai/tools/context/webview';
 import { useRuntimeTools } from '@/components/BChat/hooks/useRuntimeTools';
 import { getToolNamesByExposure, getToolRegistryEntry } from '../../../shared/ai/tools/index.js';
 
@@ -16,10 +17,6 @@ const builtinMockState = vi.hoisted(() => {
     getSessionId?: () => string | undefined;
     /** 读取绑定的工作区根目录。 */
     getWorkspaceRoot?: () => string | null;
-    /** 读取绑定的 WebView 上下文。 */
-    getWebviewContext?: () => unknown;
-    /** 读取绑定的 Widget 编辑器上下文。 */
-    getWidgetContext?: () => unknown;
   }
 
   /**
@@ -52,28 +49,17 @@ const builtinMockState = vi.hoisted(() => {
   return {
     createExecutor,
     createBuiltinTools: vi.fn<(options?: BuiltinToolOptionsFixture) => ReturnType<typeof createExecutor>[]>(() => [
-      createExecutor('read_current_webpage'),
-      createExecutor('read_current_widget'),
-      createExecutor('operate_webpage'),
       createExecutor('open_resource'),
       createExecutor('read_directory')
     ])
   };
 });
 
-const registryMockState = vi.hoisted(() => ({
-  editorToolContextRegistry: {
-    getCurrentContext: vi.fn(() => undefined),
-    getContext: vi.fn(() => undefined)
-  },
-  webviewToolContextRegistry: {
-    getCurrentContext: vi.fn((): unknown => undefined),
-    getContext: vi.fn<(id: string) => unknown>()
-  },
-  widgetToolContextRegistry: {
-    getCurrentContext: vi.fn((): unknown => undefined),
-    getContext: vi.fn<(id: string) => unknown>()
-  }
+const activeChatToolsMock = vi.hoisted(() => ({
+  getActiveBinding: vi.fn<() => ChatToolBinding | undefined>(() => undefined),
+  getBoundTools: vi.fn<(_binding: ChatToolBinding) => AIToolExecutor[]>(() => []),
+  getHiddenToolNames: vi.fn<(_binding: ChatToolBinding) => readonly string[]>(() => []),
+  dispatchBridge: vi.fn()
 }));
 
 const storeMockState = vi.hoisted(() => ({
@@ -176,16 +162,8 @@ vi.mock('@/components/BWidget/utils/widgetRuntime', () => ({
   executeWidgetRuntime: widgetRuntimeMockState.executeWidgetRuntime
 }));
 
-vi.mock('@/ai/tools/context/editor', () => ({
-  editorToolContextRegistry: registryMockState.editorToolContextRegistry
-}));
-
-vi.mock('@/ai/tools/context/webview', () => ({
-  webviewToolContextRegistry: registryMockState.webviewToolContextRegistry
-}));
-
-vi.mock('@/ai/tools/context/widget', () => ({
-  widgetToolContextRegistry: registryMockState.widgetToolContextRegistry
+vi.mock('@/hooks/useChat/useToolContext', () => ({
+  useActiveToolContext: () => activeChatToolsMock
 }));
 
 vi.mock('@/hooks/useNavigate', () => ({
@@ -272,10 +250,9 @@ describe('useRuntimeTools', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    registryMockState.webviewToolContextRegistry.getCurrentContext.mockReturnValue(undefined);
-    registryMockState.webviewToolContextRegistry.getContext.mockReturnValue(undefined);
-    registryMockState.widgetToolContextRegistry.getCurrentContext.mockReturnValue(undefined);
-    registryMockState.widgetToolContextRegistry.getContext.mockReturnValue(undefined);
+    activeChatToolsMock.getActiveBinding.mockReturnValue(undefined);
+    activeChatToolsMock.getBoundTools.mockReturnValue([]);
+    activeChatToolsMock.getHiddenToolNames.mockReturnValue([]);
     storeMockState.skillStore.initialized = false;
     storeMockState.skillStore.getEnabledSkills.mockReturnValue([]);
     storeMockState.skillStore.resolveLatestSkill.mockReset();
@@ -288,17 +265,18 @@ describe('useRuntimeTools', () => {
     storeMockState.widgetStore.syncFromDisk.mockClear();
   });
 
-  it('only exposes WebView tools while a WebView context is active', (): void => {
+  it('only exposes WebView tools while a WebView provider is active', (): void => {
     const runtimeTools = createRuntimeTools();
 
     expect(readActiveToolNames(runtimeTools.getActiveTools)).toEqual(expect.arrayContaining(['open_resource']));
     expect(readActiveToolNames(runtimeTools.getActiveTools)).not.toEqual(expect.arrayContaining(['read_current_webpage', 'operate_webpage']));
 
-    const webviewContext: WebviewToolContext = {
-      readPageSnapshot: vi.fn(),
-      operatePage: vi.fn()
-    };
-    registryMockState.webviewToolContextRegistry.getCurrentContext.mockReturnValue(webviewContext);
+    activeChatToolsMock.getActiveBinding.mockReturnValue({ providerId: 'webview', resourceId: 'webview-a' });
+    activeChatToolsMock.getBoundTools.mockReturnValue([
+      builtinMockState.createExecutor('read_current_webpage'),
+      builtinMockState.createExecutor('operate_webpage')
+    ]);
+    activeChatToolsMock.getHiddenToolNames.mockReturnValue(['open_resource']);
 
     const activeToolNames = readActiveToolNames(runtimeTools.getActiveTools);
     expect(activeToolNames).toEqual(expect.arrayContaining(['read_current_webpage', 'operate_webpage']));
@@ -316,19 +294,13 @@ describe('useRuntimeTools', () => {
     expect(readActiveToolNames(runtimeTools.getActiveTools)).toContain('read_directory');
   });
 
-  it('only exposes the current Widget reader while a Widget editor context is active', (): void => {
+  it('only exposes the current Widget reader while a Widget provider is active', (): void => {
     const runtimeTools = createRuntimeTools();
 
     expect(readActiveToolNames(runtimeTools.getActiveTools)).not.toContain('read_current_widget');
 
-    const widgetContext = {
-      widget: {
-        title: 'weather',
-        path: '/widgets/weather/widget.json',
-        getContent: () => '{}'
-      }
-    };
-    registryMockState.widgetToolContextRegistry.getCurrentContext.mockReturnValue(widgetContext);
+    activeChatToolsMock.getActiveBinding.mockReturnValue({ providerId: 'widget', resourceId: 'widget-a' });
+    activeChatToolsMock.getBoundTools.mockReturnValue([builtinMockState.createExecutor('read_current_widget')]);
 
     expect(readActiveToolNames(runtimeTools.getActiveTools)).toContain('read_current_widget');
   });
@@ -351,124 +323,82 @@ describe('useRuntimeTools', () => {
     expect(boundOptions?.getWorkspaceRoot?.()).toBe('/workspace-a');
   });
 
-  it('binds WebView callbacks to the immutable Runtime resource', (): void => {
-    const webviewA: WebviewToolContext = {
-      readPageSnapshot: vi.fn(),
-      operatePage: vi.fn()
-    };
-    const webviewB: WebviewToolContext = {
-      readPageSnapshot: vi.fn(),
-      operatePage: vi.fn()
-    };
-    registryMockState.webviewToolContextRegistry.getCurrentContext.mockReturnValue(webviewB);
-    registryMockState.webviewToolContextRegistry.getContext.mockImplementation((id: string): unknown => (id === 'webview-a' ? webviewA : undefined));
+  it('merges tools from the exact generic binding and applies hidden names', (): void => {
+    const binding = { providerId: 'webview', resourceId: 'webview-a' };
+    activeChatToolsMock.getBoundTools.mockImplementation((value: ChatToolBinding): AIToolExecutor[] =>
+      value.providerId === 'webview' && value.resourceId === 'webview-a'
+        ? [builtinMockState.createExecutor('read_current_webpage'), builtinMockState.createExecutor('operate_webpage')]
+        : []
+    );
+    activeChatToolsMock.getHiddenToolNames.mockReturnValue(['open_resource']);
     const runtimeTools = createRuntimeTools();
 
-    runtimeTools.getActiveTools({
-      sessionId: 'session-a',
-      runtimeId: 'runtime-a',
-      workspaceRoot: '/workspace-a',
-      webviewId: 'webview-a'
-    });
+    const activeToolNames = runtimeTools
+      .getActiveTools({
+        sessionId: 'session-a',
+        runtimeId: 'runtime-a',
+        workspaceRoot: '/workspace-a',
+        toolContext: binding
+      })
+      .map((tool) => tool.definition.name);
 
-    const boundOptions = builtinMockState.createBuiltinTools.mock.calls.at(-1)?.[0];
-    expect(boundOptions?.getWebviewContext?.()).toBe(webviewA);
+    expect(activeToolNames).toEqual(expect.arrayContaining(['read_current_webpage', 'operate_webpage']));
+    expect(activeToolNames).not.toContain('open_resource');
+    expect(activeChatToolsMock.getActiveBinding).not.toHaveBeenCalled();
   });
 
-  it('does not expose WebView tools for a bound Runtime without a captured WebView identity', (): void => {
-    const webviewContext: WebviewToolContext = {
-      readPageSnapshot: vi.fn(),
-      operatePage: vi.fn()
-    };
-    registryMockState.webviewToolContextRegistry.getCurrentContext.mockReturnValue(webviewContext);
+  it('applies page hidden names to application tools created dynamically', (): void => {
+    const binding = { providerId: 'future-page', resourceId: 'page-a' };
+    storeMockState.widgetStore.initialized = true;
+    storeMockState.widgetStore.getEnabledWidgets.mockReturnValue([{ id: 'weather', enabled: true, parseError: undefined }]);
+    activeChatToolsMock.getHiddenToolNames.mockReturnValue(['open_widget']);
     const runtimeTools = createRuntimeTools();
 
-    const activeToolNames = readActiveToolNames(() =>
-      runtimeTools.getActiveTools({
+    const activeToolNames = runtimeTools
+      .getActiveTools({
+        sessionId: 'session-a',
+        runtimeId: 'runtime-a',
+        workspaceRoot: '/workspace-a',
+        toolContext: binding
+      })
+      .map((tool) => tool.definition.name);
+
+    expect(activeToolNames).not.toContain('open_widget');
+    expect(activeToolNames).toContain('widget');
+  });
+
+  it('does not fall back to the current page for a bound Runtime without a tool context', (): void => {
+    activeChatToolsMock.getActiveBinding.mockReturnValue({ providerId: 'webview', resourceId: 'webview-current' });
+    activeChatToolsMock.getBoundTools.mockReturnValue([builtinMockState.createExecutor('read_current_webpage')]);
+    const runtimeTools = createRuntimeTools();
+
+    const activeToolNames = runtimeTools
+      .getActiveTools({
         sessionId: 'session-a',
         runtimeId: 'runtime-a',
         workspaceRoot: '/workspace-a'
       })
-    );
+      .map((tool) => tool.definition.name);
 
-    expect(activeToolNames).not.toEqual(expect.arrayContaining(['read_current_webpage', 'operate_webpage']));
+    expect(activeToolNames).not.toContain('read_current_webpage');
     expect(activeToolNames).toContain('open_resource');
+    expect(activeChatToolsMock.getActiveBinding).not.toHaveBeenCalled();
+    expect(activeChatToolsMock.getBoundTools).not.toHaveBeenCalled();
   });
 
-  it('binds Widget callbacks to the immutable Runtime resource', (): void => {
-    const widgetA = {
-      widget: {
-        title: 'weather-a',
-        path: '/widgets/a/widget.json',
-        getContent: () => '{}'
-      }
-    };
-    const widgetB = {
-      widget: {
-        title: 'weather-b',
-        path: '/widgets/b/widget.json',
-        getContent: () => '{}'
-      }
-    };
-    registryMockState.widgetToolContextRegistry.getCurrentContext.mockReturnValue(widgetB);
-    registryMockState.widgetToolContextRegistry.getContext.mockImplementation((id: string): unknown => (id === 'widget-a' ? widgetA : undefined));
+  it('rejects a page tool that conflicts with an application tool name', (): void => {
+    const binding = { providerId: 'future-page', resourceId: 'page-a' };
+    activeChatToolsMock.getBoundTools.mockReturnValue([builtinMockState.createExecutor('open_resource')]);
     const runtimeTools = createRuntimeTools();
 
-    runtimeTools.getActiveTools({
-      sessionId: 'session-a',
-      runtimeId: 'runtime-a',
-      workspaceRoot: '/workspace-a',
-      widgetId: 'widget-a'
-    });
-
-    const boundOptions = builtinMockState.createBuiltinTools.mock.calls.at(-1)?.[0];
-    expect(boundOptions?.getWidgetContext?.()).toBe(widgetA);
-  });
-
-  it('does not expose the Widget reader for a bound Runtime without a captured Widget identity', (): void => {
-    const widgetContext = {
-      widget: {
-        title: 'weather',
-        path: '/widgets/weather/widget.json',
-        getContent: () => '{}'
-      }
-    };
-    registryMockState.widgetToolContextRegistry.getCurrentContext.mockReturnValue(widgetContext);
-    const runtimeTools = createRuntimeTools();
-
-    const activeToolNames = readActiveToolNames(() =>
-      runtimeTools.getActiveTools({
-        sessionId: 'session-a',
-        runtimeId: 'runtime-a',
-        workspaceRoot: '/workspace-a'
-      })
-    );
-
-    expect(activeToolNames).not.toContain('read_current_widget');
-  });
-
-  it('exposes the Widget reader for a bound Runtime with a registered captured Widget identity', (): void => {
-    const widgetContext = {
-      widget: {
-        title: 'weather',
-        path: '/widgets/weather/widget.json',
-        getContent: () => '{}'
-      }
-    };
-    registryMockState.widgetToolContextRegistry.getCurrentContext.mockReturnValue(undefined);
-    registryMockState.widgetToolContextRegistry.getContext.mockImplementation((id: string): unknown => (id === 'widget-a' ? widgetContext : undefined));
-    const runtimeTools = createRuntimeTools();
-
-    const activeToolNames = readActiveToolNames(() =>
+    expect(() =>
       runtimeTools.getActiveTools({
         sessionId: 'session-a',
         runtimeId: 'runtime-a',
         workspaceRoot: '/workspace-a',
-        widgetId: 'widget-a'
+        toolContext: binding
       })
-    );
-
-    expect(activeToolNames).toContain('read_current_widget');
+    ).toThrow('Duplicate Chat context tool name: open_resource');
   });
 
   it('dynamically exposes widget tools after widget store is initialized', (): void => {

@@ -33,10 +33,6 @@ interface TestWebviewElement extends HTMLElement {
 const addWebviewRecordMock = vi.hoisted(() =>
   vi.fn<(_url: string, _title: string, _options?: { favicon?: string }) => Promise<void>>().mockResolvedValue(undefined)
 );
-const registerToolContextMock = vi.hoisted(() => vi.fn());
-const unregisterToolContextMock = vi.hoisted(() => vi.fn());
-const setCurrentToolContextMock = vi.hoisted(() => vi.fn());
-const clearCurrentToolContextMock = vi.hoisted(() => vi.fn());
 const webviewElementHolder = vi.hoisted<{ value: TestWebviewElement | null }>(() => ({ value: null }));
 
 vi.mock('vue-router', () => ({
@@ -54,13 +50,8 @@ vi.mock('@/stores/workspace/recent', () => ({
   })
 }));
 
-vi.mock('@/ai/tools/context/webview', () => ({
-  webviewToolContextRegistry: {
-    register: registerToolContextMock,
-    unregister: unregisterToolContextMock,
-    setCurrent: setCurrentToolContextMock,
-    clearCurrent: clearCurrentToolContextMock
-  }
+vi.mock('@/views/webview/web/hooks/useChatContext', () => ({
+  useChatContext: vi.fn()
 }));
 
 vi.mock('@/shared/platform', () => ({

@@ -28,9 +28,7 @@ describe('useChatServiceConfig', (): void => {
   });
 
   it('resolves tool support from the current UI model', async (): Promise<void> => {
-    const resolveSelectedModel = vi
-      .fn<() => Promise<SelectedModel | undefined>>()
-      .mockResolvedValue({ providerId: 'provider-1', modelId: 'model-2' });
+    const resolveSelectedModel = vi.fn<() => Promise<SelectedModel | undefined>>().mockResolvedValue({ providerId: 'provider-1', modelId: 'model-2' });
     getModelToolSupportMock.mockResolvedValue({ supported: true });
     const serviceConfig = useChatServiceConfig(resolveSelectedModel);
 

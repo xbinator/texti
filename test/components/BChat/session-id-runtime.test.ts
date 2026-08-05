@@ -21,21 +21,22 @@ import type {
   ChatRuntimeHandlerResult,
   ChatRuntimeSendInput,
   ChatRuntimeStartResult,
-  ChatRuntimeSubmitUserChoiceInput
+  ChatRuntimeSubmitUserChoiceInput,
+  ChatToolBinding
 } from 'types/chat-runtime';
 import { defineComponent, h, type PropType } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, shallowMount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BuildMemoryContextOptions } from '@/ai/memory/types';
-import { webviewToolContextRegistry, type WebviewToolContext } from '@/ai/tools/context/webview';
-import { widgetToolContextRegistry } from '@/ai/tools/context/widget';
 import type { ToastItem } from '@/components/BChat/components/InteractionContainer/types';
 import BChat from '@/components/BChat/index.vue';
 import { type AdaptedUserMessageInput, type SubmitAction, createUserChoice } from '@/components/BChat/utils/submitAction';
 import type { Message } from '@/components/BChat/utils/types';
 import type { FileMentionOption } from '@/components/BSmart/types';
+import { toolContextRegistry } from '@/hooks/useChat/lib/registry';
 import { useProvideActorSystem } from '@/hooks/useChat/useActorSystem';
+import type { ChatBridgeDispatchResult, ChatBridgeHandler, ToolContextHandle } from '@/hooks/useChat/useToolContext';
 import { emitChatFileReferenceInsert } from '@/shared/chat/fileReference';
 import { native } from '@/shared/platform';
 import type { ReadWorkspaceDirectoryResult } from '@/shared/platform/native/types';
@@ -644,6 +645,22 @@ function createRuntimeTool(name: string): AIToolExecutor {
 }
 
 /**
+ * 注册测试页面工具资源。
+ * @param binding - 页面 binding
+ * @param toolNames - 页面工具名称
+ * @param bridgeHandlers - 页面 Bridge handlers
+ * @returns 注册控制句柄
+ */
+function registerPageTools(binding: ChatToolBinding, toolNames: string[], bridgeHandlers: Readonly<Record<string, ChatBridgeHandler>>): ChatContextHandle {
+  return chatContextRegistry.register({
+    binding,
+    getTools: (): AIToolExecutor[] => toolNames.map(createRuntimeTool),
+    hiddenToolNames: [],
+    bridgeHandlers
+  });
+}
+
+/**
  * 创建测试用助手消息。
  * @param overrides - 需要覆盖的消息字段。
  * @returns 测试助手消息。
@@ -852,10 +869,7 @@ describe('BChat sessionId runtime', (): void => {
     resetRuntimeEventListeners(runtimeListeners);
     conversationViewMockState.scrollToBottom.mockReset();
     actorSystemMockState.registerRuntime.mockReset();
-    webviewToolContextRegistry.unregister('webview-a');
-    webviewToolContextRegistry.unregister('webview-b');
-    widgetToolContextRegistry.unregister('widget-a');
-    widgetToolContextRegistry.unregister('widget-b');
+    toolContextRegistry.clear();
     agentTaskEventMockState.listener = undefined;
     agentTaskEventMockState.dispose.mockReset();
     chatStoreMock.getSessionMessages.mockResolvedValue([]);
@@ -1239,42 +1253,12 @@ describe('BChat sessionId runtime', (): void => {
   });
 
   it('keeps Runtime bridge requests bound to the WebView active at request preparation', async (): Promise<void> => {
-    const webviewA: WebviewToolContext = {
-      readPageSnapshot: vi.fn(async () => ({
-        url: 'https://a.example',
-        title: 'A',
-        summary: 'A',
-        header: '',
-        content: 'A',
-        footer: '',
-        text: 'A',
-        selectedText: '',
-        headings: [],
-        links: [],
-        capturedAt: 1,
-        truncated: { text: false, content: false, headings: false, links: false, selectedText: false }
-      })),
-      operatePage: vi.fn()
-    };
-    const webviewB: WebviewToolContext = {
-      readPageSnapshot: vi.fn(async () => ({
-        url: 'https://b.example',
-        title: 'B',
-        summary: 'B',
-        header: '',
-        content: 'B',
-        footer: '',
-        text: 'B',
-        selectedText: '',
-        headings: [],
-        links: [],
-        capturedAt: 2,
-        truncated: { text: false, content: false, headings: false, links: false, selectedText: false }
-      })),
-      operatePage: vi.fn()
-    };
-    webviewToolContextRegistry.register('webview-a', webviewA);
-    webviewToolContextRegistry.setCurrent('webview-a');
+    const readWebviewA = vi.fn(async () => ({ url: 'https://a.example', title: 'A' }));
+    const readWebviewB = vi.fn(async () => ({ url: 'https://b.example', title: 'B' }));
+    const webviewA = registerPageTools({ providerId: 'webview', resourceId: 'webview-a' }, ['read_current_webpage', 'operate_webpage'], {
+      'webview-snapshot': async (): Promise<ChatBridgeDispatchResult> => ({ handled: true, data: await readWebviewA() })
+    });
+    webviewA.activate();
     const wrapper = mountBChat('session-active');
     await flushPromises();
     const runtimeId = await submitTextAndReadRuntimeId(wrapper, 'inspect original webpage');
@@ -1282,8 +1266,10 @@ describe('BChat sessionId runtime', (): void => {
       | { handleBridgeRequest: (event: ChatRuntimeBridgeRequestEvent) => Promise<unknown> }
       | undefined;
 
-    webviewToolContextRegistry.register('webview-b', webviewB);
-    webviewToolContextRegistry.setCurrent('webview-b');
+    const webviewB = registerPageTools({ providerId: 'webview', resourceId: 'webview-b' }, ['read_current_webpage', 'operate_webpage'], {
+      'webview-snapshot': async (): Promise<ChatBridgeDispatchResult> => ({ handled: true, data: await readWebviewB() })
+    });
+    webviewB.activate();
     const result = await registeredCapabilities?.handleBridgeRequest({
       runtimeId,
       sessionId: 'session-active',
@@ -1296,50 +1282,37 @@ describe('BChat sessionId runtime', (): void => {
     });
 
     expect(result).toEqual(expect.objectContaining({ url: 'https://a.example' }));
-    expect(webviewA.readPageSnapshot).toHaveBeenCalledOnce();
-    expect(webviewB.readPageSnapshot).not.toHaveBeenCalled();
+    expect(readWebviewA).toHaveBeenCalledOnce();
+    expect(readWebviewB).not.toHaveBeenCalled();
+
+    webviewA.unregister();
+    await expect(
+      registeredCapabilities?.handleBridgeRequest({
+        runtimeId,
+        sessionId: 'session-active',
+        turnId: 'session-active:turn:1',
+        clientId: 'bchat',
+        agentId: 'primary',
+        rootRuntimeId: runtimeId,
+        requestId: 'bridge-webview-closed',
+        kind: 'webview-snapshot'
+      })
+    ).rejects.toMatchObject({ code: 'EDITOR_UNAVAILABLE' });
+    expect(readWebviewB).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 
   it('freezes the WebView identity before asynchronous request preparation', async (): Promise<void> => {
     const resourceSync = createDeferred<void>();
-    const webviewA: WebviewToolContext = {
-      readPageSnapshot: vi.fn(async () => ({
-        url: 'https://a.example',
-        title: 'A',
-        summary: 'A',
-        header: '',
-        content: 'A',
-        footer: '',
-        text: 'A',
-        selectedText: '',
-        headings: [],
-        links: [],
-        capturedAt: 1,
-        truncated: { text: false, content: false, headings: false, links: false, selectedText: false }
-      })),
-      operatePage: vi.fn()
-    };
-    const webviewB: WebviewToolContext = {
-      readPageSnapshot: vi.fn(async () => ({
-        url: 'https://b.example',
-        title: 'B',
-        summary: 'B',
-        header: '',
-        content: 'B',
-        footer: '',
-        text: 'B',
-        selectedText: '',
-        headings: [],
-        links: [],
-        capturedAt: 2,
-        truncated: { text: false, content: false, headings: false, links: false, selectedText: false }
-      })),
-      operatePage: vi.fn()
-    };
-    webviewToolContextRegistry.register('webview-a', webviewA);
-    webviewToolContextRegistry.register('webview-b', webviewB);
-    webviewToolContextRegistry.setCurrent('webview-a');
+    const readWebviewA = vi.fn(async () => ({ url: 'https://a.example', title: 'A' }));
+    const readWebviewB = vi.fn(async () => ({ url: 'https://b.example', title: 'B' }));
+    const webviewA = registerPageTools({ providerId: 'webview', resourceId: 'webview-a' }, ['read_current_webpage', 'operate_webpage'], {
+      'webview-snapshot': async (): Promise<ChatBridgeDispatchResult> => ({ handled: true, data: await readWebviewA() })
+    });
+    const webviewB = registerPageTools({ providerId: 'webview', resourceId: 'webview-b' }, ['read_current_webpage', 'operate_webpage'], {
+      'webview-snapshot': async (): Promise<ChatBridgeDispatchResult> => ({ handled: true, data: await readWebviewB() })
+    });
+    webviewA.activate();
     skillStoreMock.syncDirtyFromDisk.mockReturnValueOnce(resourceSync.promise);
     const wrapper = mountBChat('session-active');
     await flushPromises();
@@ -1347,7 +1320,7 @@ describe('BChat sessionId runtime', (): void => {
     wrapper.findComponent(BSmartEditorStub).vm.$emit('update:value', 'inspect original webpage after preflight');
     wrapper.findComponent(InputToolbarStub).vm.$emit('submit');
     await vi.waitFor((): void => expect(skillStoreMock.syncDirtyFromDisk).toHaveBeenCalled());
-    webviewToolContextRegistry.setCurrent('webview-b');
+    webviewB.activate();
     resourceSync.resolve();
     await flushPromises();
 
@@ -1367,8 +1340,8 @@ describe('BChat sessionId runtime', (): void => {
     });
 
     expect(result).toEqual(expect.objectContaining({ url: 'https://a.example' }));
-    expect(webviewA.readPageSnapshot).toHaveBeenCalledOnce();
-    expect(webviewB.readPageSnapshot).not.toHaveBeenCalled();
+    expect(readWebviewA).toHaveBeenCalledOnce();
+    expect(readWebviewB).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 

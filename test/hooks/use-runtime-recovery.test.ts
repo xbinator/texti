@@ -37,7 +37,10 @@ function createSnapshot(): ChatRuntimeRecoverySnapshot {
     ...base,
     phase: 'streaming',
     createdAt: 1,
-    capabilities: { rendererToolNames: ['read_current_document'], documentId: 'document-1' },
+    capabilities: {
+      rendererToolNames: ['read_current_document'],
+      toolContext: { providerId: 'editor', resourceId: 'document-1' }
+    },
     pendingRequests: [
       { type: 'tool', event: { ...base, toolCallId: 'tool-call-1', toolName: 'read_current_document', input: {} } },
       {
@@ -75,7 +78,7 @@ describe('recoverRuntimes', (): void => {
     await recoverRuntimes(system);
 
     expect(system.getSession('session-1')?.getSnapshot().matches('waitingForUser')).toBe(true);
-    expect(system.getRuntimeCapabilities('runtime-1')?.documentId).toBe('document-1');
+    expect(system.getRuntimeCapabilities('runtime-1')?.descriptor?.toolContext).toEqual({ providerId: 'editor', resourceId: 'document-1' });
     expect(electronAPIMock.chatRuntimeSubmitToolResult).toHaveBeenCalledWith(
       expect.objectContaining({
         runtimeId: 'runtime-1',
@@ -90,6 +93,31 @@ describe('recoverRuntimes', (): void => {
     const confirmationListener = vi.fn();
     system.subscribeSessionEvents('session-1', confirmationListener);
     expect(confirmationListener).toHaveBeenCalledWith(expect.objectContaining({ type: 'confirmationRequested' }));
+    system.stop();
+  });
+
+  it('keeps the recovery bridge fail-closed with a stable unavailable error', async (): Promise<void> => {
+    const snapshot = { ...createSnapshot(), pendingRequests: [] };
+    electronAPIMock.chatRuntimeListActive.mockResolvedValue({ ok: true, data: [snapshot] });
+    const system = createChatActorSystem();
+    system.start();
+
+    await recoverRuntimes(system);
+
+    const capabilities = system.getRuntimeCapabilities('runtime-1');
+    if (!capabilities) throw new Error('recovered capabilities should exist');
+    await expect(
+      capabilities.handleBridgeRequest({
+        runtimeId: 'runtime-1',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        clientId: 'bchat',
+        agentId: 'primary',
+        rootRuntimeId: 'runtime-1',
+        requestId: 'bridge-after-recovery',
+        kind: 'document-snapshot'
+      })
+    ).rejects.toMatchObject({ code: 'EDITOR_UNAVAILABLE' });
     system.stop();
   });
 

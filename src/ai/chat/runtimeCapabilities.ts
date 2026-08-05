@@ -13,8 +13,6 @@ export interface RuntimeExecutionCapabilities {
   tools: readonly AIToolExecutor[];
   /** 主进程可持有的 Runtime 能力身份描述符 */
   descriptor?: ChatRuntimeCapabilityDescriptor;
-  /** Runtime 启动时对应的文档 ID */
-  documentId?: string;
   /** 按已捕获文档 ID 读取工具上下文 */
   getToolContext: () => AIToolContext | undefined;
   /** 应用级 Bridge 请求处理器 */
@@ -50,7 +48,11 @@ export function createRuntimeCapabilityRegistry(): RuntimeCapabilityRegistry {
           ...capabilities,
           tools: Object.freeze([...capabilities.tools]),
           descriptor: capabilities.descriptor
-            ? Object.freeze({ ...capabilities.descriptor, rendererToolNames: Object.freeze([...capabilities.descriptor.rendererToolNames]) })
+            ? Object.freeze({
+                ...capabilities.descriptor,
+                rendererToolNames: Object.freeze([...capabilities.descriptor.rendererToolNames]),
+                toolContext: capabilities.descriptor.toolContext ? Object.freeze({ ...capabilities.descriptor.toolContext }) : undefined
+              })
             : undefined
         })
       );

@@ -3,7 +3,7 @@
  * @description WebView 自动化页面操作脚本生成器。
  */
 import type { ActiveWebviewSnapshotElement } from './types';
-import type { WebviewOperateInput } from '@/ai/tools/context/webview';
+import type { WebviewOperateInput } from '@/views/webview/web/types';
 import { WEBVIEW_PAGE_ELEMENT_LIMIT } from './constants';
 import { createRuntimeScript } from './engine/runtime';
 

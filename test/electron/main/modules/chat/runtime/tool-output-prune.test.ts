@@ -29,7 +29,8 @@ function createAssistantToolMessage(toolPart: ChatMessageToolPart): ChatMessageR
 
 describe('tool output prune helpers', () => {
   it('prunes large successful tool result data while preserving summary fields and artifact identity', (): void => {
-    const toolPart: ChatMessageToolPart = { id: 'part0127',
+    const toolPart: ChatMessageToolPart = {
+      id: 'part0127',
       type: 'tool',
       toolCallId: 'tool-call-1',
       toolName: 'read_file',
@@ -66,7 +67,8 @@ describe('tool output prune helpers', () => {
   });
 
   it('keeps user choice tool results unpruned', (): void => {
-    const toolPart: ChatMessageToolPart = { id: 'part0128',
+    const toolPart: ChatMessageToolPart = {
+      id: 'part0128',
       type: 'tool',
       toolCallId: 'tool-call-1',
       toolName: 'ask_user_choice',

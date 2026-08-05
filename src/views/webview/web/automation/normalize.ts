@@ -4,6 +4,7 @@
  */
 import type { ActiveWebviewSnapshotElement } from './types';
 import type { AIToolExecutionError } from 'types/ai';
+import type { WebviewElementSelection } from '@/views/webview/shared/types';
 import type {
   WebviewAgentElement,
   WebviewOperateResult,
@@ -17,8 +18,7 @@ import type {
   WebviewViewportRect,
   WebviewViewportSnapshot,
   WebviewViewportTopLayer
-} from '@/ai/tools/context/webview';
-import type { WebviewElementSelection } from '@/views/webview/shared/types';
+} from '@/views/webview/web/types';
 import {
   WEBVIEW_PAGE_CONTENT_LIMIT,
   WEBVIEW_PAGE_ELEMENT_LIMIT,

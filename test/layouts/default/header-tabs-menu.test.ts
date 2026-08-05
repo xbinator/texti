@@ -199,7 +199,11 @@ function getTabElement(wrapper: ReturnType<typeof mountHeaderTabs>, tabId: strin
  * @param tabId - 标签 ID
  * @param position - 右键坐标
  */
-async function openMenuForTab(wrapper: ReturnType<typeof mountHeaderTabs>, tabId: string, position: { x: number; y: number } = { x: 220, y: 64 }): Promise<void> {
+async function openMenuForTab(
+  wrapper: ReturnType<typeof mountHeaderTabs>,
+  tabId: string,
+  position: { x: number; y: number } = { x: 220, y: 64 }
+): Promise<void> {
   await getTabElement(wrapper, tabId).trigger('contextmenu', { clientX: position.x, clientY: position.y });
 }
 

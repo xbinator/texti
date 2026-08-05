@@ -117,7 +117,7 @@ describe('useRuntimeRequestConfig', (): void => {
   it('uses the captured Runtime tool binding when discovering candidate tools', async (): Promise<void> => {
     const toolBinding: RuntimeToolDiscoveryBinding = {
       workspaceRoot: '/workspace',
-      widgetId: 'widget-a'
+      toolContext: { providerId: 'widget', resourceId: 'widget-a' }
     };
     const getActiveTools = vi.fn((): AIToolExecutor[] => [createTool('read_current_widget')]);
     const hook = useRuntimeRequestConfig({
@@ -142,7 +142,7 @@ describe('useRuntimeRequestConfig', (): void => {
 
   it('freezes the workspace root before asynchronous resource synchronization can drift it', async (): Promise<void> => {
     const workspaceRoot = ref<string | null>('/workspace-a');
-    const toolBinding: RuntimeToolDiscoveryBinding = { widgetId: 'widget-a' };
+    const toolBinding: RuntimeToolDiscoveryBinding = { toolContext: { providerId: 'widget', resourceId: 'widget-a' } };
     const getActiveTools = vi.fn((): AIToolExecutor[] => [createTool('read_directory')]);
     const hook = useRuntimeRequestConfig({
       contextWindow: ref(8000),
@@ -164,7 +164,10 @@ describe('useRuntimeRequestConfig', (): void => {
     const prepared = await hook.prepareRuntimeRequest(USER_MESSAGE, [], toolBinding);
 
     expect(prepared?.config.workspaceRoot).toBe('/workspace-a');
-    expect(getActiveTools).toHaveBeenCalledWith({ widgetId: 'widget-a', workspaceRoot: '/workspace-a' });
+    expect(getActiveTools).toHaveBeenCalledWith({
+      toolContext: { providerId: 'widget', resourceId: 'widget-a' },
+      workspaceRoot: '/workspace-a'
+    });
   });
 
   it('resolves structured Skill references and targets only their source user message', async (): Promise<void> => {

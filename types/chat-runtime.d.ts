@@ -78,18 +78,22 @@ export interface ChatRuntimeClientSnapshot {
   };
 }
 
+/** Cloneable page tool identity retained by one ChatRuntime. */
+export interface ChatToolBinding {
+  /** Stable provider namespace. */
+  readonly providerId: string;
+  /** Stable resource identity inside the provider. */
+  readonly resourceId: string;
+}
+
 /** Cloneable renderer capability identity retained by the main-process runtime. */
 export interface ChatRuntimeCapabilityDescriptor {
   /** Renderer tool names exposed when the runtime started. */
   readonly rendererToolNames: readonly string[];
-  /** Document id captured when document-scoped tools were registered. */
-  documentId?: string;
   /** Workspace root captured when renderer tool executors were registered. */
   workspaceRoot?: string;
-  /** WebView tab identity captured when webpage tools were registered. */
-  webviewId?: string;
-  /** Widget editor identity captured when Widget reader tools were registered. */
-  widgetId?: string;
+  /** Page tool resource captured when the runtime started. */
+  toolContext?: ChatToolBinding;
 }
 
 /** Renderer message snapshot accepted by runtime continuation commands. */

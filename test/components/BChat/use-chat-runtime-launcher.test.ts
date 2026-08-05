@@ -2,10 +2,12 @@
  * @file use-chat-runtime-launcher.test.ts
  * @description BChat Runtime launcher 资源绑定测试。
  */
-import { computed, ref, shallowRef } from 'vue';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { AIToolExecutor } from 'types/ai';
+import type { ChatRuntimeAddress, ChatToolBinding } from 'types/chat-runtime';
+import type { Ref } from 'vue';
+import { computed, nextTick, ref, shallowRef } from 'vue';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatActorSystem } from '@/ai/chat/actorSystem';
-import { widgetToolContextRegistry, type WidgetToolContext } from '@/ai/tools/context/widget';
 import { useChatRuntimeLauncher } from '@/components/BChat/hooks/useChatRuntimeLauncher';
 import type { UseChatSessionActorReturn } from '@/components/BChat/hooks/useChatSessionActor';
 import type { PreparedRuntimeRequest } from '@/components/BChat/hooks/useRuntimeRequestConfig';
@@ -46,23 +48,41 @@ function createSessionActor(): UseChatSessionActorReturn {
 }
 
 /**
- * 创建 Widget 工具上下文。
- * @param title - Widget 标题
- * @returns Widget 工具上下文
+ * 创建 Runtime 恢复测试使用的页面工具。
+ * @returns schema-only 页面工具
  */
-function createWidgetContext(title: string): WidgetToolContext {
+function createPageTool(): AIToolExecutor {
   return {
-    widget: {
-      title,
-      path: `/home/user/.tibis/widgets/${title}/widget.json`,
-      getContent: () => JSON.stringify({ name: title }, null, 2)
-    }
+    definition: {
+      name: 'read_current_widget',
+      description: 'read widget',
+      source: 'builtin',
+      riskLevel: 'read',
+      parameters: { type: 'object', properties: {} }
+    },
+    execute: async () => ({ toolName: 'read_current_widget', status: 'success', data: null })
   };
 }
 
+const activeToolsMock = vi.hoisted(() => ({
+  activeBinding: { providerId: 'widget', resourceId: 'widget-a' } as ChatToolBinding | undefined,
+  revision: null as unknown as Ref<number>
+}));
+
+vi.mock('@/hooks/useChat/useToolContext', () => ({
+  useActiveToolContext: () => ({
+    revision: activeToolsMock.revision,
+    getActiveBinding: () => activeToolsMock.activeBinding,
+    getBoundTools: () => [],
+    getHiddenToolNames: () => [],
+    dispatchBridge: vi.fn()
+  })
+}));
+
 describe('useChatRuntimeLauncher', (): void => {
-  afterEach((): void => {
-    widgetToolContextRegistry.unregister('widget-a');
+  beforeEach((): void => {
+    activeToolsMock.activeBinding = { providerId: 'widget', resourceId: 'widget-a' };
+    activeToolsMock.revision = ref<number>(0);
   });
 
   it('passes the captured Widget identity into asynchronous request preparation', async (): Promise<void> => {
@@ -77,8 +97,6 @@ describe('useChatRuntimeLauncher', (): void => {
       editMemoryExposed: false
     } as PreparedRuntimeRequest;
     const prepareRuntimeRequest = vi.fn(async (): Promise<PreparedRuntimeRequest> => prepared);
-    widgetToolContextRegistry.register('widget-a', createWidgetContext('aether-weather'));
-    widgetToolContextRegistry.setCurrent('widget-a');
     const launcher = useChatRuntimeLauncher({
       activeSessionId: ref('session-a'),
       actorSystem: createActorSystem(),
@@ -95,7 +113,73 @@ describe('useChatRuntimeLauncher', (): void => {
       undefined,
       undefined,
       expect.objectContaining({
-        widgetId: 'widget-a'
+        toolContext: { providerId: 'widget', resourceId: 'widget-a' }
+      })
+    );
+  });
+
+  it('upgrades a recovered Runtime when its bound page registers later', async (): Promise<void> => {
+    const address: ChatRuntimeAddress = {
+      sessionId: 'session-a',
+      turnId: 'turn-a',
+      agentId: 'primary',
+      runtimeId: 'runtime-a',
+      rootRuntimeId: 'runtime-a'
+    };
+    const registerRuntime = vi.fn();
+    const actorSystem = {
+      actor: {
+        getSnapshot: () => ({ context: { runtimeRoutes: new Map([[address.runtimeId, address]]) } })
+      },
+      getRuntimeCapabilities: vi.fn(() => ({
+        tools: [],
+        descriptor: {
+          rendererToolNames: ['read_current_widget'],
+          workspaceRoot: '/workspace',
+          toolContext: { providerId: 'widget', resourceId: 'widget-a' }
+        },
+        getToolContext: (): undefined => undefined,
+        handleBridgeRequest: async (): Promise<unknown> => undefined
+      })),
+      registerRuntime,
+      send: vi.fn()
+    } as unknown as ChatActorSystem;
+    const sessionActor = {
+      ...createSessionActor(),
+      activeRuntimeId: ref<string | undefined>('runtime-a')
+    } as unknown as UseChatSessionActorReturn;
+    const pageTool = createPageTool();
+    const getActiveTools = vi.fn((): AIToolExecutor[] => (activeToolsMock.revision.value > 0 ? [pageTool] : []));
+
+    useChatRuntimeLauncher({
+      activeSessionId: ref('session-a'),
+      actorSystem,
+      sessionActor,
+      getActiveTools,
+      prepareRuntimeRequest: vi.fn(),
+      createBridgeHandler: vi.fn(() => async (): Promise<unknown> => undefined),
+      isCurrentOperation: vi.fn(() => true)
+    });
+    await nextTick();
+    await nextTick();
+    registerRuntime.mockClear();
+
+    activeToolsMock.revision.value += 1;
+    await nextTick();
+    await nextTick();
+
+    expect(getActiveTools).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        sessionId: 'session-a',
+        runtimeId: 'runtime-a',
+        toolContext: { providerId: 'widget', resourceId: 'widget-a' }
+      })
+    );
+    expect(registerRuntime).toHaveBeenCalledWith(
+      address,
+      expect.objectContaining({
+        tools: [pageTool],
+        descriptor: expect.objectContaining({ toolContext: { providerId: 'widget', resourceId: 'widget-a' } })
       })
     );
   });

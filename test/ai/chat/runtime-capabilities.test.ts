@@ -28,17 +28,23 @@ describe('runtime capability registry', (): void => {
   it('freezes capabilities by runtime and releases them explicitly', (): void => {
     const registry = createRuntimeCapabilityRegistry();
     const sourceTools = [createTool('read_file')];
+    const sourceDescriptor = {
+      rendererToolNames: ['read_current_widget'],
+      toolContext: { providerId: 'widget', resourceId: 'widget-a' }
+    };
     const handleBridgeRequest = vi.fn(async (): Promise<unknown> => ({ ok: true }));
     registry.register('runtime-1', {
       tools: sourceTools,
-      documentId: 'document-1',
+      descriptor: sourceDescriptor,
       getToolContext: () => undefined,
       handleBridgeRequest
     });
     sourceTools.push(createTool('edit_file'));
+    sourceDescriptor.toolContext.resourceId = 'widget-b';
 
     expect(registry.get('runtime-1')?.tools.map((tool) => tool.definition.name)).toEqual(['read_file']);
-    expect(registry.get('runtime-1')?.documentId).toBe('document-1');
+    expect(registry.get('runtime-1')?.descriptor?.toolContext).toEqual({ providerId: 'widget', resourceId: 'widget-a' });
+    expect(Object.isFrozen(registry.get('runtime-1')?.descriptor?.toolContext)).toBe(true);
     expect(registry.delete('runtime-1')).toBe(true);
     expect(registry.get('runtime-1')).toBeUndefined();
   });

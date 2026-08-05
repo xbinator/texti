@@ -4,13 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { RecentRecord } from '@/shared/storage';
-import {
-  createRecentSearchText,
-  getRecentDescriptionClass,
-  isRecentDocumentPath,
-  resolveRecentDescription,
-  resolveRecentTitle
-} from '@/shared/storage';
+import { createRecentSearchText, getRecentDescriptionClass, isRecentDocumentPath, resolveRecentDescription, resolveRecentTitle } from '@/shared/storage';
 
 /**
  * 创建文件最近记录。

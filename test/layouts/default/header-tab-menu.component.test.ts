@@ -26,7 +26,9 @@ const routerPushMock = vi.hoisted(() => vi.fn<(path: string) => Promise<void>>()
 const recentRecordsMock = vi.hoisted<{ value: RecentRecord[] }>(() => ({ value: [] }));
 
 /** 剪贴板 mock。 */
-const clipboardMock = vi.hoisted(() => vi.fn<(content: string, options?: { successMessage?: string; trim?: boolean }) => Promise<boolean>>().mockResolvedValue(true));
+const clipboardMock = vi.hoisted(() =>
+  vi.fn<(content: string, options?: { successMessage?: string; trim?: boolean }) => Promise<boolean>>().mockResolvedValue(true)
+);
 
 vi.mock('vue-router', () => ({
   NavigationFailureType: {
@@ -250,14 +252,11 @@ describe('HeaderTabMenu', (): void => {
     await getButtonByText(wrapper, label).trigger('click');
     await flushPromises();
 
-    expect(getClosePlanSpy).toHaveBeenCalledWith(
-      label === '关闭其他' ? 'closeOthers' : label === '关闭右侧' ? 'closeRight' : 'closeAll',
-      {
-        anchorTabId: 'file-a',
-        activeTabId: 'settings',
-        allowCloseLastTab: true
-      }
-    );
+    expect(getClosePlanSpy).toHaveBeenCalledWith(label === '关闭其他' ? 'closeOthers' : label === '关闭右侧' ? 'closeRight' : 'closeAll', {
+      anchorTabId: 'file-a',
+      activeTabId: 'settings',
+      allowCloseLastTab: true
+    });
     expect(applyClosePlanSpy).toHaveBeenCalledTimes(1);
     wrapper.unmount();
   });

@@ -47,10 +47,9 @@ function createDegradedCapabilities(snapshot: ChatRuntimeRecoverySnapshot): Runt
   return {
     tools: [],
     descriptor: snapshot.capabilities,
-    documentId: snapshot.capabilities?.documentId,
     getToolContext: (): undefined => undefined,
     handleBridgeRequest: async (): Promise<never> => {
-      throw new Error('Renderer context is unavailable after reload');
+      throw Object.assign(new Error('Renderer context is unavailable after reload'), { code: 'EDITOR_UNAVAILABLE' as const });
     }
   };
 }

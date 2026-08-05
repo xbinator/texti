@@ -1,313 +1,96 @@
 /**
  * @file runtime-bridge.test.ts
- * @description BChat ChatRuntime renderer bridge 快照处理测试。
+ * @description BChat ChatRuntime renderer bridge 通用页面分发与应用能力测试。
  */
-import type { AIToolContext } from 'types/ai';
+import type { ChatRuntimeBridgeRequestEvent } from 'types/chat-runtime';
 import { describe, expect, it, vi } from 'vitest';
 import { handleBChatRuntimeBridgeRequest } from '@/components/BChat/utils/runtimeBridge';
+import type { ChatBridgeDispatchResult } from '@/hooks/useChat/useToolContext';
 
 /**
- * 创建编辑器工具上下文测试夹具。
- * @returns 编辑器工具上下文
+ * 创建完整 Runtime Bridge 请求事件。
+ * @param kind - Bridge 请求类型
+ * @param payload - 可选请求负载
+ * @returns Runtime Bridge 请求事件
  */
-function createEditorContext(): AIToolContext {
+function createEvent(kind: string, payload?: unknown): ChatRuntimeBridgeRequestEvent {
   return {
-    document: {
-      id: 'doc-1',
-      title: 'index.ts',
-      path: '/workspace/src/index.ts',
-      locator: 'file:///workspace/src/index.ts',
-      getContent: () => 'hello document'
-    },
-    editor: {
-      getSelection: () => ({ from: 0, to: 5, text: 'hello' }),
-      insertAtCursor: vi.fn(),
-      replaceSelection: vi.fn(),
-      replaceDocument: vi.fn()
-    }
+    runtimeId: 'runtime-1',
+    sessionId: 'session-1',
+    turnId: 'turn-1',
+    clientId: 'bchat',
+    agentId: 'primary',
+    rootRuntimeId: 'runtime-1',
+    requestId: `request-${kind}`,
+    kind,
+    ...(payload === undefined ? {} : { payload })
   };
 }
 
 describe('handleBChatRuntimeBridgeRequest', (): void => {
-  it('returns the current editor document snapshot', async (): Promise<void> => {
-    const result = await handleBChatRuntimeBridgeRequest(
-      {
-        runtimeId: 'runtime-1',
-        sessionId: 'session-1',
-        clientId: 'bchat',
-        agentId: 'default',
-        requestId: 'bridge-1',
-        kind: 'document-snapshot'
-      },
-      {
-        getEditorContext: createEditorContext,
-        getWebviewContext: () => undefined
-      }
+  it('dispatches page bridge requests through the registered context', async (): Promise<void> => {
+    const event = createEvent('document-snapshot');
+    const dispatchToolBridge = vi.fn(
+      async (): Promise<ChatBridgeDispatchResult> => ({
+        handled: true,
+        data: { id: 'doc-1', content: 'hello document' }
+      })
     );
 
-    expect(result).toEqual({
-      id: 'doc-1',
-      title: 'index.ts',
-      path: '/workspace/src/index.ts',
-      locator: 'file:///workspace/src/index.ts',
-      content: 'hello document',
-      selection: { from: 0, to: 5, text: 'hello' }
+    const result = await handleBChatRuntimeBridgeRequest(event, { dispatchToolBridge });
+
+    expect(dispatchToolBridge).toHaveBeenCalledWith(event);
+    expect(result).toEqual({ id: 'doc-1', content: 'hello document' });
+  });
+
+  it('returns a stable unsupported error when the bound page declines a request', async (): Promise<void> => {
+    const dispatchToolBridge = vi.fn(async (): Promise<ChatBridgeDispatchResult> => ({ handled: false }));
+
+    await expect(handleBChatRuntimeBridgeRequest(createEvent('future-page-snapshot'), { dispatchToolBridge })).rejects.toMatchObject({
+      code: 'ACTION_NOT_SUPPORTED'
     });
   });
 
-  it('returns the current webview snapshot', async (): Promise<void> => {
-    const result = await handleBChatRuntimeBridgeRequest(
-      {
-        runtimeId: 'runtime-1',
-        sessionId: 'session-1',
-        clientId: 'bchat',
-        agentId: 'default',
-        requestId: 'bridge-1',
-        kind: 'webview-snapshot'
-      },
-      {
-        getEditorContext: () => undefined,
-        getWebviewContext: () => ({
-          readPageSnapshot: async () => ({
-            url: 'https://example.com',
-            title: 'Example',
-            summary: 'Current Page: [Example](https://example.com)\nPage info: 800x600px [Start of page]\n[1]<button>Example</button>\n[End of page]',
-            header: 'Page info: 800x600px [Start of page]',
-            content: '[1]<button>Example</button>',
-            footer: '[End of page]',
-            text: 'page',
-            selectedText: '',
-            headings: [],
-            links: [],
-            capturedAt: 1,
-            truncated: { text: false, content: false, headings: false, links: false, selectedText: false }
-          }),
-          operatePage: vi.fn()
-        })
-      }
-    );
-
-    expect(result).toEqual({
-      url: 'https://example.com',
-      title: 'Example',
-      summary: 'Current Page: [Example](https://example.com)\nPage info: 800x600px [Start of page]\n[1]<button>Example</button>\n[End of page]',
-      header: 'Page info: 800x600px [Start of page]',
-      content: '[1]<button>Example</button>',
-      footer: '[End of page]',
-      text: 'page',
-      selectedText: '',
-      headings: [],
-      links: [],
-      capturedAt: 1,
-      truncated: { text: false, content: false, headings: false, links: false, selectedText: false }
+  it('returns a stable unavailable error when no page context is bound', async (): Promise<void> => {
+    await expect(handleBChatRuntimeBridgeRequest(createEvent('document-snapshot'), {})).rejects.toMatchObject({
+      code: 'EDITOR_UNAVAILABLE'
     });
   });
 
-  it('returns the current Widget editor snapshot', async (): Promise<void> => {
-    const result = await handleBChatRuntimeBridgeRequest(
-      {
-        runtimeId: 'runtime-1',
-        sessionId: 'session-1',
-        clientId: 'bchat',
-        agentId: 'default',
-        requestId: 'bridge-widget-1',
-        kind: 'widget-snapshot'
-      },
-      {
-        getEditorContext: () => undefined,
-        getWebviewContext: () => undefined,
-        getWidgetContext: () => ({
-          widget: {
-            title: 'aether-weather',
-            path: '/home/user/.tibis/widgets/aether-weather/widget.json',
-            getContent: () =>
-              JSON.stringify(
-                {
-                  name: 'aether-weather',
-                  description: 'Weather board',
-                  inputSchema: { type: 'object', properties: {}, required: [] },
-                  outputSchema: { type: 'object', properties: {}, required: [] },
-                  dataSchema: { type: 'object', properties: {}, required: [] },
-                  execute: { enabled: true, code: '' },
-                  metadata: { width: 980, height: 990 },
-                  elements: []
-                },
-                null,
-                2
-              )
-          }
-        })
-      }
-    );
+  it('preserves a stable page error through nested normalization causes', async (): Promise<void> => {
+    const stableError = Object.assign(new Error('网页快照已过期'), { code: 'STALE_SNAPSHOT' as const });
+    const nestedError = new Error('网页快照已过期', { cause: new Error('网页快照已过期', { cause: stableError }) });
+    const dispatchToolBridge = vi.fn(async (): Promise<ChatBridgeDispatchResult> => Promise.reject(nestedError));
 
-    expect(result).toEqual({
-      title: 'aether-weather',
-      path: '/home/user/.tibis/widgets/aether-weather/widget.json',
-      content: expect.stringContaining('"name": "aether-weather"')
+    await expect(handleBChatRuntimeBridgeRequest(createEvent('webview-snapshot'), { dispatchToolBridge })).rejects.toMatchObject({
+      code: 'STALE_SNAPSHOT',
+      message: '网页快照已过期'
     });
   });
 
-  it('dispatches webview operation to the active WebView context', async (): Promise<void> => {
-    const operatePage = vi.fn(async () => ({
-      ok: true,
-      action: 'click' as const,
-      target: { index: 1, label: 'Search', tagName: 'BUTTON' },
-      message: 'clicked',
-      navigationStarted: false,
-      pageChanged: true,
-      shouldReadAgain: true
-    }));
-    const payload = { snapshotId: 'snap-1', action: { type: 'click' as const, index: 1 } };
-
-    const result = await handleBChatRuntimeBridgeRequest(
-      {
-        runtimeId: 'runtime-1',
-        sessionId: 'session-1',
-        clientId: 'bchat',
-        agentId: 'default',
-        requestId: 'bridge-1',
-        kind: 'webview-operate',
-        payload
-      },
-      {
-        getEditorContext: () => undefined,
-        getWebviewContext: () => ({
-          readPageSnapshot: async () => ({
-            url: 'https://example.com',
-            title: 'Example',
-            summary: 'Current Page: [Example](https://example.com)\nPage info: 800x600px [Start of page]\n[1]<button>Example</button>\n[End of page]',
-            header: 'Page info: 800x600px [Start of page]',
-            content: '[1]<button>Example</button>',
-            footer: '[End of page]',
-            text: 'page',
-            selectedText: '',
-            headings: [],
-            links: [],
-            capturedAt: 1,
-            truncated: { text: false, content: false, headings: false, links: false, selectedText: false }
-          }),
-          operatePage
-        })
-      }
-    );
-
-    expect(result).toMatchObject({ ok: true, action: 'click' });
-    expect(operatePage).toHaveBeenCalledWith(payload);
-  });
-
-  it('accepts webview press operations through the bridge', async (): Promise<void> => {
-    const operatePage = vi.fn(async () => ({
-      ok: true,
-      action: 'press' as const,
-      target: { index: 1, label: '输入内容', tagName: 'INPUT' },
-      message: 'executed',
-      navigationStarted: false,
-      pageChanged: true,
-      shouldReadAgain: true
-    }));
-    const payload = { snapshotId: 'snap-1', action: { type: 'press' as const, index: 1, key: 'Enter' } };
-
-    const result = await handleBChatRuntimeBridgeRequest(
-      {
-        runtimeId: 'runtime-1',
-        sessionId: 'session-1',
-        clientId: 'bchat',
-        agentId: 'default',
-        requestId: 'bridge-press-1',
-        kind: 'webview-operate',
-        payload
-      },
-      {
-        getEditorContext: () => undefined,
-        getWebviewContext: () => ({
-          readPageSnapshot: vi.fn(),
-          operatePage
-        })
-      }
-    );
-
-    expect(result).toMatchObject({ ok: true, action: 'press' });
-    expect(operatePage).toHaveBeenCalledWith(payload);
-  });
-
-  it('rejects invalid webview operation payloads before dispatching to the WebView context', async (): Promise<void> => {
-    const operatePage = vi.fn();
-
+  it('rejects real file content snapshots because the main process owns disk access', async (): Promise<void> => {
     await expect(
-      handleBChatRuntimeBridgeRequest(
-        {
-          runtimeId: 'runtime-1',
-          sessionId: 'session-1',
-          clientId: 'bchat',
-          agentId: 'default',
-          requestId: 'bridge-1',
-          kind: 'webview-operate',
-          payload: { snapshotId: 123, action: { type: 'click', index: 1 } }
-        },
-        {
-          getEditorContext: () => undefined,
-          getWebviewContext: () => ({
-            readPageSnapshot: vi.fn(),
-            operatePage
-          })
-        }
-      )
-    ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
-    expect(operatePage).not.toHaveBeenCalled();
-  });
-
-  it('rejects real file content snapshots instead of reading editor memory', async (): Promise<void> => {
-    const getEditorContext = vi.fn(createEditorContext);
-    await expect(
-      handleBChatRuntimeBridgeRequest(
-        {
-          runtimeId: 'runtime-1',
-          sessionId: 'session-1',
-          clientId: 'bchat',
-          agentId: 'default',
-          requestId: 'bridge-1',
-          kind: 'file-content-snapshot',
-          payload: { path: 'src/index.ts', workspaceRoot: '/workspace' }
-        },
-        {
-          getEditorContext,
-          getWebviewContext: () => undefined
-        }
-      )
+      handleBChatRuntimeBridgeRequest(createEvent('file-content-snapshot', { path: 'src/index.ts', workspaceRoot: '/workspace' }), {})
     ).rejects.toMatchObject({ code: 'EDITOR_UNAVAILABLE' });
-    expect(getEditorContext).not.toHaveBeenCalled();
   });
 
   it('returns an unsaved draft file content snapshot by virtual path', async (): Promise<void> => {
-    const result = await handleBChatRuntimeBridgeRequest(
-      {
-        runtimeId: 'runtime-1',
-        sessionId: 'session-1',
-        clientId: 'bchat',
-        agentId: 'default',
-        requestId: 'bridge-1',
-        kind: 'file-content-snapshot',
-        payload: { path: 'unsaved://draft-1/note.md' }
-      },
-      {
-        getEditorContext: () => undefined,
-        getRecentFileById: async (fileId) =>
-          fileId === 'draft-1'
-            ? {
-                id: 'draft-1',
-                type: 'file',
-                url: '/editor/draft-1',
-                title: 'note.md',
-                description: '未保存文件',
-                name: 'note',
-                ext: 'md',
-                path: null,
-                content: 'draft content'
-              }
-            : undefined,
-        getWebviewContext: () => undefined
-      }
-    );
+    const result = await handleBChatRuntimeBridgeRequest(createEvent('file-content-snapshot', { path: 'unsaved://draft-1/note.md' }), {
+      getRecentFileById: async (fileId: string) =>
+        fileId === 'draft-1'
+          ? {
+              id: 'draft-1',
+              type: 'file',
+              url: '/editor/draft-1',
+              title: 'note.md',
+              description: '未保存文件',
+              name: 'note',
+              ext: 'md',
+              path: null,
+              content: 'draft content'
+            }
+          : undefined
+    });
 
     expect(result).toEqual({
       artifactId: 'draft-1',
@@ -316,29 +99,31 @@ describe('handleBChatRuntimeBridgeRequest', (): void => {
     });
   });
 
-  it('rejects real file content writes instead of replacing editor documents', async (): Promise<void> => {
-    const getEditorContext = vi.fn(createEditorContext);
+  it('rejects real file content writes because the main process owns disk access', async (): Promise<void> => {
     await expect(
-      handleBChatRuntimeBridgeRequest(
-        {
-          runtimeId: 'runtime-1',
-          sessionId: 'session-1',
-          clientId: 'bchat',
-          agentId: 'default',
-          requestId: 'bridge-1',
-          kind: 'write-file-content',
-          payload: { path: 'src/index.ts', content: 'next content', workspaceRoot: '/workspace' }
-        },
-        {
-          getEditorContext,
-          getWebviewContext: () => undefined
-        }
-      )
+      handleBChatRuntimeBridgeRequest(createEvent('write-file-content', { path: 'src/index.ts', content: 'next content', workspaceRoot: '/workspace' }), {})
     ).rejects.toMatchObject({ code: 'EDITOR_UNAVAILABLE' });
-    expect(getEditorContext).not.toHaveBeenCalled();
   });
 
-  it('writes an unsaved draft file content by virtual path', async (): Promise<void> => {
+  it('lets the bound page handle an in-memory file write first', async (): Promise<void> => {
+    const dispatchToolBridge = vi.fn(
+      async (): Promise<ChatBridgeDispatchResult> => ({
+        handled: true,
+        data: { artifactId: 'draft-1', path: 'unsaved://draft-1/note.md', content: 'next draft' }
+      })
+    );
+    const updateRecentFileById = vi.fn();
+    const event = createEvent('write-file-content', { path: 'unsaved://draft-1/note.md', content: 'next draft' });
+
+    const result = await handleBChatRuntimeBridgeRequest(event, { dispatchToolBridge, updateRecentFileById });
+
+    expect(dispatchToolBridge).toHaveBeenCalledWith(event);
+    expect(updateRecentFileById).not.toHaveBeenCalled();
+    expect(result).toEqual({ artifactId: 'draft-1', path: 'unsaved://draft-1/note.md', content: 'next draft' });
+  });
+
+  it('falls back to the recent store when the bound page declines an unsaved write', async (): Promise<void> => {
+    const dispatchToolBridge = vi.fn(async (): Promise<ChatBridgeDispatchResult> => ({ handled: false }));
     const updateRecentFileById = vi.fn().mockResolvedValue({
       id: 'draft-1',
       type: 'file',
@@ -347,22 +132,11 @@ describe('handleBChatRuntimeBridgeRequest', (): void => {
       path: null,
       content: 'next draft'
     });
-    const result = await handleBChatRuntimeBridgeRequest(
-      {
-        runtimeId: 'runtime-1',
-        sessionId: 'session-1',
-        clientId: 'bchat',
-        agentId: 'default',
-        requestId: 'bridge-1',
-        kind: 'write-file-content',
-        payload: { path: 'unsaved://draft-1/note.md', content: 'next draft' }
-      },
-      {
-        getEditorContext: () => undefined,
-        updateRecentFileById,
-        getWebviewContext: () => undefined
-      }
-    );
+
+    const result = await handleBChatRuntimeBridgeRequest(createEvent('write-file-content', { path: 'unsaved://draft-1/note.md', content: 'next draft' }), {
+      dispatchToolBridge,
+      updateRecentFileById
+    });
 
     expect(updateRecentFileById).toHaveBeenCalledWith('draft-1', expect.objectContaining({ content: 'next draft' }));
     expect(result).toEqual({
@@ -372,29 +146,64 @@ describe('handleBChatRuntimeBridgeRequest', (): void => {
     });
   });
 
+  it('falls back to the recent store when the bound page was unregistered', async (): Promise<void> => {
+    const unavailableError = Object.assign(new Error('page unavailable'), { code: 'EDITOR_UNAVAILABLE' as const });
+    const dispatchToolBridge = vi.fn(async (): Promise<ChatBridgeDispatchResult> => Promise.reject(unavailableError));
+    const updateRecentFileById = vi.fn().mockResolvedValue({
+      id: 'draft-1',
+      type: 'file',
+      name: 'note',
+      ext: 'md',
+      path: null,
+      content: 'recovered draft'
+    });
+
+    const result = await handleBChatRuntimeBridgeRequest(createEvent('write-file-content', { path: 'unsaved://draft-1/note.md', content: 'recovered draft' }), {
+      dispatchToolBridge,
+      updateRecentFileById
+    });
+
+    expect(updateRecentFileById).toHaveBeenCalledWith('draft-1', expect.objectContaining({ content: 'recovered draft' }));
+    expect(result).toEqual({
+      artifactId: 'draft-1',
+      path: 'unsaved://draft-1/note.md',
+      content: 'recovered draft'
+    });
+  });
+
+  it('falls back through nested unavailable errors from a bound page', async (): Promise<void> => {
+    const unavailableError = Object.assign(new Error('page unavailable'), { code: 'EDITOR_UNAVAILABLE' as const });
+    const nestedError = new Error('page unavailable', { cause: new Error('page unavailable', { cause: unavailableError }) });
+    const dispatchToolBridge = vi.fn(async (): Promise<ChatBridgeDispatchResult> => Promise.reject(nestedError));
+    const updateRecentFileById = vi.fn().mockResolvedValue({
+      id: 'draft-1',
+      type: 'file',
+      name: 'note',
+      ext: 'md',
+      path: null,
+      content: 'recovered draft'
+    });
+
+    const result = await handleBChatRuntimeBridgeRequest(createEvent('write-file-content', { path: 'unsaved://draft-1/note.md', content: 'recovered draft' }), {
+      dispatchToolBridge,
+      updateRecentFileById
+    });
+
+    expect(updateRecentFileById).toHaveBeenCalledWith('draft-1', expect.objectContaining({ content: 'recovered draft' }));
+    expect(result).toEqual({ artifactId: 'draft-1', path: 'unsaved://draft-1/note.md', content: 'recovered draft' });
+  });
+
   it('returns the current settings snapshot', async (): Promise<void> => {
-    const result = await handleBChatRuntimeBridgeRequest(
-      {
-        runtimeId: 'runtime-1',
-        sessionId: 'session-1',
-        clientId: 'bchat',
-        agentId: 'default',
-        requestId: 'bridge-1',
-        kind: 'settings-snapshot'
-      },
-      {
-        getEditorContext: () => undefined,
-        getWebviewContext: () => undefined,
-        getSettingsSnapshot: () => ({
-          settings: {
-            theme: 'dark',
-            themePreset: 'default',
-            sourceMode: true,
-            editorPageWidth: 'wide'
-          }
-        })
-      }
-    );
+    const result = await handleBChatRuntimeBridgeRequest(createEvent('settings-snapshot'), {
+      getSettingsSnapshot: () => ({
+        settings: {
+          theme: 'dark',
+          themePreset: 'default',
+          sourceMode: true,
+          editorPageWidth: 'wide'
+        }
+      })
+    });
 
     expect(result).toEqual({
       settings: {
@@ -406,95 +215,40 @@ describe('handleBChatRuntimeBridgeRequest', (): void => {
     });
   });
 
-  it('opens a file resource through the bridge', async (): Promise<void> => {
+  it('opens a file resource through the application bridge', async (): Promise<void> => {
     const openFileByPath = vi.fn().mockResolvedValue({ id: 'file-1' });
-    const result = await handleBChatRuntimeBridgeRequest(
-      {
-        runtimeId: 'runtime-1',
-        sessionId: 'session-1',
-        clientId: 'bchat',
-        agentId: 'default',
-        requestId: 'bridge-1',
-        kind: 'open-resource',
-        payload: { path: 'src/index.ts', resourceType: 'file' }
-      },
-      {
-        getEditorContext: () => undefined,
-        getWebviewContext: () => undefined,
-        openFileByPath
-      }
-    );
+    const result = await handleBChatRuntimeBridgeRequest(createEvent('open-resource', { path: 'src/index.ts', resourceType: 'file' }), {
+      openFileByPath
+    });
 
     expect(openFileByPath).toHaveBeenCalledWith('src/index.ts');
-    expect(result).toEqual({
-      path: 'src/index.ts',
-      resourceType: 'file',
-      opened: true,
-      fileId: 'file-1'
-    });
+    expect(result).toEqual({ path: 'src/index.ts', resourceType: 'file', opened: true, fileId: 'file-1' });
   });
 
-  it('opens a webview resource through the bridge', async (): Promise<void> => {
+  it('opens a webview resource through the application bridge', async (): Promise<void> => {
     const openInWebview = vi.fn();
-    const result = await handleBChatRuntimeBridgeRequest(
-      {
-        runtimeId: 'runtime-1',
-        sessionId: 'session-1',
-        clientId: 'bchat',
-        agentId: 'default',
-        requestId: 'bridge-1',
-        kind: 'open-resource',
-        payload: { path: 'https://example.com', resourceType: 'webview' }
-      },
-      {
-        getEditorContext: () => undefined,
-        getWebviewContext: () => undefined,
-        openInWebview
-      }
-    );
+    const result = await handleBChatRuntimeBridgeRequest(createEvent('open-resource', { path: 'https://example.com', resourceType: 'webview' }), {
+      openInWebview
+    });
 
     expect(openInWebview).toHaveBeenCalledWith('https://example.com');
-    expect(result).toEqual({
-      path: 'https://example.com',
-      resourceType: 'webview',
-      opened: true
-    });
+    expect(result).toEqual({ path: 'https://example.com', resourceType: 'webview', opened: true });
   });
 
-  it('applies a settings update through the bridge', async (): Promise<void> => {
+  it('applies a settings update through the application bridge', async (): Promise<void> => {
     const applySetting = vi.fn().mockReturnValue({
       applied: true,
       key: 'theme',
       previousValue: 'light',
       currentValue: 'dark'
     });
-    const result = await handleBChatRuntimeBridgeRequest(
-      {
-        runtimeId: 'runtime-1',
-        sessionId: 'session-1',
-        clientId: 'bchat',
-        agentId: 'default',
-        requestId: 'bridge-1',
-        kind: 'apply-setting',
-        payload: { key: 'theme', value: 'dark' }
-      },
-      {
-        getEditorContext: () => undefined,
-        getWebviewContext: () => undefined,
-        applySetting
-      }
-    );
+    const result = await handleBChatRuntimeBridgeRequest(createEvent('apply-setting', { key: 'theme', value: 'dark' }), { applySetting });
 
     expect(applySetting).toHaveBeenCalledWith({ key: 'theme', value: 'dark' });
-    expect(result).toEqual({
-      applied: true,
-      key: 'theme',
-      previousValue: 'light',
-      currentValue: 'dark'
-    });
+    expect(result).toEqual({ applied: true, key: 'theme', previousValue: 'light', currentValue: 'dark' });
   });
 
-  it('opens a draft document through the bridge', async (): Promise<void> => {
+  it('opens a draft document through the application bridge', async (): Promise<void> => {
     const openDraft = vi.fn().mockResolvedValue({
       file: {
         id: 'draft-1',
@@ -506,22 +260,7 @@ describe('handleBChatRuntimeBridgeRequest', (): void => {
       },
       unsavedPath: 'unsaved://draft-1/Notes.md'
     });
-    const result = await handleBChatRuntimeBridgeRequest(
-      {
-        runtimeId: 'runtime-1',
-        sessionId: 'session-1',
-        clientId: 'bchat',
-        agentId: 'default',
-        requestId: 'bridge-1',
-        kind: 'open-draft',
-        payload: { originalPath: 'Notes.md', content: '# Notes' }
-      },
-      {
-        getEditorContext: () => undefined,
-        getWebviewContext: () => undefined,
-        openDraft
-      }
-    );
+    const result = await handleBChatRuntimeBridgeRequest(createEvent('open-draft', { originalPath: 'Notes.md', content: '# Notes' }), { openDraft });
 
     expect(openDraft).toHaveBeenCalledWith({ originalPath: 'Notes.md', content: '# Notes' });
     expect(result).toEqual({
@@ -534,28 +273,6 @@ describe('handleBChatRuntimeBridgeRequest', (): void => {
         content: '# Notes'
       },
       unsavedPath: 'unsaved://draft-1/Notes.md'
-    });
-  });
-
-  it('throws a stable editor unavailable error when the requested context is missing', async (): Promise<void> => {
-    await expect(
-      handleBChatRuntimeBridgeRequest(
-        {
-          runtimeId: 'runtime-1',
-          sessionId: 'session-1',
-          clientId: 'bchat',
-          agentId: 'default',
-          requestId: 'bridge-1',
-          kind: 'document-snapshot'
-        },
-        {
-          getEditorContext: () => undefined,
-          getWebviewContext: () => undefined
-        }
-      )
-    ).rejects.toMatchObject({
-      code: 'EDITOR_UNAVAILABLE',
-      message: '当前没有可用的编辑器文档'
     });
   });
 });

@@ -105,7 +105,7 @@ describe('useSessionWorkspace', (): void => {
   });
 
   it('blocks a runtime when the persisted workspace cannot be loaded', async (): Promise<void> => {
-    const activeSessionId = ref<string |null>('session-1');
+    const activeSessionId = ref<string | null>('session-1');
     mocks.loadSessionById.mockRejectedValue(new Error('database unavailable'));
 
     const workspace = useSessionWorkspace({ activeSessionId, defaultWorkspaceRoot: ref('/Users/user/.tibis') });

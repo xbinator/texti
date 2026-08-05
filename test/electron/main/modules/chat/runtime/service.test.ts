@@ -2489,7 +2489,10 @@ describe('chat runtime service shell', (): void => {
     });
     const result = await service.send(
       createInput({
-        capabilities: { rendererToolNames: ['read_current_document'], documentId: 'document-1' }
+        capabilities: {
+          rendererToolNames: ['read_current_document'],
+          toolContext: { providerId: 'editor', resourceId: 'document-1' }
+        }
       })
     );
     const decisionPromise = service.requestConfirmation({
@@ -2504,7 +2507,10 @@ describe('chat runtime service shell', (): void => {
     expect(snapshots).toEqual([
       expect.objectContaining({
         runtimeId: result.runtimeId,
-        capabilities: { rendererToolNames: ['read_current_document'], documentId: 'document-1' },
+        capabilities: {
+          rendererToolNames: ['read_current_document'],
+          toolContext: { providerId: 'editor', resourceId: 'document-1' }
+        },
         pendingRequests: expect.arrayContaining([
           expect.objectContaining({ type: 'confirmation', event: expect.objectContaining({ confirmationId: 'confirmation-recovery' }) }),
           expect.objectContaining({ type: 'bridge', event: expect.objectContaining({ requestId: 'bridge-recovery' }) })

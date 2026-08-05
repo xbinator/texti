@@ -4,8 +4,8 @@
  * @vitest-environment jsdom
  */
 import type { ChatAgentHandlerResult, ChatAgentListTasksResult } from 'types/chat-agent';
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AgentTaskProjectionNotice from '@/components/BChat/components/AgentTaskProjectionNotice.vue';
 import { useChatAgentTaskStore } from '@/stores/chat/agentTask';

@@ -37,7 +37,6 @@ types/components.d.ts
 .dev-resources/
 
 # Environment files
-# 禁止提交真实密钥；使用 .env.example 作为模板
 .env
 .env.*
-!.env.example
+!.env.production

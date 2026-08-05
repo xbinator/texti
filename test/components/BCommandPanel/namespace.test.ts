@@ -13,7 +13,7 @@ describe('BCommandPanel namespace usage', (): void => {
     expect(commandPanelSource).toContain("import { createNamespace } from '@/utils/namespace';");
     expect(commandPanelSource).toContain("const [, bem] = createNamespace('command-panel');");
     expect(templateSource).toContain(':class="bem()"');
-    expect(templateSource).toContain(":class=\"bem('toolbar')\"");
+    expect(templateSource).toContain(':class="bem(\'toolbar\')"');
     expect(templateSource).toContain(":class=\"bem('item'");
     expect(templateSource).not.toContain('class="b-command-panel');
   });

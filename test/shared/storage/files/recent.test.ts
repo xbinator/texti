@@ -178,7 +178,6 @@ describe('recentFilesStorage.getAllRecentFiles', () => {
     ]);
     expect(mockElectronAPI.storeSet).toHaveBeenCalledWith('recent_files', records);
   });
-
 });
 
 describe('recentFilesStorage.addWebviewRecord', () => {

@@ -1312,10 +1312,7 @@ describe('agent coordinator', (): void => {
         }
       })
     );
-    expect(fixture.recordTaskResult).not.toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ executionStatus: 'cancelled' })
-    );
+    expect(fixture.recordTaskResult).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ executionStatus: 'cancelled' }));
   });
 
   it('lets cancellation win after the commit lease is active but before external mutation', async (): Promise<void> => {

@@ -3,7 +3,11 @@
  * @description 验证 BWidget 元素盒模型样式到 CSS 属性的转换规则。
  */
 import { describe, expect, it } from 'vitest';
-import { createWidgetElementCustomCssProperties, createWidgetElementStyleProperties, resolveWidgetBoxSideNumbers } from '@/components/BWidget/utils/widgetStyle';
+import {
+  createWidgetElementCustomCssProperties,
+  createWidgetElementStyleProperties,
+  resolveWidgetBoxSideNumbers
+} from '@/components/BWidget/utils/widgetStyle';
 
 describe('widgetStyle', (): void => {
   it('creates CSS properties from all-side box style values', (): void => {

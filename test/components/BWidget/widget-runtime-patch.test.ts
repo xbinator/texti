@@ -15,8 +15,8 @@ function createRuntimeState(): WidgetRuntimeState {
   return {
     value: createDefaultWidgetData(),
     renderContext: {
-            input: {},
-        output: undefined,
+      input: {},
+      output: undefined,
       data: {
         weather: {
           city: '上海',

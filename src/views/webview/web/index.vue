@@ -59,10 +59,9 @@
  * @description `<webview>` 标签页面入口。
  */
 import type { PageFaviconUpdatedEvent, PageTitleUpdatedEvent, WebviewTag } from 'electron';
-import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch, type CSSProperties } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch, type CSSProperties } from 'vue';
 import { useRoute } from 'vue-router';
 import { debounce } from 'lodash-es';
-import { webviewToolContextRegistry } from '@/ai/tools/context/webview';
 import { native } from '@/shared/platform';
 import { useRecentStore } from '@/stores/workspace/recent';
 import { resolveRuntimeThemeColors } from '@/theme';
@@ -73,6 +72,7 @@ import AddressBar from './components/AddressBar.vue';
 import DeviceToolbar from './components/DeviceToolbar.vue';
 import InspectorPanel from './components/InspectorPanel.vue';
 import { useCacheControl } from './hooks/useCacheControl.ts';
+import { useChatContext } from './hooks/useChatContext';
 import { useDeviceMode, type WebviewDevicePresetKey } from './hooks/useDeviceMode.ts';
 import { useHostLayer } from './hooks/useHostLayer.ts';
 import { useScreenshot } from './hooks/useScreenshot.ts';
@@ -91,6 +91,17 @@ const initialUrl = normalizeWebviewUrl(decodeURIComponent((route.query.url as st
 const webview = useWebView(webviewElementRef);
 const deviceMode = useDeviceMode();
 const cacheControl = useCacheControl(webviewElementRef);
+const chatResourceId = ref<string>(routeFullPath);
+const chatContextAvailable = computed<boolean>((): boolean => Boolean(webviewElementRef.value));
+
+useChatContext({
+  resourceId: chatResourceId,
+  available: chatContextAvailable,
+  context: {
+    readPageSnapshot: webview.readPageSnapshot,
+    operatePage: webview.operatePage
+  }
+});
 
 /**
  * 读取当前主题 CSS 变量。
@@ -103,11 +114,6 @@ function readThemeVariable(style: CSSStyleDeclaration, name: string, fallback: s
   const value = style.getPropertyValue(name).trim();
   return value || fallback;
 }
-
-webviewToolContextRegistry.register(routeFullPath, {
-  readPageSnapshot: webview.readPageSnapshot,
-  operatePage: webview.operatePage
-});
 
 /** DOM 检查看板宽度 */
 const domPanelWidth = ref(360);
@@ -407,24 +413,11 @@ watch(activeUserAgent, (userAgent) => {
   webview.setUserAgent(userAgent);
 });
 
-onMounted(() => {
-  webviewToolContextRegistry.setCurrent(routeFullPath);
-});
-
-onActivated(() => {
-  webviewToolContextRegistry.setCurrent(routeFullPath);
-});
-
-onDeactivated(() => {
-  webviewToolContextRegistry.clearCurrent(routeFullPath);
-});
-
 onBeforeUnmount(() => {
   if (webview.state.value.isElementSelecting) {
     webview.stopElementSelection().catch((err: unknown) => console.error('Element selection error:', err));
   }
 
-  webviewToolContextRegistry.unregister(routeFullPath);
   const element = webviewElementRef.value;
   if (element) {
     unbindWebviewEvents(element);

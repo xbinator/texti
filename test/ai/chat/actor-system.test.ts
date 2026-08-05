@@ -64,8 +64,10 @@ describe('chat actor system', (): void => {
     };
     const persistedCapabilities = {
       tools: [],
-      descriptor: { rendererToolNames: ['read_current_document'], documentId: 'document-1' },
-      documentId: 'document-1',
+      descriptor: {
+        rendererToolNames: ['read_current_document'],
+        toolContext: { providerId: 'editor', resourceId: 'document-1' }
+      },
       getToolContext: (): undefined => undefined,
       handleBridgeRequest: async (): Promise<unknown> => undefined
     };
@@ -74,7 +76,13 @@ describe('chat actor system', (): void => {
     const firstSession = system.getSession('session-1');
     const firstTurn = firstSession?.getSnapshot().context.turnRef;
     const frozenCapabilities = system.getRuntimeCapabilities('runtime-1');
-    system.recoverRuntime(snapshot, { ...persistedCapabilities, documentId: 'document-current' });
+    system.recoverRuntime(snapshot, {
+      ...persistedCapabilities,
+      descriptor: {
+        rendererToolNames: ['read_current_document'],
+        toolContext: { providerId: 'editor', resourceId: 'document-current' }
+      }
+    });
 
     expect(system.getSession('session-1')).toBe(firstSession);
     expect(firstSession?.getSnapshot().context.turnRef).toBe(firstTurn);
@@ -85,7 +93,7 @@ describe('chat actor system', (): void => {
       rootRuntimeId: snapshot.rootRuntimeId
     });
     expect(system.getRuntimeCapabilities('runtime-1')).toBe(frozenCapabilities);
-    expect(system.getRuntimeCapabilities('runtime-1')?.documentId).toBe('document-1');
+    expect(system.getRuntimeCapabilities('runtime-1')?.descriptor?.toolContext).toEqual({ providerId: 'editor', resourceId: 'document-1' });
     system.stop();
   });
 

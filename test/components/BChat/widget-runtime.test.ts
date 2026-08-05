@@ -177,11 +177,11 @@ describe('widgetRuntime', (): void => {
       [
         'export default class Weather extends Widget {',
         '  async onExecute() {',
-        "    this.result = this.$input.city",
-        "    return { city: this.$input.city, ok: true }",
+        '    this.result = this.$input.city',
+        '    return { city: this.$input.city, ok: true }',
         '  }',
         '  onMounted() {',
-        "    this.message = this.$output.city",
+        '    this.message = this.$output.city',
         '  }',
         '}'
       ].join('\n'),
@@ -236,10 +236,10 @@ describe('widgetRuntime', (): void => {
     expect(part.renderContext.data).toEqual({});
     expect(nextPart).toMatchObject({
       renderContext: {
-                input: {
+        input: {
           city: '上海'
         },
-          output: undefined,
+        output: undefined,
         data: {
           weather: {
             city: '上海',
@@ -267,10 +267,10 @@ describe('widgetRuntime', (): void => {
         ].join('\n')
       ),
       renderContext: {
-                input: {
+        input: {
           city: '上海'
         },
-          output: undefined,
+        output: undefined,
         data: {
           weather: {
             city: '北京',
@@ -358,10 +358,10 @@ describe('widgetRuntime', (): void => {
     expect(part.renderContext.data).toEqual({});
     expect(nextPart).toMatchObject({
       renderContext: {
-                input: {
+        input: {
           city: '上海'
         },
-          output: undefined,
+        output: undefined,
         data: {
           weather: {
             city: '上海',
@@ -402,8 +402,8 @@ describe('widgetRuntime', (): void => {
     const part: WidgetRuntimeState = {
       ...createWidgetPart('export default class Weather extends Widget { onMounted() { this.weather = { temperature: 28 } } }'),
       renderContext: {
-                input: {},
-          output: undefined,
+        input: {},
+        output: undefined,
         data: {
           weather: {
             temperature: 18
@@ -650,7 +650,7 @@ describe('widgetRuntime', (): void => {
         '',
         '  buttonByClick() {',
         "    this.message = this.cache.get('message')",
-        "    this.$sendMessage(this.message)",
+        '    this.$sendMessage(this.message)',
         '  }',
         '}'
       ].join('\n')

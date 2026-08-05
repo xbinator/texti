@@ -4,8 +4,8 @@
  * @vitest-environment jsdom
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RecentRecord, StoredDocumentRecord } from '@/shared/storage';
 import { useRecentRecord } from '@/hooks/useRecentRecord';
+import type { RecentRecord, StoredDocumentRecord } from '@/shared/storage';
 
 const routerPushMock = vi.hoisted(() => vi.fn<(_path: string) => Promise<void>>());
 const openDocumentMock = vi.hoisted(() => vi.fn<(_record: StoredDocumentRecord) => Promise<StoredDocumentRecord | null>>());
@@ -220,5 +220,4 @@ describe('useRecentRecord', (): void => {
     expect(removeRecentMock).toHaveBeenCalledWith('chat:session-a');
     expect(removeTabMock).not.toHaveBeenCalled();
   });
-
 });

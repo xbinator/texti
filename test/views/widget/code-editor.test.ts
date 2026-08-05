@@ -321,9 +321,15 @@ describe('CodeEditor', (): void => {
   });
 
   it('loads current script and updates widget data through value model', async (): Promise<void> => {
-    const initialCode = ['export default class Weather extends Widget {', '  ready = false', '', '  async onMounted() {', '    this.ready = true', '  }', '}'].join(
-      '\n'
-    );
+    const initialCode = [
+      'export default class Weather extends Widget {',
+      '  ready = false',
+      '',
+      '  async onMounted() {',
+      '    this.ready = true',
+      '  }',
+      '}'
+    ].join('\n');
     const nextCode = [
       'export default class Weather extends Widget {',
       '  async confirm() {',

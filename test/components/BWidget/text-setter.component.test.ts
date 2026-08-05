@@ -110,9 +110,9 @@ function createWidgetData(): WidgetData {
     metadata: {
       previewContext: {
         input: {
-            city: '上海'
-          },
-          output: undefined,
+          city: '上海'
+        },
+        output: undefined,
         data: {
           weather: {
             temperature: 28

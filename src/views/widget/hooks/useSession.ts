@@ -45,7 +45,7 @@ import { resolveFileTitle } from '@/utils/file/title';
 import { Modal } from '@/utils/modal';
 import { getDefaultSavePath, parseFileName } from '@/views/editor/utils/filePath';
 import { useBindings } from './useBindings';
-import { useWidgetToolContext } from './useWidgetToolContext';
+import { useChatContext } from './useChatContext';
 
 /** 已安装 Widget 对应的文件会话 ID 前缀。 */
 const WIDGET_FILE_PREFIX = 'widget-';
@@ -463,7 +463,7 @@ export function useSession(): WidgetSessionReturn {
     onDeactivated((): void => {
       isActive.value = false;
     });
-    useWidgetToolContext({
+    useChatContext({
       fileId,
       isActive,
       currentTitle,

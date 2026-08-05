@@ -31,11 +31,11 @@ function createOpenWidgetToolPart(): ChatMessageToolPart {
         value: createDefaultWidgetData(),
         renderContext: {
           input: {
-              city: '上海'
-            },
-            output: {
-              temperature: 28
-            },
+            city: '上海'
+          },
+          output: {
+            temperature: 28
+          },
           data: {}
         },
         execution: {

@@ -8,9 +8,9 @@ import type { WebviewTag } from 'electron';
 import { nextTick, type Ref } from 'vue';
 import { shallowMount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { WebviewToolContext } from '@/ai/tools/context/webview';
 import type { WebviewPageState } from '@/views/webview/shared/types';
 import WebviewPage from '@/views/webview/web/index.vue';
+import type { WebviewToolContext } from '@/views/webview/web/types';
 
 /**
  * 测试用 WebView 元素最小能力集合。
@@ -62,14 +62,6 @@ interface Deferred<T> {
 
 const registeredContextHolder = vi.hoisted<{ value: WebviewToolContext | null }>(() => ({ value: null }));
 const executeJavaScriptMock = vi.hoisted(() => vi.fn<(_script: string) => Promise<unknown>>());
-const registerToolContextMock = vi.hoisted(() =>
-  vi.fn<(_id: string, _context: WebviewToolContext) => void>((_id, context) => {
-    registeredContextHolder.value = context;
-  })
-);
-const unregisterToolContextMock = vi.hoisted(() => vi.fn());
-const setCurrentToolContextMock = vi.hoisted(() => vi.fn());
-const clearCurrentToolContextMock = vi.hoisted(() => vi.fn());
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({
@@ -86,13 +78,10 @@ vi.mock('@/stores/workspace/recent', () => ({
   })
 }));
 
-vi.mock('@/ai/tools/context/webview', () => ({
-  webviewToolContextRegistry: {
-    register: registerToolContextMock,
-    unregister: unregisterToolContextMock,
-    setCurrent: setCurrentToolContextMock,
-    clearCurrent: clearCurrentToolContextMock
-  }
+vi.mock('@/views/webview/web/hooks/useChatContext', () => ({
+  useChatContext: vi.fn((options: { context: WebviewToolContext }): void => {
+    registeredContextHolder.value = options.context;
+  })
 }));
 
 vi.mock('@/shared/platform', () => ({

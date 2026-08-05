@@ -43,15 +43,8 @@ function createEditorControllerStub(): Record<string, unknown> {
   };
 }
 
-vi.mock('@/ai/tools/context/editor', () => ({
-  editorToolContextRegistry: {
-    register: vi.fn(),
-    unregister: vi.fn()
-  }
-}));
-
-vi.mock('@/components/BEditor/hooks/useEditorToolContext', () => ({
-  createEditorToolContext: vi.fn(() => ({}))
+vi.mock('@/components/BEditor/hooks/useChatContext', () => ({
+  useChatContext: vi.fn()
 }));
 
 vi.mock('@/components/BEditor/Markdown.vue', async () => {

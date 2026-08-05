@@ -50,10 +50,6 @@ interface TestUseScreenshotOptions {
 
 const hostLayerHolder = vi.hoisted<{ value: HTMLDivElement | null }>(() => ({ value: null }));
 const screenshotOptionsHolder = vi.hoisted<{ value: TestUseScreenshotOptions | null }>(() => ({ value: null }));
-const registerToolContextMock = vi.hoisted(() => vi.fn());
-const unregisterToolContextMock = vi.hoisted(() => vi.fn());
-const setCurrentToolContextMock = vi.hoisted(() => vi.fn());
-const clearCurrentToolContextMock = vi.hoisted(() => vi.fn());
 const screenshotCapturingHolder = vi.hoisted<{ value: boolean }>(() => ({ value: false }));
 const captureSelectedElementScreenshotMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const executeJavaScriptMockHolder = vi.hoisted<{ value: ReturnType<typeof vi.fn<(script: string) => Promise<unknown>>> | null }>(() => ({ value: null }));
@@ -73,13 +69,8 @@ vi.mock('@/stores/workspace/recent', () => ({
   })
 }));
 
-vi.mock('@/ai/tools/context/webview', () => ({
-  webviewToolContextRegistry: {
-    register: registerToolContextMock,
-    unregister: unregisterToolContextMock,
-    setCurrent: setCurrentToolContextMock,
-    clearCurrent: clearCurrentToolContextMock
-  }
+vi.mock('@/views/webview/web/hooks/useChatContext', () => ({
+  useChatContext: vi.fn()
 }));
 
 vi.mock('@/shared/platform', () => ({

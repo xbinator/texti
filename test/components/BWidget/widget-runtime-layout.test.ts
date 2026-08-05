@@ -130,16 +130,16 @@ describe('createWidgetRuntimeLayout', (): void => {
   it('uses render context when measuring dynamic text nodes', (): void => {
     const compactContext: WidgetRenderContext = {
       input: {
-          city: '沪'
-        },
-        output: undefined,
+        city: '沪'
+      },
+      output: undefined,
       data: {}
     };
     const expandedContext: WidgetRenderContext = {
       input: {
-          city: '上海浦东新区'
-        },
-        output: undefined,
+        city: '上海浦东新区'
+      },
+      output: undefined,
       data: {}
     };
     const compactLayout = createWidgetRuntimeLayout([createTextElement('{{ $input.city }}')], compactContext);
@@ -160,8 +160,8 @@ describe('createWidgetRuntimeLayout', (): void => {
         {
           element: firstText,
           renderContext: {
-                        input: {},
-              output: undefined,
+            input: {},
+            output: undefined,
             data: {},
             locals: {
               item: {
@@ -173,8 +173,8 @@ describe('createWidgetRuntimeLayout', (): void => {
         {
           element: secondText,
           renderContext: {
-                        input: {},
-              output: undefined,
+            input: {},
+            output: undefined,
             data: {},
             locals: {
               item: {

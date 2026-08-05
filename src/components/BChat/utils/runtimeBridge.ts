@@ -2,17 +2,14 @@
  * @file runtimeBridge.ts
  * @description BChat ChatRuntime renderer bridge 请求处理。
  */
-import type { AIToolContext, AIToolExecutionError } from 'types/ai';
-import type { ChatRuntimeBridgeRequestEvent, ChatRuntimeEventBase } from 'types/chat-runtime';
-import type { WebviewOperateInput, WebviewPressKey, WebviewToolContext } from '@/ai/tools/context/webview';
-import type { WidgetToolContext } from '@/ai/tools/context/widget';
+import type { AIToolExecutionError } from 'types/ai';
+import type { ChatRuntimeBridgeRequestEvent } from 'types/chat-runtime';
 import type { OpenDraftInput, OpenDraftResult } from '@/ai/tools/shared/types';
+import type { ChatBridgeDispatchResult } from '@/hooks/useChat/useToolContext';
 import { isDocumentRecord } from '@/shared/storage';
 import type { StoredDocumentRecord } from '@/shared/storage/files/types';
+import { asyncTo } from '@/utils/asyncTo';
 import { isUnsavedPath, parseUnsavedPath } from '@/utils/file/unsaved';
-
-/** Bridge handler 实际消费的事件字段。 */
-type BChatRuntimeBridgeRequest = Pick<ChatRuntimeBridgeRequestEvent, 'requestId' | 'kind' | 'payload'> & Partial<ChatRuntimeEventBase>;
 
 /** Bridge settings domain types. */
 /** 可通过 ChatRuntime 暴露给模型的设置键。 */
@@ -47,16 +44,12 @@ export interface BChatRuntimeApplySettingResult {
 /** Bridge dependency surface. */
 /** BChat runtime bridge 依赖。 */
 export interface BChatRuntimeBridgeDependencies {
-  /** 获取当前编辑器工具上下文。 */
-  getEditorContext: () => AIToolContext | undefined;
+  /** 向 Runtime 启动时绑定的页面工具上下文分发请求。 */
+  dispatchToolBridge?: (event: ChatRuntimeBridgeRequestEvent) => Promise<ChatBridgeDispatchResult>;
   /** 通过最近文件 ID 获取文件记录。 */
   getRecentFileById?: (fileId: string) => StoredDocumentRecord | undefined | Promise<StoredDocumentRecord | undefined>;
   /** 更新最近文件记录。 */
   updateRecentFileById?: (fileId: string, updates: Partial<StoredDocumentRecord>) => Promise<StoredDocumentRecord>;
-  /** 获取当前 WebView 工具上下文。 */
-  getWebviewContext: () => WebviewToolContext | undefined;
-  /** 获取当前 Widget 编辑器工具上下文。 */
-  getWidgetContext?: () => WidgetToolContext | undefined;
   /** 获取应用设置快照。 */
   getSettingsSnapshot?: () => BChatRuntimeSettingsSnapshot;
   /** 应用设置修改。 */
@@ -69,33 +62,6 @@ export interface BChatRuntimeBridgeDependencies {
   openInWebview?: (url: string) => Promise<void> | void;
   /** 在系统默认程序中打开 URL。 */
   openExternal?: (url: string) => Promise<void> | void;
-}
-
-/** Bridge response snapshot types. */
-/** 编辑器文档快照。 */
-export interface BChatRuntimeDocumentSnapshot {
-  /** 文档 ID。 */
-  id: string;
-  /** 文档标题。 */
-  title: string;
-  /** 磁盘路径。 */
-  path: string | null;
-  /** 虚拟定位符。 */
-  locator?: string;
-  /** 文档内容。 */
-  content: string;
-  /** 当前选区。 */
-  selection: ReturnType<AIToolContext['editor']['getSelection']>;
-}
-
-/** Widget 编辑页 bridge 快照。 */
-export interface BChatRuntimeWidgetSnapshot {
-  /** Widget 标签栏标题。 */
-  title: string;
-  /** Widget 文件路径，未保存时为空。 */
-  path: string | null;
-  /** 当前内存中的 WidgetData JSON。 */
-  content: string;
 }
 
 /** 文件内容 bridge 快照。 */
@@ -146,141 +112,77 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * 判断值是否为有限数字。
- * @param value - 待判断值
- * @returns 是否为有限数字
+ * 安全读取 Bridge 错误码。
+ * @param error - 原始错误
+ * @returns 错误码或 undefined
  */
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
+function readBridgeErrorCode(error: unknown): unknown {
+  if (!isRecord(error)) return undefined;
+  try {
+    return error.code;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
- * 判断值是否为网页滚动方向。
- * @param value - 待判断值
- * @returns 是否为网页滚动方向
+ * 沿 cause 链定位最原始的稳定业务错误，并防止循环引用卡死。
+ * @param error - 可能被多次归一化的错误
+ * @returns 带业务码的错误，或 cause 链最深处的原始异常
  */
-function isWebviewScrollDirection(value: unknown): value is 'up' | 'down' | 'left' | 'right' {
-  return value === 'up' || value === 'down' || value === 'left' || value === 'right';
+function unwrapBridgeError(error: unknown): unknown {
+  const visited = new Set<object>();
+  let current = error;
+  let deepest = error;
+
+  while (isRecord(current)) {
+    if (visited.has(current)) return deepest;
+    visited.add(current);
+    deepest = current;
+    if (readBridgeErrorCode(current) !== undefined) return current;
+
+    try {
+      if (current.cause === undefined) return current;
+      current = current.cause;
+    } catch {
+      return current;
+    }
+  }
+
+  return current;
 }
 
 /**
- * 判断值是否为支持的网页按键。
- * @param value - 待判断值
- * @returns 是否为支持的网页按键
+ * 请求 Runtime 绑定页面处理 Bridge 事件。
+ * @param event - Bridge 请求事件
+ * @param dependencies - Bridge 依赖
+ * @returns 页面分发结果
  */
-function isWebviewPressKey(value: unknown): value is WebviewPressKey {
-  return (
-    value === 'Enter' ||
-    value === 'Tab' ||
-    value === 'Escape' ||
-    value === 'ArrowUp' ||
-    value === 'ArrowDown' ||
-    value === 'ArrowLeft' ||
-    value === 'ArrowRight'
-  );
+async function requestPageBridge(event: ChatRuntimeBridgeRequestEvent, dependencies: BChatRuntimeBridgeDependencies): Promise<ChatBridgeDispatchResult> {
+  if (!dependencies.dispatchToolBridge) {
+    throw createBridgeError('EDITOR_UNAVAILABLE', 'Runtime 未绑定可用的页面工具上下文');
+  }
+
+  const [error, result] = await asyncTo(dependencies.dispatchToolBridge(event));
+  if (error) {
+    // Registry 错误可能经过多层 asyncTo，沿 cause 链恢复稳定业务码。
+    throw unwrapBridgeError(error);
+  }
+  return result;
 }
 
 /**
- * 判断值是否为 WebView 操作动作。
- * @param value - 待判断值
- * @returns 是否为 WebView 操作动作
+ * 分发并要求 Runtime 绑定页面处理 Bridge 事件。
+ * @param event - Bridge 请求事件
+ * @param dependencies - Bridge 依赖
+ * @returns 页面响应数据
  */
-function isWebviewOperateAction(value: unknown): value is WebviewOperateInput['action'] {
-  if (!isRecord(value) || typeof value.type !== 'string') {
-    return false;
+async function dispatchPageBridge(event: ChatRuntimeBridgeRequestEvent, dependencies: BChatRuntimeBridgeDependencies): Promise<unknown> {
+  const result = await requestPageBridge(event, dependencies);
+  if (!result.handled) {
+    throw createBridgeError('ACTION_NOT_SUPPORTED', `绑定页面不支持 Bridge 请求：${event.kind}`);
   }
-
-  if (value.type === 'click') {
-    return isFiniteNumber(value.index);
-  }
-
-  if (value.type === 'input') {
-    return isFiniteNumber(value.index) && typeof value.text === 'string' && (value.clear === undefined || typeof value.clear === 'boolean');
-  }
-
-  if (value.type === 'select') {
-    return isFiniteNumber(value.index) && typeof value.optionText === 'string';
-  }
-
-  if (value.type === 'press') {
-    return isFiniteNumber(value.index) && isWebviewPressKey(value.key);
-  }
-
-  if (value.type === 'scroll') {
-    return (
-      (value.index === undefined || isFiniteNumber(value.index)) &&
-      isWebviewScrollDirection(value.direction) &&
-      (value.pixels === undefined || isFiniteNumber(value.pixels))
-    );
-  }
-
-  if (value.type === 'navigate') {
-    return typeof value.url === 'string';
-  }
-
-  if (value.type === 'wait') {
-    return value.seconds === undefined || isFiniteNumber(value.seconds);
-  }
-
-  return false;
-}
-
-/**
- * 判断 bridge payload 是否为 WebView 操作输入。
- * @param value - 待判断值
- * @returns 是否为 WebView 操作输入
- */
-function isWebviewOperateInput(value: unknown): value is WebviewOperateInput {
-  if (!isRecord(value) || !isWebviewOperateAction(value.action)) {
-    return false;
-  }
-
-  if (value.action.type === 'navigate') {
-    return value.snapshotId === undefined || typeof value.snapshotId === 'string';
-  }
-
-  return typeof value.snapshotId === 'string' && value.snapshotId.length > 0;
-}
-
-/** Editor document bridge handlers. */
-/**
- * 读取当前编辑器文档快照。
- * @param dependencies - bridge 依赖
- * @returns 文档快照
- */
-function readDocumentSnapshot(dependencies: BChatRuntimeBridgeDependencies): BChatRuntimeDocumentSnapshot {
-  const context = dependencies.getEditorContext();
-  if (!context) {
-    throw createBridgeError('EDITOR_UNAVAILABLE', '当前没有可用的编辑器文档');
-  }
-
-  return {
-    id: context.document.id,
-    title: context.document.title,
-    path: context.document.path,
-    ...(context.document.locator ? { locator: context.document.locator } : {}),
-    content: context.document.getContent(),
-    selection: context.editor.getSelection()
-  };
-}
-
-/** Widget editor bridge handlers. */
-/**
- * 读取当前 Widget 编辑页快照。
- * @param dependencies - bridge 依赖
- * @returns Widget 编辑页快照
- */
-function readWidgetSnapshot(dependencies: BChatRuntimeBridgeDependencies): BChatRuntimeWidgetSnapshot {
-  const context = dependencies.getWidgetContext?.();
-  if (!context) {
-    throw createBridgeError('EDITOR_UNAVAILABLE', '当前没有可用的 Widget 编辑页');
-  }
-
-  return {
-    title: context.widget.title,
-    path: context.widget.path,
-    content: context.widget.getContent()
-  };
+  return result.data;
 }
 
 /** File content bridge handlers. */
@@ -292,7 +194,7 @@ function readWidgetSnapshot(dependencies: BChatRuntimeBridgeDependencies): BChat
  * @returns 文件内容快照
  */
 async function readFileContentSnapshot(
-  event: BChatRuntimeBridgeRequest,
+  event: ChatRuntimeBridgeRequestEvent,
   dependencies: BChatRuntimeBridgeDependencies
 ): Promise<BChatRuntimeFileContentSnapshot> {
   const payload = isRecord(event.payload) ? event.payload : {};
@@ -324,7 +226,7 @@ async function readFileContentSnapshot(
  * @param dependencies - bridge 依赖
  * @returns 写入结果
  */
-async function writeFileContent(event: BChatRuntimeBridgeRequest, dependencies: BChatRuntimeBridgeDependencies): Promise<BChatRuntimeFileContentSnapshot> {
+async function writeFileContent(event: ChatRuntimeBridgeRequestEvent, dependencies: BChatRuntimeBridgeDependencies): Promise<BChatRuntimeFileContentSnapshot> {
   const payload = isRecord(event.payload) ? event.payload : {};
   const filePath = typeof payload.path === 'string' ? payload.path.trim() : '';
   const content = typeof payload.content === 'string' ? payload.content : '';
@@ -336,12 +238,6 @@ async function writeFileContent(event: BChatRuntimeBridgeRequest, dependencies: 
     const unsavedReference = parseUnsavedPath(filePath);
     if (!unsavedReference) {
       throw createBridgeError('INVALID_INPUT', `未识别的未保存文档路径：${filePath}`);
-    }
-
-    const activeContext = dependencies.getEditorContext();
-    if (activeContext?.document.locator === filePath || activeContext?.document.path === filePath || activeContext?.document.id === unsavedReference.fileId) {
-      await activeContext.editor.replaceDocument(content);
-      return { artifactId: activeContext.document.id, path: filePath, content };
     }
 
     if (!dependencies.updateRecentFileById) {
@@ -384,7 +280,7 @@ function isSettingKey(value: unknown): value is BChatRuntimeSettingKey {
  * @param dependencies - bridge 依赖
  * @returns 设置修改结果
  */
-function applySetting(event: BChatRuntimeBridgeRequest, dependencies: BChatRuntimeBridgeDependencies): BChatRuntimeApplySettingResult {
+function applySetting(event: ChatRuntimeBridgeRequestEvent, dependencies: BChatRuntimeBridgeDependencies): BChatRuntimeApplySettingResult {
   if (!dependencies.applySetting) {
     throw createBridgeError('EDITOR_UNAVAILABLE', '当前环境不支持修改设置');
   }
@@ -407,7 +303,7 @@ function applySetting(event: BChatRuntimeBridgeRequest, dependencies: BChatRunti
  * @param dependencies - bridge 依赖
  * @returns 未保存草稿结果
  */
-async function openDraft(event: BChatRuntimeBridgeRequest, dependencies: BChatRuntimeBridgeDependencies): Promise<OpenDraftResult> {
+async function openDraft(event: ChatRuntimeBridgeRequestEvent, dependencies: BChatRuntimeBridgeDependencies): Promise<OpenDraftResult> {
   if (!dependencies.openDraft) {
     throw createBridgeError('EXECUTION_FAILED', '当前环境不支持创建未保存草稿');
   }
@@ -437,7 +333,7 @@ function isOpenResourceType(value: unknown): value is BChatRuntimeOpenResourceTy
  * @param dependencies - bridge 依赖
  * @returns 打开结果
  */
-async function openResource(event: BChatRuntimeBridgeRequest, dependencies: BChatRuntimeBridgeDependencies): Promise<BChatRuntimeOpenResourceResult> {
+async function openResource(event: ChatRuntimeBridgeRequestEvent, dependencies: BChatRuntimeBridgeDependencies): Promise<BChatRuntimeOpenResourceResult> {
   const payload = isRecord(event.payload) ? event.payload : {};
   const path = typeof payload.path === 'string' ? payload.path.trim() : '';
   const resourceType = isOpenResourceType(payload.resourceType) ? payload.resourceType : null;
@@ -482,40 +378,21 @@ async function openResource(event: BChatRuntimeBridgeRequest, dependencies: BCha
  * @param dependencies - bridge 依赖
  * @returns bridge 响应数据
  */
-export async function handleBChatRuntimeBridgeRequest(event: BChatRuntimeBridgeRequest, dependencies: BChatRuntimeBridgeDependencies): Promise<unknown> {
-  if (event.kind === 'document-snapshot') {
-    return readDocumentSnapshot(dependencies);
-  }
-
-  if (event.kind === 'webview-snapshot') {
-    const context = dependencies.getWebviewContext();
-    if (!context) {
-      throw createBridgeError('EDITOR_UNAVAILABLE', '当前没有可用的网页');
-    }
-    return context.readPageSnapshot();
-  }
-
-  if (event.kind === 'widget-snapshot') {
-    return readWidgetSnapshot(dependencies);
-  }
-
-  if (event.kind === 'webview-operate') {
-    const context = dependencies.getWebviewContext();
-    if (!context) {
-      throw createBridgeError('EDITOR_UNAVAILABLE', '当前没有可操作的网页');
-    }
-    if (!isWebviewOperateInput(event.payload)) {
-      throw createBridgeError('INVALID_INPUT', '网页操作参数无效');
-    }
-
-    return context.operatePage(event.payload);
-  }
-
+export async function handleBChatRuntimeBridgeRequest(event: ChatRuntimeBridgeRequestEvent, dependencies: BChatRuntimeBridgeDependencies): Promise<unknown> {
   if (event.kind === 'file-content-snapshot') {
     return readFileContentSnapshot(event, dependencies);
   }
 
   if (event.kind === 'write-file-content') {
+    if (dependencies.dispatchToolBridge) {
+      const [dispatchError, result] = await asyncTo(dependencies.dispatchToolBridge(event));
+      if (dispatchError) {
+        const originalError = unwrapBridgeError(dispatchError);
+        if (readBridgeErrorCode(originalError) !== 'EDITOR_UNAVAILABLE') throw originalError;
+      } else if (result.handled) {
+        return result.data;
+      }
+    }
     return writeFileContent(event, dependencies);
   }
 
@@ -535,5 +412,5 @@ export async function handleBChatRuntimeBridgeRequest(event: BChatRuntimeBridgeR
     return openResource(event, dependencies);
   }
 
-  throw createBridgeError('INVALID_INPUT', `不支持的 bridge 请求类型：${event.kind}`);
+  return dispatchPageBridge(event, dependencies);
 }

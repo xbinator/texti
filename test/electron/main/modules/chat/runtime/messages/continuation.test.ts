@@ -5,10 +5,7 @@
 import type { ChatMessageRecord } from 'types/chat';
 import type { AgentOrderedToolCallSnapshot, ChatAgentResult } from 'types/chat-agent';
 import { describe, expect, it } from 'vitest';
-import {
-  createCancellationPolicy,
-  injectAgentResults
-} from '../../../../../../../electron/main/modules/chat/runtime/messages/continuation.mts';
+import { createCancellationPolicy, injectAgentResults } from '../../../../../../../electron/main/modules/chat/runtime/messages/continuation.mts';
 
 /**
  * 创建一个最小结构化 Child 结果。
@@ -17,12 +14,7 @@ import {
  * @param attemptId - Attempt 身份
  * @returns 可注入模型上下文的结果
  */
-function createResult(
-  taskId: string,
-  agentId: string,
-  attemptId: string,
-  executionStatus: ChatAgentResult['executionStatus'] = 'completed'
-): ChatAgentResult {
+function createResult(taskId: string, agentId: string, attemptId: string, executionStatus: ChatAgentResult['executionStatus'] = 'completed'): ChatAgentResult {
   return {
     taskId,
     agentId,

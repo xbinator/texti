@@ -34,10 +34,9 @@
 
 <script setup lang="ts">
 import type { EditorController, EditorSearchState, EditorState } from './types';
-import { computed, onBeforeUnmount, ref, toRef, watch } from 'vue';
-import { editorToolContextRegistry } from '@/ai/tools/context/editor';
+import { computed, ref, toRef } from 'vue';
 import { resolveEditorKind, resolveMonacoLanguage } from './constants/resolver';
-import { createEditorToolContext } from './hooks/useEditorToolContext';
+import { useChatContext } from './hooks/useChatContext';
 import Markdown from './Markdown.vue';
 import Monaco from './Monaco.vue';
 
@@ -67,10 +66,10 @@ const emit = defineEmits(['rename-file', 'save', 'save-as', 'copy-path', 'show-i
 const editorState = defineModel<EditorState>('value', { default: () => ({ content: '', name: '', path: '', id: '', ext: '' }) });
 
 const editable = toRef(props, 'editable');
+const active = toRef(props, 'active');
 const editorKind = computed(() => resolveEditorKind(editorState.value.ext));
 const monacoLanguage = computed(() => resolveMonacoLanguage(editorState.value.ext));
 const outlineContent = defineModel<string>('outlineContent', { default: '' });
-const lastRegisteredDocumentId = ref('');
 
 /**
  * 统一读取当前活动的编辑器控制器。
@@ -84,60 +83,10 @@ function getEditorController(): EditorController | null {
   return markdownRef.value?.editorController ?? null;
 }
 
-/**
- * 注销已注册的编辑器工具上下文。
- */
-function unregisterEditorToolContext(): void {
-  if (!lastRegisteredDocumentId.value) {
-    return;
-  }
-
-  editorToolContextRegistry.unregister(lastRegisteredDocumentId.value);
-  lastRegisteredDocumentId.value = '';
-}
-
-/**
- * 根据当前激活的编辑器实例注册统一工具上下文。
- */
-function registerEditorToolContext(): void {
-  const editorInstance = getEditorController();
-  const documentId = editorState.value.id;
-
-  unregisterEditorToolContext();
-
-  if (!props.active || !editorInstance || !documentId) {
-    return;
-  }
-
-  editorToolContextRegistry.register(
-    documentId,
-    createEditorToolContext({
-      getFileState: () => editorState.value,
-      getEditorInstance: getEditorController
-    })
-  );
-  lastRegisteredDocumentId.value = documentId;
-}
-
-watch(
-  [
-    () => props.active,
-    editorKind,
-    () => markdownRef.value?.editorController,
-    () => editorState.value.id,
-    () => editorState.value.name,
-    () => editorState.value.path,
-    () => editorState.value.ext,
-    monacoRef
-  ],
-  (): void => {
-    registerEditorToolContext();
-  },
-  { immediate: true }
-);
-
-onBeforeUnmount(() => {
-  unregisterEditorToolContext();
+useChatContext({
+  editorState,
+  active,
+  getController: getEditorController
 });
 
 function setContent(text: string): void {

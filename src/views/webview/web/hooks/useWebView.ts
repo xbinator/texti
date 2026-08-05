@@ -4,7 +4,6 @@
  */
 import type { DidNavigateEvent, PageFaviconUpdatedEvent, PageTitleUpdatedEvent, WebviewTag } from 'electron';
 import { ref, type Ref } from 'vue';
-import type { WebviewOperateInput, WebviewOperateResult, WebviewPageSnapshot } from '@/ai/tools/context/webview';
 import type {
   WebviewAgentActivity,
   WebviewAgentActivityPhase,
@@ -29,6 +28,7 @@ import {
 import { createPageOperationScript } from '@/views/webview/web/automation/operationScript';
 import { createPageSnapshotScript } from '@/views/webview/web/automation/snapshotScript';
 import type { ActiveWebviewSnapshotElement } from '@/views/webview/web/automation/types';
+import type { WebviewOperateInput, WebviewOperateResult, WebviewPageSnapshot } from '@/views/webview/web/types';
 import {
   DEFAULT_ELEMENT_PICKER_THEME,
   createDrainElementSelectionMessagesScript,

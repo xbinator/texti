@@ -3,11 +3,7 @@
  * @description 通用目录安装事务的写入、冲突、重试、回滚与清理测试。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  DirectoryInstallConflictError,
-  installDirectory,
-  type DirectoryInstallerAPI
-} from '@/utils/file/directory';
+import { DirectoryInstallConflictError, installDirectory, type DirectoryInstallerAPI } from '@/utils/file/directory';
 
 /** 通用目录安装 API 测试替身。 */
 interface DirectoryInstallerAPIMock extends DirectoryInstallerAPI {

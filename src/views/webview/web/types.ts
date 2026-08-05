@@ -1,6 +1,6 @@
 /**
- * @file webview.ts
- * @description WebView 工具上下文注册表，管理当前激活网页的读取能力。
+ * @file types.ts
+ * @description WebView 页面快照、操作输入与 Chat 上下文领域类型。
  */
 
 /**
@@ -406,91 +406,3 @@ export interface WebviewToolContext {
    */
   operatePage(input: WebviewOperateInput): Promise<WebviewOperateResult>;
 }
-
-/**
- * WebView 工具上下文注册表。
- */
-export interface WebviewToolContextRegistry {
-  /**
-   * 注册 WebView 上下文。
-   * @param id - WebView 标签页标识
-   * @param context - WebView 工具上下文
-   */
-  register(id: string, context: WebviewToolContext): void;
-  /**
-   * 注销 WebView 上下文。
-   * @param id - WebView 标签页标识
-   */
-  unregister(id: string): void;
-  /**
-   * 标记当前激活 WebView。
-   * @param id - WebView 标签页标识
-   */
-  setCurrent(id: string): void;
-  /**
-   * 清理当前激活 WebView。
-   * @param id - WebView 标签页标识
-   */
-  clearCurrent(id: string): void;
-  /**
-   * 获取当前激活 WebView 的稳定标识。
-   * @returns 当前 WebView 标识或 null
-   */
-  getCurrentId(): string | null;
-  /**
-   * 按稳定标识获取 WebView 上下文。
-   * @param id - WebView 标签页标识
-   * @returns 对应上下文或 undefined
-   */
-  getContext(id: string): WebviewToolContext | undefined;
-  /**
-   * 获取当前激活 WebView 上下文。
-   * @returns 当前上下文或 undefined
-   */
-  getCurrentContext(): WebviewToolContext | undefined;
-}
-
-/**
- * 创建 WebView 工具上下文注册表。
- * @returns WebView 工具上下文注册表
- */
-export function createWebviewToolContextRegistry(): WebviewToolContextRegistry {
-  /** WebView 标签页 ID 到上下文的映射。 */
-  const contexts = new Map<string, WebviewToolContext>();
-  /** 当前激活 WebView 标签页 ID。 */
-  let currentId: string | null = null;
-
-  return {
-    register(id: string, context: WebviewToolContext): void {
-      contexts.set(id, context);
-    },
-    unregister(id: string): void {
-      contexts.delete(id);
-      if (currentId === id) {
-        currentId = null;
-      }
-    },
-    setCurrent(id: string): void {
-      if (contexts.has(id)) {
-        currentId = id;
-      }
-    },
-    clearCurrent(id: string): void {
-      if (currentId === id) {
-        currentId = null;
-      }
-    },
-    getCurrentId(): string | null {
-      return currentId;
-    },
-    getContext(id: string): WebviewToolContext | undefined {
-      return contexts.get(id);
-    },
-    getCurrentContext(): WebviewToolContext | undefined {
-      return currentId ? contexts.get(currentId) : undefined;
-    }
-  };
-}
-
-/** 全局 WebView 工具上下文注册表单例。 */
-export const webviewToolContextRegistry = createWebviewToolContextRegistry();

@@ -12,15 +12,14 @@ import type {
   ChatRuntimeBridgeRequestEvent,
   ChatRuntimeCapabilityDescriptor,
   ChatRuntimeStartResult,
-  ChatRuntimeUserInputPart
+  ChatRuntimeUserInputPart,
+  ChatToolBinding
 } from 'types/chat-runtime';
 import type { Ref } from 'vue';
 import { nextTick, watch } from 'vue';
 import { nanoid } from 'nanoid';
 import type { ChatActorSystem } from '@/ai/chat/actorSystem';
-import { editorToolContextRegistry } from '@/ai/tools/context/editor';
-import { webviewToolContextRegistry } from '@/ai/tools/context/webview';
-import { widgetToolContextRegistry } from '@/ai/tools/context/widget';
+import { useActiveToolContext } from '@/hooks/useChat/useToolContext';
 
 /** Runtime 请求准备函数。 */
 type PrepareRuntimeRequest = ReturnType<typeof useRuntimeRequestConfig>['prepareRuntimeRequest'];
@@ -45,24 +44,8 @@ interface UseChatRuntimeLauncherOptions {
 
 /** Runtime 预检开始时冻结的 Renderer 资源身份。 */
 interface RuntimeResourceSnapshot {
-  /** 当前编辑器文档 ID。 */
-  readonly documentId?: string;
-  /** 当前 WebView 标签 ID。 */
-  readonly webviewId?: string;
-  /** 当前 Widget 编辑页 ID。 */
-  readonly widgetId?: string;
-}
-
-/**
- * 捕获预检开始时的 Renderer 资源身份。
- * @returns 不受后续页面切换影响的资源快照
- */
-function captureRuntimeResources(): RuntimeResourceSnapshot {
-  return Object.freeze({
-    documentId: editorToolContextRegistry.getCurrentContext()?.document.id,
-    webviewId: webviewToolContextRegistry.getCurrentId() ?? undefined,
-    widgetId: widgetToolContextRegistry.getCurrentId() ?? undefined
-  });
+  /** 预检开始时的页面工具 binding。 */
+  readonly toolContext?: ChatToolBinding;
 }
 
 /**
@@ -72,9 +55,7 @@ function captureRuntimeResources(): RuntimeResourceSnapshot {
  */
 function createResourceBinding(resources: RuntimeResourceSnapshot): RuntimeToolDiscoveryBinding {
   return Object.freeze({
-    documentId: resources.documentId,
-    webviewId: resources.webviewId,
-    widgetId: resources.widgetId
+    toolContext: resources.toolContext
   });
 }
 
@@ -84,16 +65,11 @@ function createResourceBinding(resources: RuntimeResourceSnapshot): RuntimeToolD
  * @param resources - 预检开始时冻结的 Renderer 资源
  * @returns 可由主进程持有的 capability 描述
  */
-function createCapabilityDescriptor(
-  prepared: PreparedRuntimeRequest,
-  resources: RuntimeResourceSnapshot = captureRuntimeResources()
-): ChatRuntimeCapabilityDescriptor {
+function createCapabilityDescriptor(prepared: PreparedRuntimeRequest, resources: RuntimeResourceSnapshot): ChatRuntimeCapabilityDescriptor {
   return {
     rendererToolNames: prepared.rendererTools.map((tool): string => tool.definition.name),
-    documentId: resources.documentId,
     workspaceRoot: prepared.config.workspaceRoot,
-    webviewId: resources.webviewId,
-    widgetId: resources.widgetId
+    toolContext: resources.toolContext
   };
 }
 
@@ -103,6 +79,13 @@ function createCapabilityDescriptor(
  * @returns Runtime 准备与生命周期操作
  */
 export function useChatRuntimeLauncher(options: UseChatRuntimeLauncherOptions) {
+  const activeChatTools = useActiveToolContext();
+
+  /** 捕获预检开始时的页面资源。 */
+  function captureRuntimeResources(): RuntimeResourceSnapshot {
+    return Object.freeze({ toolContext: activeChatTools.getActiveBinding() });
+  }
+
   /** 为请求补充 capability 描述，并丢弃过期准备结果。 */
   async function prepare(
     operationId: number,
@@ -132,23 +115,19 @@ export function useChatRuntimeLauncher(options: UseChatRuntimeLauncherOptions) {
       sessionId: address.sessionId,
       runtimeId: address.runtimeId,
       workspaceRoot: descriptor.workspaceRoot ?? null,
-      documentId: descriptor.documentId,
-      webviewId: descriptor.webviewId,
-      widgetId: descriptor.widgetId
+      toolContext: descriptor.toolContext
     });
     const tools = options.getActiveTools(binding).filter((tool): boolean => allowedToolNames.has(tool.definition.name));
-    const { documentId } = descriptor;
     options.actorSystem.registerRuntime(address, {
       tools,
       descriptor,
-      documentId,
-      getToolContext: () => (documentId ? editorToolContextRegistry.getContext(documentId) : undefined),
+      getToolContext: (): undefined => undefined,
       handleBridgeRequest: options.createBridgeHandler(binding)
     });
   }
 
   watch(
-    [options.activeSessionId, options.sessionActor.activeRuntimeId],
+    [options.activeSessionId, options.sessionActor.activeRuntimeId, activeChatTools.revision],
     async (): Promise<void> => {
       await nextTick();
       upgradeRecoveredCapabilities();
@@ -172,23 +151,19 @@ export function useChatRuntimeLauncher(options: UseChatRuntimeLauncherOptions) {
       runtimeId,
       rootRuntimeId: runtimeId
     };
-    const descriptor = prepared.config.capabilities ?? createCapabilityDescriptor(prepared);
+    const descriptor = prepared.config.capabilities ?? createCapabilityDescriptor(prepared, captureRuntimeResources());
     const allowedToolNames = new Set(prepared.rendererTools.map((tool): string => tool.definition.name));
     const binding: RuntimeToolBinding = Object.freeze({
       sessionId,
       runtimeId,
       workspaceRoot: prepared.config.workspaceRoot ?? null,
-      documentId: descriptor.documentId,
-      webviewId: descriptor.webviewId,
-      widgetId: descriptor.widgetId
+      toolContext: descriptor.toolContext
     });
     const tools = options.getActiveTools(binding).filter((tool): boolean => allowedToolNames.has(tool.definition.name));
-    const { documentId } = descriptor;
     options.actorSystem.registerRuntime(address, {
       tools,
       descriptor,
-      documentId,
-      getToolContext: () => (documentId ? editorToolContextRegistry.getContext(documentId) : undefined),
+      getToolContext: (): undefined => undefined,
       handleBridgeRequest: options.createBridgeHandler(binding)
     });
     options.actorSystem.send({ type: 'runtime.event', runtimeId, event: { type: 'runtime.started', runtimeId } });

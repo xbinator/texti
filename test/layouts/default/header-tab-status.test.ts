@@ -100,7 +100,7 @@ describe('HeaderTab generic status', (): void => {
     expect((emittedEvent as MouseEvent).clientX).toBe(120);
     expect((emittedEvent as MouseEvent).clientY).toBe(48);
     expect(headerTabSource).toContain("(e: 'contextmenu', event: MouseEvent): void;");
-    expect(headerTabSource).toContain("@contextmenu.prevent=\"emit('contextmenu', $event)\"");
+    expect(headerTabSource).toContain('@contextmenu.prevent="emit(\'contextmenu\', $event)"');
   });
 
   it('does not depend on chat runtime types or stores', (): void => {

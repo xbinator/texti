@@ -89,9 +89,11 @@ describe('dialog:openDirectory', (): void => {
 
   it('keeps a pending directory request independent from a file request', async (): Promise<void> => {
     let resolveDirectory: ((result: { canceled: boolean; filePaths: string[] }) => void) | undefined;
-    const pendingDirectory = new Promise<{ canceled: boolean; filePaths: string[] }>((resolve: (result: { canceled: boolean; filePaths: string[] }) => void): void => {
-      resolveDirectory = resolve;
-    });
+    const pendingDirectory = new Promise<{ canceled: boolean; filePaths: string[] }>(
+      (resolve: (result: { canceled: boolean; filePaths: string[] }) => void): void => {
+        resolveDirectory = resolve;
+      }
+    );
     mocks.showOpenDialog.mockReturnValueOnce(pendingDirectory).mockResolvedValueOnce({ canceled: true, filePaths: [] });
     mocks.realpath.mockResolvedValue('/private/tmp/workspace');
 

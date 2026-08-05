@@ -2,7 +2,7 @@
  * @file types.ts
  * @description WebView 自动化引擎扁平 DOM 树的可序列化类型。
  */
-import type { WebviewAgentElementAction, WebviewViewportElementLayer, WebviewViewportRect } from '@/ai/tools/context/webview';
+import type { WebviewAgentElementAction, WebviewViewportElementLayer, WebviewViewportRect } from '@/views/webview/web/types';
 
 /**
  * 页面 DOM 节点滚动距离。

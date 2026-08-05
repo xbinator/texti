@@ -1,17 +1,20 @@
 /**
- * @file use-widget-tool-context.test.ts
- * @description Widget 编辑页工具上下文绑定测试。
+ * @file use-chat-context.test.ts
+ * @description Widget 编辑页 Chat 上下文绑定测试。
  * @vitest-environment jsdom
  */
+/* eslint-disable vue/one-component-per-file */
+import type { ChatRuntimeBridgeRequestEvent } from 'types/chat-runtime';
 import type { Ref, VNode } from 'vue';
 import { computed, defineComponent, h, nextTick, ref } from 'vue';
 import { mount, type VueWrapper } from '@vue/test-utils';
-import { describe, expect, it } from 'vitest';
-import { widgetToolContextRegistry } from '@/ai/tools/context/widget';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { WidgetData } from '@/components/BWidget/types';
 import { createDefaultWidgetData } from '@/components/BWidget/utils/widgetData';
+import { toolContextRegistry } from '@/hooks/useChat/lib/registry';
+import { useActiveToolContext } from '@/hooks/useChat/useToolContext';
 import type { FileState } from '@/shared/platform/native/types';
-import { useWidgetToolContext } from '@/views/widget/hooks/useWidgetToolContext';
+import { useChatContext } from '@/views/widget/hooks/useChatContext';
 
 /**
  * Widget 上下文测试宿主。
@@ -54,7 +57,7 @@ function createHarness(): WidgetContextHarness {
 
   const Host = defineComponent({
     setup(): () => VNode {
-      useWidgetToolContext({
+      useChatContext({
         fileId,
         isActive,
         currentTitle,
@@ -76,29 +79,55 @@ function createHarness(): WidgetContextHarness {
   };
 }
 
-describe('useWidgetToolContext', (): void => {
+/**
+ * 创建 Widget provider 测试 Bridge 请求。
+ * @param kind - Bridge kind
+ * @returns Bridge 请求
+ */
+function createEvent(kind: string): ChatRuntimeBridgeRequestEvent {
+  return {
+    runtimeId: 'runtime-a',
+    sessionId: 'session-a',
+    turnId: 'turn-a',
+    clientId: 'bchat',
+    agentId: 'primary',
+    rootRuntimeId: 'runtime-a',
+    requestId: `request-${kind}`,
+    kind
+  };
+}
+
+describe('useChatContext', (): void => {
+  afterEach((): void => toolContextRegistry.clear());
+
   it('registers the active Widget editor and reads latest in-memory WidgetData JSON', async (): Promise<void> => {
     const harness = createHarness();
+    const tools = useActiveToolContext();
+    const binding = { providerId: 'widget', resourceId: 'widget-context-test-a' };
 
-    expect(widgetToolContextRegistry.getCurrentId()).toBe('widget-context-test-a');
-    expect(widgetToolContextRegistry.getCurrentContext()?.widget.title).toBe('aether-weather');
+    expect(tools.getActiveBinding()).toEqual(binding);
+    expect(tools.getBoundTools(binding).map((tool) => tool.definition.name)).toEqual(['read_current_widget']);
 
     harness.data.value.description = 'Updated Weather board';
     harness.title.value = 'weather-custom';
     await nextTick();
 
-    const context = widgetToolContextRegistry.getContext('widget-context-test-a');
-    expect(context?.widget.title).toBe('weather-custom');
-    expect(context?.widget.path).toBe('/home/user/.tibis/widgets/aether-weather/widget.json');
-    expect(context?.widget.getContent()).toContain('"description": "Updated Weather board"');
+    await expect(tools.dispatchBridge(binding, createEvent('widget-snapshot'))).resolves.toEqual({
+      handled: true,
+      data: expect.objectContaining({
+        title: 'weather-custom',
+        path: '/home/user/.tibis/widgets/aether-weather/widget.json',
+        content: expect.stringContaining('"description": "Updated Weather board"')
+      })
+    });
 
     harness.isActive.value = false;
     await nextTick();
 
-    expect(widgetToolContextRegistry.getCurrentContext()).toBeUndefined();
-    expect(widgetToolContextRegistry.getContext('widget-context-test-a')).toBe(context);
+    expect(tools.getActiveBinding()).toBeUndefined();
+    expect(tools.getBoundTools(binding)).toHaveLength(1);
 
     harness.wrapper.unmount();
-    expect(widgetToolContextRegistry.getContext('widget-context-test-a')).toBeUndefined();
+    expect(tools.getBoundTools(binding)).toEqual([]);
   });
 });

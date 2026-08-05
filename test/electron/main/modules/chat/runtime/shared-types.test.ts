@@ -112,7 +112,7 @@ describe('chat runtime shared types', (): void => {
       createdAt: 1,
       capabilities: {
         rendererToolNames: ['read_current_document'],
-        documentId: 'document-1'
+        toolContext: { providerId: 'editor', resourceId: 'document-1' }
       },
       pendingRequests: [
         {

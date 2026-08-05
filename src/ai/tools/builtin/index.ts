@@ -16,12 +16,8 @@ import {
   createGetCurrentTimeTool,
   createGetMcpSettingsTool,
   createGetSettingsTool,
-  createOperateWebpageTool,
   createOpenResourceTool,
   createQueryLogsTool,
-  createReadCurrentDocumentTool,
-  createReadCurrentWebpageTool,
-  createReadCurrentWidgetTool,
   createReadDirectoryTool,
   createReadFileTool,
   createRefreshMcpDiscoveryTool,
@@ -204,8 +200,6 @@ interface CreateBuiltinToolsOptions extends BuiltinToolBaseOptions {
 export function createBuiltinTools(options: CreateBuiltinToolsOptions = {}): AIToolExecutor[] {
   // 先汇总全部只读 schema-only 工具，再通过共享清单筛选默认暴露项。
   const allReadonlyTools: AIToolExecutor[] = [
-    createReadCurrentDocumentTool(),
-    createReadCurrentWebpageTool(),
     createGetCurrentTimeTool(),
     createQuestionTool({
       getPendingQuestion: options.getPendingQuestion ?? (() => null),
@@ -229,9 +223,6 @@ export function createBuiltinTools(options: CreateBuiltinToolsOptions = {}): AIT
 
   // 创建文档写工具 schema，实际执行在主进程。
   const createDocumentTool = createCreateDocumentTool();
-  const readCurrentWebpageTool = createReadCurrentWebpageTool();
-  const readCurrentWidgetTool = createReadCurrentWidgetTool();
-  const operateWebpageTool = createOperateWebpageTool();
 
   // 没有确认适配器时只返回只读工具 + 始终注册的写工具
   if (!options.confirm) {
@@ -240,11 +231,8 @@ export function createBuiltinTools(options: CreateBuiltinToolsOptions = {}): AIT
       ...(readDirectoryTool ? [readDirectoryTool] : []),
       ...fileSearchTools,
       ...(mcpReadTool ? [mcpReadTool] : []),
-      readCurrentWebpageTool,
-      readCurrentWidgetTool,
       createBuiltinTodoWriteTool({ getSessionId: options.getSessionId ?? (() => undefined) }),
       createDocumentTool,
-      operateWebpageTool,
       createBuiltinEditMemoryTool()
     ];
   }
@@ -293,11 +281,8 @@ export function createBuiltinTools(options: CreateBuiltinToolsOptions = {}): AIT
     ...(readDirectoryTool ? [readDirectoryTool] : []),
     ...fileSearchTools,
     ...(mcpReadTool ? [mcpReadTool] : []),
-    readCurrentWebpageTool,
-    readCurrentWidgetTool,
     ...writableTools,
     ...mcpWriteTools,
-    operateWebpageTool,
     ...(skillTool ? [skillTool] : []),
     ...(widgetTool ? [widgetTool] : []),
     todoWriteTool

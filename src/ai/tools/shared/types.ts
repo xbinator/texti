@@ -35,16 +35,6 @@ export interface ToolWorkspaceOptions {
   isFileInRecent?: (filePath: string) => boolean;
 }
 /**
- * 工具基础选项 - 页面上下文读取能力
- */
-export interface ToolPageContextOptions {
-  /** 获取当前 WebView 上下文。 */
-  getWebviewContext?: () => unknown;
-  /** 获取当前 Widget 编辑器上下文。 */
-  getWidgetContext?: () => unknown;
-}
-
-/**
  * 工具基础选项 - 确认能力（可选）
  */
 export interface ToolConfirmationOptions {
@@ -72,4 +62,4 @@ export interface ToolDraftOptions {
 /**
  * 内置工具共享基础选项
  */
-export interface BuiltinToolBaseOptions extends ToolConfirmationOptions, ToolWorkspaceOptions, ToolPageContextOptions, ToolDraftOptions {}
+export interface BuiltinToolBaseOptions extends ToolConfirmationOptions, ToolWorkspaceOptions, ToolDraftOptions {}

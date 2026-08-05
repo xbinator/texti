@@ -3,30 +3,17 @@
  * @description ChatRuntime 内置工具创建和动态过滤 hook。
  */
 import type { AIToolExecutor } from 'types/ai';
-import type { ChatRuntimeSkillSnapshot } from 'types/chat-runtime';
+import type { ChatRuntimeSkillSnapshot, ChatToolBinding } from 'types/chat-runtime';
 import type { Ref } from 'vue';
 import { uniq } from 'lodash-es';
 import type { SkillDefinition } from '@/ai/skill/types';
-import {
-  createBuiltinTools,
-  isBuiltinToolName,
-  OPEN_WIDGET_TOOL_NAME,
-  OPERATE_WEBPAGE_TOOL_NAME,
-  OPEN_RESOURCE_TOOL_NAME,
-  READ_CURRENT_WEBPAGE_TOOL_NAME,
-  READ_CURRENT_WIDGET_TOOL_NAME,
-  READ_DIRECTORY_TOOL_NAME,
-  SKILL_TOOL_NAME,
-  WIDGET_TOOL_NAME
-} from '@/ai/tools/builtin';
+import { createBuiltinTools, isBuiltinToolName, OPEN_WIDGET_TOOL_NAME, READ_DIRECTORY_TOOL_NAME, SKILL_TOOL_NAME, WIDGET_TOOL_NAME } from '@/ai/tools/builtin';
 import { createSkillTool } from '@/ai/tools/builtin/SkillTool';
 import { createOpenWidgetTool, createWidgetTool } from '@/ai/tools/builtin/WidgetTool';
 import type { AIToolConfirmationAdapter } from '@/ai/tools/confirmation';
-import { editorToolContextRegistry } from '@/ai/tools/context/editor';
-import { webviewToolContextRegistry } from '@/ai/tools/context/webview';
-import { widgetToolContextRegistry } from '@/ai/tools/context/widget';
 import { createWidgetHttpClient, executeWidgetRuntime, type WidgetConsoleLevel, type WidgetLogLevel } from '@/components/BWidget/utils/widgetRuntime';
 import { formatWidgetLogArgs } from '@/components/BWidget/utils/widgetRuntime/logger';
+import { useActiveToolContext } from '@/hooks/useChat/useToolContext';
 import { useNavigate } from '@/hooks/useNavigate';
 import { logger } from '@/shared/logger';
 import { native } from '@/shared/platform';
@@ -40,12 +27,8 @@ import { createRuntimeError } from '../utils/runtimeError';
 export interface RuntimeToolResourceBinding {
   /** 请求准备时冻结的工作区根目录。 */
   readonly workspaceRoot?: string | null;
-  /** 请求准备时冻结的文档 ID。 */
-  readonly documentId?: string;
-  /** 请求准备时冻结的 WebView 标签 ID。 */
-  readonly webviewId?: string;
-  /** 请求准备时冻结的 Widget 编辑页 ID。 */
-  readonly widgetId?: string;
+  /** 请求准备时冻结的页面工具资源。 */
+  readonly toolContext?: ChatToolBinding;
 }
 
 /** Runtime 工具绑定后不可变的执行身份。 */
@@ -67,6 +50,18 @@ interface PendingQuestionSnapshot {
   questionId: string;
   /** 发起 Question 的工具调用 ID。 */
   toolCallId: string;
+}
+
+/**
+ * 校验最终 Runtime 工具名称唯一，避免 schema 与执行器选择不一致。
+ * @param tools - 合并后的 Runtime 工具
+ * @returns 原工具数组
+ */
+function validateToolNames(tools: AIToolExecutor[]): AIToolExecutor[] {
+  const names = tools.map((tool: AIToolExecutor): string => tool.definition.name);
+  if (uniq(names).length === names.length) return tools;
+  const duplicateName = names.find((name: string, index: number): boolean => names.indexOf(name) !== index) ?? 'unknown';
+  throw new Error(`Duplicate Chat context tool name: ${duplicateName}`);
 }
 
 /**
@@ -115,6 +110,7 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
   const widgetStore = useWidgetStore();
   const toolSettingsStore = useToolSettingsStore();
   const recentStore = useRecentStore();
+  const activeChatTools = useActiveToolContext();
   const { openDraft, openFileByPath } = useNavigate();
   /** open_widget 前置执行阶段复用的托管 HTTP 客户端。 */
   const widgetHttpClient = createWidgetHttpClient();
@@ -166,20 +162,6 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
     const getSessionId = boundSessionId ? (): string => boundSessionId : options.getSessionId;
     const getWorkspaceRoot = binding && boundWorkspaceRoot !== undefined ? (): string | null => boundWorkspaceRoot : options.getWorkspaceRoot;
 
-    /** @returns Runtime 绑定的 WebView 上下文；未绑定时读取当前上下文。 */
-    function getWebviewContext(): unknown {
-      if (!binding) return webviewToolContextRegistry.getCurrentContext();
-      if (!binding.webviewId) return undefined;
-      return webviewToolContextRegistry.getContext(binding.webviewId);
-    }
-
-    /** @returns Runtime 绑定的 Widget 编辑器上下文；未绑定时读取当前上下文。 */
-    function getWidgetContext(): unknown {
-      if (!binding) return widgetToolContextRegistry.getCurrentContext();
-      if (!binding.widgetId) return undefined;
-      return widgetToolContextRegistry.getContext(binding.widgetId);
-    }
-
     return createBuiltinTools({
       confirm: options.createConfirmationAdapter(runtimeBinding),
       skillStore,
@@ -189,8 +171,6 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
       isFileInRecent: (filePath: string): boolean => {
         return Boolean(recentStore.recentFiles?.some((file): boolean => file.path === filePath));
       },
-      getWebviewContext,
-      getWidgetContext,
       openDraft,
       openFileByPath,
       /**
@@ -216,33 +196,34 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
   }
 
   /**
+   * 解析工具发现或执行使用的页面 binding。
+   * @param binding - 可选 Runtime binding
+   * @returns 页面 binding
+   */
+  function resolveToolBinding(binding?: RuntimeToolDiscoveryBinding): ChatToolBinding | undefined {
+    return binding ? binding.toolContext : activeChatTools.getActiveBinding();
+  }
+
+  /**
    * 动态获取当前可用的工具列表。
    * 每次调用时根据运行时状态（编辑器、MCP、Skill、Widget）过滤条件工具。
    * @returns 当前可用工具列表
    */
   function getActiveTools(binding?: RuntimeToolDiscoveryBinding): AIToolExecutor[] {
-    const allBuiltinTools = createBoundTools(binding);
-    const hasActiveEditor = binding
-      ? Boolean(binding.documentId && editorToolContextRegistry.getContext(binding.documentId))
-      : Boolean(editorToolContextRegistry.getCurrentContext());
-    const hasActiveWebview = binding
-      ? Boolean(binding.webviewId && webviewToolContextRegistry.getContext(binding.webviewId))
-      : Boolean(webviewToolContextRegistry.getCurrentContext());
-    const hasActiveWidget = binding
-      ? Boolean(binding.widgetId && widgetToolContextRegistry.getContext(binding.widgetId))
-      : Boolean(widgetToolContextRegistry.getCurrentContext());
+    const pageBinding = resolveToolBinding(binding);
+    const pageTools = pageBinding ? activeChatTools.getBoundTools(pageBinding) : [];
+    const hiddenNames = new Set(pageBinding ? activeChatTools.getHiddenToolNames(pageBinding) : []);
+    const coreTools = createBoundTools(binding);
     const hasWorkspace = Boolean(binding && binding.workspaceRoot !== undefined ? binding.workspaceRoot : options.workspaceRoot.value);
     const enabledWidgets = widgetStore.initialized ? widgetStore.getEnabledWidgets() : [];
     const hasActiveWidgets = widgetStore.initialized && enabledWidgets.length > 0;
-    const baseBuiltinTools = hasActiveWidgets
-      ? allBuiltinTools.filter((tool: AIToolExecutor): boolean => tool.definition.name !== OPEN_WIDGET_TOOL_NAME)
-      : allBuiltinTools;
+    const baseBuiltinTools = hasActiveWidgets ? coreTools.filter((tool: AIToolExecutor): boolean => tool.definition.name !== OPEN_WIDGET_TOOL_NAME) : coreTools;
 
-    // skillStore 在 onMounted 中异步初始化，allBuiltinTools 创建时 skillStore.initialized 为 false，
+    // skillStore 在 onMounted 中异步初始化，coreTools 创建时 skillStore.initialized 为 false，
     // 因此需要在每次获取工具时动态判断是否需要追加 Skill 工具。
     const dynamicTools: AIToolExecutor[] = [];
     if (skillStore.initialized && skillStore.getEnabledSkills().length > 0) {
-      const hasSkillTool = allBuiltinTools.some((tool) => tool.definition.name === SKILL_TOOL_NAME);
+      const hasSkillTool = baseBuiltinTools.some((tool) => tool.definition.name === SKILL_TOOL_NAME);
       if (!hasSkillTool) {
         dynamicTools.push(createSkillTool(skillStore));
       }
@@ -259,16 +240,13 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
       );
     }
 
-    return [...baseBuiltinTools, ...dynamicTools].filter((tool: AIToolExecutor): boolean => {
+    const applicationTools = [...baseBuiltinTools, ...dynamicTools].filter((tool: AIToolExecutor): boolean => !hiddenNames.has(tool.definition.name));
+    const tools = [...applicationTools, ...pageTools].filter((tool: AIToolExecutor): boolean => {
       if (!isBuiltinToolName(tool.definition.name)) return false;
-      if (tool.definition.name === 'read_current_document' && !hasActiveEditor) return false;
-      if (tool.definition.name === READ_CURRENT_WEBPAGE_TOOL_NAME && !hasActiveWebview) return false;
-      if (tool.definition.name === READ_CURRENT_WIDGET_TOOL_NAME && !hasActiveWidget) return false;
-      if (tool.definition.name === OPERATE_WEBPAGE_TOOL_NAME && !hasActiveWebview) return false;
-      if (tool.definition.name === OPEN_RESOURCE_TOOL_NAME && hasActiveWebview) return false;
       if (tool.definition.name === READ_DIRECTORY_TOOL_NAME && !hasWorkspace) return false;
       return true;
     });
+    return validateToolNames(tools);
   }
 
   /**

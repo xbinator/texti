@@ -3,12 +3,7 @@
  * @description 使用真实 SQLite 验证 Main-owned Turn/Checkpoint/Task 分层预算预留、结算和恢复事实。
  */
 import type { AgentStoreDatabase } from '../../../../../../electron/main/modules/chat/agents/types.mjs';
-import type {
-  AgentBudgetSnapshot,
-  AgentPreAttemptCancellationResult,
-  AgentUsageAccounting,
-  ChatAgentResult
-} from 'types/chat-agent';
+import type { AgentBudgetSnapshot, AgentPreAttemptCancellationResult, AgentUsageAccounting, ChatAgentResult } from 'types/chat-agent';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createAgentBudgetLedger } from '../../../../../../electron/main/modules/chat/agents/budget.mjs';

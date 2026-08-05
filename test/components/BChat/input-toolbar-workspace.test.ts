@@ -4,8 +4,8 @@
  * @vitest-environment jsdom
  */
 import { readFileSync } from 'node:fs';
-import { mount } from '@vue/test-utils';
 import { defineComponent, h } from 'vue';
+import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
 import InputToolbar from '@/components/BChat/components/InputToolbar.vue';
 

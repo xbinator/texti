@@ -223,6 +223,7 @@ tibis/
 │   │   ├── useAntdTheme.ts           # Ant Design 明暗主题
 │   │   ├── useAutoCollapse.ts        # ResizeObserver 自动折叠
 │   │   ├── useChat.ts                # AI 流式聊天（invoke/stream/abort）
+│   │   ├── useChatToolContext/        # 页面向 ChatRuntime 注册工具、Bridge handler 与稳定资源 binding
 │   │   ├── useClipboard.ts           # 剪贴板操作
 │   │   ├── useFileController.ts      # 公共文件生命周期控制器
 │   │   ├── useFileDrop.ts            # 文件拖拽处理
@@ -642,6 +643,8 @@ electron/main/modules/chat/runtime/tools/
 ### ChatRuntime 主进程架构
 
 聊天核心为 **ChatRuntime 主进程服务**（`electron/main/modules/chat/runtime/`），渲染进程通过 `useChatRuntime` hook 与主进程协同。
+
+Editor、WebView、Widget 等页面通过 `src/hooks/useChatToolContext/` 自主注册页面工具与 Bridge handler；BChat 只冻结并消费通用 `providerId + resourceId` binding，不需要识别相邻页面类型。页面离开后注销能力，已经启动的 Runtime 仍按其冻结 binding 精确路由，资源不存在时失败关闭。
 
 ```
 electron/main/modules/chat/runtime/
