@@ -8,7 +8,7 @@ import type { ChatRuntimeBridgeRequestEvent } from 'types/chat-runtime';
 import type { Ref } from 'vue';
 import { computed } from 'vue';
 import { createToolSuccessResult } from '@/ai/tools/results';
-import { useChatContextProvider, type ChatBridgeDispatchResult, type ToolContextTool } from '@/hooks/useChat/useChatContextRegistry';
+import { useChatContextProvider, type ChatBridgeDispatchResult, type ToolContextTool } from '@/hooks/useChat/useContextRegistry';
 import { asyncTo } from '@/utils/asyncTo';
 import { parseUnsavedPath } from '@/utils/file/unsaved';
 import { createEditorToolContext } from './useEditorToolContext';

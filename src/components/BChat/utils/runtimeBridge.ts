@@ -5,7 +5,7 @@
 import type { AIToolExecutionError } from 'types/ai';
 import type { ChatRuntimeBridgeRequestEvent } from 'types/chat-runtime';
 import type { OpenDraftInput, OpenDraftResult } from '@/ai/tools/shared/types';
-import type { ChatBridgeDispatchResult } from '@/hooks/useChat/useChatContextRegistry';
+import type { ChatBridgeDispatchResult } from '@/hooks/useChat/useContextRegistry';
 import { isDocumentRecord } from '@/shared/storage';
 import type { StoredDocumentRecord } from '@/shared/storage/files/types';
 import { asyncTo } from '@/utils/asyncTo';

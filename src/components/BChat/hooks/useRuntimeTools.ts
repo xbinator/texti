@@ -13,7 +13,7 @@ import { createOpenWidgetTool, createWidgetTool } from '@/ai/tools/builtin/Widge
 import type { AIToolConfirmationAdapter } from '@/ai/tools/confirmation';
 import { createWidgetHttpClient, executeWidgetRuntime, type WidgetConsoleLevel, type WidgetLogLevel } from '@/components/BWidget/utils/widgetRuntime';
 import { formatWidgetLogArgs } from '@/components/BWidget/utils/widgetRuntime/logger';
-import { useActiveChatContext } from '@/hooks/useChat/useChatContextRegistry';
+import { useActiveChatContext } from '@/hooks/useChat/useContextRegistry';
 import { useNavigate } from '@/hooks/useNavigate';
 import { logger } from '@/shared/logger';
 import { native } from '@/shared/platform';

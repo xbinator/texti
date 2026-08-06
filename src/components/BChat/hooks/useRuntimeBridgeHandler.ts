@@ -4,7 +4,7 @@
  */
 import type { RuntimeToolBinding } from './useRuntimeTools';
 import type { ChatRuntimeBridgeRequestEvent } from 'types/chat-runtime';
-import { useActiveChatContext } from '@/hooks/useChat/useChatContextRegistry';
+import { useActiveChatContext } from '@/hooks/useChat/useContextRegistry';
 import type { useNavigate } from '@/hooks/useNavigate';
 import { native } from '@/shared/platform';
 import type { StoredDocumentRecord } from '@/shared/storage/files/types';

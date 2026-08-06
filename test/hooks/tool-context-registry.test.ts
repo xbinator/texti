@@ -7,8 +7,8 @@ import type { ChatRuntimeBridgeRequestEvent, ChatToolBinding } from 'types/chat-
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AIToolConfirmationAdapter, AIToolConfirmationRequest } from '@/ai/tools/confirmation';
-import { createToolContextRegistry } from '@/hooks/useChat/lib/registry';
-import type { ToolContextTool } from '@/hooks/useChat/useChatContextRegistry';
+import { createToolContextRegistry } from '@/hooks/useChat/tool/registry';
+import type { ToolContextTool } from '@/hooks/useChat/useContextRegistry';
 
 /**
  * 创建测试确认适配器。

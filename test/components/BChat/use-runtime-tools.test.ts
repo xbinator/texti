@@ -162,7 +162,7 @@ vi.mock('@/components/BWidget/utils/widgetRuntime', () => ({
   executeWidgetRuntime: widgetRuntimeMockState.executeWidgetRuntime
 }));
 
-vi.mock('@/hooks/useChat/useChatContextRegistry', () => ({
+vi.mock('@/hooks/useChat/useContextRegistry', () => ({
   useActiveChatContext: () => activeChatToolsMock
 }));
 

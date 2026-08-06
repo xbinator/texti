@@ -5,7 +5,7 @@
 import type { ChatRuntimeBridgeRequestEvent } from 'types/chat-runtime';
 import { describe, expect, it, vi } from 'vitest';
 import { handleBChatRuntimeBridgeRequest } from '@/components/BChat/utils/runtimeBridge';
-import type { ChatBridgeDispatchResult } from '@/hooks/useChat/useChatContextRegistry';
+import type { ChatBridgeDispatchResult } from '@/hooks/useChat/useContextRegistry';
 
 /**
  * 创建完整 Runtime Bridge 请求事件。

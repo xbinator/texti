@@ -10,8 +10,8 @@ import { defineComponent, h, KeepAlive, nextTick, ref } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { toolContextRegistry } from '@/hooks/useChat/lib/registry';
-import { useActiveChatContext, useChatContextProvider, type ToolContextTool } from '@/hooks/useChat/useChatContextRegistry';
+import { toolContextRegistry } from '@/hooks/useChat/tool/registry';
+import { useActiveChatContext, useChatContextProvider, type ToolContextTool } from '@/hooks/useChat/useContextRegistry';
 
 /** Hook 测试使用的 Runtime 服务。 */
 const RUNTIME_SERVICES = { confirmation: { confirm: async (): Promise<boolean> => true } };
@@ -70,7 +70,7 @@ function createHarness(): HookHarness {
   return { wrapper: mount(Host), resourceId, available, active };
 }
 
-describe('useChatContextRegistry', (): void => {
+describe('useContextRegistry', (): void => {
   afterEach((): void => toolContextRegistry.clear());
 
   it('registers only when available and retains inactive mounted resources', async (): Promise<void> => {

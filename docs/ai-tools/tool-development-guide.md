@@ -12,7 +12,7 @@
 - `electron/main/modules/chat/runtime/tools/**/index.mts` 是已迁移工具的主进程执行入口。
 - `src/ai/tools/catalog/runtimeTools.ts` 只为 renderer 暴露 schema-only 工具，执行时会提示该工具已迁移到主进程。
 - `src/ai/tools/builtin/**/index.ts` 只保留仍需 renderer 本地状态或本地交互的工具。
-- `src/hooks/useChat/useChatContextRegistry.ts` 是页面绑定工具的通用注册与消费入口；工具定义、真实 executor、确认、展示和历史策略归属各页面的 `useChatContext`。
+- `src/hooks/useChat/useContextRegistry.ts` 是页面绑定工具的通用注册与消费入口；工具定义、真实 executor、确认、展示和历史策略归属各页面的 `useChatContext`。
 
 新增工具前，先判断工具属于哪一类，再决定写在哪里。
 
@@ -67,7 +67,7 @@
 - WebView：`src/views/webview/web/hooks/useChatContext.ts`
 - Widget：`src/views/widget/hooks/useChatContext.ts`
 - 新页面：该页面模块自己的 `hooks/useChatContext.ts`
-- 通用注册 Hook：`src/hooks/useChat/useChatContextRegistry.ts`
+- 通用注册 Hook：`src/hooks/useChat/useContextRegistry.ts`
 - 页面领域输入、结果校验：与页面 `useChatContext` 相邻放置
 - 测试：页面测试目录及 `test/integration/chat-page-tool-self-registration.test.ts`
 
@@ -348,7 +348,7 @@ bridge 不是第二套工具运行时，只是主进程向 renderer 请求 UI �
 import type { AIToolContext, AIToolExecutionMetadata, AIToolExecutionResult } from 'types/ai';
 import type { Ref } from 'vue';
 import { createToolFailureResult, createToolSuccessResult } from '@/ai/tools/results';
-import { useChatContextProvider, type ToolContextTool } from '@/hooks/useChat/useChatContextRegistry';
+import { useChatContextProvider, type ToolContextTool } from '@/hooks/useChat/useContextRegistry';
 import { asyncTo } from '@/utils/asyncTo';
 
 /** 示例页面工具上下文。 */
@@ -685,9 +685,9 @@ export async function executeExampleTool(input: ChatRuntimeMainToolExecutionInpu
 
 第一次接触页面绑定工具，建议按顺序读：
 
-1. `src/hooks/useChat/useChatContextRegistry.ts`
-2. `src/hooks/useChat/lib/types.ts`
-3. `src/hooks/useChat/lib/registry.ts`
+1. `src/hooks/useChat/useContextRegistry.ts`
+2. `src/hooks/useChat/tool/types.ts`
+3. `src/hooks/useChat/tool/registry.ts`
 4. 一个页面实例，例如 `src/components/BEditor/hooks/useChatContext.ts`
 5. 页面调用入口，例如 `src/components/BEditor/index.vue`
 6. `src/components/BChat/hooks/useRuntimeTools.ts`

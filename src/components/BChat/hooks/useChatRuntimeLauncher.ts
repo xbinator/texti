@@ -20,7 +20,7 @@ import type { Ref } from 'vue';
 import { nextTick, watch } from 'vue';
 import { nanoid } from 'nanoid';
 import type { ChatActorSystem } from '@/ai/chat/actorSystem';
-import { useActiveChatContext } from '@/hooks/useChat/useChatContextRegistry';
+import { useActiveChatContext } from '@/hooks/useChat/useContextRegistry';
 
 /** Runtime 请求准备函数。 */
 type PrepareRuntimeRequest = ReturnType<typeof useRuntimeRequestConfig>['prepareRuntimeRequest'];

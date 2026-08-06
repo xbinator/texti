@@ -7,7 +7,7 @@ import type { AIToolContext, AIToolExecutionError, AIToolExecutionMetadata, AITo
 import { ref } from 'vue';
 import { OPEN_RESOURCE_TOOL_NAME } from '@/ai/tools/catalog/runtimeTools';
 import { createToolFailureResult, createToolSuccessResult } from '@/ai/tools/results';
-import { useChatContextProvider, type ToolContextConfirmation, type ToolContextTool } from '@/hooks/useChat/useChatContextRegistry';
+import { useChatContextProvider, type ToolContextConfirmation, type ToolContextTool } from '@/hooks/useChat/useContextRegistry';
 import { asyncTo } from '@/utils/asyncTo';
 import {
   SUPPORTED_WEBPAGE_PRESS_KEYS,

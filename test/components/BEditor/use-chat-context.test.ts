@@ -14,8 +14,8 @@ import { executeToolCall } from '@/ai/tools/stream';
 import { createNoopEditorController, type EditorController } from '@/components/BEditor/adapters/types';
 import { useChatContext } from '@/components/BEditor/hooks/useChatContext';
 import type { EditorState } from '@/components/BEditor/types';
-import { toolContextRegistry } from '@/hooks/useChat/lib/registry';
-import { useActiveChatContext } from '@/hooks/useChat/useChatContextRegistry';
+import { toolContextRegistry } from '@/hooks/useChat/tool/registry';
+import { useActiveChatContext } from '@/hooks/useChat/useContextRegistry';
 
 /**
  * 创建 Editor provider 测试 Bridge 请求。

@@ -11,8 +11,8 @@ import { mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WidgetData } from '@/components/BWidget/types';
 import { createDefaultWidgetData } from '@/components/BWidget/utils/widgetData';
-import { toolContextRegistry } from '@/hooks/useChat/lib/registry';
-import { useActiveChatContext } from '@/hooks/useChat/useChatContextRegistry';
+import { toolContextRegistry } from '@/hooks/useChat/tool/registry';
+import { useActiveChatContext } from '@/hooks/useChat/useContextRegistry';
 import type { FileState } from '@/shared/platform/native/types';
 import { useChatContext } from '@/views/widget/hooks/useChatContext';
 

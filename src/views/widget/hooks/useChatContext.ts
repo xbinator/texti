@@ -7,7 +7,7 @@ import type { ComputedRef, Ref } from 'vue';
 import { computed } from 'vue';
 import { createToolSuccessResult } from '@/ai/tools/results';
 import type { WidgetData } from '@/components/BWidget/types';
-import { useChatContextProvider, type ToolContextTool } from '@/hooks/useChat/useChatContextRegistry';
+import { useChatContextProvider, type ToolContextTool } from '@/hooks/useChat/useContextRegistry';
 import type { FileState } from '@/shared/platform/native/types';
 
 /**

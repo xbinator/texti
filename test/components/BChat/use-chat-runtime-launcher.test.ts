@@ -69,7 +69,7 @@ const activeToolsMock = vi.hoisted(() => ({
   revision: null as unknown as Ref<number>
 }));
 
-vi.mock('@/hooks/useChat/useChatContextRegistry', () => ({
+vi.mock('@/hooks/useChat/useContextRegistry', () => ({
   useActiveChatContext: () => ({
     revision: activeToolsMock.revision,
     getActiveBinding: () => activeToolsMock.activeBinding,
