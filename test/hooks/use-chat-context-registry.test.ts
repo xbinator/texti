@@ -10,7 +10,7 @@ import { defineComponent, h, KeepAlive, nextTick, ref } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { toolContextRegistry } from '@/hooks/useChat/tool/registry';
+import { toolContextRegistry } from '@/hooks/useChat/context/registry';
 import { useActiveChatContext, useChatContextProvider, type ToolContextTool } from '@/hooks/useChat/useContextRegistry';
 
 /** Hook 测试使用的 Runtime 服务。 */

@@ -686,8 +686,8 @@ export async function executeExampleTool(input: ChatRuntimeMainToolExecutionInpu
 第一次接触页面绑定工具，建议按顺序读：
 
 1. `src/hooks/useChat/useContextRegistry.ts`
-2. `src/hooks/useChat/tool/types.ts`
-3. `src/hooks/useChat/tool/registry.ts`
+2. `src/hooks/useChat/context/types.ts`
+3. `src/hooks/useChat/context/registry.ts`
 4. 一个页面实例，例如 `src/components/BEditor/hooks/useChatContext.ts`
 5. 页面调用入口，例如 `src/components/BEditor/index.vue`
 6. `src/components/BChat/hooks/useRuntimeTools.ts`

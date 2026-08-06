@@ -9,7 +9,7 @@ import type { Ref } from 'vue';
 import { ref } from 'vue';
 import { OPEN_RESOURCE_TOOL_NAME } from '@/ai/tools/catalog/runtimeTools';
 import { createToolFailureResult, createToolSuccessResult } from '@/ai/tools/results';
-import { createEnvironmentLine, createEnvironmentSection } from '@/hooks/useChat/tool/environment';
+import { createEnvironmentLine, createEnvironmentSection } from '@/hooks/useChat/context/environment';
 import { useChatContextProvider, type ToolContextConfirmation, type ToolContextTool } from '@/hooks/useChat/useContextRegistry';
 import { asyncTo } from '@/utils/asyncTo';
 import {

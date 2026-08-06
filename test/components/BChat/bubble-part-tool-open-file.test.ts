@@ -9,7 +9,7 @@ import type { ChatMessageToolPart } from 'types/chat';
 import { mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import BubblePartTool from '@/components/BChat/components/MessageBubble/BubblePartTool/index.vue';
-import { toolContextRegistry } from '@/hooks/useChat/tool/registry';
+import { toolContextRegistry } from '@/hooks/useChat/context/registry';
 
 const openFileMock = vi.hoisted(() => vi.fn<(_options: { filePath?: string | null }) => Promise<void>>().mockResolvedValue(undefined));
 /** 工具摘要组件源码。 */

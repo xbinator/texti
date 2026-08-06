@@ -12,7 +12,7 @@ import { defineComponent, h, ref } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { toolContextRegistry } from '@/hooks/useChat/tool/registry';
+import { toolContextRegistry } from '@/hooks/useChat/context/registry';
 import { useActiveChatContext, useChatContextProvider, type ToolContextTool } from '@/hooks/useChat/useContextRegistry';
 import { projectRendererToolOutputs } from '../../electron/main/modules/chat/runtime/context/renderer-tool-output.mjs';
 import { isRendererManagedTool } from '../../electron/main/modules/chat/runtime/stream/tools.mjs';

@@ -10,7 +10,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AIToolConfirmationAdapter } from '@/ai/tools/confirmation';
-import { toolContextRegistry } from '@/hooks/useChat/tool/registry';
+import { toolContextRegistry } from '@/hooks/useChat/context/registry';
 import { useActiveChatContext } from '@/hooks/useChat/useContextRegistry';
 import { useChatContext } from '@/views/webview/web/hooks/useChatContext';
 import type { WebviewOperateResult, WebviewPageSnapshot, WebviewToolContext } from '@/views/webview/web/types';

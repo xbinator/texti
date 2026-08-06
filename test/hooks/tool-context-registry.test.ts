@@ -7,7 +7,7 @@ import type { ChatRuntimeBridgeRequestEvent, ChatRuntimePageEnvironmentContext, 
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AIToolConfirmationAdapter, AIToolConfirmationRequest } from '@/ai/tools/confirmation';
-import { createToolContextRegistry } from '@/hooks/useChat/tool/registry';
+import { createToolContextRegistry } from '@/hooks/useChat/context/registry';
 import type { ToolContextTool } from '@/hooks/useChat/useContextRegistry';
 
 /**

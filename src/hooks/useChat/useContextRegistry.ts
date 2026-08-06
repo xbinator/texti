@@ -2,9 +2,9 @@
  * @file useContextRegistry.ts
  * @description 将页面工具上下文绑定到 Vue 生命周期，并提供 BChat 消费入口。
  */
-import type { ActiveChatContext, ChatContextProviderOptions, ToolContextHandle } from './tool/types';
+import type { ActiveChatContext, ChatContextProviderOptions, ToolContextHandle } from './context/types';
 import { onActivated, onDeactivated, onScopeDispose, readonly, ref, watch } from 'vue';
-import { toolContextRegistry } from './tool/registry';
+import { toolContextRegistry } from './context/registry';
 
 export type {
   ActiveChatContext,
@@ -20,7 +20,7 @@ export type {
   ToolContextRegistry,
   ToolContextRuntimeServices,
   ToolContextTool
-} from './tool/types';
+} from './context/types';
 
 /** Registry 状态变化的 Vue 修订投影。 */
 const registryRevision = ref<number>(0);

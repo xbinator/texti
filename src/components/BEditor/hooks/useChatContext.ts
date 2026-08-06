@@ -7,7 +7,7 @@ import type { AIToolContext, AIToolExecutionError } from 'types/ai';
 import type { ChatRuntimeBridgeRequestEvent, ChatRuntimePageEnvironmentContext } from 'types/chat-runtime';
 import type { Ref } from 'vue';
 import { computed } from 'vue';
-import { createEnvironmentLine, createEnvironmentSection } from '@/hooks/useChat/tool/environment';
+import { createEnvironmentLine, createEnvironmentSection } from '@/hooks/useChat/context/environment';
 import { useChatContextProvider, type ChatBridgeDispatchResult } from '@/hooks/useChat/useContextRegistry';
 import { asyncTo } from '@/utils/asyncTo';
 import { parseUnsavedPath } from '@/utils/file/unsaved';

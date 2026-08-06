@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createNoopEditorController, type EditorController } from '@/components/BEditor/adapters/types';
 import { useChatContext } from '@/components/BEditor/hooks/useChatContext';
 import type { EditorState } from '@/components/BEditor/types';
-import { toolContextRegistry } from '@/hooks/useChat/tool/registry';
+import { toolContextRegistry } from '@/hooks/useChat/context/registry';
 import { useActiveChatContext } from '@/hooks/useChat/useContextRegistry';
 
 /**

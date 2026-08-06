@@ -34,7 +34,7 @@ import BChat from '@/components/BChat/index.vue';
 import { type AdaptedUserMessageInput, type SubmitAction, createUserChoice } from '@/components/BChat/utils/submitAction';
 import type { Message } from '@/components/BChat/utils/types';
 import type { FileMentionOption } from '@/components/BSmart/types';
-import { toolContextRegistry } from '@/hooks/useChat/tool/registry';
+import { toolContextRegistry } from '@/hooks/useChat/context/registry';
 import { useProvideActorSystem } from '@/hooks/useChat/useActorSystem';
 import type { ChatBridgeDispatchResult, ChatBridgeHandler, ToolContextHandle, ToolContextTool } from '@/hooks/useChat/useContextRegistry';
 import { emitChatFileReferenceInsert } from '@/shared/chat/fileReference';

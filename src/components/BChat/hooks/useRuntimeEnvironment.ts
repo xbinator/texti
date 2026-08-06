@@ -4,7 +4,7 @@
  */
 import type { RuntimeToolDiscoveryBinding } from './useRuntimeTools';
 import type { ChatRuntimeEnvironmentContext, ChatRuntimeEnvironmentMetadata, ChatRuntimePageEnvironmentContext } from 'types/chat-runtime';
-import { normalizeEnvironmentContext } from '@/hooks/useChat/tool/environment';
+import { normalizeEnvironmentContext } from '@/hooks/useChat/context/environment';
 
 /** 环境时间字段类型。 */
 type DatePartType = 'year' | 'month' | 'day' | 'hour' | 'minute' | 'second';

@@ -5,7 +5,7 @@
 import type { ChatRuntimePageEnvironmentContext } from 'types/chat-runtime';
 import type { ComputedRef, Ref } from 'vue';
 import { computed } from 'vue';
-import { createEnvironmentLine, createEnvironmentSection } from '@/hooks/useChat/tool/environment';
+import { createEnvironmentLine, createEnvironmentSection } from '@/hooks/useChat/context/environment';
 import { useChatContextProvider } from '@/hooks/useChat/useContextRegistry';
 import type { FileState } from '@/shared/platform/native/types';
 

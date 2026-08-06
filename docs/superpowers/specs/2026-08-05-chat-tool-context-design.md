@@ -160,7 +160,7 @@ export interface ChatRendererToolHistoryPolicy {
 }
 ```
 
-`ChatRendererToolHistoryPolicy` 由 `types/chat-runtime.d.ts` 权威声明，`src/hooks/useChat/tool/types.ts` 只导入并重新导出，避免共享 Runtime 类型反向依赖 Renderer Hook。
+`ChatRendererToolHistoryPolicy` 由 `types/chat-runtime.d.ts` 权威声明，`src/hooks/useChat/context/types.ts` 只导入并重新导出，避免共享 Runtime 类型反向依赖 Renderer Hook。
 
 该策略必须 JSON 可克隆。`placeholder` 最长 500 字符；`redactInputPaths` 最多 32 项，每项最长 256 字符，只允许以 `.` 分隔的普通自有属性路径，不允许通配符、数组脚本或 `__proto__`、`prototype`、`constructor` 段。主进程验证并冻结策略，只解释通用字段，不调用页面函数，也不根据工具名称选择 projector。
 
