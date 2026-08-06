@@ -4,9 +4,12 @@
  */
 import type { WebviewOperateInput, WebviewToolContext } from '../types';
 import type { AIToolContext, AIToolExecutionError, AIToolExecutionMetadata, AIToolExecutionResult } from 'types/ai';
+import type { ChatRuntimePageEnvironmentContext } from 'types/chat-runtime';
+import type { Ref } from 'vue';
 import { ref } from 'vue';
 import { OPEN_RESOURCE_TOOL_NAME } from '@/ai/tools/catalog/runtimeTools';
 import { createToolFailureResult, createToolSuccessResult } from '@/ai/tools/results';
+import { createEnvironmentLine, createEnvironmentSection } from '@/hooks/useChat/tool/environment';
 import { useChatContextProvider, type ToolContextConfirmation, type ToolContextTool } from '@/hooks/useChat/useContextRegistry';
 import { asyncTo } from '@/utils/asyncTo';
 import {
@@ -18,21 +21,33 @@ import {
 } from './chatToolInput';
 import { isWebpageResult, isWebpageSnapshot, sanitizeWebpageError, sanitizeWebpageResult } from './chatToolResult';
 
+/** WebView 页面可注入 Chat 的轻量环境信息。 */
+export interface WebviewChatPageEnvironment {
+  /** 当前页面地址。 */
+  readonly url?: string;
+  /** 当前页面标题。 */
+  readonly title?: string;
+  /** 当前页面选中文本。 */
+  readonly selectedText?: string;
+}
+
 /** WebView Chat Context 选项。 */
 interface UseChatContextOptions {
   /** 当前 WebView 资源 ID。 */
-  readonly resourceId: Readonly<import('vue').Ref<string>>;
+  readonly resourceId: Readonly<Ref<string>>;
   /** 当前 WebView 能力是否可用。 */
-  readonly available: Readonly<import('vue').Ref<boolean>>;
+  readonly available: Readonly<Ref<boolean>>;
   /** 当前 WebView 强类型工具上下文。 */
   readonly context: WebviewToolContext;
+  /** 当前 WebView 页面轻量环境信息。 */
+  readonly page: Readonly<Ref<WebviewChatPageEnvironment>>;
 }
 
 /** 读取当前网页工具名称。 */
 const READ_CURRENT_WEBPAGE_TOOL_NAME = 'read_current_webpage';
 
 /** 操作当前网页工具名称。 */
-const OPERATE_WEBPAGE_TOOL_NAME = 'operate_webpage';
+const OPERATE_CURRENT_WEBPAGE_TOOL_NAME = 'operate_current_webpage';
 
 /** 网页操作确认文本预览最大长度。 */
 const WEBVIEW_CONFIRMATION_PREVIEW_LIMIT = 300;
@@ -227,16 +242,30 @@ export function useChatContext(options: UseChatContextOptions): void {
    */
   async function operatePage(input: unknown, metadata?: AIToolExecutionMetadata): Promise<AIToolExecutionResult> {
     const normalized = normalizeWebpageInput(input);
-    if (!normalized) return createToolFailureResult(OPERATE_WEBPAGE_TOOL_NAME, 'INVALID_INPUT', '网页操作参数无效');
+    if (!normalized) return createToolFailureResult(OPERATE_CURRENT_WEBPAGE_TOOL_NAME, 'INVALID_INPUT', '网页操作参数无效');
     const [error, result] = await asyncTo(options.context.operatePage(normalized, metadata?.abortSignal));
     if (error) {
       const safeError = sanitizeWebpageError(error.cause ?? error);
-      return createToolFailureResult(OPERATE_WEBPAGE_TOOL_NAME, safeError.code, safeError.message);
+      return createToolFailureResult(OPERATE_CURRENT_WEBPAGE_TOOL_NAME, safeError.code, safeError.message);
     }
     if (!isWebpageResult(result)) {
-      return createToolFailureResult(OPERATE_WEBPAGE_TOOL_NAME, 'INVALID_INPUT', '网页操作结果格式无效');
+      return createToolFailureResult(OPERATE_CURRENT_WEBPAGE_TOOL_NAME, 'INVALID_INPUT', '网页操作结果格式无效');
     }
-    return createToolSuccessResult(OPERATE_WEBPAGE_TOOL_NAME, sanitizeWebpageResult(result));
+    return createToolSuccessResult(OPERATE_CURRENT_WEBPAGE_TOOL_NAME, sanitizeWebpageResult(result));
+  }
+
+  /**
+   * 读取当前页面轻量环境信息。
+   * @returns Chat Runtime 用户级环境上下文片段
+   */
+  function getEnvironmentContext(): ChatRuntimePageEnvironmentContext {
+    const page = options.page.value;
+    const section = createEnvironmentSection('current_page', [
+      createEnvironmentLine('URL', page.url),
+      createEnvironmentLine('Title', page.title),
+      createEnvironmentLine('Selected text', page.selectedText)
+    ]);
+    return section ? { sections: [section] } : {};
   }
 
   /**
@@ -264,7 +293,7 @@ export function useChatContext(options: UseChatContextOptions): void {
         name: READ_CURRENT_WEBPAGE_TOOL_NAME,
         description:
           '读取当前内置 WebView 页面的 BrowserState。模型应优先阅读 summary：其中包含 Current Page、Page info、简化 DOM 树、[N] 元素句柄和滚动提示。' +
-          '需要操作网页前必须先调用此工具获取 snapshotId，并从 summary/content 中选择 [N] 作为 operate_webpage 的 index；elements、viewport 和 selectedElement 仅作为辅助元数据。',
+          '需要操作网页前必须先调用此工具获取 snapshotId，并从 summary/content 中选择 [N] 作为 operate_current_webpage 的 index；elements、viewport 和 selectedElement 仅作为辅助元数据。',
         source: 'builtin',
         riskLevel: 'read',
         requiresActiveDocument: false,
@@ -287,7 +316,7 @@ export function useChatContext(options: UseChatContextOptions): void {
   function createOperateTool(): ToolContextTool {
     return {
       definition: {
-        name: OPERATE_WEBPAGE_TOOL_NAME,
+        name: OPERATE_CURRENT_WEBPAGE_TOOL_NAME,
         description:
           '操作当前激活 WebView 页面。页面内可操作项必须使用 read_current_webpage 返回的 [N]，再执行 click、input、select、press 或 scroll；不要用 navigate 替代页面文字、链接、按钮或卡片。' +
           'navigate 仅用于用户明确提供 URL、要求地址栏导航或切换到某网址，无需 snapshotId。文本框输入后需要按键时使用 press Enter；不接受 CSS selector 或任意 JavaScript。' +
@@ -336,6 +365,7 @@ export function useChatContext(options: UseChatContextOptions): void {
     available: options.available,
     active,
     getTools: () => [createReadTool(), createOperateTool()],
+    getEnvironmentContext,
     hiddenToolNames: [OPEN_RESOURCE_TOOL_NAME],
     appBridgeHandlers: {}
   });

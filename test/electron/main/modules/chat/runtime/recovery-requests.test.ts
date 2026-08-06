@@ -292,7 +292,7 @@ describe('chat runtime recovery request projections', (): void => {
   it('lists and removes pending renderer tool events', async (): Promise<void> => {
     const runtime = createRuntime();
     const requests = createRuntimeRendererToolRequests({ emit: vi.fn(), getRuntime: () => runtime, timeoutMs: 30_000 });
-    const result = requests.request({ runtime, toolCallId: 'tool-call-1', toolName: 'read_current_document', input: {} });
+    const result = requests.request({ runtime, toolCallId: 'tool-call-1', toolName: 'inspect_registered_page', input: {} });
 
     expect(requests.listPending(runtime.runtimeId)).toEqual([
       expect.objectContaining({ type: 'tool', event: expect.objectContaining({ toolCallId: 'tool-call-1' }) })
@@ -300,7 +300,7 @@ describe('chat runtime recovery request projections', (): void => {
     requests.submit({
       runtimeId: runtime.runtimeId,
       toolCallId: 'tool-call-1',
-      result: { toolName: 'read_current_document', status: 'success', data: { content: 'hello' } }
+      result: { toolName: 'inspect_registered_page', status: 'success', data: { content: 'hello' } }
     });
     await result;
     expect(requests.listPending(runtime.runtimeId)).toEqual([]);
@@ -314,7 +314,7 @@ describe('chat runtime recovery request projections', (): void => {
       throw new Error('cancel notification failed');
     });
     const requests = createRuntimeRendererToolRequests({ emit, getRuntime: () => runtime, timeoutMs: 30_000 });
-    const result = requests.request({ runtime, toolCallId: 'tool-call-failed-cancel', toolName: 'read_current_document', input: {} });
+    const result = requests.request({ runtime, toolCallId: 'tool-call-failed-cancel', toolName: 'inspect_registered_page', input: {} });
 
     expect((): void => requests.rejectRuntime(runtime.runtimeId, 'Runtime failed')).not.toThrow();
     const pendingAfterReject = requests.listPending(runtime.runtimeId);
@@ -322,7 +322,7 @@ describe('chat runtime recovery request projections', (): void => {
       requests.submit({
         runtimeId: runtime.runtimeId,
         toolCallId: 'tool-call-failed-cancel',
-        result: { toolName: 'read_current_document', status: 'failure', error: { code: 'TOOL_TIMEOUT', message: 'test cleanup' } }
+        result: { toolName: 'inspect_registered_page', status: 'failure', error: { code: 'TOOL_TIMEOUT', message: 'test cleanup' } }
       });
     }
 
@@ -340,7 +340,7 @@ describe('chat runtime recovery request projections', (): void => {
       timeoutMs: 30_000
     });
 
-    const result = requests.request({ runtime, toolCallId: 'tool-call-notify-failed', toolName: 'read_current_document', input: {} });
+    const result = requests.request({ runtime, toolCallId: 'tool-call-notify-failed', toolName: 'inspect_registered_page', input: {} });
 
     await expect(result).rejects.toThrow('tool request notification failed');
     expect(requests.listPending(runtime.runtimeId)).toEqual([]);

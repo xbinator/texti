@@ -9,7 +9,6 @@ import * as runtimeTools from '@/ai/tools/catalog/runtimeTools';
 import { GLOB_TOOL_NAME, GREP_TOOL_NAME, READ_FILE_TOOL_NAME, createGlobTool, createGrepTool, createReadFileTool } from '@/ai/tools/catalog/runtimeTools';
 import { stageFileEditToolRegistryEntry, stageFileWriteToolRegistryEntry } from '../../../shared/ai/tools/AgentStagedFileTool/index.js';
 import { createDocumentToolRegistryEntry } from '../../../shared/ai/tools/DocumentTool/index.js';
-import { getCurrentTimeToolRegistryEntry } from '../../../shared/ai/tools/EnvironmentTool/index.js';
 import { editFileToolRegistryEntry } from '../../../shared/ai/tools/FileEditTool/index.js';
 import {
   globToolRegistryEntry,
@@ -57,7 +56,6 @@ describe('toolRegistry', (): void => {
   it('assembles registry entries from one Tool directory per tool domain', (): void => {
     expect(TOOL_REGISTRY).toEqual([
       createDocumentToolRegistryEntry,
-      getCurrentTimeToolRegistryEntry,
       readFileToolRegistryEntry,
       readDirectoryToolRegistryEntry,
       globToolRegistryEntry,
@@ -113,13 +111,13 @@ describe('toolRegistry', (): void => {
     expect(getToolRegistryEntry('read_current_document')).toBeUndefined();
     expect(getToolRegistryEntry('read_current_widget')).toBeUndefined();
     expect(getToolRegistryEntry('read_current_webpage')).toBeUndefined();
-    expect(getToolRegistryEntry('operate_webpage')).toBeUndefined();
+    expect(getToolRegistryEntry('operate_current_webpage')).toBeUndefined();
+    expect(getToolRegistryEntry('get_current_time')).toBeUndefined();
   });
 
   it('can derive tool names by renderer exposure policy', (): void => {
-    expect(getToolNamesByExposure('default-readonly')).toEqual(
-      expect.arrayContaining(['get_current_time', 'read_file', 'get_settings', 'query_logs', 'open_resource'])
-    );
+    expect(getToolNamesByExposure('default-readonly')).toEqual(expect.arrayContaining(['read_file', 'get_settings', 'query_logs', 'open_resource']));
+    expect(getToolNamesByExposure('default-readonly')).not.toContain('get_current_time');
     expect(getToolNamesByExposure('default-readonly')).not.toContain('read_current_document');
     expect(getToolNamesByExposure('default-writable')).toEqual(expect.arrayContaining(['create_document', 'edit_file', 'write_file', 'update_settings']));
     expect(getToolNamesByExposure('conditional-readonly')).toEqual(expect.arrayContaining(['read_directory', 'glob', 'grep', 'get_mcp_settings']));

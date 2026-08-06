@@ -13,7 +13,6 @@ import {
   createEditFileTool,
   createGlobTool,
   createGrepTool,
-  createGetCurrentTimeTool,
   createGetMcpSettingsTool,
   createGetSettingsTool,
   createOpenResourceTool,
@@ -40,7 +39,6 @@ export {
   EDIT_FILE_TOOL_NAME,
   GLOB_TOOL_NAME,
   GREP_TOOL_NAME,
-  GET_CURRENT_TIME_TOOL_NAME,
   GET_MCP_SETTINGS_TOOL_NAME,
   GET_SETTINGS_TOOL_NAME,
   OPEN_RESOURCE_TOOL_NAME,
@@ -196,7 +194,6 @@ interface CreateBuiltinToolsOptions extends BuiltinToolBaseOptions {
 export function createBuiltinTools(options: CreateBuiltinToolsOptions = {}): AIToolExecutor[] {
   // 先汇总全部只读 schema-only 工具，再通过共享清单筛选默认暴露项。
   const allReadonlyTools: AIToolExecutor[] = [
-    createGetCurrentTimeTool(),
     createQuestionTool({
       getPendingQuestion: options.getPendingQuestion ?? (() => null),
       createQuestionId: options.createQuestionId ?? (() => nanoid())

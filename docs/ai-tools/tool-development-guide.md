@@ -2,7 +2,7 @@
 
 日期：2026-06-25
 
-更新：2026-08-05
+更新：2026-08-06
 
 本文档说明如何在当前工具架构下新增或修改 AI 工具。应用级工具的定义和执行拆成两层，页面绑定工具则由页面完整自注册：
 
@@ -44,7 +44,7 @@
 - `MemoryTool`
 - `ShellTool`
 - `SkillTool`
-- `WidgetTool`，负责聊天级 Widget 发现与打开，不是 Widget 编辑页的 `read_current_widget`。
+- `WidgetTool`，负责聊天级 Widget 发现与打开；Widget 编辑页只注册轻量环境上下文，不提供当前 Widget 读取工具。
 
 代码落点：
 
@@ -55,11 +55,11 @@
 
 ### 页面绑定 Renderer 工具
 
-工具必须读取或操作某个具体页面实例，且 Runtime 启动后仍必须绑定该实例时，使用页面自注册。当前包括：
+工具或环境信息必须绑定某个具体页面实例，且 Runtime 启动后仍必须绑定该实例时，使用页面自注册。当前包括：
 
-- Editor 的 `read_current_document`。
-- WebView 的 `read_current_webpage` 和 `operate_webpage`。
-- Widget 编辑页的 `read_current_widget`。
+- Editor 注册 `current_file` 环境 section：文件路径、选中行号和选中行内容。
+- WebView 注册 `current_page` 环境 section，并注册 `read_current_webpage` 和 `operate_current_webpage`。
+- Widget 编辑页注册 `current_file` 环境 section：Widget 文件路径。
 
 代码落点：
 
@@ -71,7 +71,9 @@
 - 页面领域输入、结果校验：与页面 `useChatContext` 相邻放置
 - 测试：页面测试目录及 `test/integration/chat-page-tool-self-registration.test.ts`
 
-页面工具不进入 `shared/ai/tools`、`src/ai/tools/catalog/runtimeTools.ts` 或 Electron 主进程工具分支。BChat 只捕获当前页面 binding 和通用 Renderer 工具描述符，不引用页面类型或工具名。
+页面工具和页面环境上下文不进入 `shared/ai/tools`、`src/ai/tools/catalog/runtimeTools.ts` 或 Electron 主进程工具分支。BChat 只捕获当前页面 binding、页面环境 section 和通用 Renderer 工具描述符，不引用页面类型或工具名。
+
+Chat Runtime 会在 BChat 层自动补充环境元信息，包括操作系统、IANA 时区、当前本地日期、当前本地具体时间和主工作目录路径；页面模块只注册自身能提供的自描述 `sections`，例如 `current_page` 或 `current_file`，不需要再实现时间、时区或系统信息工具。新增页面只在自己的 `useChatContext` 中组装 section，Chat 和 Runtime 不新增页面类型判断。
 
 ### SDK-managed 工具
 
@@ -88,7 +90,6 @@ shared/ai/tools/
   AgentStagedFileTool/index.ts
   DelegateTaskTool/index.ts
   DocumentTool/index.ts
-  EnvironmentTool/index.ts
   FileEditTool/index.ts
   FileReadTool/index.ts
   FileWriteTool/index.ts
@@ -103,7 +104,6 @@ shared/ai/tools/
 - `AgentStagedFileTool`：Child Task 私有 overlay 的内部暂存文件写入与编辑工具。
 - `DocumentTool`：应用级文档草稿创建工具；当前 Editor 文档读取归属 Editor 页面 `useChatContext`。
 - `DelegateTaskTool`：Main Coordinator 拥有的内部延迟委派契约；不进入普通 main/renderer 工具执行器。
-- `EnvironmentTool`：当前时间等环境信息工具。
 - `FileReadTool`：文件、目录读取工具。
 - `FileWriteTool`：文件创建或覆盖工具。
 - `FileEditTool`：精确替换类文件编辑工具。
@@ -226,7 +226,7 @@ export const TOOL_REGISTRY = [
 
 主进程执行逻辑按目录分组：
 
-- `ReadTool`：主进程环境等只读工具。
+- `ReadTool`：主进程通用只读工具。
 - `FileTool`：文件和目录读取、创建、写入、编辑。
 - `SettingsTool`：应用设置和 MCP server 配置写入。
 - `ResourceTool`：打开文件、网页或其他资源。

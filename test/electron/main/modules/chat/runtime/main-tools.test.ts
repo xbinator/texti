@@ -87,7 +87,7 @@ describe('createMainToolExecutor', (): void => {
     });
   });
 
-  it('routes local read tools without renderer bridge', async (): Promise<void> => {
+  it('does not route removed environment time tools through main-process dependencies', async (): Promise<void> => {
     const bridgeRequests: MainToolBridgeRequest[] = [];
     const executeMainTool = createMainToolExecutor(createMainToolDependencies(bridgeRequests));
 
@@ -98,9 +98,7 @@ describe('createMainToolExecutor', (): void => {
       input: {}
     });
 
-    expect(result.status).toBe('success');
-    expect(result.toolName).toBe('get_current_time');
-    expect(result.data).toMatchObject({ iso: '2026-06-19T00:00:00.000Z' });
+    expect(result).toMatchObject({ status: 'failure', error: { code: 'TOOL_NOT_FOUND' } });
     expect(bridgeRequests).toEqual([]);
   });
 
@@ -160,7 +158,7 @@ describe('createMainToolExecutor', (): void => {
     const operateResult = await executeMainTool({
       runtime,
       toolCallId: 'tool-call-web-operate-1',
-      toolName: 'operate_webpage',
+      toolName: 'operate_current_webpage',
       input: { snapshotId: 'snapshot-a', action: { type: 'click', index: 1 } }
     });
 

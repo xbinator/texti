@@ -1954,7 +1954,7 @@ describe('chat runtime service shell', (): void => {
             id: 'webview-operate',
             type: 'tool',
             toolCallId: 'webview-call-operate',
-            toolName: 'operate_webpage',
+            toolName: 'operate_current_webpage',
             status: 'done',
             input: {
               snapshotId: 'webview-snapshot-OLD_SNAPSHOT_SENTINEL',
@@ -1969,7 +1969,7 @@ describe('chat runtime service shell', (): void => {
               mode: 'keep',
               redactInputPaths: ['snapshotId', 'step', 'action.text', 'action.url', 'action.optionText']
             },
-            result: { toolName: 'operate_webpage', status: 'success', data: { ok: true, action: 'click' } }
+            result: { toolName: 'operate_current_webpage', status: 'success', data: { ok: true, action: 'click' } }
           },
           {
             id: 'webview-read-current',
@@ -2491,7 +2491,7 @@ describe('chat runtime service shell', (): void => {
     const capabilities = {
       rendererTools: [
         {
-          name: 'read_current_document',
+          name: 'inspect_registered_page',
           history: { mode: 'latest-only' as const, redactInputPaths: ['payload.secret'] }
         }
       ],
@@ -2514,7 +2514,7 @@ describe('chat runtime service shell', (): void => {
         capabilities: {
           rendererTools: [
             {
-              name: 'read_current_document',
+              name: 'inspect_registered_page',
               history: { mode: 'latest-only', redactInputPaths: ['payload.secret'] }
             }
           ],

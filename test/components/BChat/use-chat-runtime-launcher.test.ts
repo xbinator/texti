@@ -54,18 +54,18 @@ function createSessionActor(): UseChatSessionActorReturn {
 function createPageTool(): AIToolExecutor {
   return {
     definition: {
-      name: 'read_current_widget',
-      description: 'read widget',
+      name: 'inspect_registered_page',
+      description: 'inspect registered page',
       source: 'builtin',
       riskLevel: 'read',
       parameters: { type: 'object', properties: {} }
     },
-    execute: async () => ({ toolName: 'read_current_widget', status: 'success', data: null })
+    execute: async () => ({ toolName: 'inspect_registered_page', status: 'success', data: null })
   };
 }
 
 const activeToolsMock = vi.hoisted(() => ({
-  activeBinding: { providerId: 'widget', resourceId: 'widget-a' } as ChatToolBinding | undefined,
+  activeBinding: { providerId: 'page', resourceId: 'page-a' } as ChatToolBinding | undefined,
   revision: null as unknown as Ref<number>
 }));
 
@@ -74,11 +74,12 @@ vi.mock('@/hooks/useChat/useContextRegistry', () => ({
     revision: activeToolsMock.revision,
     getActiveBinding: () => activeToolsMock.activeBinding,
     getBoundTools: () => [],
+    getEnvironmentContext: () => undefined,
     getHiddenToolNames: () => [],
     getRendererTools: () => [
       {
-        name: 'read_current_widget',
-        history: { mode: 'latest-only', placeholder: '已保留最新 Widget 快照' }
+        name: 'inspect_registered_page',
+        history: { mode: 'latest-only', placeholder: '已保留最新页面快照' }
       }
     ],
     getPresentation: () => undefined,
@@ -88,11 +89,11 @@ vi.mock('@/hooks/useChat/useContextRegistry', () => ({
 
 describe('useChatRuntimeLauncher', (): void => {
   beforeEach((): void => {
-    activeToolsMock.activeBinding = { providerId: 'widget', resourceId: 'widget-a' };
+    activeToolsMock.activeBinding = { providerId: 'page', resourceId: 'page-a' };
     activeToolsMock.revision = ref<number>(0);
   });
 
-  it('passes the captured Widget identity into asynchronous request preparation', async (): Promise<void> => {
+  it('passes the captured page identity into asynchronous request preparation', async (): Promise<void> => {
     const prepared = {
       config: {
         model: { providerId: 'provider', modelId: 'model' },
@@ -120,7 +121,7 @@ describe('useChatRuntimeLauncher', (): void => {
       undefined,
       undefined,
       expect.objectContaining({
-        toolContext: { providerId: 'widget', resourceId: 'widget-a' }
+        toolContext: { providerId: 'page', resourceId: 'page-a' }
       })
     );
   });
@@ -143,12 +144,12 @@ describe('useChatRuntimeLauncher', (): void => {
         descriptor: {
           rendererTools: [
             {
-              name: 'read_current_widget',
-              history: { mode: 'latest-only', placeholder: '已保留最新 Widget 快照' }
+              name: 'inspect_registered_page',
+              history: { mode: 'latest-only', placeholder: '已保留最新页面快照' }
             }
           ],
           workspaceRoot: '/workspace',
-          toolContext: { providerId: 'widget', resourceId: 'widget-a' }
+          toolContext: { providerId: 'page', resourceId: 'page-a' }
         },
         getToolContext: (): undefined => undefined,
         handleBridgeRequest: async (): Promise<unknown> => undefined
@@ -184,14 +185,14 @@ describe('useChatRuntimeLauncher', (): void => {
       expect.objectContaining({
         sessionId: 'session-a',
         runtimeId: 'runtime-a',
-        toolContext: { providerId: 'widget', resourceId: 'widget-a' }
+        toolContext: { providerId: 'page', resourceId: 'page-a' }
       })
     );
     expect(registerRuntime).toHaveBeenCalledWith(
       address,
       expect.objectContaining({
         tools: [pageTool],
-        descriptor: expect.objectContaining({ toolContext: { providerId: 'widget', resourceId: 'widget-a' } })
+        descriptor: expect.objectContaining({ toolContext: { providerId: 'page', resourceId: 'page-a' } })
       })
     );
   });
@@ -222,8 +223,8 @@ describe('useChatRuntimeLauncher', (): void => {
 
     expect(result?.config.capabilities?.rendererTools).toEqual([
       {
-        name: 'read_current_widget',
-        history: { mode: 'latest-only', placeholder: '已保留最新 Widget 快照' }
+        name: 'inspect_registered_page',
+        history: { mode: 'latest-only', placeholder: '已保留最新页面快照' }
       }
     ]);
   });

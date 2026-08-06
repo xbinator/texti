@@ -301,9 +301,8 @@ vi.mock('@/ai/tools/builtin', () => ({
   EDIT_MEMORY_TOOL_NAME: 'edit_memory',
   OPEN_RESOURCE_TOOL_NAME: 'open_resource',
   OPEN_WIDGET_TOOL_NAME: 'open_widget',
-  OPERATE_WEBPAGE_TOOL_NAME: 'operate_webpage',
+  OPERATE_CURRENT_WEBPAGE_TOOL_NAME: 'operate_current_webpage',
   READ_CURRENT_WEBPAGE_TOOL_NAME: 'read_current_webpage',
-  READ_CURRENT_WIDGET_TOOL_NAME: 'read_current_widget',
   READ_DIRECTORY_TOOL_NAME: 'read_directory',
   SKILL_TOOL_NAME: 'skill',
   WIDGET_TOOL_NAME: 'widget'
@@ -1270,7 +1269,7 @@ describe('BChat sessionId runtime', (): void => {
   it('keeps Runtime bridge requests bound to the WebView active at request preparation', async (): Promise<void> => {
     const readWebviewA = vi.fn(async () => ({ url: 'https://a.example', title: 'A' }));
     const readWebviewB = vi.fn(async () => ({ url: 'https://b.example', title: 'B' }));
-    const webviewA = registerPageTools({ providerId: 'webview', resourceId: 'webview-a' }, ['read_current_webpage', 'operate_webpage'], {
+    const webviewA = registerPageTools({ providerId: 'webview', resourceId: 'webview-a' }, ['read_current_webpage', 'operate_current_webpage'], {
       'webview-snapshot': async (): Promise<ChatBridgeDispatchResult> => ({ handled: true, data: await readWebviewA() })
     });
     webviewA.activate();
@@ -1281,7 +1280,7 @@ describe('BChat sessionId runtime', (): void => {
       | { handleBridgeRequest: (event: ChatRuntimeBridgeRequestEvent) => Promise<unknown> }
       | undefined;
 
-    const webviewB = registerPageTools({ providerId: 'webview', resourceId: 'webview-b' }, ['read_current_webpage', 'operate_webpage'], {
+    const webviewB = registerPageTools({ providerId: 'webview', resourceId: 'webview-b' }, ['read_current_webpage', 'operate_current_webpage'], {
       'webview-snapshot': async (): Promise<ChatBridgeDispatchResult> => ({ handled: true, data: await readWebviewB() })
     });
     webviewB.activate();
@@ -1321,10 +1320,10 @@ describe('BChat sessionId runtime', (): void => {
     const resourceSync = createDeferred<void>();
     const readWebviewA = vi.fn(async () => ({ url: 'https://a.example', title: 'A' }));
     const readWebviewB = vi.fn(async () => ({ url: 'https://b.example', title: 'B' }));
-    const webviewA = registerPageTools({ providerId: 'webview', resourceId: 'webview-a' }, ['read_current_webpage', 'operate_webpage'], {
+    const webviewA = registerPageTools({ providerId: 'webview', resourceId: 'webview-a' }, ['read_current_webpage', 'operate_current_webpage'], {
       'webview-snapshot': async (): Promise<ChatBridgeDispatchResult> => ({ handled: true, data: await readWebviewA() })
     });
-    const webviewB = registerPageTools({ providerId: 'webview', resourceId: 'webview-b' }, ['read_current_webpage', 'operate_webpage'], {
+    const webviewB = registerPageTools({ providerId: 'webview', resourceId: 'webview-b' }, ['read_current_webpage', 'operate_current_webpage'], {
       'webview-snapshot': async (): Promise<ChatBridgeDispatchResult> => ({ handled: true, data: await readWebviewB() })
     });
     webviewA.activate();
@@ -2297,7 +2296,13 @@ describe('BChat sessionId runtime', (): void => {
     );
     expect(electronAPIMock.chatRuntimeSend).toHaveBeenCalledWith(
       expect.objectContaining({
-        system: '<user_memory>relevant</user_memory>',
+        system: undefined,
+        runtimeContext: expect.objectContaining({
+          memory: expect.objectContaining({
+            content: '<user_memory>relevant</user_memory>',
+            targetMessageId: expect.any(String)
+          })
+        }),
         tools: [expect.objectContaining({ name: 'read_file' })]
       })
     );
@@ -2345,7 +2350,13 @@ describe('BChat sessionId runtime', (): void => {
     );
     expect(electronAPIMock.chatRuntimeSend).toHaveBeenCalledWith(
       expect.objectContaining({
-        system: '<user_memory>full</user_memory>',
+        system: undefined,
+        runtimeContext: expect.objectContaining({
+          memory: expect.objectContaining({
+            content: '<user_memory>full</user_memory>',
+            targetMessageId: expect.any(String)
+          })
+        }),
         tools: expect.arrayContaining([expect.objectContaining({ name: 'edit_memory' }), expect.objectContaining({ name: 'read_file' })])
       })
     );
@@ -3392,7 +3403,13 @@ describe('BChat sessionId runtime', (): void => {
     );
     expect(electronAPIMock.chatRuntimeContinue).toHaveBeenCalledWith(
       expect.objectContaining({
-        system: '<user_memory>regen</user_memory>'
+        system: undefined,
+        runtimeContext: expect.objectContaining({
+          memory: {
+            content: '<user_memory>regen</user_memory>',
+            targetMessageId: 'user-regenerate'
+          }
+        })
       })
     );
   });
@@ -3451,11 +3468,17 @@ describe('BChat sessionId runtime', (): void => {
     expect(memoryStoreMock.loadMemory).toHaveBeenCalled();
     expect(electronAPIMock.chatRuntimeSend).toHaveBeenCalledWith(
       expect.objectContaining({
-        system: 'Remember user prefers concise answers.',
-        capabilities: {
+        system: undefined,
+        runtimeContext: expect.objectContaining({
+          memory: expect.objectContaining({
+            content: 'Remember user prefers concise answers.',
+            targetMessageId: expect.any(String)
+          })
+        }),
+        capabilities: expect.objectContaining({
           rendererTools: expect.any(Array),
           workspaceRoot: '/workspace'
-        },
+        }),
         tavily: { enabled: true, apiKey: 'tvly-test' },
         mcp: {
           servers: [

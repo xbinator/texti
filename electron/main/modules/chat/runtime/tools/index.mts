@@ -34,7 +34,7 @@ export function createMainToolExecutor(deps: MainToolsDependencies): MainToolExe
           }
         : deps;
 
-    if (isReadTool(input.toolName)) return executeReadTool(input, toolDeps);
+    if (isReadTool(input.toolName)) return executeReadTool(input);
     if (isFileTool(input.toolName)) return executeFileTool(input, toolDeps);
     if (isSettingsTool(input.toolName)) return executeSettingsTool(input, toolDeps);
     if (isResourceTool(input.toolName)) return executeResourceTool(input, toolDeps);

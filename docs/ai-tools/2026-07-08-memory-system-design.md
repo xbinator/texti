@@ -173,11 +173,12 @@ export interface MemorySelectionContext {
 BChat 输入
   -> buildUserInputParts() 解析文本与文件引用
   -> sendRuntimeUserMessage()
-  -> resolveChatRuntimeRequestConfig(userMessage, parts)
-  -> createMemorySelectionContext()
-  -> resolveRuntimeSystemPrompt(selection)
+  -> prepareRuntimeRequest(userMessage, parts)
+  -> createSelectionContext()
+  -> resolveRuntimeMemoryContext(selection)
   -> memoryStore.buildSystemPromptContext({ selection, onSelectionDebug })
   -> buildSystemPromptContext()
+  -> 写入 ChatRuntime runtimeContext.memory
   -> ChatRuntime send
 ```
 

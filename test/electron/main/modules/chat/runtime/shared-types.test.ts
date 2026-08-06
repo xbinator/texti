@@ -111,7 +111,7 @@ describe('chat runtime shared types', (): void => {
       phase: 'streaming',
       createdAt: 1,
       capabilities: {
-        rendererTools: [{ name: 'read_current_document' }],
+        rendererTools: [{ name: 'inspect_registered_page' }],
         toolContext: { providerId: 'editor', resourceId: 'document-1' }
       },
       pendingRequests: [

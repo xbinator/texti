@@ -60,9 +60,14 @@ function createConfirmation(approved: boolean): AIToolConfirmationAdapter {
 function mountContext(context: WebviewToolContext): ReturnType<typeof mount> {
   const resourceId = ref<string>('/webview/a');
   const available = ref<boolean>(true);
+  const page = ref({
+    url: 'https://example.com',
+    title: 'Example',
+    selectedText: 'Selected page text'
+  });
   const Host = defineComponent({
     setup(): () => VNode {
-      useChatContext({ resourceId, available, context });
+      useChatContext({ resourceId, available, context, page });
       return (): VNode => h('div');
     }
   });
@@ -93,14 +98,17 @@ describe('useChatContext', (): void => {
     await expect(readTool.execute({})).resolves.toEqual({ toolName: 'read_current_webpage', status: 'success', data: pageSnapshot });
     expect(tools.getHiddenToolNames(binding)).toEqual(['open_resource']);
     expect(tools.getPresentation(binding, 'read_current_webpage')).toEqual(expect.objectContaining({ label: '读取当前网页' }));
-    expect(tools.getPresentation(binding, 'operate_webpage')).toEqual(expect.objectContaining({ label: '操作当前网页' }));
+    expect(tools.getPresentation(binding, 'operate_current_webpage')).toEqual(expect.objectContaining({ label: '操作当前网页' }));
+    expect(tools.getEnvironmentContext(binding)).toEqual({
+      sections: [{ tag: 'current_page', lines: ['URL: https://example.com', 'Title: Example', 'Selected text: Selected page text'] }]
+    });
     expect(tools.getRendererTools(binding)).toEqual([
       {
         name: 'read_current_webpage',
         history: { mode: 'latest-only', placeholder: '历史网页快照已裁剪，请重新读取当前网页。' }
       },
       {
-        name: 'operate_webpage',
+        name: 'operate_current_webpage',
         history: { mode: 'keep', redactInputPaths: ['snapshotId', 'step', 'action.text', 'action.url', 'action.optionText'] }
       }
     ]);
@@ -118,8 +126,8 @@ describe('useChatContext', (): void => {
     const controller = new AbortController();
     const operateTool = tools
       .getBoundTools({ providerId: 'webview', resourceId: '/webview/a' }, { confirmation })
-      .find((tool): boolean => tool.definition.name === 'operate_webpage');
-    if (!operateTool) throw new Error('operate_webpage should be registered');
+      .find((tool): boolean => tool.definition.name === 'operate_current_webpage');
+    if (!operateTool) throw new Error('operate_current_webpage should be registered');
 
     await expect(operateTool.execute({ action: { type: 'click', index: 1 } })).resolves.toMatchObject({
       status: 'failure',
@@ -137,9 +145,9 @@ describe('useChatContext', (): void => {
         undefined,
         { abortSignal: controller.signal }
       )
-    ).resolves.toEqual({ toolName: 'operate_webpage', status: 'success', data: operationResult });
+    ).resolves.toEqual({ toolName: 'operate_current_webpage', status: 'success', data: operationResult });
     expect(confirmation.confirm).toHaveBeenCalledWith(
-      expect.objectContaining({ toolName: 'operate_webpage', title: '操作当前网页', description: '点击当前网页元素 #1' })
+      expect.objectContaining({ toolName: 'operate_current_webpage', title: '操作当前网页', description: '点击当前网页元素 #1' })
     );
     expect(context.operatePage).toHaveBeenCalledWith({ snapshotId: 'snapshot-a', action: { type: 'click', index: 1 } }, controller.signal);
     wrapper.unmount();
@@ -155,8 +163,8 @@ describe('useChatContext', (): void => {
     const confirmation = createConfirmation(false);
     const operateTool = tools
       .getBoundTools({ providerId: 'webview', resourceId: '/webview/a' }, { confirmation })
-      .find((tool): boolean => tool.definition.name === 'operate_webpage');
-    if (!operateTool) throw new Error('operate_webpage should be registered');
+      .find((tool): boolean => tool.definition.name === 'operate_current_webpage');
+    if (!operateTool) throw new Error('operate_current_webpage should be registered');
 
     await expect(
       operateTool.execute({
@@ -180,7 +188,7 @@ describe('useChatContext', (): void => {
     const tools = useActiveChatContext();
     const executors = tools.getBoundTools({ providerId: 'webview', resourceId: '/webview/a' }, { confirmation: createConfirmation(true) });
     const readTool = executors.find((tool): boolean => tool.definition.name === 'read_current_webpage');
-    const operateTool = executors.find((tool): boolean => tool.definition.name === 'operate_webpage');
+    const operateTool = executors.find((tool): boolean => tool.definition.name === 'operate_current_webpage');
     if (!readTool || !operateTool) throw new Error('WebView tools should be registered');
 
     await expect(readTool.execute({})).resolves.toMatchObject({ status: 'failure', error: { code: 'PAGE_LOADING', message: '页面正在导航' } });

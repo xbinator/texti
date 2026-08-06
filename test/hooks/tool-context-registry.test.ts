@@ -3,7 +3,7 @@
  * @description 页面工具上下文 Registry 的资源隔离与生命周期测试。
  * @vitest-environment jsdom
  */
-import type { ChatRuntimeBridgeRequestEvent, ChatToolBinding } from 'types/chat-runtime';
+import type { ChatRuntimeBridgeRequestEvent, ChatRuntimePageEnvironmentContext, ChatToolBinding } from 'types/chat-runtime';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AIToolConfirmationAdapter, AIToolConfirmationRequest } from '@/ai/tools/confirmation';
@@ -69,13 +69,13 @@ describe('tool context registry', (): void => {
     const editorHandler = vi.fn(() => ({ handled: true as const, data: { title: 'Editor' } }));
     const editor = registry.register({
       binding: editorBinding,
-      getTools: () => [createTool('read_current_document')],
+      getTools: () => [createTool('inspect_editor_page')],
       hiddenToolNames: [],
       appBridgeHandlers: { 'document-snapshot': editorHandler }
     });
     registry.register({
       binding: widgetBinding,
-      getTools: () => [createTool('read_current_widget')],
+      getTools: () => [createTool('inspect_widget_page')],
       hiddenToolNames: [],
       appBridgeHandlers: {}
     });
@@ -84,10 +84,8 @@ describe('tool context registry', (): void => {
 
     expect(registry.getActiveBinding()).toEqual(editorBinding);
     expect(Object.isFrozen(registry.getActiveBinding())).toBe(true);
-    expect(registry.getBoundTools(editorBinding, { confirmation: createConfirmation() }).map((tool) => tool.definition.name)).toEqual([
-      'read_current_document'
-    ]);
-    expect(registry.getBoundTools(widgetBinding, { confirmation: createConfirmation() }).map((tool) => tool.definition.name)).toEqual(['read_current_widget']);
+    expect(registry.getBoundTools(editorBinding, { confirmation: createConfirmation() }).map((tool) => tool.definition.name)).toEqual(['inspect_editor_page']);
+    expect(registry.getBoundTools(widgetBinding, { confirmation: createConfirmation() }).map((tool) => tool.definition.name)).toEqual(['inspect_widget_page']);
     await expect(registry.dispatchAppBridge(editorBinding, createEvent('document-snapshot'))).resolves.toEqual({
       handled: true,
       data: { title: 'Editor' }
@@ -106,7 +104,7 @@ describe('tool context registry', (): void => {
     });
     const second = registry.register({
       binding,
-      getTools: () => [createTool('operate_webpage')],
+      getTools: () => [createTool('operate_current_webpage')],
       hiddenToolNames: ['open_resource', 'open_resource'],
       appBridgeHandlers: {}
     });
@@ -115,7 +113,7 @@ describe('tool context registry', (): void => {
     first.unregister();
 
     expect(registry.getActiveBinding()).toEqual(binding);
-    expect(registry.getBoundTools(binding, { confirmation: createConfirmation() }).map((tool) => tool.definition.name)).toEqual(['operate_webpage']);
+    expect(registry.getBoundTools(binding, { confirmation: createConfirmation() }).map((tool) => tool.definition.name)).toEqual(['operate_current_webpage']);
     expect(registry.getHiddenToolNames(binding)).toEqual(['open_resource']);
     expect(Object.isFrozen(registry.getHiddenToolNames(binding))).toBe(true);
   });
@@ -153,11 +151,34 @@ describe('tool context registry', (): void => {
     expect(() =>
       registry.register({
         binding,
-        getTools: () => [createTool('read_current_document'), createTool('read_current_document')],
+        getTools: () => [createTool('inspect_editor_page'), createTool('inspect_editor_page')],
         hiddenToolNames: [],
         appBridgeHandlers: {}
       })
-    ).toThrow('Duplicate Tool context tool name: read_current_document');
+    ).toThrow('Duplicate Tool context tool name: inspect_editor_page');
+  });
+
+  it('returns a cloned environment context only for the exact binding', (): void => {
+    const registry = createToolContextRegistry();
+    const binding: ChatToolBinding = { providerId: 'editor', resourceId: 'document-a' };
+    const context = {
+      sections: [{ tag: 'current_file', lines: ['Path: /workspace/Draft.md', 'Selected lines:', '2: selected line'] }]
+    } satisfies ChatRuntimePageEnvironmentContext;
+    registry.register({
+      binding,
+      getTools: () => [],
+      getEnvironmentContext: () => context,
+      hiddenToolNames: [],
+      appBridgeHandlers: {}
+    });
+
+    const resolved = registry.getEnvironmentContext(binding);
+    context.sections[0].lines[2] = '2: changed later';
+
+    expect(resolved).toEqual({
+      sections: [{ tag: 'current_file', lines: ['Path: /workspace/Draft.md', 'Selected lines:', '2: selected line'] }]
+    });
+    expect(registry.getEnvironmentContext({ providerId: 'editor', resourceId: 'missing' })).toBeUndefined();
   });
 
   it('rejects page tool definitions that cannot cross the Runtime IPC boundary', (): void => {

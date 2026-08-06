@@ -4,20 +4,21 @@
 
 第一阶段已经用 `useChatContextProvider` 统一了 Editor、WebView、Widget 的页面 binding、生命周期和 Bridge 路由，BChat 不再直接读取三个页面专用 Context Registry。
 
-但页面工具协议仍然分散在多处：
+但页面工具协议曾经分散在多处：
 
 - 页面 `useChatContext` 只注册 schema-only executor 和 Bridge handler。
-- `shared/ai/tools/DocumentTool`、`WebviewTool`、`WidgetTool` 继续声明页面工具名称、Schema 与策略元数据。
-- `shared/ai/tools/index.ts` 继续集中聚合三个页面的工具条目。
-- Electron 主进程继续按 `read_current_document`、`read_current_webpage`、`operate_webpage` 与 `read_current_widget` 等具体名称执行页面工具。
-- BChat 的工具标签和结果摘要仍包含页面工具专用映射。
-- WebView 历史裁剪仍由主进程的页面专用 projector 完成。
+- `shared/ai/tools` 曾集中声明页面工具名称、Schema 与策略元数据。
+- Electron 主进程曾按具体页面工具名执行或投影页面工具。
+- BChat 曾需要知道 Editor、WebView、Widget 的当前上下文来源。
+- WebView 历史裁剪曾由主进程的页面专用 projector 完成。
+
+2026-08-06 的后续调整进一步收窄页面工具：Editor 和 Widget 不再注册 `read_current_*` 读取工具，只向 Runtime 注入轻量 `current_environment_context`；WebView 保留网页读取与操作工具，操作工具命名为 `operate_current_webpage`。
 
 因此，新增第四种带有新工具的页面仍要同时修改页面、shared Registry、Electron 执行分支和 BChat 展示配置。这与“页面存在即注册，页面消失即注销，Chat 和主进程不关心页面类型”的最终目标冲突。
 
 ## 最终目标
 
-- 页面模块一次性注册工具定义、真实 executor、确认信息、展示信息与历史策略。
+- 页面模块一次性注册工具定义、真实 executor、确认信息、展示信息、历史策略与轻量环境上下文。
 - BChat 只消费通用页面工具注册能力，不识别页面类型或页面工具名称。
 - Electron 主进程只区分应用级主进程工具与本轮已授权的 Renderer 工具，不识别页面类型或页面工具名称。
 - 新增第四种页面及其新工具时，只修改该页面模块和对应测试。
@@ -54,26 +55,28 @@
 
 页面绑定工具由页面模块声明并在 Renderer 执行：
 
-- Editor：`read_current_document`。
-- WebView：`read_current_webpage`、`operate_webpage`。
-- Widget：`read_current_widget`。
+- Editor：注册 `current_file` 环境 section，不注册当前文档读取工具。
+- WebView：注册 `current_page` 环境 section、`read_current_webpage` 与 `operate_current_webpage`。
+- Widget：注册 `current_file` 环境 section，不注册当前 Widget 读取工具。
 - 后续任意页面提供的新工具。
 
 页面工具只能通过应用已有的受控 Renderer 能力工作。注册项不能携带主进程函数，也不能扩大 Renderer 原有权限。
+
+BChat 在 Runtime 请求准备阶段自动补充环境元信息：操作系统、IANA 时区、当前本地日期、当前本地具体时间和主工作目录路径。页面模块只注册自身拥有的自描述 `sections`，例如 `current_page` 或 `current_file`，不再实现时间、时区或系统信息工具；新增页面只修改自己的 hook，不要求 Chat 或主进程认识页面类型。
 
 ### 通用注册层
 
 ```text
 src/hooks/useChat/
-├── lib/
+├── tool/
 │   ├── registry.ts
 │   └── types.ts
-└── useChatContextRegistry.ts
+└── useContextRegistry.ts
 ```
 
-- `useChatContextRegistry.ts`：通过 `useChatContextProvider` 管理页面注册生命周期，并通过 `useActiveChatContext` 为 BChat 提供通用消费入口。
-- `lib/registry.ts`：维护资源、激活状态、工具声明、展示元数据和精确 binding 查询。
-- `lib/types.ts`：声明注册项、Runtime 服务、确认、展示、历史和 Bridge 类型。
+- `useContextRegistry.ts`：通过 `useChatContextProvider` 管理页面注册生命周期，并通过 `useActiveChatContext` 为 BChat 提供通用消费入口。
+- `tool/registry.ts`：维护资源、激活状态、工具声明、展示元数据和精确 binding 查询。
+- `tool/types.ts`：声明注册项、Runtime 服务、确认、展示、历史和 Bridge 类型。
 
 页面领域类型、输入校验和结果规整保留在页面模块内。通用注册层不建立 Editor、WebView、Widget 的联合类型。
 
@@ -157,7 +160,7 @@ export interface ChatRendererToolHistoryPolicy {
 }
 ```
 
-`ChatRendererToolHistoryPolicy` 由 `types/chat-runtime.d.ts` 权威声明，`src/hooks/useChat/lib/types.ts` 只导入并重新导出，避免共享 Runtime 类型反向依赖 Renderer Hook。
+`ChatRendererToolHistoryPolicy` 由 `types/chat-runtime.d.ts` 权威声明，`src/hooks/useChat/tool/types.ts` 只导入并重新导出，避免共享 Runtime 类型反向依赖 Renderer Hook。
 
 该策略必须 JSON 可克隆。`placeholder` 最长 500 字符；`redactInputPaths` 最多 32 项，每项最长 256 字符，只允许以 `.` 分隔的普通自有属性路径，不允许通配符、数组脚本或 `__proto__`、`prototype`、`constructor` 段。主进程验证并冻结策略，只解释通用字段，不调用页面函数，也不根据工具名称选择 projector。
 
@@ -407,28 +410,29 @@ WebView 读取快照使用 `latest-only`；网页操作结果保留，但声明�
 
 ### Editor
 
-- `read_current_document` 的定义和真实 executor 移到 Editor 模块。
-- executor 通过 Editor 强类型 Context 返回标题、路径、内容和选区。
+- Editor 不再注册当前文档读取工具。
+- Editor 通过页面环境上下文注册当前文件定位信息：文件路径、选中行号和选中行内容。
 - `shared/ai/tools/DocumentTool` 只保留应用级 `create_document`。
-- Electron `ReadTool` 删除 `read_current_document` 分支。
+- Electron `ReadTool` 不包含当前文档读取分支。
 - Editor 仅为未保存文件写入保留应用 Bridge handler。
 
 ### WebView
 
-- `read_current_webpage` 与 `operate_webpage` 的定义和真实 executor 移到 WebView 模块。
+- `read_current_webpage` 与 `operate_current_webpage` 的定义和真实 executor 移到 WebView 模块。
 - 输入 Schema、常量、动作校验和结果清洗移动到 WebView 页面目录。
-- `operate_webpage` 使用 `riskLevel: 'write'` 和页面确认内容生成器。
+- `operate_current_webpage` 使用 `riskLevel: 'write'` 和页面确认内容生成器。
 - WebView 读取工具注册 `latest-only`，操作工具注册 `keep` 与失效、敏感输入路径。
+- WebView 通过页面环境上下文注册当前页面地址、标题和选中文本。
 - 删除 `shared/ai/tools/WebviewTool`。
 - 删除 Electron WebView 主进程执行器、输入/结果 sanitizer 和专用历史 projector。
 - WebView 不再注册页面工具 Bridge handler。
 
 ### Widget
 
-- `read_current_widget` 的定义和真实 executor 移到 Widget 页面模块。
-- executor 直接读取最新 `WidgetData`、标题和文件状态。
+- Widget 不再注册当前 Widget 读取工具。
+- Widget 通过页面环境上下文注册当前 Widget 文件路径。
 - 删除 `shared/ai/tools/WidgetTool`。
-- Electron `ReadTool` 删除 `read_current_widget` 分支。
+- Electron `ReadTool` 不包含当前 Widget 读取分支。
 - Widget 不再注册页面工具 Bridge handler。
 
 ## 新页面接入
@@ -522,10 +526,10 @@ WebView 读取快照使用 `latest-only`；网页操作结果保留，但声明�
 
 ### 现有页面回归
 
-- `read_current_document` 保持标题、路径、内容和选区语义。
+- Editor 环境上下文只包含文件路径、选中行号和选中行内容。
 - `read_current_webpage` 保持 BrowserState 与 snapshotId 语义。
-- `operate_webpage` 保持操作、确认、结果清洗和重新观察约束。
-- `read_current_widget` 保持 WidgetData JSON 语义。
+- `operate_current_webpage` 保持操作、确认、结果清洗和重新观察约束。
+- Widget 环境上下文只包含 Widget 文件路径。
 - 未保存文件写入回退保持现有行为。
 - 应用级文件、设置、MCP、Skill、Confirmation 与资源工具不受影响。
 
@@ -549,7 +553,7 @@ WebView 读取快照使用 `latest-only`；网页操作结果保留，但声明�
 本设计已完成实施：
 
 - Editor、WebView、Widget 均通过各自页面目录中的同名 `useChatContext` 注册完整工具契约。
-- 通用 Hook 入口为 `src/hooks/useChat/useChatContextRegistry.ts`，页面使用 `useChatContextProvider`，BChat 使用 `useActiveChatContext`。
+- 通用 Hook 入口为 `src/hooks/useChat/useContextRegistry.ts`，页面使用 `useChatContextProvider`，BChat 使用 `useActiveChatContext`。
 - `shared/ai/tools/WebviewTool`、`shared/ai/tools/WidgetTool` 以及 Electron WebView 专用执行与历史投影已删除；`shared/ai/tools/DocumentTool` 仅保留应用级 `create_document`。
 - 页面工具执行、恢复、中断、活动上报、展示和历史投影均通过通用协议处理。
 - `test/integration/chat-page-tool-self-registration.test.ts` 以生产代码未知的第四页面工具验证零中心配置接入。

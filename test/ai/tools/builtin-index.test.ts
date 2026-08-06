@@ -31,7 +31,9 @@ describe('builtin tools index', (): void => {
   it('keeps page-scoped schemas out of the core builtin factory', (): void => {
     const toolNames = createBuiltinTools().map((tool) => tool.definition.name);
 
-    expect(toolNames).not.toEqual(expect.arrayContaining(['read_current_document', 'read_current_webpage', 'read_current_widget', 'operate_webpage']));
+    expect(toolNames).not.toEqual(
+      expect.arrayContaining(['get_current_time', 'read_current_document', 'read_current_webpage', 'read_current_widget', 'operate_current_webpage'])
+    );
   });
 
   it('keeps workspace file search tools available when a workspace exists', (): void => {

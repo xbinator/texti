@@ -69,7 +69,7 @@ export interface MemorySelectionDebugInfo {
   droppedItems: MemorySelectionDebugItem[];
 }
 
-/** 构建 system prompt 记忆上下文的选项 */
+/** 构建 runtime context 记忆上下文的选项 */
 export interface BuildMemoryContextOptions {
   /** 最大注入字符数 */
   maxChars?: number;

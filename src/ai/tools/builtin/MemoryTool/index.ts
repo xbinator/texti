@@ -50,7 +50,7 @@ export function createBuiltinEditMemoryTool(): AIToolExecutor<EditMemoryInput> {
     definition: {
       name: EDIT_MEMORY_TOOL_NAME,
       description:
-        '修改用户记忆。你已在 system prompt 中持有当前完整记忆内容。' +
+        '修改用户记忆。你已在本轮 runtime memory context 中持有当前完整记忆内容。' +
         '决定某个分区应该包含哪些条目，提供完整列表即可，工具会直接覆盖该分区。' +
         '未提及的分区不受影响。单分区最多 20 条，每条一行文本。',
       source: 'builtin',

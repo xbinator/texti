@@ -515,7 +515,7 @@ async function* createTwoMainToolCallStream(): AsyncGenerator<unknown> {
  * @returns AI stream chunk 序列
  */
 async function* createMainBridgeToolStream(): AsyncGenerator<unknown> {
-  yield { type: 'tool-call', toolCallId: 'tool-call-1', toolName: 'read_current_document', input: {} };
+  yield { type: 'tool-call', toolCallId: 'tool-call-1', toolName: 'inspect_registered_page', input: {} };
   yield { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 6, outputTokens: 4, totalTokens: 10 } };
 }
 
@@ -526,15 +526,6 @@ async function* createMainBridgeToolStream(): AsyncGenerator<unknown> {
 async function* createMainWebpageToolStream(): AsyncGenerator<unknown> {
   yield { type: 'tool-call', toolCallId: 'tool-call-1', toolName: 'read_current_webpage', input: {} };
   yield { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 9, outputTokens: 4, totalTokens: 13 } };
-}
-
-/**
- * 创建主进程当前时间工具调用的测试流。
- * @returns AI stream chunk 序列
- */
-async function* createMainTimeToolStream(): AsyncGenerator<unknown> {
-  yield { type: 'tool-call', toolCallId: 'tool-call-1', toolName: 'get_current_time', input: {} };
-  yield { type: 'finish', finishReason: 'tool-calls', totalUsage: { inputTokens: 5, outputTokens: 4, totalTokens: 9 } };
 }
 
 /**
@@ -1858,16 +1849,16 @@ describe('runtime stream executor', (): void => {
     expect(result).toEqual({ totalUsage: { inputTokens: 8, outputTokens: 5, totalTokens: 13 } });
   });
 
-  it('executes read_current_document through the generic renderer-managed tool executor', async (): Promise<void> => {
+  it('executes page-registered tools through the generic renderer-managed tool executor', async (): Promise<void> => {
     const assistantMessage = createAssistantMessage();
     const updates: ChatMessageRecord[] = [];
     const executeRendererTool = vi.fn().mockResolvedValue({
-      toolName: 'read_current_document',
+      toolName: 'inspect_registered_page',
       status: 'success',
       data: { id: 'doc-1', title: 'index.md', path: '/tmp/index.md', content: '# Hello' }
     });
     const executeMainTool = vi.fn().mockResolvedValue({
-      toolName: 'read_current_document',
+      toolName: 'inspect_registered_page',
       status: 'failure',
       error: { code: 'EXECUTION_FAILED', message: 'main process should not run' }
     });
@@ -1889,7 +1880,7 @@ describe('runtime stream executor', (): void => {
       {
         runtime: {
           ...runtime,
-          tools: [{ name: 'read_current_document', description: 'Read current document', parameters: { type: 'object', properties: {} } }]
+          tools: [{ name: 'inspect_registered_page', description: 'Inspect registered page', parameters: { type: 'object', properties: {} } }]
         },
         userMessage,
         assistantMessage
@@ -1900,9 +1891,12 @@ describe('runtime stream executor', (): void => {
     );
 
     expect(executeRendererTool).toHaveBeenCalledWith({
-      runtime: expect.objectContaining({ runtimeId: 'runtime-1', tools: expect.arrayContaining([expect.objectContaining({ name: 'read_current_document' })]) }),
+      runtime: expect.objectContaining({
+        runtimeId: 'runtime-1',
+        tools: expect.arrayContaining([expect.objectContaining({ name: 'inspect_registered_page' })])
+      }),
       toolCallId: 'tool-call-1',
-      toolName: 'read_current_document',
+      toolName: 'inspect_registered_page',
       input: {}
     });
     expect(executeMainTool).not.toHaveBeenCalled();
@@ -1913,11 +1907,11 @@ describe('runtime stream executor', (): void => {
         {
           type: 'tool',
           toolCallId: 'tool-call-1',
-          toolName: 'read_current_document',
+          toolName: 'inspect_registered_page',
           status: 'done',
           input: {},
           result: {
-            toolName: 'read_current_document',
+            toolName: 'inspect_registered_page',
             status: 'success',
             data: { id: 'doc-1', title: 'index.md', path: '/tmp/index.md', content: '# Hello' }
           }
@@ -2256,72 +2250,6 @@ describe('runtime stream executor', (): void => {
             toolName: 'read_current_webpage',
             status: 'success',
             data: webpageSnapshot
-          }
-        }
-      ]
-    });
-  });
-
-  it('executes get_current_time through the main-process tool executor', async (): Promise<void> => {
-    const assistantMessage = createAssistantMessage();
-    const updates: ChatMessageRecord[] = [];
-    const executeMainTool = vi.fn().mockResolvedValue({
-      toolName: 'get_current_time',
-      status: 'success',
-      data: { iso: '2026-06-19T00:00:00.000Z', timestamp: 1781827200000, locale: '2026-06-19 08:00:00' }
-    });
-    const executeRendererTool = vi.fn().mockResolvedValue({
-      toolName: 'get_current_time',
-      status: 'failure',
-      error: { code: 'EXECUTION_FAILED', message: 'renderer should not run' }
-    });
-    const resolve = vi.fn().mockResolvedValue({
-      createOptions: {
-        providerId: 'openai',
-        providerName: 'OpenAI',
-        providerType: 'openai',
-        apiKey: 'sk-test',
-        baseUrl: 'https://api.openai.com/v1'
-      },
-      modelId: 'gpt-test'
-    });
-    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createMainTimeToolStream() }]);
-    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, executeRendererTool, executeMainTool });
-
-    const result = await executor(
-      {
-        runtime: {
-          ...runtime,
-          tools: [{ name: 'get_current_time', description: 'Get current time', parameters: { type: 'object', properties: {} } }]
-        },
-        userMessage,
-        assistantMessage
-      },
-      async (message) => {
-        updates.push({ ...message, parts: [...message.parts] });
-      }
-    );
-
-    expect(executeMainTool).toHaveBeenCalledWith({
-      runtime: expect.objectContaining({ runtimeId: 'runtime-1', tools: expect.arrayContaining([expect.objectContaining({ name: 'get_current_time' })]) }),
-      toolCallId: 'tool-call-1',
-      toolName: 'get_current_time',
-      input: {}
-    });
-    expect(executeRendererTool).not.toHaveBeenCalled();
-    expect(result).toEqual({ totalUsage: { inputTokens: 5, outputTokens: 4, totalTokens: 9 }, shouldContinue: true });
-    expect(updates.at(-1)).toMatchObject({
-      parts: [
-        {
-          type: 'tool',
-          toolCallId: 'tool-call-1',
-          toolName: 'get_current_time',
-          status: 'done',
-          input: {},
-          result: {
-            toolName: 'get_current_time',
-            status: 'success',
-            data: { iso: '2026-06-19T00:00:00.000Z', timestamp: 1781827200000, locale: '2026-06-19 08:00:00' }
           }
         }
       ]

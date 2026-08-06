@@ -10,7 +10,6 @@ import {
   EDIT_FILE_TOOL_NAME,
   GLOB_TOOL_NAME,
   GREP_TOOL_NAME,
-  GET_CURRENT_TIME_TOOL_NAME,
   GET_MCP_SETTINGS_TOOL_NAME,
   GET_SETTINGS_TOOL_NAME,
   OPEN_RESOURCE_TOOL_NAME,
@@ -34,7 +33,6 @@ export {
   EDIT_FILE_TOOL_NAME,
   GLOB_TOOL_NAME,
   GREP_TOOL_NAME,
-  GET_CURRENT_TIME_TOOL_NAME,
   GET_MCP_SETTINGS_TOOL_NAME,
   GET_SETTINGS_TOOL_NAME,
   OPEN_RESOURCE_TOOL_NAME,
@@ -119,11 +117,6 @@ function getRuntimeToolFactory(toolName: string): () => AIToolExecutor {
  * 创建 create_document schema-only 工具。
  */
 export const createCreateDocumentTool = getRuntimeToolFactory(CREATE_DOCUMENT_TOOL_NAME);
-
-/**
- * 创建 get_current_time schema-only 工具。
- */
-export const createGetCurrentTimeTool = getRuntimeToolFactory(GET_CURRENT_TIME_TOOL_NAME);
 
 /**
  * 创建 read_file schema-only 工具。

@@ -578,10 +578,10 @@ function createWebviewPageSummary(snapshot: { url: string; title: string; header
     snapshot.footer,
     '',
     'Rules:',
-    '- Use [N] as the element handle for operate_webpage.',
+    '- Use [N] as the element handle for operate_current_webpage.',
     '- Do not use navigate for page-visible links or text; use [N] with click.',
     '- Treat [N] as a handle from the latest snapshotId, not as a stable position across reads.',
-    '- If the footer says more content exists above or below, use operate_webpage scroll and read again.'
+    '- If the footer says more content exists above or below, use operate_current_webpage scroll and read again.'
   ]
     .filter((line, index, lines) => line || (index > 0 && lines[index - 1]))
     .join('\n');

@@ -12,13 +12,20 @@ import type {
   ToolContextTool
 } from './types';
 import type { AIToolContext, AIToolExecutionError, AIToolExecutionMetadata, AIToolExecutionResult, AIToolExecutor } from 'types/ai';
-import type { ChatRendererToolDescriptor, ChatRendererToolHistoryPolicy, ChatRuntimeBridgeRequestEvent, ChatToolBinding } from 'types/chat-runtime';
+import type {
+  ChatRendererToolDescriptor,
+  ChatRendererToolHistoryPolicy,
+  ChatRuntimeBridgeRequestEvent,
+  ChatRuntimePageEnvironmentContext,
+  ChatToolBinding
+} from 'types/chat-runtime';
 import { isEqual, uniq } from 'lodash-es';
 import type { AIToolConfirmationRequest } from '@/ai/tools/confirmation';
 import { executeResultWithPermission } from '@/ai/tools/permission';
 import { createToolFailureResult } from '@/ai/tools/results';
 import { asyncTo } from '@/utils/asyncTo';
 import { readToolExecutionErrorCode } from '../../../../shared/ai/toolExecutionErrors';
+import { normalizeEnvironmentContext } from './environment';
 
 /** 注册时冻结的页面工具元数据。 */
 interface ToolMetadataSnapshot {
@@ -124,6 +131,24 @@ function cloneDefinition(definition: ToolContextDefinition, toolName: string): T
     return structuredClone(definition);
   } catch {
     throw new Error(`Tool context definition must be cloneable: ${toolName}`);
+  }
+}
+
+/**
+ * 结构化复制页面环境上下文，确保可进入 Runtime IPC。
+ * @param context - 页面注册的环境上下文
+ * @param binding - 页面资源身份
+ * @returns 与页面原对象解耦的上下文快照
+ */
+function cloneEnvironmentContext(
+  context: ChatRuntimePageEnvironmentContext | undefined,
+  binding: ChatToolBinding
+): ChatRuntimePageEnvironmentContext | undefined {
+  if (!context) return undefined;
+  try {
+    return normalizeEnvironmentContext(structuredClone(context));
+  } catch {
+    throw new Error(`Tool context environment must be cloneable: ${binding.providerId}:${binding.resourceId}`);
   }
 }
 
@@ -390,6 +415,10 @@ export function createToolContextRegistry(): ToolContextRegistry {
             })
         )
       );
+    },
+    getEnvironmentContext(binding: ChatToolBinding): ChatRuntimePageEnvironmentContext | undefined {
+      const entry = findEntry(binding);
+      return entry?.getEnvironmentContext ? cloneEnvironmentContext(entry.getEnvironmentContext(), binding) : undefined;
     },
     async dispatchAppBridge(binding: ChatToolBinding, event: ChatRuntimeBridgeRequestEvent): Promise<ChatBridgeDispatchResult> {
       return dispatchAppBridge(binding, event);

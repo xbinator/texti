@@ -65,7 +65,7 @@ describe('chat actor system', (): void => {
     const persistedCapabilities = {
       tools: [],
       descriptor: {
-        rendererTools: [{ name: 'read_current_document' }],
+        rendererTools: [{ name: 'inspect_registered_page' }],
         toolContext: { providerId: 'editor', resourceId: 'document-1' }
       },
       getToolContext: (): undefined => undefined,
@@ -79,7 +79,7 @@ describe('chat actor system', (): void => {
     system.recoverRuntime(snapshot, {
       ...persistedCapabilities,
       descriptor: {
-        rendererTools: [{ name: 'read_current_document' }],
+        rendererTools: [{ name: 'inspect_registered_page' }],
         toolContext: { providerId: 'editor', resourceId: 'document-current' }
       }
     });

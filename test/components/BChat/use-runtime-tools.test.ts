@@ -117,13 +117,8 @@ const widgetRuntimeMockState = vi.hoisted(() => {
 
 vi.mock('@/ai/tools/builtin', () => ({
   createBuiltinTools: builtinMockState.createBuiltinTools,
-  isBuiltinToolName: vi.fn((toolName: string): boolean =>
-    ['read_current_webpage', 'read_current_widget', 'operate_webpage', 'open_resource', 'read_directory', 'skill', 'widget', 'open_widget'].includes(toolName)
-  ),
-  OPERATE_WEBPAGE_TOOL_NAME: 'operate_webpage',
+  isBuiltinToolName: vi.fn((toolName: string): boolean => ['open_resource', 'read_directory', 'skill', 'widget', 'open_widget'].includes(toolName)),
   OPEN_RESOURCE_TOOL_NAME: 'open_resource',
-  READ_CURRENT_WEBPAGE_TOOL_NAME: 'read_current_webpage',
-  READ_CURRENT_WIDGET_TOOL_NAME: 'read_current_widget',
   READ_DIRECTORY_TOOL_NAME: 'read_directory',
   OPEN_WIDGET_TOOL_NAME: 'open_widget',
   SKILL_TOOL_NAME: 'skill',
@@ -269,17 +264,17 @@ describe('useRuntimeTools', () => {
     const runtimeTools = createRuntimeTools();
 
     expect(readActiveToolNames(runtimeTools.getActiveTools)).toEqual(expect.arrayContaining(['open_resource']));
-    expect(readActiveToolNames(runtimeTools.getActiveTools)).not.toEqual(expect.arrayContaining(['read_current_webpage', 'operate_webpage']));
+    expect(readActiveToolNames(runtimeTools.getActiveTools)).not.toEqual(expect.arrayContaining(['read_current_webpage', 'operate_current_webpage']));
 
     activeChatToolsMock.getActiveBinding.mockReturnValue({ providerId: 'webview', resourceId: 'webview-a' });
     activeChatToolsMock.getBoundTools.mockReturnValue([
       builtinMockState.createExecutor('read_current_webpage'),
-      builtinMockState.createExecutor('operate_webpage')
+      builtinMockState.createExecutor('operate_current_webpage')
     ]);
     activeChatToolsMock.getHiddenToolNames.mockReturnValue(['open_resource']);
 
     const activeToolNames = readActiveToolNames(runtimeTools.getActiveTools);
-    expect(activeToolNames).toEqual(expect.arrayContaining(['read_current_webpage', 'operate_webpage']));
+    expect(activeToolNames).toEqual(expect.arrayContaining(['read_current_webpage', 'operate_current_webpage']));
     expect(activeToolNames).not.toContain('open_resource');
   });
 
@@ -294,15 +289,13 @@ describe('useRuntimeTools', () => {
     expect(readActiveToolNames(runtimeTools.getActiveTools)).toContain('read_directory');
   });
 
-  it('only exposes the current Widget reader while a Widget provider is active', (): void => {
+  it('does not add page tools when a provider only registers environment context', (): void => {
     const runtimeTools = createRuntimeTools();
 
-    expect(readActiveToolNames(runtimeTools.getActiveTools)).not.toContain('read_current_widget');
-
     activeChatToolsMock.getActiveBinding.mockReturnValue({ providerId: 'widget', resourceId: 'widget-a' });
-    activeChatToolsMock.getBoundTools.mockReturnValue([builtinMockState.createExecutor('read_current_widget')]);
+    activeChatToolsMock.getBoundTools.mockReturnValue([]);
 
-    expect(readActiveToolNames(runtimeTools.getActiveTools)).toContain('read_current_widget');
+    expect(readActiveToolNames(runtimeTools.getActiveTools)).toEqual(expect.arrayContaining(['open_resource']));
   });
 
   it('binds builtin callbacks to the immutable Runtime session and workspace', (): void => {
@@ -327,7 +320,7 @@ describe('useRuntimeTools', () => {
     const binding = { providerId: 'webview', resourceId: 'webview-a' };
     activeChatToolsMock.getBoundTools.mockImplementation((value: ChatToolBinding): AIToolExecutor[] =>
       value.providerId === 'webview' && value.resourceId === 'webview-a'
-        ? [builtinMockState.createExecutor('read_current_webpage'), builtinMockState.createExecutor('operate_webpage')]
+        ? [builtinMockState.createExecutor('read_current_webpage'), builtinMockState.createExecutor('operate_current_webpage')]
         : []
     );
     activeChatToolsMock.getHiddenToolNames.mockReturnValue(['open_resource']);
@@ -342,7 +335,7 @@ describe('useRuntimeTools', () => {
       })
       .map((tool) => tool.definition.name);
 
-    expect(activeToolNames).toEqual(expect.arrayContaining(['read_current_webpage', 'operate_webpage']));
+    expect(activeToolNames).toEqual(expect.arrayContaining(['read_current_webpage', 'operate_current_webpage']));
     expect(activeToolNames).not.toContain('open_resource');
     expect(activeChatToolsMock.getActiveBinding).not.toHaveBeenCalled();
   });
@@ -497,7 +490,7 @@ describe('useRuntimeTools', () => {
 
   it('replaces prebuilt open_widget with the renderer executable widget tool', (): void => {
     const staleOpenWidgetTool = builtinMockState.createExecutor('open_widget');
-    builtinMockState.createBuiltinTools.mockReturnValueOnce([builtinMockState.createExecutor('read_current_webpage'), staleOpenWidgetTool]);
+    builtinMockState.createBuiltinTools.mockReturnValueOnce([builtinMockState.createExecutor('read_directory'), staleOpenWidgetTool]);
     storeMockState.widgetStore.initialized = true;
     storeMockState.widgetStore.getEnabledWidgets.mockReturnValue([
       {

@@ -106,7 +106,7 @@ interface ToolPermissionGrantItem {
 
 /** 工具名称中文标签。 */
 const TOOL_PERMISSION_LABELS: Record<string, string> = {
-  operate_webpage: '操作当前网页',
+  operate_current_webpage: '操作当前网页',
   update_settings: '修改应用设置'
 };
 

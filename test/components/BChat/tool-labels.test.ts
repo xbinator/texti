@@ -7,8 +7,8 @@ import { getActionLabel } from '@/components/BChat/utils/toolLabels';
 
 describe('toolLabels', (): void => {
   it('does not centrally label page-scoped tools', (): void => {
-    expect(getActionLabel('operate_webpage')).toEqual({ alias: 'operate_webpage' });
-    expect(getActionLabel('read_current_widget')).toEqual({ alias: 'read_current_widget' });
+    expect(getActionLabel('operate_current_webpage')).toEqual({ alias: 'operate_current_webpage' });
+    expect(getActionLabel('inspect_registered_page')).toEqual({ alias: 'inspect_registered_page' });
   });
 
   it('labels grep as content search', (): void => {

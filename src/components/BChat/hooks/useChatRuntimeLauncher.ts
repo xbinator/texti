@@ -13,6 +13,7 @@ import type {
   ChatRuntimeCapabilityDescriptor,
   ChatRendererToolDescriptor,
   ChatRuntimeStartResult,
+  ChatRuntimePageEnvironmentContext,
   ChatRuntimeUserInputPart,
   ChatToolBinding
 } from 'types/chat-runtime';
@@ -47,6 +48,8 @@ interface UseChatRuntimeLauncherOptions {
 interface RuntimeResourceSnapshot {
   /** 预检开始时的页面工具 binding。 */
   readonly toolContext?: ChatToolBinding;
+  /** 预检开始时的页面轻量环境上下文。 */
+  readonly pageEnvironment?: ChatRuntimePageEnvironmentContext;
   /** 预检开始时页面声明的 Renderer 元数据。 */
   readonly rendererTools: readonly ChatRendererToolDescriptor[];
 }
@@ -58,7 +61,8 @@ interface RuntimeResourceSnapshot {
  */
 function createResourceBinding(resources: RuntimeResourceSnapshot): RuntimeToolDiscoveryBinding {
   return Object.freeze({
-    toolContext: resources.toolContext
+    toolContext: resources.toolContext,
+    pageEnvironment: resources.pageEnvironment
   });
 }
 
@@ -96,6 +100,7 @@ export function useChatRuntimeLauncher(options: UseChatRuntimeLauncherOptions) {
     const toolContext = activeChatTools.getActiveBinding();
     return Object.freeze({
       toolContext,
+      pageEnvironment: toolContext ? activeChatTools.getEnvironmentContext(toolContext) : undefined,
       rendererTools: toolContext ? activeChatTools.getRendererTools(toolContext) : Object.freeze([] as ChatRendererToolDescriptor[])
     });
   }

@@ -11,8 +11,8 @@ import { useToolSettingsStore } from '@/stores/ai/toolSettings';
  * Runtime 配置 hook 返回值。
  */
 interface UseRuntimeConfigReturn {
-  /** 解析 runtime system prompt 上下文。 */
-  resolveRuntimeSystemPrompt: (
+  /** 解析 Runtime 记忆上下文。 */
+  resolveRuntimeMemoryContext: (
     selection?: MemorySelectionContext,
     onSelectionDebug?: (debugInfo: MemorySelectionDebugInfo) => void
   ) => Promise<string | undefined>;
@@ -35,7 +35,7 @@ function isRuntimeEnabledMcpServer(server: AIMCPRequestConfig['servers'][number]
 }
 
 /**
- * 管理 ChatRuntime 的 system prompt、Tavily 和 MCP 请求配置。
+ * 管理 ChatRuntime 的记忆、Tavily 和 MCP 请求配置。
  * @returns Runtime 配置解析方法
  */
 export function useRuntimeConfig(): UseRuntimeConfigReturn {
@@ -43,12 +43,12 @@ export function useRuntimeConfig(): UseRuntimeConfigReturn {
   const toolSettingsStore = useToolSettingsStore();
 
   /**
-   * 解析 runtime system prompt 上下文。
+   * 解析 Runtime 记忆上下文。
    * @param selection - 当前请求的记忆筛选上下文
    * @param onSelectionDebug - 记忆选择调试回调
-   * @returns system prompt
+   * @returns 记忆上下文
    */
-  async function resolveRuntimeSystemPrompt(
+  async function resolveRuntimeMemoryContext(
     selection?: MemorySelectionContext,
     onSelectionDebug?: (debugInfo: MemorySelectionDebugInfo) => void
   ): Promise<string | undefined> {
@@ -111,7 +111,7 @@ export function useRuntimeConfig(): UseRuntimeConfigReturn {
   }
 
   return {
-    resolveRuntimeSystemPrompt,
+    resolveRuntimeMemoryContext,
     resolveRuntimeTavilyConfig,
     resolveRuntimeMcpRequestConfig
   };

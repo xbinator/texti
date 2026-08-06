@@ -1089,7 +1089,7 @@ describe('useWebView', () => {
     expect(snapshot.header).toContain('Page info:');
     expect(summary).toContain('Current Page:');
     expect(summary).toContain('Interactive elements from top layer of the current page');
-    expect(summary).toContain('Use [N] as the element handle for operate_webpage.');
+    expect(summary).toContain('Use [N] as the element handle for operate_current_webpage.');
     expect(summary).toContain('Do not use navigate for page-visible links or text; use [N] with click.');
     expect(summary).toContain('[End of page]');
     expect(snapshot.content).toContain('<h1>示例页面</h1>');

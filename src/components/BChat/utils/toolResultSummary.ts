@@ -96,25 +96,6 @@ const TODO_STATUS_MAP: Record<string, string> = {
 };
 
 /**
- * 格式化 get_current_time 工具的结果。
- * @param data - 工具结果数据
- * @returns 时间摘要
- */
-function summarizeGetCurrentTime(data: Record<string, unknown>): ToolResultSummary {
-  const locale = typeof data.locale === 'string' ? data.locale : String(data.iso ?? '');
-  const iso = typeof data.iso === 'string' ? data.iso : '';
-  const timestamp = typeof data.timestamp === 'number' ? String(data.timestamp) : '';
-
-  return {
-    text: locale,
-    tags: [
-      { label: 'ISO', value: iso },
-      { label: '时间戳', value: timestamp }
-    ].filter((tag) => tag.value)
-  };
-}
-
-/**
  * 格式化 get_settings 工具的结果。
  * @param data - 工具结果数据
  * @returns 设置摘要
@@ -522,7 +503,6 @@ function summarizeOpenResource(data: Record<string, unknown>): ToolResultSummary
 
 /** 工具名称到摘要解析函数的映射 */
 const TOOL_SUMMARIZERS: Record<string, (data: unknown) => ToolResultSummary> = {
-  get_current_time: (data) => summarizeGetCurrentTime(data as Record<string, unknown>),
   get_settings: (data) => summarizeGetSettings(data as Record<string, unknown>),
   update_settings: (data) => summarizeUpdateSettings(data as Record<string, unknown>),
   todowrite: (data) => summarizeTodoWrite(data as Record<string, unknown>),

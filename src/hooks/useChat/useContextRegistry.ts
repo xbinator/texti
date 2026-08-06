@@ -65,6 +65,7 @@ export function useChatContextProvider(options: ChatContextProviderOptions): voi
     handle = toolContextRegistry.register({
       binding: { providerId: options.providerId, resourceId },
       getTools: options.getTools,
+      getEnvironmentContext: options.getEnvironmentContext,
       hiddenToolNames: options.hiddenToolNames ?? [],
       appBridgeHandlers: options.appBridgeHandlers ?? {}
     });
@@ -98,6 +99,7 @@ export function useActiveChatContext(): ActiveChatContext {
     getPresentation: toolContextRegistry.getPresentation,
     getPresentationByTool: toolContextRegistry.getPresentationByTool,
     getRendererTools: toolContextRegistry.getRendererTools,
+    getEnvironmentContext: toolContextRegistry.getEnvironmentContext,
     dispatchAppBridge: toolContextRegistry.dispatchAppBridge
   };
 }

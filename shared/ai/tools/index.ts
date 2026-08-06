@@ -6,7 +6,6 @@ import type { SharedToolDefinition, ToolExposureQuery, ToolRegistryEntry, ToolRu
 import { stageFileEditToolRegistryEntry, stageFileWriteToolRegistryEntry } from './AgentStagedFileTool/index.js';
 import { delegateTaskToolRegistryEntry } from './DelegateTaskTool/index.js';
 import { createDocumentToolRegistryEntry } from './DocumentTool/index.js';
-import { getCurrentTimeToolRegistryEntry } from './EnvironmentTool/index.js';
 import { editFileToolRegistryEntry } from './FileEditTool/index.js';
 import { globToolRegistryEntry, grepToolRegistryEntry, readDirectoryToolRegistryEntry, readFileToolRegistryEntry } from './FileReadTool/index.js';
 import { writeFileToolRegistryEntry } from './FileWriteTool/index.js';
@@ -38,7 +37,6 @@ export type {
 export { AGENT_FILE_COMMIT_ADAPTER, STAGE_FILE_EDIT_TOOL_NAME, STAGE_FILE_WRITE_TOOL_NAME } from './AgentStagedFileTool/index.js';
 export { DELEGATE_TASK_TOOL_NAME } from './DelegateTaskTool/index.js';
 export { CREATE_DOCUMENT_TOOL_NAME } from './DocumentTool/index.js';
-export { GET_CURRENT_TIME_TOOL_NAME } from './EnvironmentTool/index.js';
 export { EDIT_FILE_TOOL_NAME } from './FileEditTool/index.js';
 export { GLOB_TOOL_NAME, GREP_TOOL_NAME, READ_DIRECTORY_TOOL_NAME, READ_FILE_TOOL_NAME } from './FileReadTool/index.js';
 export { WRITE_FILE_TOOL_NAME } from './FileWriteTool/index.js';
@@ -56,7 +54,6 @@ export { GET_SETTINGS_TOOL_NAME, UPDATE_SETTINGS_TOOL_NAME } from './SettingsToo
 /** 已迁移到主进程的工具 registry。 */
 export const TOOL_REGISTRY = [
   createDocumentToolRegistryEntry,
-  getCurrentTimeToolRegistryEntry,
   readFileToolRegistryEntry,
   readDirectoryToolRegistryEntry,
   globToolRegistryEntry,

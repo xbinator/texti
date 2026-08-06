@@ -467,8 +467,7 @@ export function useSession(): WidgetSessionReturn {
       fileId,
       isActive,
       currentTitle,
-      fileState: controller.fileState,
-      data: controller.data
+      fileState: controller.fileState
     });
   }
 

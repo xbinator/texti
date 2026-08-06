@@ -138,7 +138,7 @@ describe('BasicSettingsPage tool permissions', (): void => {
 
   it('renders persisted tool permission grants with readable labels', (): void => {
     const store = useChatPermissionStore();
-    store.grantToolPermission('operate_webpage', 'always');
+    store.grantToolPermission('operate_current_webpage', 'always');
     store.grantToolPermission('update_settings', 'always');
 
     const wrapper = mountBasicSettingsPage();
@@ -156,20 +156,20 @@ describe('BasicSettingsPage tool permissions', (): void => {
 
   it('revokes one persisted tool permission grant', async (): Promise<void> => {
     const store = useChatPermissionStore();
-    store.grantToolPermission('operate_webpage', 'always');
+    store.grantToolPermission('operate_current_webpage', 'always');
     store.grantToolPermission('update_settings', 'always');
     const wrapper = mountBasicSettingsPage();
 
     await findPermissionRow(wrapper, '操作当前网页').find('button').trigger('click');
 
-    expect(store.alwaysToolPermissionGrants.operate_webpage).toBeUndefined();
+    expect(store.alwaysToolPermissionGrants.operate_current_webpage).toBeUndefined();
     expect(store.alwaysToolPermissionGrants.update_settings).toBe(true);
     expect(wrapper.text()).not.toContain('操作当前网页');
   });
 
   it('clears all persisted tool permission grants', async (): Promise<void> => {
     const store = useChatPermissionStore();
-    store.grantToolPermission('operate_webpage', 'always');
+    store.grantToolPermission('operate_current_webpage', 'always');
     store.grantToolPermission('update_settings', 'always');
     const wrapper = mountBasicSettingsPage();
 

@@ -1,6 +1,6 @@
 /**
  * @file memory.ts
- * @description 记忆系统 Pinia Store，管理 MEMORY.md 的读写、缓存和 system prompt 注入
+ * @description 记忆系统 Pinia Store，管理 MEMORY.md 的读写、缓存和 runtime context 注入
  */
 import { defineStore } from 'pinia';
 import { buildSystemPromptContext } from '@/ai/memory/injector';
@@ -123,9 +123,9 @@ export const useMemoryStore = defineStore('memory', {
     },
 
     /**
-     * 构建要注入到 System Prompt 的记忆上下文
+     * 构建要注入到 Runtime Context 的记忆上下文
      * @param options - 记忆注入选项
-     * @returns 注入字符串，无记忆或未启用时返回空字符串
+     * @returns runtime context 注入字符串，无记忆或未启用时返回空字符串
      */
     buildSystemPromptContext(options?: BuildMemoryContextOptions): string {
       if (!useSettingStore().memoryEnabled) return '';

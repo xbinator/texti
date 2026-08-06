@@ -151,7 +151,7 @@ function createWebviewOperatePart(id: string, snapshotId: string): ChatMessageTo
     id,
     type: 'tool',
     toolCallId: `call-${id}`,
-    toolName: 'operate_webpage',
+    toolName: 'operate_current_webpage',
     status: 'done',
     input: {
       snapshotId,
@@ -162,7 +162,7 @@ function createWebviewOperatePart(id: string, snapshotId: string): ChatMessageTo
       mode: 'keep',
       redactInputPaths: ['snapshotId', 'step', 'action.text', 'action.url', 'action.optionText']
     },
-    result: { toolName: 'operate_webpage', status: 'success', data: { ok: true } }
+    result: { toolName: 'operate_current_webpage', status: 'success', data: { ok: true } }
   };
 }
 

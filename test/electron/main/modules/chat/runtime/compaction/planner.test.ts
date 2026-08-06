@@ -300,7 +300,7 @@ describe('compaction planner', (): void => {
         id: 'source-operate',
         type: 'tool',
         toolCallId: 'call-source-operate',
-        toolName: 'operate_webpage',
+        toolName: 'operate_current_webpage',
         status: 'done',
         input: {
           snapshotId: 'webview-snapshot-SNAPSHOT_SENTINEL',
@@ -313,7 +313,7 @@ describe('compaction planner', (): void => {
         },
         inputText: '{"rawDom":"SUMMARY_INPUT_TEXT_DOM_SENTINEL"}',
         providerMetadata: { rawRequest: '<button>SUMMARY_PROVIDER_DOM_SENTINEL</button>' },
-        result: { toolName: 'operate_webpage', status: 'success', data: { ok: true } }
+        result: { toolName: 'operate_current_webpage', status: 'success', data: { ok: true } }
       }
     ]);
 

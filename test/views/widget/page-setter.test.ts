@@ -892,19 +892,17 @@ describe('PageSetter', (): void => {
 
   it('keeps schema input and type selector text at 12px', (): void => {
     const source = readFileSync('src/views/widget/components/PageSetter/SchemaTreeEditor.vue', 'utf-8');
+    const nameInputBlock = readStyleBlock(source, '.schema-editor__name-input');
+    const typeSelectBlock = readStyleBlock(source, '.schema-editor__type-select');
 
-    const typeSelectorFontSizePattern = new RegExp(
-      [
-        String.raw`\.schema-editor__type-select :deep\(\.b-select\),`,
-        String.raw`\s*\.schema-editor__type-select :deep\(\.ant-select-selector\),`,
-        String.raw`\s*\.schema-editor__type-select :deep\(\.ant-select-selection-item\),`,
-        String.raw`\s*\.schema-editor__type-select :deep\(select\) \{[^}]*font-size: 12px;`
-      ].join(''),
-      'u'
-    );
-
-    expect(source).toMatch(/\.schema-editor__name-input :deep\(\.ant-input\),\s*\.schema-editor__name-input :deep\(input\) \{[^}]*font-size: 12px;/);
-    expect(source).toMatch(typeSelectorFontSizePattern);
+    expect(nameInputBlock).toContain(':deep(.ant-input),');
+    expect(nameInputBlock).toContain(':deep(input) {');
+    expect(nameInputBlock).toContain('font-size: 12px;');
+    expect(typeSelectBlock).toContain(':deep(.b-select),');
+    expect(typeSelectBlock).toContain(':deep(.ant-select-selector),');
+    expect(typeSelectBlock).toContain(':deep(.ant-select-selection-item),');
+    expect(typeSelectBlock).toContain(':deep(select) {');
+    expect(typeSelectBlock).toContain('font-size: 12px;');
   });
 
   it('keeps SidebarState schema modal usage bound directly to active schema', (): void => {

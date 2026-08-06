@@ -140,8 +140,58 @@ export interface ChatRuntimeSkillContext {
   readonly snapshots: ChatRuntimeSkillSnapshot[];
 }
 
+/** Runtime 注入的用户记忆上下文。 */
+export interface ChatRuntimeMemoryContext {
+  /** 接收记忆上下文的用户消息 ID。 */
+  readonly targetMessageId: string;
+  /** 已按预算裁剪的记忆文本。 */
+  readonly content: string;
+}
+
+/** Runtime 当前环境元信息。 */
+export interface ChatRuntimeEnvironmentMetadata {
+  /** 当前操作系统名称。 */
+  readonly operatingSystem: string;
+  /** 当前 IANA 时区。 */
+  readonly timezone: string;
+  /** 当前本地日期，格式为 YYYY-MM-DD。 */
+  readonly currentDate: string;
+  /** 当前本地具体时间，格式为 YYYY-MM-DD HH:mm:ss。 */
+  readonly currentTime: string;
+  /** 当前主工作目录路径。 */
+  readonly workspaceRoot?: string;
+}
+
+/** Runtime 环境上下文片段。 */
+export interface ChatRuntimeEnvironmentSection {
+  /** XML 安全的 section 标签名。 */
+  readonly tag: string;
+  /** 已由页面按自身语义组装、等待 Runtime 统一转义的文本行。 */
+  readonly lines: readonly string[];
+}
+
+/** 页面可注册的当前环境片段。 */
+export interface ChatRuntimePageEnvironmentContext {
+  /** 页面自描述的环境 section。 */
+  readonly sections?: readonly ChatRuntimeEnvironmentSection[];
+}
+
+/** Runtime 注入的当前环境上下文。 */
+export interface ChatRuntimeEnvironmentContext {
+  /** 接收环境上下文的用户消息 ID。 */
+  readonly targetMessageId: string;
+  /** 当前环境元信息。 */
+  readonly metadata: ChatRuntimeEnvironmentMetadata;
+  /** 页面自描述的环境 section。 */
+  readonly sections?: readonly ChatRuntimeEnvironmentSection[];
+}
+
 /** Renderer 传递给主进程的临时 Runtime 上下文容器。 */
 export interface ChatRuntimeContext {
+  /** 当前用户轮次使用的记忆上下文。 */
+  readonly memory?: ChatRuntimeMemoryContext;
+  /** 当前用户轮次使用的环境上下文。 */
+  readonly environment?: ChatRuntimeEnvironmentContext;
   /** 当前用户轮次显式选择的 Skill 上下文。 */
   readonly skill?: ChatRuntimeSkillContext;
 }

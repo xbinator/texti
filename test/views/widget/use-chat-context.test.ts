@@ -9,8 +9,6 @@ import { computed, defineComponent, h, nextTick, ref } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { WidgetData } from '@/components/BWidget/types';
-import { createDefaultWidgetData } from '@/components/BWidget/utils/widgetData';
 import { toolContextRegistry } from '@/hooks/useChat/tool/registry';
 import { useActiveChatContext } from '@/hooks/useChat/useContextRegistry';
 import type { FileState } from '@/shared/platform/native/types';
@@ -30,8 +28,6 @@ interface WidgetContextHarness {
   title: Ref<string>;
   /** Widget 文件状态。 */
   fileState: Ref<FileState>;
-  /** WidgetData。 */
-  data: Ref<WidgetData>;
 }
 
 /**
@@ -50,19 +46,13 @@ function createHarness(): WidgetContextHarness {
     path: '/home/user/.tibis/widgets/aether-weather/widget.json',
     content: '{}'
   });
-  const data = ref<WidgetData>({
-    ...createDefaultWidgetData('aether-weather'),
-    description: 'Weather board'
-  });
-
   const Host = defineComponent({
     setup(): () => VNode {
       useChatContext({
         fileId,
         isActive,
         currentTitle,
-        fileState,
-        data
+        fileState
       });
 
       return (): VNode => h('div');
@@ -74,8 +64,7 @@ function createHarness(): WidgetContextHarness {
     fileId,
     isActive,
     title,
-    fileState,
-    data
+    fileState
   };
 }
 
@@ -87,37 +76,27 @@ describe('useChatContext', (): void => {
 
   afterEach((): void => toolContextRegistry.clear());
 
-  it('registers the active Widget editor and reads latest in-memory WidgetData JSON', async (): Promise<void> => {
+  it('registers the active Widget editor as file environment without exposing a Widget read tool', async (): Promise<void> => {
     const harness = createHarness();
     const tools = useActiveChatContext();
     const binding = { providerId: 'widget', resourceId: 'widget-context-test-a' };
 
     expect(tools.getActiveBinding()).toEqual(binding);
-    const widgetTool = tools.getBoundTools(binding, { confirmation: { confirm: vi.fn(async (): Promise<boolean> => true) } })[0];
-    if (!widgetTool) throw new Error('widget tool should exist');
-    expect(widgetTool.definition.name).toBe('read_current_widget');
-
-    harness.data.value.description = 'Updated Weather board';
     harness.title.value = 'weather-custom';
     await nextTick();
 
-    await expect(widgetTool.execute({})).resolves.toEqual({
-      toolName: 'read_current_widget',
-      status: 'success',
-      data: expect.objectContaining({
-        title: 'weather-custom',
-        path: '/home/user/.tibis/widgets/aether-weather/widget.json',
-        content: expect.stringContaining('"description": "Updated Weather board"')
-      })
+    expect(tools.getBoundTools(binding, { confirmation: { confirm: vi.fn(async (): Promise<boolean> => true) } })).toEqual([]);
+    expect(tools.getPresentation(binding, 'read_current_widget')).toBeUndefined();
+    expect(tools.getRendererTools(binding)).toEqual([]);
+    expect(tools.getEnvironmentContext(binding)).toEqual({
+      sections: [{ tag: 'current_file', lines: ['Path: /home/user/.tibis/widgets/aether-weather/widget.json'] }]
     });
-    expect(tools.getPresentation(binding, 'read_current_widget')).toEqual(expect.objectContaining({ label: '读取当前 Widget' }));
-    expect(tools.getRendererTools(binding)).toEqual([{ name: 'read_current_widget', history: { mode: 'keep' } }]);
 
     harness.isActive.value = false;
     await nextTick();
 
     expect(tools.getActiveBinding()).toBeUndefined();
-    expect(tools.getBoundTools(binding, { confirmation: { confirm: async (): Promise<boolean> => true } })).toHaveLength(1);
+    expect(tools.getBoundTools(binding, { confirmation: { confirm: async (): Promise<boolean> => true } })).toHaveLength(0);
 
     harness.wrapper.unmount();
     expect(tools.getBoundTools(binding, { confirmation: { confirm: async (): Promise<boolean> => true } })).toEqual([]);

@@ -30,8 +30,8 @@ describe('runtime capability registry', (): void => {
     const sourceTools = [createTool('read_file')];
     const redactInputPaths = ['payload.secret'];
     const sourceDescriptor = {
-      rendererTools: [{ name: 'read_current_widget', history: { mode: 'latest-only' as const, redactInputPaths } }],
-      toolContext: { providerId: 'widget', resourceId: 'widget-a' }
+      rendererTools: [{ name: 'inspect_registered_page', history: { mode: 'latest-only' as const, redactInputPaths } }],
+      toolContext: { providerId: 'page', resourceId: 'page-a' }
     };
     const handleBridgeRequest = vi.fn(async (): Promise<unknown> => ({ ok: true }));
     registry.register('runtime-1', {
@@ -41,13 +41,13 @@ describe('runtime capability registry', (): void => {
       handleBridgeRequest
     });
     sourceTools.push(createTool('edit_file'));
-    sourceDescriptor.toolContext.resourceId = 'widget-b';
+    sourceDescriptor.toolContext.resourceId = 'page-b';
     redactInputPaths.push('payload.newSecret');
 
     expect(registry.get('runtime-1')?.tools.map((tool) => tool.definition.name)).toEqual(['read_file']);
-    expect(registry.get('runtime-1')?.descriptor?.toolContext).toEqual({ providerId: 'widget', resourceId: 'widget-a' });
+    expect(registry.get('runtime-1')?.descriptor?.toolContext).toEqual({ providerId: 'page', resourceId: 'page-a' });
     expect(registry.get('runtime-1')?.descriptor?.rendererTools).toEqual([
-      { name: 'read_current_widget', history: { mode: 'latest-only', redactInputPaths: ['payload.secret'] } }
+      { name: 'inspect_registered_page', history: { mode: 'latest-only', redactInputPaths: ['payload.secret'] } }
     ]);
     expect(Object.isFrozen(registry.get('runtime-1')?.descriptor?.rendererTools[0]?.history?.redactInputPaths)).toBe(true);
     expect(Object.isFrozen(registry.get('runtime-1')?.descriptor?.toolContext)).toBe(true);

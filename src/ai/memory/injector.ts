@@ -1,6 +1,6 @@
 /**
  * @file injector.ts
- * @description 记忆注入到 system prompt 的构建器，控制 token 预算和裁剪策略
+ * @description 记忆 runtime context 构建器，控制 token 预算和裁剪策略
  */
 import type { BuildMemoryContextOptions, MemoryDoc, MemoryInjectionMode, MemorySelectionDebugInfo, MemorySelectionDebugItem, MemorySection } from './types';
 import { extractMemoryKeywords, scoreMemoryItemRelevance, selectRelevantMemorySections } from './selector';
@@ -58,7 +58,7 @@ function formatSections(sections: MemorySection[]): string {
 }
 
 /**
- * 包装记忆内容为 system prompt 片段。
+ * 包装记忆内容为 runtime memory context 片段。
  * @param header - XML 标签内的头部文本
  * @param sections - 非空分区列表
  * @returns 完整记忆注入文本
@@ -297,14 +297,14 @@ function resolveBuildOptions(
 }
 
 /**
- * 构建要注入到 System Prompt 的记忆上下文
+ * 构建要注入到 Runtime Context 的记忆上下文
  *
  * 格式：<user_memory>...</user_memory>
  * 包含所有分区内容，控制在 token 预算内
  *
  * @param doc - 记忆文档
  * @param options - 构建选项，兼容旧版最大字符数
- * @returns 注入到 system prompt 的字符串，无记忆时返回空字符串
+ * @returns 注入到 runtime context 的字符串，无记忆时返回空字符串
  */
 export function buildSystemPromptContext(doc: MemoryDoc, options?: BuildMemoryContextOptions | number): string {
   const resolvedOptions = resolveBuildOptions(options);

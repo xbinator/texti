@@ -120,6 +120,7 @@ import { useChatWorkflow } from './hooks/useChatWorkflow';
 import { useInteractionState } from './hooks/useInteractionState';
 import { useRuntimeBridgeHandler } from './hooks/useRuntimeBridgeHandler';
 import { useRuntimeConfig } from './hooks/useRuntimeConfig';
+import { useRuntimeEnvironment } from './hooks/useRuntimeEnvironment';
 import { useRuntimeRequestConfig } from './hooks/useRuntimeRequestConfig';
 import { useRuntimeTools } from './hooks/useRuntimeTools';
 import { useSessionWorkspace } from './hooks/useSessionWorkspace';
@@ -449,7 +450,9 @@ function showNoModelToast(): void {
 /** Chat 服务配置解析 hook。 */
 const chatServiceConfig = useChatServiceConfig(modelSelectionEvents.resolveSelectedModel);
 /** Runtime 请求配置解析 hook。 */
-const { resolveRuntimeSystemPrompt, resolveRuntimeTavilyConfig, resolveRuntimeMcpRequestConfig } = useRuntimeConfig();
+const { resolveRuntimeMemoryContext, resolveRuntimeTavilyConfig, resolveRuntimeMcpRequestConfig } = useRuntimeConfig();
+/** Runtime 环境上下文解析 hook。 */
+const { resolveRuntimeEnvironmentContext } = useRuntimeEnvironment();
 /** Runtime 请求准备与纯策略适配 hook。 */
 const { prepareRuntimeRequest, resolveRuntimeRequestConfig } = useRuntimeRequestConfig({
   contextWindow,
@@ -460,7 +463,8 @@ const { prepareRuntimeRequest, resolveRuntimeRequestConfig } = useRuntimeRequest
   getActiveTools,
   getSkillContentHashes,
   resolveSkillSnapshots,
-  resolveRuntimeSystemPrompt,
+  resolveRuntimeMemoryContext,
+  resolveRuntimeEnvironmentContext,
   resolveRuntimeTavilyConfig,
   resolveRuntimeMcpRequestConfig,
   onMissingServiceConfig: showNoModelToast

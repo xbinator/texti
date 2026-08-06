@@ -72,7 +72,7 @@ import AddressBar from './components/AddressBar.vue';
 import DeviceToolbar from './components/DeviceToolbar.vue';
 import InspectorPanel from './components/InspectorPanel.vue';
 import { useCacheControl } from './hooks/useCacheControl.ts';
-import { useChatContext } from './hooks/useChatContext';
+import { useChatContext, type WebviewChatPageEnvironment } from './hooks/useChatContext';
 import { useDeviceMode, type WebviewDevicePresetKey } from './hooks/useDeviceMode.ts';
 import { useHostLayer } from './hooks/useHostLayer.ts';
 import { useScreenshot } from './hooks/useScreenshot.ts';
@@ -93,10 +93,16 @@ const deviceMode = useDeviceMode();
 const cacheControl = useCacheControl(webviewElementRef);
 const chatResourceId = ref<string>(routeFullPath);
 const chatContextAvailable = computed<boolean>((): boolean => Boolean(webviewElementRef.value));
+const chatPageEnvironment = computed<WebviewChatPageEnvironment>((): WebviewChatPageEnvironment => {
+  const { url, title } = webview.state.value;
+  const selectedText = webview.selectedElement?.text;
+  return selectedText ? { url, title, selectedText } : { url, title };
+});
 
 useChatContext({
   resourceId: chatResourceId,
   available: chatContextAvailable,
+  page: chatPageEnvironment,
   context: {
     readPageSnapshot: webview.readPageSnapshot,
     operatePage: webview.operatePage

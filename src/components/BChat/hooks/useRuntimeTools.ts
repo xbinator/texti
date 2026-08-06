@@ -3,7 +3,7 @@
  * @description ChatRuntime 内置工具创建和动态过滤 hook。
  */
 import type { AIToolExecutor } from 'types/ai';
-import type { ChatRuntimeSkillSnapshot, ChatToolBinding } from 'types/chat-runtime';
+import type { ChatRuntimePageEnvironmentContext, ChatRuntimeSkillSnapshot, ChatToolBinding } from 'types/chat-runtime';
 import type { Ref } from 'vue';
 import { uniq } from 'lodash-es';
 import type { SkillDefinition } from '@/ai/skill/types';
@@ -29,6 +29,8 @@ export interface RuntimeToolResourceBinding {
   readonly workspaceRoot?: string | null;
   /** 请求准备时冻结的页面工具资源。 */
   readonly toolContext?: ChatToolBinding;
+  /** 请求准备时冻结的页面轻量环境上下文。 */
+  readonly pageEnvironment?: ChatRuntimePageEnvironmentContext;
 }
 
 /** Runtime 工具绑定后不可变的执行身份。 */

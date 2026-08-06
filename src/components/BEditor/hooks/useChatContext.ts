@@ -3,12 +3,12 @@
  * @description 将 BEditor 文档能力注册为 ChatRuntime 页面上下文。
  */
 import type { EditorController, EditorState } from '../types';
-import type { AIToolContext, AIToolExecutionError, AIToolExecutionResult } from 'types/ai';
-import type { ChatRuntimeBridgeRequestEvent } from 'types/chat-runtime';
+import type { AIToolContext, AIToolExecutionError } from 'types/ai';
+import type { ChatRuntimeBridgeRequestEvent, ChatRuntimePageEnvironmentContext } from 'types/chat-runtime';
 import type { Ref } from 'vue';
 import { computed } from 'vue';
-import { createToolSuccessResult } from '@/ai/tools/results';
-import { useChatContextProvider, type ChatBridgeDispatchResult, type ToolContextTool } from '@/hooks/useChat/useContextRegistry';
+import { createEnvironmentLine, createEnvironmentSection } from '@/hooks/useChat/tool/environment';
+import { useChatContextProvider, type ChatBridgeDispatchResult } from '@/hooks/useChat/useContextRegistry';
 import { asyncTo } from '@/utils/asyncTo';
 import { parseUnsavedPath } from '@/utils/file/unsaved';
 import { createEditorToolContext } from './useEditorToolContext';
@@ -23,8 +23,19 @@ interface UseChatContextOptions {
   readonly getController: () => EditorController | null;
 }
 
-/** Editor 页面读取工具名称。 */
-const READ_CURRENT_DOCUMENT_TOOL_NAME = 'read_current_document';
+/** 当前文件选中行。 */
+interface EditorSelectedLine {
+  /** 1-based 行号。 */
+  readonly lineNumber: number;
+  /** 当前行内容。 */
+  readonly content: string;
+}
+
+/** 自动注入上下文中最多携带的选中行数。 */
+const MAX_CONTEXT_SELECTED_LINES = 20;
+
+/** 自动注入上下文中单行内容最大长度。 */
+const MAX_CONTEXT_LINE_LENGTH = 500;
 
 /**
  * 创建稳定工具错误。
@@ -48,6 +59,58 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * 按编辑器文本切分物理行。
+ * @param content - 当前文件内容
+ * @returns 文本行数组
+ */
+function splitContentLines(content: string): string[] {
+  return content.split(/\r\n|\r|\n/u);
+}
+
+/**
+ * 截断单行内容，避免轻量环境上下文膨胀。
+ * @param content - 原始行内容
+ * @returns 限长后的行内容
+ */
+function truncateLine(content: string): string {
+  return content.length > MAX_CONTEXT_LINE_LENGTH ? `${content.slice(0, MAX_CONTEXT_LINE_LENGTH)}...` : content;
+}
+
+/**
+ * 根据绝对文本 offset 解析 1-based 行号。
+ * @param content - 当前文件内容
+ * @param offset - 绝对 offset
+ * @returns 1-based 行号
+ */
+function resolveLineNumber(content: string, offset: number): number {
+  const safeOffset = Math.min(Math.max(0, offset), content.length);
+  return content.slice(0, safeOffset).split(/\r\n|\r|\n/u).length;
+}
+
+/**
+ * 读取当前选区覆盖的文件行。
+ * @param state - 当前编辑器文件状态
+ * @param controller - 当前编辑器控制器
+ * @returns 当前选区行信息
+ */
+function readSelectedLines(state: EditorState, controller: EditorController | null): EditorSelectedLine[] | undefined {
+  const selection = controller?.getSelection();
+  if (!selection) return undefined;
+  const startLine = resolveLineNumber(state.content, selection.from);
+  const endLine = resolveLineNumber(state.content, Math.max(selection.from, selection.to - 1));
+  const lines = splitContentLines(state.content);
+  return lines
+    .slice(startLine - 1, Math.min(endLine, lines.length))
+    .slice(0, MAX_CONTEXT_SELECTED_LINES)
+    .map(
+      (content: string, index: number): EditorSelectedLine => ({
+        lineNumber: startLine + index,
+        content: truncateLine(content)
+      })
+    );
+}
+
+/**
  * 注册 Editor Chat 工具上下文。
  * @param options - Editor 工具注册选项
  */
@@ -65,43 +128,27 @@ export function useChatContext(options: UseChatContextOptions): void {
   }
 
   /**
-   * 直接读取当前文档工具结果。
-   * @returns 当前编辑器文档与选区
+   * 读取当前编辑器工具上下文。
+   * @returns 当前编辑器上下文
    */
-  function readDocument(): AIToolExecutionResult {
+  function getAvailableContext(): AIToolContext {
     const context = getContext();
-    return createToolSuccessResult(READ_CURRENT_DOCUMENT_TOOL_NAME, {
-      id: context.document.id,
-      artifactId: context.document.id,
-      title: context.document.title,
-      path: context.document.path ?? context.document.locator ?? `unsaved://${context.document.id}/${context.document.title}`,
-      content: context.document.getContent(),
-      selected: { content: context.editor.getSelection()?.text ?? '' }
-    });
+    return context;
   }
 
   /**
-   * 创建 Editor 页面完整工具。
-   * @returns 当前文档读取工具
+   * 创建当前文件轻量环境上下文。
+   * @returns 当前文件定位上下文
    */
-  function createDocumentTool(): ToolContextTool {
-    return {
-      definition: {
-        name: READ_CURRENT_DOCUMENT_TOOL_NAME,
-        description: '读取当前编辑器文档的标题、路径、Markdown 内容和用户选中的内容。',
-        source: 'builtin',
-        riskLevel: 'read',
-        requiresActiveDocument: false,
-        permissionCategory: 'document',
-        parameters: { type: 'object', properties: {}, additionalProperties: false }
-      },
-      execute: (): AIToolExecutionResult => readDocument(),
-      presentation: {
-        label: '读取当前文档',
-        summarize: (): string => '已读取当前文档'
-      },
-      history: { mode: 'keep' }
-    };
+  function getEnvironmentContext(): ChatRuntimePageEnvironmentContext {
+    const context = getAvailableContext();
+    const selectedLines = readSelectedLines(options.editorState.value, options.getController());
+    const selectedLineEntries = selectedLines?.map((line: EditorSelectedLine): string => `${String(line.lineNumber)}: ${line.content}`);
+    const section = createEnvironmentSection('current_file', [
+      createEnvironmentLine('Path', context.document.path ?? context.document.locator),
+      ...(selectedLineEntries?.length ? ['Selected lines:', ...selectedLineEntries] : [])
+    ]);
+    return section ? { sections: [section] } : {};
   }
 
   /**
@@ -115,7 +162,7 @@ export function useChatContext(options: UseChatContextOptions): void {
     const content = typeof payload.content === 'string' ? payload.content : '';
     const reference = parseUnsavedPath(path);
     const context = getContext();
-    const matches = Boolean(reference && (context.document.locator === path || context.document.path === path || context.document.id === reference.fileId));
+    const matches = context.document.locator === path || context.document.path === path || Boolean(reference && context.document.id === reference.fileId);
     if (!matches) return { handled: false };
     const [error] = await asyncTo(context.editor.replaceDocument(content));
     if (error) throw error.cause ?? error;
@@ -127,7 +174,8 @@ export function useChatContext(options: UseChatContextOptions): void {
     resourceId,
     available,
     active: options.active,
-    getTools: () => [createDocumentTool()],
+    getTools: () => [],
+    getEnvironmentContext,
     hiddenToolNames: [],
     appBridgeHandlers: {
       'write-file-content': writeContent

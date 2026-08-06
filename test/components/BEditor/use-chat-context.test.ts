@@ -10,7 +10,6 @@ import { defineComponent, h, ref } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { executeToolCall } from '@/ai/tools/stream';
 import { createNoopEditorController, type EditorController } from '@/components/BEditor/adapters/types';
 import { useChatContext } from '@/components/BEditor/hooks/useChatContext';
 import type { EditorState } from '@/components/BEditor/types';
@@ -45,17 +44,18 @@ describe('useChatContext', (): void => {
 
   afterEach((): void => toolContextRegistry.clear());
 
-  it('registers and directly executes the bound document tool', async (): Promise<void> => {
+  it('registers current file environment without exposing a document read tool', async (): Promise<void> => {
     const editorState = ref<EditorState>({
       id: 'document-a',
       name: 'Draft',
-      path: null,
+      path: '/home/user/workspace/Draft.md',
       ext: 'md',
-      content: '# Draft'
+      content: '# Draft\nselected line\nlast line'
     });
     const replaceDocument = vi.fn(async (): Promise<void> => undefined);
     const editorController: EditorController = {
       ...createNoopEditorController(),
+      getSelection: (): { from: number; to: number; text: string } => ({ from: 8, to: 21, text: 'selected line' }),
       replaceDocument
     };
     const active = ref<boolean>(true);
@@ -73,33 +73,18 @@ describe('useChatContext', (): void => {
     const tools = useActiveChatContext();
     const binding = { providerId: 'editor', resourceId: 'document-a' };
 
-    const documentTool = tools.getBoundTools(binding, { confirmation: { confirm: vi.fn(async (): Promise<boolean> => true) } })[0];
-    if (!documentTool) throw new Error('document tool should exist');
-    expect(documentTool.definition.name).toBe('read_current_document');
-    await expect(
-      executeToolCall({ toolCallId: 'tool-call-document', toolName: 'read_current_document', input: {} }, [documentTool], undefined)
-    ).resolves.toMatchObject({
-      result: {
-        toolName: 'read_current_document',
-        status: 'success',
-        data: {
-          id: 'document-a',
-          artifactId: 'document-a',
-          title: 'Draft.md',
-          content: '# Draft',
-          path: 'unsaved://document-a/Draft.md',
-          selected: { content: '' }
-        }
-      }
+    expect(tools.getBoundTools(binding, { confirmation: { confirm: vi.fn(async (): Promise<boolean> => true) } })).toEqual([]);
+    expect(tools.getPresentation(binding, 'read_current_document')).toBeUndefined();
+    expect(tools.getRendererTools(binding)).toEqual([]);
+    expect(tools.getEnvironmentContext(binding)).toEqual({
+      sections: [{ tag: 'current_file', lines: ['Path: /home/user/workspace/Draft.md', 'Selected lines:', '2: selected line'] }]
     });
-    expect(tools.getPresentation(binding, 'read_current_document')).toEqual(expect.objectContaining({ label: '读取当前文档' }));
-    expect(tools.getRendererTools(binding)).toEqual([{ name: 'read_current_document', history: { mode: 'keep' } }]);
     await expect(tools.dispatchAppBridge(binding, createEvent('document-snapshot'))).resolves.toEqual({ handled: false });
     await expect(
-      tools.dispatchAppBridge(binding, createEvent('write-file-content', { path: 'unsaved://document-a/Draft.md', content: '# Updated' }))
+      tools.dispatchAppBridge(binding, createEvent('write-file-content', { path: '/home/user/workspace/Draft.md', content: '# Updated' }))
     ).resolves.toEqual({
       handled: true,
-      data: { artifactId: 'document-a', path: 'unsaved://document-a/Draft.md', content: '# Updated' }
+      data: { artifactId: 'document-a', path: '/home/user/workspace/Draft.md', content: '# Updated' }
     });
     expect(replaceDocument).toHaveBeenCalledWith('# Updated');
     await expect(

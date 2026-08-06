@@ -3,7 +3,13 @@
  * @description 页面工具上下文（Tool Context）注册、查询和 Bridge 分发类型。
  */
 import type { AIToolContext, AIToolDefinition, AIToolExecutionMetadata, AIToolExecutionResult, AIToolExecutor } from 'types/ai';
-import type { ChatRendererToolDescriptor, ChatRendererToolHistoryPolicy, ChatRuntimeBridgeRequestEvent, ChatToolBinding } from 'types/chat-runtime';
+import type {
+  ChatRendererToolDescriptor,
+  ChatRendererToolHistoryPolicy,
+  ChatRuntimeBridgeRequestEvent,
+  ChatRuntimePageEnvironmentContext,
+  ChatToolBinding
+} from 'types/chat-runtime';
 import type { Ref } from 'vue';
 import type { AIToolConfirmationAdapter } from '@/ai/tools/confirmation';
 
@@ -69,6 +75,8 @@ export interface ToolContextRegistration {
   readonly binding: ChatToolBinding;
   /** 动态创建当前资源工具。 */
   readonly getTools: () => ToolContextTool[];
+  /** 动态读取当前资源的轻量环境上下文。 */
+  readonly getEnvironmentContext?: () => ChatRuntimePageEnvironmentContext | undefined;
   /** 需要隐藏的应用级工具名称。 */
   readonly hiddenToolNames: readonly string[];
   /** 按 Bridge kind 索引的处理器。 */
@@ -103,6 +111,8 @@ export interface ToolContextRegistry {
   getPresentationByTool(toolName: string): ToolContextPresentation | undefined;
   /** 按 binding 获取可克隆 Renderer 工具描述符。 */
   getRendererTools(binding: ChatToolBinding): readonly ChatRendererToolDescriptor[];
+  /** 按 binding 获取页面注册的轻量环境上下文。 */
+  getEnvironmentContext(binding: ChatToolBinding): ChatRuntimePageEnvironmentContext | undefined;
   /** 按 binding 分发应用级 Bridge。 */
   dispatchAppBridge(binding: ChatToolBinding, event: ChatRuntimeBridgeRequestEvent): Promise<ChatBridgeDispatchResult>;
   /** 订阅 Registry 有效状态变化。 */
@@ -123,6 +133,8 @@ export interface ChatContextProviderOptions {
   readonly active: Readonly<Ref<boolean>>;
   /** 动态创建当前资源工具。 */
   readonly getTools: () => ToolContextTool[];
+  /** 动态读取当前资源的轻量环境上下文。 */
+  readonly getEnvironmentContext?: () => ChatRuntimePageEnvironmentContext | undefined;
   /** 需要隐藏的应用级工具名称。 */
   readonly hiddenToolNames?: readonly string[];
   /** 页面 Bridge handlers。 */
@@ -133,7 +145,14 @@ export interface ChatContextProviderOptions {
 export interface ActiveChatContext
   extends Pick<
     ToolContextRegistry,
-    'getActiveBinding' | 'getBoundTools' | 'getHiddenToolNames' | 'getPresentation' | 'getPresentationByTool' | 'getRendererTools' | 'dispatchAppBridge'
+    | 'getActiveBinding'
+    | 'getBoundTools'
+    | 'getHiddenToolNames'
+    | 'getPresentation'
+    | 'getPresentationByTool'
+    | 'getRendererTools'
+    | 'getEnvironmentContext'
+    | 'dispatchAppBridge'
   > {
   /** Registry 状态变化修订号。 */
   readonly revision: Readonly<Ref<number>>;

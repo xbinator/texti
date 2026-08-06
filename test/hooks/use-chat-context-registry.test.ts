@@ -35,13 +35,13 @@ interface HookHarness {
 function createTool(): ToolContextTool {
   return {
     definition: {
-      name: 'read_current_document',
+      name: 'inspect_editor_page',
       description: 'read',
       source: 'builtin',
       riskLevel: 'read',
       parameters: { type: 'object', properties: {} }
     },
-    execute: async () => ({ toolName: 'read_current_document', status: 'success', data: null })
+    execute: async () => ({ toolName: 'inspect_editor_page', status: 'success', data: null })
   };
 }
 
@@ -86,7 +86,7 @@ describe('useContextRegistry', (): void => {
     harness.active.value = false;
     await nextTick();
     expect(tools.getActiveBinding()).toBeUndefined();
-    expect(tools.getBoundTools(binding, RUNTIME_SERVICES).map((tool) => tool.definition.name)).toEqual(['read_current_document']);
+    expect(tools.getBoundTools(binding, RUNTIME_SERVICES).map((tool) => tool.definition.name)).toEqual(['inspect_editor_page']);
 
     harness.wrapper.unmount();
     expect(tools.getBoundTools(binding, RUNTIME_SERVICES)).toEqual([]);

@@ -3,7 +3,7 @@
  * @description BChat Runtime 请求准备 IO hook 测试。
  */
 import type { AIToolExecutor } from 'types/ai';
-import type { ChatRuntimeModelSelection } from 'types/chat-runtime';
+import type { ChatRuntimeEnvironmentContext, ChatRuntimeModelSelection } from 'types/chat-runtime';
 import { ref } from 'vue';
 import { describe, expect, it, vi } from 'vitest';
 import { useRuntimeRequestConfig } from '@/components/BChat/hooks/useRuntimeRequestConfig';
@@ -66,7 +66,8 @@ describe('useRuntimeRequestConfig', (): void => {
       getActiveTools: vi.fn(() => [createTool('edit_memory')]),
       getSkillContentHashes: vi.fn(() => ({ weather: 'hash-1' })),
       resolveSkillSnapshots: vi.fn(async () => []),
-      resolveRuntimeSystemPrompt: vi.fn(async () => 'system'),
+      resolveRuntimeMemoryContext: vi.fn(async () => 'system'),
+      resolveRuntimeEnvironmentContext: vi.fn(() => undefined),
       resolveRuntimeTavilyConfig: vi.fn(() => undefined),
       resolveRuntimeMcpRequestConfig: vi.fn(() => undefined),
       onMissingServiceConfig: vi.fn()
@@ -103,7 +104,8 @@ describe('useRuntimeRequestConfig', (): void => {
       getActiveTools: vi.fn(() => []),
       getSkillContentHashes: vi.fn(() => ({})),
       resolveSkillSnapshots: vi.fn(async () => []),
-      resolveRuntimeSystemPrompt: vi.fn(async () => undefined),
+      resolveRuntimeMemoryContext: vi.fn(async () => undefined),
+      resolveRuntimeEnvironmentContext: vi.fn(() => undefined),
       resolveRuntimeTavilyConfig: vi.fn(() => undefined),
       resolveRuntimeMcpRequestConfig: vi.fn(() => undefined),
       onMissingServiceConfig
@@ -114,12 +116,39 @@ describe('useRuntimeRequestConfig', (): void => {
     expect(syncAIResources).not.toHaveBeenCalled();
   });
 
+  it('moves memory prompt content into user-level runtime context', async (): Promise<void> => {
+    const hook = useRuntimeRequestConfig({
+      contextWindow: ref(8000),
+      workspaceRoot: ref('/workspace'),
+      resolveServiceConfig: vi.fn(async () => ({ providerId: 'provider', modelId: 'model', toolSupport: { supported: true, reason: 'supported' } })),
+      syncAIResources: vi.fn(async (): Promise<void> => undefined),
+      getActiveTools: vi.fn(() => []),
+      getSkillContentHashes: vi.fn(() => ({})),
+      resolveSkillSnapshots: vi.fn(async () => []),
+      resolveRuntimeMemoryContext: vi.fn(async () => '<user_memory>\n- prefers concise answers\n</user_memory>'),
+      resolveRuntimeEnvironmentContext: vi.fn(() => undefined),
+      resolveRuntimeTavilyConfig: vi.fn(() => undefined),
+      resolveRuntimeMcpRequestConfig: vi.fn(() => undefined),
+      onMissingServiceConfig: vi.fn()
+    });
+
+    const prepared = await hook.prepareRuntimeRequest(USER_MESSAGE);
+
+    expect(prepared?.config.system).toBeUndefined();
+    expect(prepared?.config.runtimeContext).toEqual({
+      memory: {
+        targetMessageId: 'user-1',
+        content: '<user_memory>\n- prefers concise answers\n</user_memory>'
+      }
+    });
+  });
+
   it('uses the captured Runtime tool binding when discovering candidate tools', async (): Promise<void> => {
     const toolBinding: RuntimeToolDiscoveryBinding = {
       workspaceRoot: '/workspace',
-      toolContext: { providerId: 'widget', resourceId: 'widget-a' }
+      toolContext: { providerId: 'page', resourceId: 'page-a' }
     };
-    const getActiveTools = vi.fn((): AIToolExecutor[] => [createTool('read_current_widget')]);
+    const getActiveTools = vi.fn((): AIToolExecutor[] => [createTool('inspect_registered_page')]);
     const hook = useRuntimeRequestConfig({
       contextWindow: ref(8000),
       workspaceRoot: ref('/workspace'),
@@ -128,7 +157,8 @@ describe('useRuntimeRequestConfig', (): void => {
       getActiveTools,
       getSkillContentHashes: vi.fn(() => ({})),
       resolveSkillSnapshots: vi.fn(async () => []),
-      resolveRuntimeSystemPrompt: vi.fn(async () => undefined),
+      resolveRuntimeMemoryContext: vi.fn(async () => undefined),
+      resolveRuntimeEnvironmentContext: vi.fn(() => undefined),
       resolveRuntimeTavilyConfig: vi.fn(() => undefined),
       resolveRuntimeMcpRequestConfig: vi.fn(() => undefined),
       onMissingServiceConfig: vi.fn()
@@ -137,12 +167,64 @@ describe('useRuntimeRequestConfig', (): void => {
     const prepared = await hook.prepareRuntimeRequest(USER_MESSAGE, [], toolBinding);
 
     expect(getActiveTools).toHaveBeenCalledWith(toolBinding);
-    expect(prepared?.rendererTools.map((tool: AIToolExecutor): string => tool.definition.name)).toEqual(['read_current_widget']);
+    expect(prepared?.rendererTools.map((tool: AIToolExecutor): string => tool.definition.name)).toEqual(['inspect_registered_page']);
+  });
+
+  it('moves current environment into user-level runtime context from the captured page binding', async (): Promise<void> => {
+    const toolBinding: RuntimeToolDiscoveryBinding = {
+      toolContext: { providerId: 'editor', resourceId: 'document-a' },
+      pageEnvironment: {
+        sections: [{ tag: 'current_file', lines: ['Path: /workspace-a/Draft.md', 'Selected lines:', '2: selected line'] }]
+      }
+    };
+    const environmentContext: ChatRuntimeEnvironmentContext = {
+      targetMessageId: 'user-1',
+      metadata: {
+        operatingSystem: 'macOS',
+        timezone: 'Asia/Shanghai',
+        currentDate: '2026-08-06',
+        currentTime: '2026-08-06 17:12:34',
+        workspaceRoot: '/workspace-a'
+      },
+      sections: [{ tag: 'current_file', lines: ['Path: /workspace-a/Draft.md', 'Selected lines:', '2: selected line'] }]
+    };
+    const resolveRuntimeEnvironmentContext = vi.fn((): ChatRuntimeEnvironmentContext => environmentContext);
+    const hook = useRuntimeRequestConfig({
+      contextWindow: ref(8000),
+      workspaceRoot: ref('/workspace-a'),
+      resolveServiceConfig: vi.fn(async () => ({ providerId: 'provider', modelId: 'model', toolSupport: { supported: true, reason: 'supported' } })),
+      syncAIResources: vi.fn(async (): Promise<void> => undefined),
+      getActiveTools: vi.fn(() => []),
+      getSkillContentHashes: vi.fn(() => ({})),
+      resolveSkillSnapshots: vi.fn(async () => []),
+      resolveRuntimeMemoryContext: vi.fn(async () => undefined),
+      resolveRuntimeEnvironmentContext,
+      resolveRuntimeTavilyConfig: vi.fn(() => undefined),
+      resolveRuntimeMcpRequestConfig: vi.fn(() => undefined),
+      onMissingServiceConfig: vi.fn()
+    });
+
+    const prepared = await hook.prepareRuntimeRequest(USER_MESSAGE, [], toolBinding);
+
+    expect(resolveRuntimeEnvironmentContext).toHaveBeenCalledWith(
+      {
+        toolContext: { providerId: 'editor', resourceId: 'document-a' },
+        pageEnvironment: {
+          sections: [{ tag: 'current_file', lines: ['Path: /workspace-a/Draft.md', 'Selected lines:', '2: selected line'] }]
+        },
+        workspaceRoot: '/workspace-a'
+      },
+      '/workspace-a',
+      'user-1'
+    );
+    expect(prepared?.config.runtimeContext).toEqual({
+      environment: environmentContext
+    });
   });
 
   it('freezes the workspace root before asynchronous resource synchronization can drift it', async (): Promise<void> => {
     const workspaceRoot = ref<string | null>('/workspace-a');
-    const toolBinding: RuntimeToolDiscoveryBinding = { toolContext: { providerId: 'widget', resourceId: 'widget-a' } };
+    const toolBinding: RuntimeToolDiscoveryBinding = { toolContext: { providerId: 'page', resourceId: 'page-a' } };
     const getActiveTools = vi.fn((): AIToolExecutor[] => [createTool('read_directory')]);
     const hook = useRuntimeRequestConfig({
       contextWindow: ref(8000),
@@ -155,7 +237,8 @@ describe('useRuntimeRequestConfig', (): void => {
       getActiveTools,
       getSkillContentHashes: vi.fn(() => ({})),
       resolveSkillSnapshots: vi.fn(async () => []),
-      resolveRuntimeSystemPrompt: vi.fn(async () => undefined),
+      resolveRuntimeMemoryContext: vi.fn(async () => undefined),
+      resolveRuntimeEnvironmentContext: vi.fn(() => undefined),
       resolveRuntimeTavilyConfig: vi.fn(() => undefined),
       resolveRuntimeMcpRequestConfig: vi.fn(() => undefined),
       onMissingServiceConfig: vi.fn()
@@ -165,7 +248,7 @@ describe('useRuntimeRequestConfig', (): void => {
 
     expect(prepared?.config.workspaceRoot).toBe('/workspace-a');
     expect(getActiveTools).toHaveBeenCalledWith({
-      toolContext: { providerId: 'widget', resourceId: 'widget-a' },
+      toolContext: { providerId: 'page', resourceId: 'page-a' },
       workspaceRoot: '/workspace-a'
     });
   });
@@ -186,7 +269,8 @@ describe('useRuntimeRequestConfig', (): void => {
       getActiveTools: vi.fn(() => []),
       getSkillContentHashes: vi.fn(() => ({ weather: 'hash-weather' })),
       resolveSkillSnapshots,
-      resolveRuntimeSystemPrompt: vi.fn(async () => undefined),
+      resolveRuntimeMemoryContext: vi.fn(async () => undefined),
+      resolveRuntimeEnvironmentContext: vi.fn(() => undefined),
       resolveRuntimeTavilyConfig: vi.fn(() => undefined),
       resolveRuntimeMcpRequestConfig: vi.fn(() => undefined),
       onMissingServiceConfig: vi.fn()

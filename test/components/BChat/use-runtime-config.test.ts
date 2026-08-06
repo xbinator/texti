@@ -108,8 +108,8 @@ describe('useRuntimeConfig', (): void => {
     };
     memoryStoreMock.buildSystemPromptContext.mockReturnValue('<user_memory>memory</user_memory>');
 
-    const { resolveRuntimeSystemPrompt } = useRuntimeConfig();
-    const system = await resolveRuntimeSystemPrompt(selection);
+    const { resolveRuntimeMemoryContext } = useRuntimeConfig();
+    const system = await resolveRuntimeMemoryContext(selection);
 
     expect(system).toBe('<user_memory>memory</user_memory>');
     expect(memoryStoreMock.buildSystemPromptContext).toHaveBeenCalledWith({ selection });

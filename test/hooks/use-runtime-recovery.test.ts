@@ -38,11 +38,11 @@ function createSnapshot(): ChatRuntimeRecoverySnapshot {
     phase: 'streaming',
     createdAt: 1,
     capabilities: {
-      rendererTools: [{ name: 'read_current_document' }],
+      rendererTools: [{ name: 'inspect_registered_page' }],
       toolContext: { providerId: 'editor', resourceId: 'document-1' }
     },
     pendingRequests: [
-      { type: 'tool', event: { ...base, toolCallId: 'tool-call-1', toolName: 'read_current_document', input: {} } },
+      { type: 'tool', event: { ...base, toolCallId: 'tool-call-1', toolName: 'inspect_registered_page', input: {} } },
       {
         type: 'confirmation',
         event: {

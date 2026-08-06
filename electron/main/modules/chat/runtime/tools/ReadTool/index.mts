@@ -3,11 +3,11 @@
  * @description ChatRuntime 主进程只读工具。
  */
 import type { ChatRuntimeMainToolExecutionInput } from '../../types.mjs';
-import type { MainToolsDependencies, RuntimeLogFilters } from '../types.mjs';
+import type { RuntimeLogFilters } from '../types.mjs';
 import type { AIToolExecutionResult } from 'types/ai';
 import { readLogs } from '../../../../logger/service.mjs';
 import { LogLevel, type LogQueryOptions, type LogScope } from '../../../../logger/types.mjs';
-import { GET_CURRENT_TIME_TOOL_NAME, MAX_QUERY_LOG_LIMIT, QUERY_LOGS_TOOL_NAME, READ_TOOL_NAMES, DEFAULT_QUERY_LOG_LIMIT } from '../constants.mjs';
+import { MAX_QUERY_LOG_LIMIT, QUERY_LOGS_TOOL_NAME, READ_TOOL_NAMES, DEFAULT_QUERY_LOG_LIMIT } from '../constants.mjs';
 import { createMainToolFailureResult, createMainToolSuccessResult } from '../results.mjs';
 
 /**
@@ -17,20 +17,6 @@ import { createMainToolFailureResult, createMainToolSuccessResult } from '../res
  */
 export function isReadTool(toolName: string): boolean {
   return READ_TOOL_NAMES.has(toolName);
-}
-
-/**
- * 创建 get_current_time 工具成功结果。
- * @param iso - ISO 时间字符串
- * @returns 工具成功结果
- */
-function createGetCurrentTimeSuccessResult(iso: string): AIToolExecutionResult {
-  const date = new Date(iso);
-  return createMainToolSuccessResult(GET_CURRENT_TIME_TOOL_NAME, {
-    iso,
-    timestamp: date.getTime(),
-    locale: date.toLocaleString()
-  });
 }
 
 /**
@@ -145,11 +131,7 @@ function createQueryLogsSuccessResult(input: unknown): AIToolExecutionResult {
  * @param deps - 主进程工具依赖
  * @returns 工具执行结果
  */
-export async function executeReadTool(input: ChatRuntimeMainToolExecutionInput, deps: MainToolsDependencies): Promise<AIToolExecutionResult> {
-  if (input.toolName === GET_CURRENT_TIME_TOOL_NAME) {
-    return createGetCurrentTimeSuccessResult(deps.now());
-  }
-
+export async function executeReadTool(input: ChatRuntimeMainToolExecutionInput): Promise<AIToolExecutionResult> {
   if (input.toolName === QUERY_LOGS_TOOL_NAME) {
     return createQueryLogsSuccessResult(input.input);
   }
