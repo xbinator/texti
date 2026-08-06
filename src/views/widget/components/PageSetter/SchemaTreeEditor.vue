@@ -879,32 +879,38 @@ const hasObjectActionColumn = computed<boolean>(() => schemaRows.value.some((row
     flex: 1 1 auto;
     width: 100%;
     min-width: 0;
-  }
 
-  .schema-editor__name-input :deep(.ant-input),
-  .schema-editor__name-input :deep(input) {
-    box-sizing: border-box;
-    width: 100%;
-    height: 28px;
-    font-size: 12px;
+    :deep(.ant-input),
+    :deep(input) {
+      box-sizing: border-box;
+      width: 100%;
+      height: 28px;
+      font-size: 12px;
+    }
   }
 
   .schema-editor__type-select {
     flex-shrink: 0;
     width: var(--schema-editor-type-width);
     min-width: var(--schema-editor-type-width);
-  }
 
-  .schema-editor__type-select :deep(.b-select),
-  .schema-editor__type-select :deep(.ant-select-selector),
-  .schema-editor__type-select :deep(.ant-select-selection-item),
-  .schema-editor__type-select :deep(select) {
-    font-size: 12px;
-  }
+    :deep(.b-select .ant-select-selection-item),
+    :deep(.b-select .ant-select-selection-placeholder) {
+      font-size: 12px;
+      line-height: 26px;
+    }
 
-  .schema-editor__type-select :deep(.ant-select-selector),
-  .schema-editor__type-select :deep(select) {
-    height: 28px;
+    :deep(.b-select),
+    :deep(.ant-select-selector),
+    :deep(.ant-select-selection-item),
+    :deep(select) {
+      font-size: 12px;
+    }
+
+    :deep(.ant-select-selector),
+    :deep(select) {
+      height: 28px;
+    }
   }
 
   textarea.ant-input {
@@ -941,15 +947,15 @@ const hasObjectActionColumn = computed<boolean>(() => schemaRows.value.some((row
   .schema-editor__description {
     box-sizing: border-box;
     width: 100%;
-  }
 
-  .schema-editor__description :deep(.ant-input),
-  .schema-editor__description :deep(textarea) {
-    box-sizing: border-box;
-    width: 100%;
-    font-size: 12px;
-    line-height: 1.5;
-    resize: vertical;
+    :deep(.ant-input),
+    :deep(textarea) {
+      box-sizing: border-box;
+      width: 100%;
+      font-size: 12px;
+      line-height: 1.5;
+      resize: vertical;
+    }
   }
 
   .schema-editor__empty {
