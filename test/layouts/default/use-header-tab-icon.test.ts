@@ -56,6 +56,27 @@ function createFileRecord(overrides: Partial<Extract<RecentRecord, { type: 'file
 }
 
 /**
+ * 创建 Widget 最近记录。
+ * @param overrides - 需要覆盖的字段
+ * @returns Widget 最近记录
+ */
+function createWidgetRecord(overrides: Partial<Extract<RecentRecord, { type: 'widget' }>> = {}): Extract<RecentRecord, { type: 'widget' }> {
+  return {
+    type: 'widget',
+    id: 'widget-weather',
+    url: '/widget/widget-weather',
+    title: 'widget.json',
+    description: '/home/user/.tibis/widgets/weather/widget.json',
+    path: '/home/user/.tibis/widgets/weather/widget.json',
+    content: '',
+    savedContent: '',
+    name: 'widget',
+    ext: 'json',
+    ...overrides
+  };
+}
+
+/**
  * 创建 WebView 最近记录。
  * @param overrides - 需要覆盖的字段
  * @returns WebView 最近记录
@@ -102,6 +123,19 @@ describe('useHeaderTabIcon', (): void => {
     expect(iconProps.value.record).toBe(record);
     expect(iconProps.value.fileName).toBe('');
     expect(iconProps.value.icon).toBe('');
+  });
+
+  it('uses the blocks icon for widget tabs instead of the widget.json record icon', (): void => {
+    const tab = ref(createTab({ path: '/widget/widget-weather', recentKey: 'widget:widget-weather', title: 'widget.json' }));
+    recentRecordsMock.value = [createWidgetRecord()];
+
+    const iconProps = useHeaderTabIcon(tab);
+
+    expect(iconProps.value).toEqual({
+      record: undefined,
+      fileName: '',
+      icon: 'lucide:blocks'
+    });
   });
 
   it('matches WebView records by decoded route URL when recentKey is absent', (): void => {

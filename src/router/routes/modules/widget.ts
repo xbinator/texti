@@ -16,7 +16,10 @@ const routes: AppRouteRecordRaw[] = [
     component: () => import('@/views/widget/index.vue'),
     meta: {
       hideTab: true,
-      tab: createFileRouteTabMeta('widget')
+      tab: {
+        ...createFileRouteTabMeta('widget'),
+        icon: 'lucide:blocks'
+      }
     },
     beforeEnter: (to) => {
       if (!to.params.id) {

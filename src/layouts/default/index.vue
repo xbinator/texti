@@ -33,7 +33,7 @@
             title="欢迎"
             @click="handleOpenWelcome"
           >
-            <Icon icon="lucide:blocks" width="14" height="14" />
+            <Icon icon="lucide:layout-grid" width="14" height="14" />
           </button>
           <HeaderTabs />
         </div>

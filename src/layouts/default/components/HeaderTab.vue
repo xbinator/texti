@@ -236,11 +236,11 @@ const statusVisual = computed<StatusVisual | undefined>(() => (props.status ? ST
 }
 
 .header-tab__status--attention {
-  color: var(--warning-color, #fa8c16);
+  color: var(--warning-color);
 }
 
 .header-tab__status--error {
-  color: var(--error-color, #ff4d4f);
+  color: var(--error-color);
 }
 
 .header-tab__status--completed {

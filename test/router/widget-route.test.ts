@@ -30,6 +30,7 @@ describe('widget route', (): void => {
     expect(widgetRoute?.path).toBe('widget/:id?');
     expect(widgetRoute?.name).toBe('widget');
     expect(widgetRoute?.meta?.hideTab).toBe(true);
+    expect(widgetRoute?.meta?.tab?.icon).toBe('lucide:blocks');
     expect(typeof tabId).toBe('function');
     expect(typeof cacheKey).toBe('function');
     expect(typeof tabId === 'function' ? tabId(route) : '').toBe('widget-1');

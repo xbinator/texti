@@ -9,6 +9,9 @@ import { useRecentStore } from '@/stores/workspace/recent';
 import type { Tab } from '@/stores/workspace/tabs';
 import { WEB_RECORD_ICON } from '@/utils/file/icons';
 
+/** Widget 标签页使用固定的工具图标，避免落到 widget.json 文件图标。 */
+const WIDGET_TAB_ICON = 'lucide:blocks';
+
 /**
  * HeaderTab 传给 BRecentIcon 的图标属性。
  */
@@ -28,6 +31,15 @@ export interface HeaderTabIconProps {
  */
 function isWebviewPath(path: string): boolean {
   return path.startsWith('/webview/');
+}
+
+/**
+ * 判断标签页路径是否来自 Widget 编辑器路由。
+ * @param path - 标签页路由路径
+ * @returns 是否为 Widget 标签页路径
+ */
+function isWidgetPath(path: string): boolean {
+  return path.startsWith('/widget/');
 }
 
 /**
@@ -118,6 +130,10 @@ export function useHeaderTabIcon(tabRef: Ref<Tab>): ComputedRef<HeaderTabIconPro
     const configuredIcon = getConfiguredIcon(tab);
     if (configuredIcon) {
       return { record: undefined, fileName: '', icon: configuredIcon };
+    }
+
+    if (isWidgetPath(tab.path)) {
+      return { record: undefined, fileName: '', icon: WIDGET_TAB_ICON };
     }
 
     const record = getRecentRecord(tab, recordsByKey.value, webviewsByUrl.value);
