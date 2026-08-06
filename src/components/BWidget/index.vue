@@ -32,6 +32,7 @@
       :elements="board.state.value.elements"
       :selection="board.state.value.selection"
       :active-element-id="activeElementId"
+      :geometry-preview-changes="moveablePreviewChanges"
       :viewport="board.state.value.viewport"
       :viewport-size="viewportSize"
       @context-menu="handleWidgetContextMenu"
@@ -1261,8 +1262,8 @@ function startDirectDrag(id: string, event: PointerEvent, selectOnEnd: boolean):
 
   const abortController = new AbortController();
   cancelDirectDrag();
-  // 新选中直接拖拽需要隐藏旧控制层；组合直接拖拽需要避免父子预览与控制层错位。
-  hideMoveableDuringDirectDrag.value = selectOnEnd || isWidgetGroupElement(element);
+  // 新选中直接拖拽需要隐藏旧控制层，已选组合拖拽则保留控制点并由 MoveableLayer 跟随刷新。
+  hideMoveableDuringDirectDrag.value = selectOnEnd;
   directDragSession = {
     id,
     startClient: {

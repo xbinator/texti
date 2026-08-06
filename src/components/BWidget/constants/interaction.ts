@@ -47,10 +47,10 @@ export const WIDGET_MOVEABLE_THROTTLE = 0;
 export const WIDGET_SELECTO_BLOCKED_DRAG_SELECTOR = [
   '.b-widget-context-menu',
   '.b-widget-moveable-layer',
+  '.b-widget-element',
   '.moveable-control',
   '.moveable-line',
   '.moveable-area',
   '.moveable-control-box',
-  '.moveable-direction',
-  '.b-widget-element.is-selected'
+  '.moveable-direction'
 ].join(', ');

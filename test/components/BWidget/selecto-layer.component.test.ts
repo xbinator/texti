@@ -1,6 +1,6 @@
 /**
  * @file selecto-layer.component.test.ts
- * @description 验证 BWidget Selecto 图层不会抢占右键菜单交互。
+ * @description 验证 BWidget Selecto 图层不会抢占节点拖拽和右键菜单交互。
  * @vitest-environment jsdom
  */
 import { mount } from '@vue/test-utils';
@@ -121,6 +121,32 @@ describe('SelectoLayer', (): void => {
 
     const canStartDrag = latestSelectoOptions?.dragCondition?.({
       inputEvent: createMouseEventWithTarget(menuButton)
+    });
+
+    expect(canStartDrag).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('blocks drag selection from widget element targets', (): void => {
+    const root = createRootElement();
+    const viewport: WidgetViewport = { center: { x: 0, y: 0 }, zoom: 1 };
+    const node = document.createElement('div');
+    node.className = 'b-widget-node b-widget-element';
+    root.appendChild(node);
+
+    const wrapper = mount(SelectoLayer, {
+      props: {
+        root,
+        activeTool: 'select',
+        selection: ['group-1'],
+        viewport,
+        viewportSize: { width: 800, height: 600 }
+      },
+      attachTo: document.body
+    });
+
+    const canStartDrag = latestSelectoOptions?.dragCondition?.({
+      inputEvent: createMouseEventWithTarget(node)
     });
 
     expect(canStartDrag).toBe(false);

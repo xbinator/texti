@@ -987,7 +987,7 @@ describe('BWidget node click selection', () => {
     wrapper.unmount();
   });
 
-  it('keeps group and child previews aligned while directly dragging a selected group child', async (): Promise<void> => {
+  it('keeps moveable controls while directly dragging a selected group child', async (): Promise<void> => {
     const data = createGroupedWidgetData();
     const wrapper = mount(BWidget, {
       props: {
@@ -1006,7 +1006,7 @@ describe('BWidget node click selection', () => {
     await dispatchPointerEvent(findNodeById(wrapper, 'node-1').element, 'pointerdown', { clientX: 100, clientY: 100 });
     await dispatchPointerEvent(window, 'pointermove', { clientX: 140, clientY: 120 });
 
-    expect(wrapper.find('.moveable-stub').exists()).toBe(false);
+    expect(wrapper.find('.moveable-stub').exists()).toBe(true);
     expect(findNodeById(wrapper, 'group-1').attributes('style')).toContain('translate(40px, 20px)');
     expect(findNodeById(wrapper, 'node-1').attributes('style')).toContain('translate(120px, 80px)');
 

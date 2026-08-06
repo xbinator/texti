@@ -189,6 +189,8 @@ interface Props {
   selection: string[];
   /** 组合选区内当前编辑的子元素 ID */
   activeElementId?: string | null;
+  /** 画布节点预览几何，用于直接拖拽期间刷新控制框 */
+  geometryPreviewChanges?: WidgetGeometryChange[];
   /** 当前视口 */
   viewport: WidgetViewport;
   /** 当前视口渲染尺寸 */
@@ -985,6 +987,14 @@ watch(
     syncTargets().catch((error: unknown): void => {
       console.warn('BWidget Moveable target sync failed', error);
     });
+  },
+  { deep: true, flush: 'post' }
+);
+
+watch(
+  () => props.geometryPreviewChanges,
+  () => {
+    scheduleMoveableRectRefresh();
   },
   { deep: true, flush: 'post' }
 );
