@@ -4,17 +4,21 @@
 -->
 <template>
   <SettingsPage :title="MENU_ITEMS.basic.label">
-    <SettingsSection title="基本设置">
+    <SettingsSection title="通用设置">
       <SettingsItem label="外观">
         <BSelect :value="settingStore.theme" :options="themeOptions" :width="280" @change="handleThemeChange" />
       </SettingsItem>
-      <SettingsItem label="主题风格">
+      <SettingsItem label="主题">
         <BSelect :value="settingStore.themePreset" :options="presetOptions" :width="280" @change="handlePresetChange" />
       </SettingsItem>
-      <SettingsItem label="字体样式">
+    </SettingsSection>
+
+    <SettingsSection title="字体设置">
+      <SettingsItem label="样式">
         <BSelect :value="settingStore.defaultFontStyle" :options="defaultFontStyleOptions" :width="280" @change="handleDefaultFontStyleChange" />
       </SettingsItem>
-      <SettingsItem label="字体大小" :control-width="280">
+
+      <SettingsItem label="大小" :control-width="280">
         <BInputNumber
           :value="settingStore.rootFontSize"
           :min="ROOT_FONT_SIZE_MIN"

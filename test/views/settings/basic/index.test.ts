@@ -169,7 +169,8 @@ describe('BasicSettingsPage tool permissions', (): void => {
   it('renders the font style setting with its default option', (): void => {
     const wrapper = mountBasicSettingsPage();
 
-    expect(wrapper.text()).toContain('字体样式');
+    expect(wrapper.text()).toContain('字体设置');
+    expect(wrapper.text()).toContain('样式');
     expect(wrapper.text()).toContain('默认');
   });
 
