@@ -13,7 +13,7 @@
       -->
       <div v-if="platform === 'mac' && !isFullScreen" class="b-layout-header__mac-spacer"></div>
 
-      <div class="b-layout-header__content" :class="{ 'is-mac': platform === 'mac' }">
+      <div class="b-layout-header__content" :class="{ 'is-mac': platform === 'mac', 'is-fullscreen': isFullScreen }">
         <template v-if="!isMac()">
           <div class="b-layout-header__left">
             <BToolbar :title="'文件'" :options="toolbarFileOptions" />
@@ -315,6 +315,12 @@ useEventListener(window, 'resize', validateWindowState);
 
     .b-layout-header__center {
       margin-left: 12px;
+    }
+  }
+
+  &.is-fullscreen {
+    .b-layout-header__center {
+      margin-left: 0;
     }
   }
 }
