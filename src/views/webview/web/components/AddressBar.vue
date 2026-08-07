@@ -1,16 +1,9 @@
 <template>
   <div class="address-bar">
     <div class="nav-buttons">
-      <BButton type="ghost" size="small" square :disabled="!canGoBack" tooltip="后退" icon="lucide:arrow-left" @click="emit('goBack')" />
-      <BButton type="ghost" size="small" square :disabled="!canGoForward" tooltip="前进" icon="lucide:arrow-right" @click="emit('goForward')" />
-      <BButton
-        type="ghost"
-        size="small"
-        square
-        :tooltip="isLoading ? '停止' : '刷新'"
-        :icon="isLoading ? 'lucide:x' : 'lucide:refresh-cw'"
-        @click="isLoading ? emit('stop') : emit('reload')"
-      />
+      <BButton type="ghost" size="small" square :disabled="!canGoBack" icon="lucide:arrow-left" @click="emit('goBack')" />
+      <BButton type="ghost" size="small" square :disabled="!canGoForward" icon="lucide:arrow-right" @click="emit('goForward')" />
+      <BButton type="ghost" size="small" square :icon="isLoading ? 'lucide:x' : 'lucide:refresh-cw'" @click="isLoading ? emit('stop') : emit('reload')" />
     </div>
 
     <div class="address-input">
@@ -24,7 +17,6 @@
         type="ghost"
         size="small"
         square
-        :tooltip="isDeviceToolbarVisible ? '隐藏设备工具栏' : '显示设备工具栏'"
         :icon="isDeviceToolbarVisible ? 'lucide:monitor-off' : 'lucide:monitor-smartphone'"
         @click="emit('toggleDeviceToolbar')"
       />
@@ -32,19 +24,11 @@
         :type="isElementSelecting ? 'secondary' : 'ghost'"
         size="small"
         square
-        :tooltip="isElementSelecting ? '停止选择元素' : '选择页面元素'"
         :icon="isElementSelecting ? 'lucide:scan-line' : 'lucide:mouse-pointer-click'"
         @click="emit('selectElement')"
       />
-      <BButton
-        :type="isInspectorOpen ? 'secondary' : 'ghost'"
-        size="small"
-        square
-        :tooltip="isInspectorOpen ? '关闭 CSS 查看器' : '打开 CSS 查看器'"
-        :icon="'lucide:hash'"
-        @click="emit('toggleInspector')"
-      />
-      <BButton type="ghost" size="small" square tooltip="在浏览器打开" placement="bottomRight" icon="lucide:external-link" @click="emit('openInBrowser')" />
+      <BButton :type="isInspectorOpen ? 'secondary' : 'ghost'" size="small" square :icon="'lucide:hash'" @click="emit('toggleInspector')" />
+      <BButton type="ghost" size="small" square placement="bottomRight" icon="lucide:external-link" @click="emit('openInBrowser')" />
 
       <BDropdown placement="bottomRight">
         <BButton type="ghost" size="small" square icon="lucide:more-vertical" />
