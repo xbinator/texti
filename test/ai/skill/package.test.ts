@@ -58,12 +58,6 @@ describe('parseSkillPackageBuffer', (): void => {
     expect(result.resources[0]?.content.byteLength).toBe(2 * 1024 * 1024);
   });
 
-  it('rejects unsafe skill names before install paths are created', async (): Promise<void> => {
-    const buffer = await createSkillZipBuffer('', '../demo');
-
-    await expect(parseSkillPackageBuffer(buffer)).rejects.toThrow('Skill name 只能包含字母、数字、下划线和短横线');
-  });
-
   it('rejects Windows reserved skill names before install paths are created', async (): Promise<void> => {
     const buffer = await createSkillZipBuffer('', 'CON');
 

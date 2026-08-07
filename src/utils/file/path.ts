@@ -12,7 +12,7 @@ const WINDOWS_INVALID_PATH_CHARS = /[<>:"|?*]/u;
 const WINDOWS_RESERVED_PATH_SEGMENT = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu;
 
 /** 可安全作为跨平台资源目录名的标识格式。 */
-export const PORTABLE_RESOURCE_ID_PATTERN = /^[A-Za-z0-9_-]+$/u;
+export const PORTABLE_RESOURCE_ID_PATTERN = /^[A-Za-z0-9_.-]+$/u;
 
 /**
  * 将路径分隔符统一为 `/`。

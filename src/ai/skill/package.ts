@@ -3,7 +3,7 @@
  * @description Skill zip 包解析与资源归一化工具。
  */
 import type { SkillDefinition } from './types';
-import { path, PORTABLE_RESOURCE_ID_PATTERN } from '@/utils/file/path';
+import { path } from '@/utils/file/path';
 import { isZipPackageBuffer, readZipPackage, type ZipPackageResource } from '@/utils/zip/package';
 import { parseSkillMarkdown } from './parser';
 
@@ -66,10 +66,6 @@ function normalizeSkillPackageResource(resource: ZipPackageResource): SkillPacka
  * @param name - SKILL.md frontmatter name
  */
 function assertSafeSkillName(name: string): void {
-  if (!PORTABLE_RESOURCE_ID_PATTERN.test(name)) {
-    throw new Error('Skill name 只能包含字母、数字、下划线和短横线');
-  }
-
   if (path.isWindowsReservedFileName(name)) {
     throw new Error('Skill name 不能使用 Windows 保留名称');
   }

@@ -17,6 +17,7 @@ describe('PORTABLE_RESOURCE_ID_PATTERN', (): void => {
   it('matches typical portable ids and rejects unsafe characters', (): void => {
     expect(PORTABLE_RESOURCE_ID_PATTERN.test('weather-widget')).toBe(true);
     expect(PORTABLE_RESOURCE_ID_PATTERN.test('Weather_Widget')).toBe(true);
+    expect(PORTABLE_RESOURCE_ID_PATTERN.test('widget.v1.0')).toBe(true);
     expect(PORTABLE_RESOURCE_ID_PATTERN.test('not/allowed')).toBe(false);
     expect(PORTABLE_RESOURCE_ID_PATTERN.test('has space')).toBe(false);
   });
