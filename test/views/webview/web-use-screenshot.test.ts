@@ -10,7 +10,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { native } from '@/shared/platform/native';
 import type { WebviewElementSelection } from '@/views/webview/shared/types';
 import { useScreenshot } from '@/views/webview/web/hooks/useScreenshot';
-import { createElementCaptureRectScript } from '@/views/webview/web/utils/screenshot';
+import {
+  createElementCaptureRectScript,
+  createFixedElementCaptureCleanupScript,
+  createFixedElementCaptureSetupScript,
+  createFixedElementVisibilityScript
+} from '@/views/webview/web/utils/screenshot';
 
 const croppedPngBytes = new Uint8Array([137, 80, 78, 71, 2]);
 const drawImageMock = vi.fn();
@@ -259,6 +264,63 @@ describe('useScreenshot', () => {
     expect(native.saveBinaryFile).not.toHaveBeenCalled();
   });
 
+  it('keeps positioned element ids stable when a later scan discovers an earlier DOM sibling', (): void => {
+    document.body.innerHTML = `
+      <div id="existing-fixed" style="position: fixed; top: 0; width: 100px; height: 40px;"></div>
+    `;
+    const existingElement = document.querySelector('#existing-fixed');
+    if (!(existingElement instanceof HTMLElement)) {
+      throw new Error('existing fixed element should exist');
+    }
+
+    Object.defineProperty(existingElement, 'getBoundingClientRect', {
+      configurable: true,
+      value: (): DOMRect => new DOMRect(0, 0, 100, 40)
+    });
+    new Script(createFixedElementCaptureSetupScript()).runInThisContext();
+
+    const dynamicElement = document.createElement('div');
+    dynamicElement.id = 'dynamic-fixed';
+    dynamicElement.style.cssText = 'position: fixed; top: 0; width: 120px; height: 48px;';
+    Object.defineProperty(dynamicElement, 'getBoundingClientRect', {
+      configurable: true,
+      value: (): DOMRect => new DOMRect(0, 0, 120, 48)
+    });
+    document.body.insertBefore(dynamicElement, existingElement);
+
+    new Script(createFixedElementCaptureSetupScript()).runInThisContext();
+
+    expect(existingElement.getAttribute('data-tibis-full-page-overlay-id')).toBe('1');
+    expect(dynamicElement.getAttribute('data-tibis-full-page-overlay-id')).toBe('2');
+    new Script(createFixedElementCaptureCleanupScript()).runInThisContext();
+    document.body.innerHTML = '';
+  });
+
+  it('hides every scrollbar during full-page capture and restores them on cleanup', (): void => {
+    new Script(createFixedElementCaptureSetupScript()).runInThisContext();
+    new Script(createFixedElementCaptureSetupScript()).runInThisContext();
+
+    const scrollbarStyles = document.querySelectorAll('#__tibis_full_page_capture_scrollbar_style__');
+    const scrollbarStyle = scrollbarStyles.item(0);
+    expect(scrollbarStyles).toHaveLength(1);
+    expect(scrollbarStyle?.textContent).toContain('html, body, * { scrollbar-width: none !important; }');
+    expect(scrollbarStyle?.textContent).toContain('html::-webkit-scrollbar');
+    expect(scrollbarStyle?.textContent).toContain('body::-webkit-scrollbar');
+    expect(scrollbarStyle?.textContent).toContain('*::-webkit-scrollbar');
+
+    new Script(createFixedElementCaptureCleanupScript()).runInThisContext();
+
+    expect(document.querySelector('#__tibis_full_page_capture_scrollbar_style__')).toBeNull();
+  });
+
+  it('disables fixed element motion while hiding full-page capture overlays', (): void => {
+    const script = createFixedElementVisibilityScript(false);
+
+    expect(script).toContain('transition: none !important;');
+    expect(script).toContain('animation: none !important;');
+    expect(script).toContain('visibility: hidden !important;');
+  });
+
   it('does not show capture mask when full page screenshot finishes before the delay', async (): Promise<void> => {
     const pngBytes = new Uint8Array([137, 80, 78, 71, 10]);
     const maskChanges: boolean[] = [];
@@ -273,7 +335,9 @@ describe('useScreenshot', () => {
       null,
       null,
       null,
+      null,
       [],
+      null,
       null,
       null,
       null,
@@ -295,6 +359,38 @@ describe('useScreenshot', () => {
     expect(native.copyImageToClipboard).toHaveBeenCalledTimes(1);
   });
 
+  it('refreshes positioned element markers after every full-page slice scroll', async (): Promise<void> => {
+    const pngBytes = new Uint8Array([137, 80, 78, 71, 16]);
+    const webviewElement = createScreenshotWebview(pngBytes);
+    webviewElement.executeJavaScript = vi.fn().mockImplementation((script: string): Promise<unknown> => {
+      if (script.includes('const contentHeight = Math.max(')) {
+        return Promise.resolve({
+          contentHeight: 180,
+          viewportWidth: 200,
+          viewportHeight: 100,
+          maxScrollTop: 80,
+          scrollTop: 0
+        });
+      }
+
+      if (script.includes("return Array.from(document.querySelectorAll('[' + overlayIdMarker + ']'))")) {
+        return Promise.resolve([]);
+      }
+
+      return Promise.resolve(null);
+    });
+    const screenshot = useScreenshot({
+      webviewElementRef: ref<WebviewTag | null>(webviewElement),
+      webviewState: ref({ title: 'Example', url: 'https://example.com' })
+    });
+
+    await screenshot.captureFullPageScreenshot();
+
+    const setupCalls = vi.mocked(webviewElement.executeJavaScript).mock.calls.filter(([script]) => String(script).includes('let overlayIndex'));
+    expect(setupCalls).toHaveLength(3);
+    expect(native.copyImageToClipboard).toHaveBeenCalledTimes(1);
+  });
+
   it('shows capture mask only after a slow screenshot exceeds the delay', async (): Promise<void> => {
     vi.useFakeTimers();
     const pngBytes = new Uint8Array([137, 80, 78, 71, 13]);
@@ -308,6 +404,7 @@ describe('useScreenshot', () => {
         maxScrollTop: 0,
         scrollTop: 0
       },
+      null,
       null,
       null,
       null,
@@ -361,6 +458,7 @@ describe('useScreenshot', () => {
         maxScrollTop: 0,
         scrollTop: 0
       },
+      null,
       null,
       null,
       null,
