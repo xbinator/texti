@@ -124,7 +124,7 @@ describe('importWidgetZipFile', (): void => {
       ]
     );
 
-    await expect(importWidgetZipFile(file)).rejects.toThrow(`超过 ${WIDGET_ZIP_MAX_RESOURCE_BYTES} 字节限制`);
+    await expect(importWidgetZipFile(file)).rejects.toThrow('超过 5 MiB 限制');
   });
 });
 

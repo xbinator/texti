@@ -7,6 +7,10 @@ import { path } from '@/utils/file/path';
 
 /** zip 文件 magic bytes（PK\x03\x04）。 */
 const ZIP_MAGIC = new Uint8Array([0x50, 0x4b, 0x03, 0x04]);
+/** 二进制 KiB 字节数。 */
+const KIB_BYTES = 1024;
+/** 二进制 MiB 字节数。 */
+const MIB_BYTES = KIB_BYTES * 1024;
 
 /**
  * zip 包资源文件。
@@ -48,6 +52,23 @@ interface RootFileEntryMatch {
   entry: JSZip.JSZipObject;
   /** 需要从资源路径中剥离的单一包装目录前缀。 */
   wrapperPrefix: string;
+}
+
+/**
+ * 格式化文件大小，避免直接暴露难读的原始字节数限制。
+ * @param byteLength - 文件大小字节数
+ * @returns 适合错误提示展示的大小文本
+ */
+function formatByteSize(byteLength: number): string {
+  if (byteLength >= MIB_BYTES) {
+    return `${Number.parseFloat((byteLength / MIB_BYTES).toFixed(1))} MiB`;
+  }
+
+  if (byteLength >= KIB_BYTES) {
+    return `${Number.parseFloat((byteLength / KIB_BYTES).toFixed(1))} KiB`;
+  }
+
+  return `${byteLength} B`;
 }
 
 /**
@@ -198,7 +219,7 @@ async function readResourceEntry(
   const content = await entry.async('arraybuffer');
 
   if (typeof options.maxFileBytes === 'number' && content.byteLength > options.maxFileBytes) {
-    throw new Error(`文件 "${relativePath}" 解压后超过 ${options.maxFileBytes} 字节限制`);
+    throw new Error(`文件 "${relativePath}" 解压后超过 ${formatByteSize(options.maxFileBytes)} 限制`);
   }
 
   return {

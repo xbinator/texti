@@ -93,12 +93,14 @@ describe('readZipPackage', (): void => {
     await expect(readZipPackage(buffer, { rootFileName: 'widget.json' })).rejects.toThrow('zip 条目路径不安全');
   });
 
-  it('rejects resources larger than maxFileBytes', async (): Promise<void> => {
+  it('rejects resources larger than maxFileBytes with readable limit text', async (): Promise<void> => {
     const buffer = await createZipBuffer([
       { path: 'SKILL.md', content: '---\nname: demo\ndescription: demo\n---\nbody' },
-      { path: 'assets/big.bin', content: new Uint8Array([1, 2, 3]) }
+      { path: 'assets/big.bin', content: new Uint8Array(1024 * 1024 + 1) }
     ]);
 
-    await expect(readZipPackage(buffer, { rootFileName: 'SKILL.md', maxFileBytes: 2 })).rejects.toThrow('文件 "assets/big.bin" 解压后超过 2 字节限制');
+    await expect(readZipPackage(buffer, { rootFileName: 'SKILL.md', maxFileBytes: 1024 * 1024 })).rejects.toThrow(
+      '文件 "assets/big.bin" 解压后超过 1 MiB 限制'
+    );
   });
 });

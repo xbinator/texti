@@ -12,10 +12,14 @@ import { parseSkillPackageBuffer } from '@/ai/skill/package';
  * @param skillName - SKILL.md frontmatter name
  * @returns zip 二进制内容
  */
-async function createSkillZipBuffer(wrapperPrefix = '', skillName = 'demo-skill'): Promise<ArrayBuffer> {
+async function createSkillZipBuffer(
+  wrapperPrefix = '',
+  skillName = 'demo-skill',
+  resourceContent: Uint8Array = new Uint8Array([5, 6, 7])
+): Promise<ArrayBuffer> {
   const zip = new JSZip();
   zip.file(`${wrapperPrefix}SKILL.md`, ['---', `name: ${skillName}`, 'description: Demo skill', '---', '', 'Use bundled resources.'].join('\n'));
-  zip.file(`${wrapperPrefix}assets/icon.bin`, new Uint8Array([5, 6, 7]));
+  zip.file(`${wrapperPrefix}assets/icon.bin`, resourceContent);
 
   return zip.generateAsync({ type: 'arraybuffer' });
 }
@@ -43,6 +47,15 @@ describe('parseSkillPackageBuffer', (): void => {
     expect(result.resources).toHaveLength(1);
     expect(result.resources[0]?.relativePath).toBe('assets/icon.bin');
     expect(Array.from(new Uint8Array(result.resources[0]?.content ?? new ArrayBuffer(0)))).toEqual([5, 6, 7]);
+  });
+
+  it('accepts bundled resources larger than the previous 1 MiB limit', async (): Promise<void> => {
+    const buffer = await createSkillZipBuffer('', 'demo-skill', new Uint8Array(2 * 1024 * 1024));
+
+    const result = await parseSkillPackageBuffer(buffer);
+
+    expect(result.resources[0]?.relativePath).toBe('assets/icon.bin');
+    expect(result.resources[0]?.content.byteLength).toBe(2 * 1024 * 1024);
   });
 
   it('rejects unsafe skill names before install paths are created', async (): Promise<void> => {

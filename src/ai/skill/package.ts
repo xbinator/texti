@@ -10,7 +10,7 @@ import { parseSkillMarkdown } from './parser';
 /** 最大 zip 条目数。 */
 const MAX_ENTRIES = 50;
 /** 单个资源文件最大解压后字节数。 */
-const MAX_FILE_BYTES = 1 * 1024 * 1024;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
 /** Skill 根层入口文件名。 */
 const SKILL_MD_FILE_NAME = 'SKILL.md';
 
