@@ -673,6 +673,9 @@ async function captureFullPagePng(element: WebviewTag): Promise<ArrayBuffer> {
       // 先恢复定位层原始状态，确保读取的是这一屏真实可见的吸附元素。
       // eslint-disable-next-line no-await-in-loop
       await element.executeJavaScript(createFixedElementVisibilityScript(true));
+      // 当前切片可能在滚动后显示或创建新的定位层，需要在读取快照前补充标记。
+      // eslint-disable-next-line no-await-in-loop
+      await element.executeJavaScript(createFixedElementCaptureSetupScript());
       // 先读取当前屏幕中真正吸附住的定位元素，再决定后续是否保留。
       // eslint-disable-next-line no-await-in-loop
       const visiblePositionedElementsRaw = (await element.executeJavaScript(createVisiblePositionedElementSnapshotScript())) as unknown;

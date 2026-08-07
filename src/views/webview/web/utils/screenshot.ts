@@ -929,6 +929,8 @@ const FULL_PAGE_CAPTURE_STICKY_ATTRIBUTE = 'data-tibis-full-page-sticky';
 const FULL_PAGE_CAPTURE_OVERLAY_ID_ATTRIBUTE = 'data-tibis-full-page-overlay-id';
 /** 用于控制 fixed 元素显隐的样式节点 ID。 */
 const FULL_PAGE_CAPTURE_STYLE_ID = '__tibis_full_page_capture_fixed_style__';
+/** 用于在 full-page 截图期间隐藏所有滚动条的样式节点 ID。 */
+const FULL_PAGE_CAPTURE_SCROLLBAR_STYLE_ID = '__tibis_full_page_capture_scrollbar_style__';
 
 /**
  * 构建 full-page 截图前的 fixed 元素标记脚本。
@@ -941,8 +943,12 @@ export function createFixedElementCaptureSetupScript(): string {
   const stickyMarker = ${JSON.stringify(FULL_PAGE_CAPTURE_STICKY_ATTRIBUTE)};
   const overlayIdMarker = ${JSON.stringify(FULL_PAGE_CAPTURE_OVERLAY_ID_ATTRIBUTE)};
   const styleId = ${JSON.stringify(FULL_PAGE_CAPTURE_STYLE_ID)};
+  const scrollbarStyleId = ${JSON.stringify(FULL_PAGE_CAPTURE_SCROLLBAR_STYLE_ID)};
   const elements = Array.from(document.querySelectorAll('*'));
-  let overlayIndex = 0;
+  const existingIndexes = elements
+    .map((element) => Number.parseInt(element.getAttribute(overlayIdMarker) || '', 10))
+    .filter((value) => Number.isFinite(value));
+  let overlayIndex = existingIndexes.length ? Math.max(...existingIndexes) : 0;
 
   elements.forEach((element) => {
     if (!(element instanceof HTMLElement)) {
@@ -959,8 +965,10 @@ export function createFixedElementCaptureSetupScript(): string {
       return;
     }
 
-    overlayIndex += 1;
-    element.setAttribute(overlayIdMarker, String(overlayIndex));
+    if (!element.hasAttribute(overlayIdMarker)) {
+      overlayIndex += 1;
+      element.setAttribute(overlayIdMarker, String(overlayIndex));
+    }
 
     if (computedStyle.position === 'sticky') {
       element.setAttribute(stickyMarker, 'true');
@@ -974,6 +982,16 @@ export function createFixedElementCaptureSetupScript(): string {
     const style = document.createElement('style');
     style.id = styleId;
     document.documentElement.appendChild(style);
+  }
+
+  if (!document.getElementById(scrollbarStyleId)) {
+    const scrollbarStyle = document.createElement('style');
+    scrollbarStyle.id = scrollbarStyleId;
+    scrollbarStyle.textContent = [
+      'html, body, * { scrollbar-width: none !important; }',
+      'html::-webkit-scrollbar, body::-webkit-scrollbar, *::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }'
+    ].join('\\n');
+    document.documentElement.appendChild(scrollbarStyle);
   }
 
   return null;
@@ -1042,14 +1060,21 @@ export function createVisiblePositionedElementSnapshotScript(): string {
  */
 export function createFixedElementVisibilityScript(visible: boolean | WebviewFixedElementRole[]): string {
   const stickyRule = `[${FULL_PAGE_CAPTURE_STICKY_ATTRIBUTE}="true"] { position: relative !important; top: auto !important; bottom: auto !important; }`;
+  const fixedHiddenRule = [
+    `[${FULL_PAGE_CAPTURE_FIXED_ATTRIBUTE}="true"] {`,
+    'visibility: hidden !important;',
+    'transition: none !important;',
+    'animation: none !important;',
+    '}'
+  ].join(' ');
   let cssText = '';
 
   if (Array.isArray(visible)) {
     if (!visible.length) {
-      cssText = [`[${FULL_PAGE_CAPTURE_FIXED_ATTRIBUTE}="true"] { visibility: hidden !important; }`, stickyRule].join('\n');
+      cssText = [fixedHiddenRule, stickyRule].join('\n');
     }
   } else if (!visible) {
-    cssText = [`[${FULL_PAGE_CAPTURE_FIXED_ATTRIBUTE}="true"] { visibility: hidden !important; }`, stickyRule].join('\n');
+    cssText = [fixedHiddenRule, stickyRule].join('\n');
   }
 
   return `
@@ -1080,6 +1105,7 @@ export function createFixedElementCaptureCleanupScript(): string {
   const stickyMarker = ${JSON.stringify(FULL_PAGE_CAPTURE_STICKY_ATTRIBUTE)};
   const overlayIdMarker = ${JSON.stringify(FULL_PAGE_CAPTURE_OVERLAY_ID_ATTRIBUTE)};
   const styleId = ${JSON.stringify(FULL_PAGE_CAPTURE_STYLE_ID)};
+  const scrollbarStyleId = ${JSON.stringify(FULL_PAGE_CAPTURE_SCROLLBAR_STYLE_ID)};
 
   document.querySelectorAll('[' + marker + '="true"]').forEach((element) => {
     if (element instanceof HTMLElement) {
@@ -1096,6 +1122,7 @@ export function createFixedElementCaptureCleanupScript(): string {
   });
 
   document.getElementById(styleId)?.remove();
+  document.getElementById(scrollbarStyleId)?.remove();
   return null;
 })();
 `;
