@@ -267,7 +267,7 @@ export function toAntdToken(tokens: ThemeTokens, rootFontSize: number = DEFAULT_
       borderRadius: inputRadius,
       lineWidth: inputLineWidth,
       paddingInline: inputPaddingInline,
-      fontFamily: tokens.input.fontFamily
+      fontFamily: tokens.font.sans
     };
   }
 
@@ -288,7 +288,7 @@ export function toAntdToken(tokens: ThemeTokens, rootFontSize: number = DEFAULT_
   inputComponentTokens.Button = {
     borderRadius: controlRadius,
     lineWidth: controlLineWidth,
-    fontFamily: tokens.font.display,
+    fontFamily: tokens.font.sans,
     fontSize,
     controlHeight,
     controlHeightSM,

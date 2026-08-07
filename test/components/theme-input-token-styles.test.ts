@@ -26,7 +26,7 @@ describe('theme input token styles', (): void => {
     expect(commandPanelSource).toContain('box-shadow: var(--input-shadow);');
     expect(commandPanelSource).toContain('padding: var(--input-padding-block) var(--input-padding-inline);');
     expect(commandPanelSource).toContain('gap: var(--input-gap);');
-    expect(commandPanelSource).toContain('font-family: var(--input-font-family);');
+    expect(commandPanelSource).toContain('font-family: var(--font-sans);');
     expect(commandPanelSource).toContain('color: var(--input-placeholder-color);');
     expect(commandPanelSource).not.toContain('--input-height');
     expect(commandPanelSource).not.toContain('--input-keycap-size');
@@ -38,12 +38,12 @@ describe('theme input token styles', (): void => {
     const smartInputSource = readSource('src/components/BSmart/Input.vue');
     const chatSource = readSource('src/components/BChat/index.vue');
 
-    expect(smartEditorSource).toContain('font-family: var(--input-font-family);');
+    expect(smartEditorSource).toContain('font-family: var(--font-sans);');
     expect(smartEditorSource).toContain('border: var(--input-border-width) solid var(--input-border);');
     expect(smartEditorSource).toContain('border-radius: var(--input-radius);');
     expect(smartEditorSource).toContain('box-shadow: var(--input-active-shadow);');
     expect(smartInputSource).toContain('border-radius: var(--input-radius);');
-    expect(smartInputSource).toContain('font-family: var(--input-font-family);');
+    expect(smartInputSource).toContain('font-family: var(--font-sans);');
     expect(smartInputSource).toContain('color: var(--input-icon-color);');
     expect(chatSource).toContain('border: var(--input-border-width) solid var(--input-border);');
     expect(chatSource).toContain('border-radius: var(--input-radius);');
@@ -68,7 +68,7 @@ describe('theme input token styles', (): void => {
     expect(resetSource).toContain('border: 0;');
     expect(modelListSource).toContain('class="search-input"');
     expect(modelListSource).toContain('border-radius: var(--input-radius);');
-    expect(modelListSource).toContain('font-family: var(--input-font-family);');
+    expect(modelListSource).toContain('font-family: var(--font-sans);');
     expect(webAddressSource).toContain('border: var(--input-border-width) solid var(--input-border);');
     expect(webAddressSource).toContain('border-radius: var(--input-radius);');
     expect(webAddressSource).toContain('color: var(--input-placeholder-color);');

@@ -94,6 +94,24 @@ describe('app rem scaling styles', (): void => {
     expect(settingsSource).not.toContain(':options="rootFontSizeOptions"');
   });
 
+  it('adds a default font style select entry in basic settings', (): void => {
+    const settingsSource = readSource('src/views/settings/basic/index.vue');
+    const fontOptionsSource = readSource('src/views/settings/basic/fontOptions.ts');
+
+    expect(settingsSource).toContain('默认字体样式');
+    expect(settingsSource).toContain(':value="settingStore.defaultFontStyle"');
+    expect(settingsSource).toContain(':options="defaultFontStyleOptions"');
+    expect(settingsSource).toContain('@change="handleDefaultFontStyleChange"');
+    expect(settingsSource).toContain('settingStore.setDefaultFontStyle');
+    expect(settingsSource).toContain('getDefaultFontStyleOptions(getCurrentFontPlatform(), settingStore.defaultFontStyle)');
+    expect(fontOptionsSource).toContain("label: '黑体'");
+    expect(fontOptionsSource).toContain("label: '宋体'");
+    expect(fontOptionsSource).toContain("label: '楷体'");
+    expect(fontOptionsSource).toContain("label: '仿宋'");
+    expect(fontOptionsSource).not.toContain("label: '系统默认'");
+    expect(fontOptionsSource).not.toContain("label: '衬线字体'");
+  });
+
   it('keeps basic settings chrome authored in px units', (): void => {
     const settingsItemSource = readSource('src/views/settings/basic/components/SettingsItem.vue');
     const permissionSource = readSource('src/views/settings/basic/components/ToolPermissionGrants.vue');

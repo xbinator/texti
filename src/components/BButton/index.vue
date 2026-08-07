@@ -141,7 +141,7 @@ export default defineComponent({
   align-items: center;
   justify-content: center;
   padding: 0 16px;
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
   font-size: 14px;
   color: var(--button-primary-text, #fff);
   white-space: nowrap;

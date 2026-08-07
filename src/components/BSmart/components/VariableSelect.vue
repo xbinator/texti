@@ -242,7 +242,7 @@ function handleMouseEnter(index: number): void {
   padding: 2px 6px;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--color-primary);
   white-space: nowrap;

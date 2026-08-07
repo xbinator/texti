@@ -20,7 +20,6 @@ const overworldInputOverrides: OverworldInputOverrides = {
   paddingInline: '12px',
   paddingBlock: '0px',
   gap: '10px',
-  fontFamily: '"Pixelify Sans", "VT323", ui-monospace, monospace',
   keycapSize: '28px',
   keycapRadius: '0px',
   keycapBorderWidth: '2px',
@@ -47,8 +46,7 @@ const overworldDesignOverrides: ThemeTokenOverrides = {
   },
   font: {
     sans: '"Pixelify Sans", "VT323", ui-monospace, monospace',
-    mono: '"VT323", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-    display: '"Pixelify Sans", "VT323", ui-monospace, monospace'
+    mono: '"VT323", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
   },
   motion: {
     durationFast: '90ms',

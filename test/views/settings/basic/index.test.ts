@@ -166,6 +166,13 @@ describe('BasicSettingsPage tool permissions', (): void => {
     expect(wrapper.text()).not.toContain('权限模式');
   });
 
+  it('renders the font style setting with its default option', (): void => {
+    const wrapper = mountBasicSettingsPage();
+
+    expect(wrapper.text()).toContain('字体样式');
+    expect(wrapper.text()).toContain('默认');
+  });
+
   it('revokes one persisted tool permission grant', async (): Promise<void> => {
     const store = useChatPermissionStore();
     store.grantToolPermission('operate_current_webpage', 'always');

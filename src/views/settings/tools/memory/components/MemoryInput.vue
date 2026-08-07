@@ -105,7 +105,7 @@ defineExpose({ focus, clear });
 
 .memory-input__field {
   flex: 1;
-  font-family: var(--input-font-family);
+  font-family: var(--font-sans);
   color: var(--text-primary);
   resize: vertical;
   outline: none;

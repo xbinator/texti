@@ -10,6 +10,23 @@ import type { PersistConfig } from '@/stores/helpers/types';
 import { getResolvedTokens, applyCssVars, validateTokens } from '@/theme';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
+export type DefaultFontStyle =
+  | 'theme'
+  | 'heiti'
+  | 'songti'
+  | 'kaiti'
+  | 'fangsong'
+  | 'pingfang'
+  | 'yuanti'
+  | 'yahei'
+  | 'simhei'
+  | 'simsun'
+  | 'youyuan'
+  | 'notoSansCjk'
+  | 'notoSerifCjk'
+  | 'sourceHanSans'
+  | 'sourceHanSerif'
+  | 'wenquanyi';
 
 type ResolvedTheme = 'dark' | 'light';
 
@@ -20,6 +37,28 @@ const LEGACY_SIDEBAR_WIDTH_KEY = 'sidebar_width';
 export const ROOT_FONT_SIZE_DEFAULT = 14;
 export const ROOT_FONT_SIZE_MIN = 12;
 export const ROOT_FONT_SIZE_MAX = 18;
+export const DEFAULT_FONT_STYLE_DEFAULT: DefaultFontStyle = 'theme';
+
+/**
+ * 默认 UI 字体样式到字体栈的映射。
+ */
+const DEFAULT_FONT_STYLE_STACKS: Record<Exclude<DefaultFontStyle, 'theme'>, string> = {
+  heiti: '"Heiti SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", SimHei, "Noto Sans CJK SC", sans-serif',
+  songti: '"Songti SC", STSong, SimSun, "Noto Serif CJK SC", serif',
+  kaiti: '"Kaiti SC", STKaiti, KaiTi, "Noto Serif CJK SC", serif',
+  fangsong: 'STFangsong, FangSong, "Noto Serif CJK SC", serif',
+  pingfang: '"PingFang SC", "Hiragino Sans GB", "Heiti SC", "Microsoft YaHei", sans-serif',
+  yuanti: '"Yuanti SC", YouYuan, "PingFang SC", "Microsoft YaHei", sans-serif',
+  yahei: '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif',
+  simhei: 'SimHei, "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif',
+  simsun: 'SimSun, NSimSun, "Songti SC", "Noto Serif CJK SC", serif',
+  youyuan: 'YouYuan, "Yuanti SC", "Microsoft YaHei", sans-serif',
+  notoSansCjk: '"Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei", sans-serif',
+  notoSerifCjk: '"Noto Serif CJK SC", "Source Han Serif SC", SimSun, serif',
+  sourceHanSans: '"Source Han Sans SC", "Noto Sans CJK SC", "WenQuanYi Micro Hei", sans-serif',
+  sourceHanSerif: '"Source Han Serif SC", "Noto Serif CJK SC", SimSun, serif',
+  wenquanyi: '"WenQuanYi Micro Hei", "WenQuanYi Zen Hei", "Noto Sans CJK SC", sans-serif'
+};
 
 interface PersistedSettingState {
   chatSidebarActiveSessionId: string | null;
@@ -32,6 +71,8 @@ interface PersistedSettingState {
   themePreset: string;
   /** 应用根字号，控制 rem UI 缩放 */
   rootFontSize: number;
+  /** 默认 UI 字体样式，仅覆盖 --font-sans */
+  defaultFontStyle: DefaultFontStyle;
   sidebarVisible: boolean;
   sidebarWidth: number;
 }
@@ -48,6 +89,7 @@ const DEFAULT_SETTINGS: PersistedSettingState = {
   theme: 'system',
   themePreset: 'default',
   rootFontSize: ROOT_FONT_SIZE_DEFAULT,
+  defaultFontStyle: DEFAULT_FONT_STYLE_DEFAULT,
   sidebarVisible: false,
   sidebarWidth: 340
 };
@@ -78,8 +120,47 @@ function applyRootFontSize(size: number): void {
   document.documentElement.style.fontSize = `${size}px`;
 }
 
+/**
+ * 应用默认 UI 字体样式到文档根元素。
+ * @param style - 默认字体样式
+ */
+function applyDefaultFontStyle(style: DefaultFontStyle): void {
+  if (style === 'theme') {
+    document.documentElement.style.removeProperty('--font-sans');
+    return;
+  }
+
+  document.documentElement.style.setProperty('--font-sans', DEFAULT_FONT_STYLE_STACKS[style]);
+}
+
 function isThemeMode(value: unknown): value is ThemeMode {
   return value === 'dark' || value === 'light' || value === 'system';
+}
+
+/**
+ * 判断未知值是否为默认字体样式。
+ * @param value - 未知持久化值
+ * @returns 是否为默认字体样式
+ */
+function isDefaultFontStyle(value: unknown): value is DefaultFontStyle {
+  return (
+    value === 'theme' ||
+    value === 'heiti' ||
+    value === 'songti' ||
+    value === 'kaiti' ||
+    value === 'fangsong' ||
+    value === 'pingfang' ||
+    value === 'yuanti' ||
+    value === 'yahei' ||
+    value === 'simhei' ||
+    value === 'simsun' ||
+    value === 'youyuan' ||
+    value === 'notoSansCjk' ||
+    value === 'notoSerifCjk' ||
+    value === 'sourceHanSans' ||
+    value === 'sourceHanSerif' ||
+    value === 'wenquanyi'
+  );
 }
 
 /**
@@ -92,6 +173,18 @@ function normalizeRootFontSize(value: unknown): number {
   if (value < ROOT_FONT_SIZE_MIN || value > ROOT_FONT_SIZE_MAX) return ROOT_FONT_SIZE_DEFAULT;
 
   return Math.round(value);
+}
+
+/**
+ * 规范化默认字体样式。
+ * @param value - 未知持久化值
+ * @returns 合法默认字体样式
+ */
+function normalizeDefaultFontStyle(value: unknown): DefaultFontStyle {
+  if (value === 'system') return 'heiti';
+  if (value === 'serif') return 'songti';
+
+  return isDefaultFontStyle(value) ? value : DEFAULT_FONT_STYLE_DEFAULT;
 }
 
 function normalizeSidebarWidth(value: unknown): number {
@@ -135,6 +228,7 @@ function normalizeSettings(value: unknown): PersistedSettingState {
     theme: merged.theme,
     themePreset: normalizeThemePreset(merged.themePreset),
     rootFontSize: normalizeRootFontSize(merged.rootFontSize),
+    defaultFontStyle: normalizeDefaultFontStyle(merged.defaultFontStyle),
     sidebarVisible: merged.sidebarVisible,
     sidebarWidth: merged.sidebarWidth
   };
@@ -212,6 +306,7 @@ export const useSettingStore = defineStore('setting', {
         theme: this.theme,
         themePreset: this.themePreset,
         rootFontSize: this.rootFontSize,
+        defaultFontStyle: this.defaultFontStyle,
         sidebarVisible: this.sidebarVisible,
         sidebarWidth: this.sidebarWidth
       };
@@ -259,6 +354,16 @@ export const useSettingStore = defineStore('setting', {
       this.rootFontSize = normalizeRootFontSize(size);
       this.persistSettings();
       applyRootFontSize(this.rootFontSize);
+    },
+
+    /**
+     * 设置默认 UI 字体样式。
+     * @param style - 默认字体样式
+     */
+    setDefaultFontStyle(style: DefaultFontStyle): void {
+      this.defaultFontStyle = normalizeDefaultFontStyle(style);
+      this.persistSettings();
+      applyDefaultFontStyle(this.defaultFontStyle);
     },
 
     // ==================== 侧边栏设置 ====================
@@ -344,6 +449,7 @@ export const useSettingStore = defineStore('setting', {
     init(): void {
       this.initTheme();
       applyRootFontSize(this.rootFontSize);
+      applyDefaultFontStyle(this.defaultFontStyle);
       // 标题不保存到本地，每次启动使用默认值
       native.setWindowTitle(this.title);
       this.syncNativeMenuState();

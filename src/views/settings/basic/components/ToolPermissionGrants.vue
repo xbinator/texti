@@ -162,7 +162,7 @@ function handleClearPermissions(): void {
 
 .basic-tool-permissions__code {
   margin-top: 2px;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace);
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-tertiary);
 }

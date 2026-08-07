@@ -91,7 +91,7 @@ function isShadowKey(key: string): boolean {
  * @returns 是否为合法 Token 值
  */
 function isValidTokenValue(key: string, value: string): boolean {
-  if (key.startsWith('--font-') || key === '--input-font-family') {
+  if (key.startsWith('--font-')) {
     return value.trim().length > 0;
   }
 

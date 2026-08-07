@@ -549,7 +549,7 @@ onBeforeUnmount((): void => {
 }
 
 .b-smart-input__control {
-  font-family: var(--input-font-family);
+  font-family: var(--font-sans);
   background: var(--input-bg);
   border: var(--input-border-width) solid var(--input-border);
   border-radius: var(--input-radius);
@@ -566,7 +566,7 @@ onBeforeUnmount((): void => {
   }
 
   :deep(.ant-input) {
-    font-family: var(--input-font-family);
+    font-family: var(--font-sans);
     background: transparent;
   }
 

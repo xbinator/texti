@@ -230,7 +230,7 @@ function handleAction(action: ChatMessageConfirmationAction): void {
 .confirm-bottom-sheet__description code,
 .confirm-bottom-sheet__metadata code,
 .confirm-bottom-sheet__fingerprints code {
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace);
+  font-family: var(--font-mono);
 }
 
 .confirm-bottom-sheet__metadata {
@@ -262,7 +262,7 @@ function handleAction(action: ChatMessageConfirmationAction): void {
   margin: 0;
   margin-top: 4px;
   overflow: auto;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace);
+  font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
   white-space: pre-wrap;

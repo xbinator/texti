@@ -134,7 +134,7 @@ function navigateTo(item: MenuItem): void {
   height: 32px;
   padding: 0 14px;
   margin-bottom: 8px;
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
   font-size: 14px;
   color: var(--text-primary);
   text-decoration: none;

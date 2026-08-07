@@ -781,7 +781,7 @@ onScopeDispose((): void => {
 }
 
 .b-agent-task-card__protocol-error code {
-  font-family: Monaco, 'SF Mono', Consolas, monospace;
+  font-family: var(--font-mono);
   color: var(--text-tertiary);
 }
 

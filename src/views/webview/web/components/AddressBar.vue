@@ -231,7 +231,7 @@ function handleCopy(): void {
 .address-input__control {
   width: 100%;
   min-width: 0;
-  font-family: var(--input-font-family);
+  font-family: var(--font-sans);
   color: var(--text-primary);
   outline: none;
   background: transparent;

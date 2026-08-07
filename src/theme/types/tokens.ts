@@ -192,7 +192,6 @@ export interface ThemeTokens {
     paddingInline: string;
     paddingBlock: string;
     gap: string;
-    fontFamily: string;
     bg: string;
     border: string;
     focusBorder: string;
@@ -285,7 +284,6 @@ export interface ThemeTokens {
   font: {
     sans: string;
     mono: string;
-    display: string;
   };
   /** 动效时长和缓动 */
   motion: {

@@ -39,7 +39,7 @@ const [, bem] = createNamespace('', 'bubble-part-tool');
   max-height: 280px;
   padding: 6px 8px;
   overflow: auto;
-  font-family: Monaco, 'SF Mono', Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
   background: var(--color-fill-tertiary, rgb(0 0 0 / 3%));

@@ -130,14 +130,32 @@ describe('theme design token styles', (): void => {
     expect(confirmationSource).toContain('border: var(--surface-border-width) solid var(--border-primary);');
   });
 
-  it('uses theme font tokens in global and display chrome styles', (): void => {
+  it('uses unified global font tokens without display or input font variables', (): void => {
+    const globalIndexSource = readSource('src/assets/styles/index.less');
     const resetSource = readSource('src/assets/styles/reset.less');
     const buttonSource = readSource('src/components/BButton/index.vue');
 
+    expect(globalIndexSource).toContain('--font-sans:');
+    expect(globalIndexSource).toContain('--font-mono:');
+    expect(globalIndexSource).not.toContain('--font-display');
+    expect(globalIndexSource).not.toContain('--input-font-family');
     expect(resetSource).toContain('font-family: var(--font-sans);');
     expect(resetSource).toContain('font-family: var(--font-mono);');
     expect(existsSync('src/assets/styles/theme-fonts.less')).toBe(false);
-    expect(buttonSource).toContain('font-family: var(--font-display);');
+    expect(buttonSource).toContain('font-family: var(--font-sans);');
+  });
+
+  it('does not keep fallback font stacks at ordinary CSS variable call sites', (): void => {
+    const ordinarySources = [
+      readSource('src/views/skill/index.vue'),
+      readSource('src/views/settings/basic/components/ToolPermissionGrants.vue'),
+      readSource('src/components/BChat/components/ConfirmationSheet.vue')
+    ].join('\n');
+
+    expect(ordinarySources).not.toContain('var(--font-mono,');
+    expect(ordinarySources).not.toContain('var(--font-sans,');
+    expect(ordinarySources).not.toContain('--font-display');
+    expect(ordinarySources).not.toContain('--input-font-family');
   });
 
   it('uses interaction shadow tokens in pressable themed chrome', (): void => {

@@ -565,7 +565,7 @@ defineExpose<BSmartEditorExpose>({
   min-height: 80px;
   padding: var(--input-padding-block) var(--input-padding-inline);
   overflow-y: auto;
-  font-family: var(--input-font-family);
+  font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.6;
   word-break: break-all;

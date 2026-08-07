@@ -163,7 +163,7 @@ function handleCopyPath(): void {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-family: var(--font-mono);
   font-size: 11px;
   white-space: nowrap;
 }

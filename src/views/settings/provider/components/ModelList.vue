@@ -184,12 +184,12 @@ async function handleDeleteModel(modelId: string): Promise<void> {
 
 .search-input {
   width: 200px;
-  font-family: var(--input-font-family);
+  font-family: var(--font-sans);
   border-radius: var(--input-radius);
 }
 
 .search-input :deep(.ant-input) {
-  font-family: var(--input-font-family);
+  font-family: var(--font-sans);
 }
 
 .search-input :deep(.ant-input::placeholder) {

@@ -272,7 +272,7 @@ registerShortcut({
   min-width: 0;
   height: 24px;
   padding: 0;
-  font-family: var(--input-font-family);
+  font-family: var(--font-sans);
   font-size: 12px;
   line-height: 24px;
   color: var(--text-primary);

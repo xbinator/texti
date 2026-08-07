@@ -24,8 +24,8 @@ interface DesignTokenProbe {
   };
   /** 字体 Token */
   font: {
-    /** 展示字体栈 */
-    display: string;
+    /** 默认字体栈 */
+    sans: string;
   };
   /** 交互 Token */
   interaction: {
@@ -69,8 +69,6 @@ interface DesignTokenProbe {
     paddingBlock: string;
     /** 输入框图标与内容间距 */
     gap: string;
-    /** 输入框字体 */
-    fontFamily: string;
     /** 占位符颜色 */
     placeholderColor: string;
     /** 前后缀图标颜色 */
@@ -221,7 +219,7 @@ describe('theme preset registry', (): void => {
     expect(probe.input.paddingInline).toBe('12px');
     expect(probe.input.paddingBlock).toBe('0px');
     expect(probe.input.gap).toBe('10px');
-    expect(probe.input.fontFamily).toContain('Pixelify Sans');
+    expect(probe.font.sans).toContain('Pixelify Sans');
     expect(probe.input.placeholderColor).toBe('rgb(58 51 42 / 70%)');
     expect(probe.input.iconColor).toBe('#161310');
     expect(probe.input.shadow).toBe('2px 2px 0 0 #161310');
@@ -234,7 +232,7 @@ describe('theme preset registry', (): void => {
     expect(probe.input.keycapShadow).toBe('none');
     expect(lightCssVars['--control-radius']).toBe('0px');
     expect(lightCssVars['--radius-full']).toBe('0px');
-    expect(lightCssVars['--font-display']).toContain('Pixelify Sans');
+    expect(lightCssVars['--font-sans']).toContain('Pixelify Sans');
     expect(lightCssVars['--interaction-press-offset']).toBe('0.1429rem');
     expect(lightCssVars['--interaction-raised-shadow']).toBe('0.1429rem 0.1429rem 0 0 #161310');
     expect(lightCssVars['--interaction-pressed-shadow']).toBe('none');

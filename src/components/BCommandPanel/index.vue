@@ -497,7 +497,7 @@ watch([visible, scope], ([nextVisible]): void => {
   & :deep(.ant-input) {
     min-height: 0;
     padding: 0;
-    font-family: var(--input-font-family);
+    font-family: var(--font-sans);
     font-size: 14px;
     color: var(--text-primary);
     background: transparent;
@@ -515,7 +515,7 @@ watch([visible, scope], ([nextVisible]): void => {
 .b-command-panel__search-input {
   flex: 1;
   min-width: 0;
-  font-family: var(--input-font-family);
+  font-family: var(--font-sans);
 }
 
 .b-command-panel__search-hint {

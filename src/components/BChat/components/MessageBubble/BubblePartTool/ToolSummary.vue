@@ -106,7 +106,7 @@ async function handleOpenFileTag(tag: ToolSummaryTag): Promise<void> {
 
 .bubble-part-tool__summary-text--shell {
   padding: 4px 8px;
-  font-family: Monaco, 'SF Mono', Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   background: var(--color-fill-tertiary, rgb(0 0 0 / 6%));
   border-radius: 4px;

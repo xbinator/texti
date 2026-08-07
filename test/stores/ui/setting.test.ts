@@ -12,6 +12,7 @@ describe('setting store persistence', (): void => {
   beforeEach((): void => {
     localStorage.clear();
     document.documentElement.style.fontSize = '';
+    document.documentElement.style.removeProperty('--font-sans');
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       writable: true,
@@ -56,6 +57,12 @@ describe('setting store persistence', (): void => {
     expect(useSettingStore().rootFontSize).toBe(14);
   });
 
+  it('normalizes an invalid persisted default font style', (): void => {
+    local.setItem('app_settings', { defaultFontStyle: 'unknown' });
+
+    expect(useSettingStore().defaultFontStyle).toBe('theme');
+  });
+
   it('applies root font size changes to the document element', (): void => {
     const settingStore = useSettingStore();
 
@@ -73,5 +80,35 @@ describe('setting store persistence', (): void => {
     settingStore.init();
 
     expect(document.documentElement.style.fontSize).toBe('15px');
+  });
+
+  it('normalizes legacy default font style values', (): void => {
+    local.setItem('app_settings', { defaultFontStyle: 'serif' });
+
+    expect(useSettingStore().defaultFontStyle).toBe('songti');
+  });
+
+  it('restores persisted default font style during init', (): void => {
+    local.setItem('app_settings', { defaultFontStyle: 'songti' });
+    const settingStore = useSettingStore();
+
+    settingStore.init();
+
+    expect(document.documentElement.style.getPropertyValue('--font-sans')).toContain('Songti SC');
+  });
+
+  it('applies default font style changes only to the sans font variable', (): void => {
+    const settingStore = useSettingStore();
+
+    settingStore.setDefaultFontStyle('heiti');
+
+    expect(settingStore.defaultFontStyle).toBe('heiti');
+    expect(document.documentElement.style.getPropertyValue('--font-sans')).toContain('Heiti SC');
+    expect(document.documentElement.style.getPropertyValue('--font-mono')).toBe('');
+    expect(local.getItem<{ defaultFontStyle?: string }>('app_settings')?.defaultFontStyle).toBe('heiti');
+
+    settingStore.setDefaultFontStyle('theme');
+
+    expect(document.documentElement.style.getPropertyValue('--font-sans')).toBe('');
   });
 });

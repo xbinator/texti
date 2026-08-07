@@ -11,6 +11,9 @@
       <SettingsItem label="主题风格">
         <BSelect :value="settingStore.themePreset" :options="presetOptions" :width="280" @change="handlePresetChange" />
       </SettingsItem>
+      <SettingsItem label="字体样式">
+        <BSelect :value="settingStore.defaultFontStyle" :options="defaultFontStyleOptions" :width="280" @change="handleDefaultFontStyleChange" />
+      </SettingsItem>
       <SettingsItem label="字体大小" :control-width="280">
         <BInputNumber
           :value="settingStore.rootFontSize"
@@ -49,7 +52,7 @@ import { computed } from 'vue';
 import type { SelectOption } from '@/components/BSelect/types';
 import type { EditorViewMode, EditorPageWidth, EditorSaveStrategy } from '@/stores/editor/preferences';
 import { useEditorPreferencesStore } from '@/stores/editor/preferences';
-import type { ThemeMode } from '@/stores/ui/setting';
+import type { DefaultFontStyle, ThemeMode } from '@/stores/ui/setting';
 import { ROOT_FONT_SIZE_DEFAULT, ROOT_FONT_SIZE_MAX, ROOT_FONT_SIZE_MIN, useSettingStore } from '@/stores/ui/setting';
 import { getPresetList } from '@/theme';
 import SettingsPage from '@/views/settings/_components/SettingsPage.vue';
@@ -57,6 +60,7 @@ import SettingsSection from '@/views/settings/_components/SettingsSection.vue';
 import { MENU_ITEMS } from '@/views/settings/constants';
 import SettingsItem from './components/SettingsItem.vue';
 import ToolPermissionGrants from './components/ToolPermissionGrants.vue';
+import { getCurrentFontPlatform, getDefaultFontStyleOptions } from './fontOptions';
 
 const editorStore = useEditorPreferencesStore();
 const settingStore = useSettingStore();
@@ -74,6 +78,11 @@ const themeOptions: SelectOption[] = [
  * 主题风格选项，从注册表动态获取。
  */
 const presetOptions = computed<SelectOption[]>(() => getPresetList().map((p) => ({ value: p.id, label: p.label })));
+
+/**
+ * 默认字体样式选项，根据当前系统展示常见中文字体。
+ */
+const defaultFontStyleOptions = computed<SelectOption[]>(() => getDefaultFontStyleOptions(getCurrentFontPlatform(), settingStore.defaultFontStyle));
 
 /**
  * 应用界面根字号输入步进。
@@ -120,6 +129,14 @@ function handleThemeChange(value: string | number): void {
  */
 function handlePresetChange(value: string | number): void {
   settingStore.setThemePreset(value as string);
+}
+
+/**
+ * 处理默认字体样式变更。
+ * @param value - 新的默认字体样式
+ */
+function handleDefaultFontStyleChange(value: string | number): void {
+  settingStore.setDefaultFontStyle(value as DefaultFontStyle);
 }
 
 /**

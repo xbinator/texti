@@ -74,8 +74,7 @@ function createDesignTokenProbe(): ThemeTokens {
     },
     font: {
       sans: 'Inter, system-ui, sans-serif',
-      mono: 'ui-monospace, monospace',
-      display: 'Pixelify Sans, ui-monospace, monospace'
+      mono: 'ui-monospace, monospace'
     },
     motion: {
       durationFast: '90ms',
@@ -116,7 +115,6 @@ function createDesignTokenProbe(): ThemeTokens {
       paddingInline: '12px',
       paddingBlock: '0px',
       gap: '10px',
-      fontFamily: 'Pixelify Sans, ui-monospace, monospace',
       placeholderColor: 'rgb(58 51 42 / 70%)',
       iconColor: '#161310',
       shadow: '2px 2px 0 0 #161310',
@@ -229,5 +227,14 @@ describe('theme design token derivation', (): void => {
     expect(vars['--border-width-hairline']).toBe('1px');
     expect(vars['--button-shadow']).toBe('0.1429rem 0.1429rem 0 0 #161310');
     expect(vars['--input-active-shadow']).toBe('0.1429rem 0.1429rem 0 0 #2e5dd6');
+  });
+
+  it('emits only sans and mono font CSS variables', (): void => {
+    const vars = toCssVars(createDesignTokenProbe());
+
+    expect(vars['--font-sans']).toBe('Inter, system-ui, sans-serif');
+    expect(vars['--font-mono']).toBe('ui-monospace, monospace');
+    expect(vars).not.toHaveProperty('--font-display');
+    expect(vars).not.toHaveProperty('--input-font-family');
   });
 });

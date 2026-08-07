@@ -131,7 +131,7 @@ function handleDropdownVisibleChange(open: boolean): void {
 .b-select {
   :deep(.ant-select-selector.ant-select-selector) {
     height: auto;
-    font-family: var(--input-font-family);
+    font-family: var(--font-sans);
     outline: none;
     background: var(--input-bg);
     border: var(--input-border-width) solid var(--input-border);

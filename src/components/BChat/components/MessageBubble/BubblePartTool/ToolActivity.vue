@@ -103,7 +103,7 @@ const [, bem] = createNamespace('', 'bubble-part-tool');
 
 .bubble-part-tool__activity-phase {
   margin-top: 4px;
-  font-family: Monaco, 'SF Mono', Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-tertiary);
 }

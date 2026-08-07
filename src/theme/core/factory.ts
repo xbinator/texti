@@ -100,8 +100,7 @@ export function createDefaultDesignTokens(): DesignTokens {
     },
     font: {
       sans: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-      mono: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
-      display: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+      mono: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace'
     },
     motion: {
       durationFast: '150ms',
@@ -368,7 +367,6 @@ export function createThemeTokens(palette: BasePalette, mode: 'light' | 'dark', 
       paddingInline: '12px',
       paddingBlock: '4px',
       gap: '8px',
-      fontFamily: designTokens.font.sans,
       bg: palette.bg2,
       border: palette.border,
       focusBorder: palette.accent,
