@@ -1,3 +1,7 @@
+<!--
+  @file BCollapseTransition.vue
+  @description 共享折叠过渡组件，提供高度、内边距与透明度动画。
+-->
 <template>
   <Transition
     :name="name"
@@ -19,13 +23,59 @@ import { createNamespace } from '@/utils/namespace';
 defineOptions({ name: 'BCollapseTransition' });
 
 const [name] = createNamespace('collapse-transition');
+const frameMap = new WeakMap<RendererElement, number>();
+
+/**
+ * 取消元素上尚未执行的动画帧。
+ * @param el - 过渡元素
+ */
+function clearFrame(el: RendererElement): void {
+  const frameId = frameMap.get(el);
+
+  if (frameId === undefined) {
+    return;
+  }
+
+  cancelAnimationFrame(frameId);
+  frameMap.delete(el);
+}
+
+/**
+ * 在下一帧执行样式变更，确保浏览器先绘制起始高度。
+ * @param el - 过渡元素
+ * @param callback - 样式变更回调
+ */
+function runNextFrame(el: RendererElement, callback: () => void): void {
+  clearFrame(el);
+
+  const frameId = requestAnimationFrame((): void => {
+    frameMap.delete(el);
+    callback();
+  });
+
+  frameMap.set(el, frameId);
+}
+
+/**
+ * 清除过渡期间写入的内联样式。
+ * @param el - 过渡元素
+ */
+function resetStyles(el: RendererElement): void {
+  clearFrame(el);
+  el.style.height = '';
+  el.style.overflow = '';
+  el.style.paddingTop = '';
+  el.style.paddingBottom = '';
+}
 
 /**
  * 进入前：将元素初始状态设为高度和 padding 均为 0
  * @param el - 过渡元素
  */
 function onBeforeEnter(el: RendererElement): void {
+  clearFrame(el);
   el.style.height = '0';
+  el.style.overflow = 'hidden';
   el.style.paddingTop = '0';
   el.style.paddingBottom = '0';
 }
@@ -35,14 +85,16 @@ function onBeforeEnter(el: RendererElement): void {
  * @param el - 过渡元素
  */
 function onEnter(el: RendererElement): void {
-  if (el.scrollHeight !== 0) {
-    el.style.height = `${el.scrollHeight}px`;
-  } else {
-    el.style.height = '';
-  }
-  el.style.paddingTop = '';
-  el.style.paddingBottom = '';
-  el.style.overflow = 'hidden';
+  runNextFrame(el, (): void => {
+    el.style.paddingTop = '';
+    el.style.paddingBottom = '';
+
+    if (el.scrollHeight !== 0) {
+      el.style.height = `${el.scrollHeight}px`;
+    } else {
+      el.style.height = '';
+    }
+  });
 }
 
 /**
@@ -50,8 +102,7 @@ function onEnter(el: RendererElement): void {
  * @param el - 过渡元素
  */
 function onAfterEnter(el: RendererElement): void {
-  el.style.height = '';
-  el.style.overflow = '';
+  resetStyles(el);
 }
 
 /**
@@ -59,6 +110,7 @@ function onAfterEnter(el: RendererElement): void {
  * @param el - 过渡元素
  */
 function onBeforeLeave(el: RendererElement): void {
+  clearFrame(el);
   el.style.height = `${el.scrollHeight}px`;
   el.style.overflow = 'hidden';
 }
@@ -68,11 +120,13 @@ function onBeforeLeave(el: RendererElement): void {
  * @param el - 过渡元素
  */
 function onLeave(el: RendererElement): void {
-  if (el.scrollHeight !== 0) {
-    el.style.height = '0';
-    el.style.paddingTop = '0';
-    el.style.paddingBottom = '0';
-  }
+  runNextFrame(el, (): void => {
+    if (el.scrollHeight !== 0) {
+      el.style.height = '0';
+      el.style.paddingTop = '0';
+      el.style.paddingBottom = '0';
+    }
+  });
 }
 
 /**
@@ -80,20 +134,27 @@ function onLeave(el: RendererElement): void {
  * @param el - 过渡元素
  */
 function onAfterLeave(el: RendererElement): void {
-  el.style.height = '';
-  el.style.overflow = '';
-  el.style.paddingTop = '';
-  el.style.paddingBottom = '';
+  resetStyles(el);
 }
 </script>
 
 <style lang="less">
-.b-collapse-transition-enter-active {
-  box-sizing: content-box;
-}
-
 .b-collapse-transition-leave-active,
 .b-collapse-transition-enter-active {
-  transition: 0.3s height ease-in-out, 0.3s padding-top ease-in-out, 0.3s padding-bottom ease-in-out;
+  box-sizing: border-box;
+  overflow: hidden;
+  transition: height 0.22s cubic-bezier(0.4, 0, 0.2, 1), padding-top 0.22s cubic-bezier(0.4, 0, 0.2, 1), padding-bottom 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.14s ease-out;
+  will-change: height, padding-top, padding-bottom, opacity;
+}
+
+.b-collapse-transition-enter-from,
+.b-collapse-transition-leave-to {
+  opacity: 0;
+}
+
+.b-collapse-transition-enter-to,
+.b-collapse-transition-leave-from {
+  opacity: 1;
 }
 </style>

@@ -22,7 +22,7 @@
         <BIcon :icon="rawExpanded ? 'lucide:chevron-down' : 'lucide:chevron-right'" :size="12" />
         <span>{{ rawExpanded ? '收起原始数据' : '查看原始数据' }}</span>
       </div>
-      <BubblePartToolCode v-if="rawExpanded" :value="previewValue" />
+      <ToolCode v-if="rawExpanded" :value="previewValue" />
     </template>
   </div>
 </template>
@@ -33,7 +33,7 @@ import { ref } from 'vue';
 import { useNavigate } from '@/hooks/useNavigate';
 import { asyncTo } from '@/utils/asyncTo';
 import { createNamespace } from '@/utils/namespace';
-import BubblePartToolCode from '../BubblePartToolCode/index.vue';
+import ToolCode from './ToolCode.vue';
 
 defineOptions({ name: 'ToolSummary' });
 

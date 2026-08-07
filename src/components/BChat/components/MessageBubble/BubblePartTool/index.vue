@@ -4,11 +4,8 @@
 -->
 <template>
   <!-- 工具气泡容器：inputting 状态默认展开，其余状态默认折叠 -->
-  <BubblePart type="tool" :has-content="hasContent" :default-collapsed="defaultCollapsed">
+  <BubblePart type="tool" :has-content="hasContent" :default-collapsed="defaultCollapsed" :icon="icon" :icon-spin="part.status === 'inputting'">
     <template #title>
-      <!-- 状态图标：inputting 旋转、executing 扳手、done 成功/失败 -->
-      <BIcon :icon="icon" :class="bem('icon', { spin: part.status === 'inputting' })" :size="14" />
-
       <!-- todowrite 任务进度 -->
       <div v-if="todoWriteTodos">{{ title }} {{ todoWriteCompletedCount }}/{{ todoWriteTodos.length }}</div>
       <!-- 工具名称（文件操作时显示路径，其余显示别名） -->
@@ -16,17 +13,30 @@
 
       <!-- 执行失败状态标签 -->
       <span v-if="part.status === 'done' && part.result?.status === 'failure'" :class="bem('status', { failure: true })">失败</span>
-    </template>
 
-    <!-- 活动状态来自 Main 持久化快照，不以组件挂载时间或动画推断工具存活。 -->
-    <ToolActivity
-      v-if="part.activity"
-      :activity="part.activity"
-      :activity-label="activityLabel"
-      :show-idle-controls="showIdleControls"
-      :control-pending="controlPending"
-      @control="handleToolControl"
-    />
+      <!-- 空闲运行工具的控制按钮直接内联在标题右侧，避免额外状态组件占位。 -->
+      <div v-if="showIdleControls" :class="bem('activity-actions')" @click.stop>
+        <BButton
+          type="secondary"
+          size="mini"
+          :disabled="controlPending !== null"
+          :loading="controlPending === 'continue_waiting'"
+          @click="handleToolControl('continue_waiting')"
+        >
+          继续等待
+        </BButton>
+        <BButton
+          type="secondary"
+          size="mini"
+          danger
+          :disabled="controlPending !== null"
+          :loading="controlPending === 'stop'"
+          @click="handleToolControl('stop')"
+        >
+          停止
+        </BButton>
+      </div>
+    </template>
 
     <!-- Shell 命令与当前屏幕共享终端区域，命令在前且不重复显示成功摘要 -->
     <ToolShellDisplay
@@ -47,7 +57,7 @@
     <ToolSummary v-else-if="summary" :summary="summary" :preview-value="previewValue" :is-shell-command="isShellCommand" />
 
     <!-- 无摘要的工具：展示代码格式的输入/输出内容 -->
-    <BubblePartToolCode v-else-if="hasContent" :value="previewValue" />
+    <ToolCode v-else-if="hasContent" :value="previewValue" />
   </BubblePart>
 </template>
 
@@ -71,8 +81,7 @@ import { getActionLabel } from '../../../utils/toolLabels';
 import { getToolResultSummary } from '../../../utils/toolResultSummary';
 import TodoList from '../../TodoList.vue';
 import BubblePart from '../BubblePart/index.vue';
-import BubblePartToolCode from '../BubblePartToolCode/index.vue';
-import ToolActivity from './ToolActivity.vue';
+import ToolCode from './ToolCode.vue';
 import ToolQuestionResult from './ToolQuestionResult.vue';
 import ToolShellDisplay from './ToolShellDisplay.vue';
 import ToolSummary from './ToolSummary.vue';
@@ -237,8 +246,8 @@ const defaultCollapsed = computed<boolean>(() => props.part.status !== 'inputtin
 /** 当前活动状态文案。 */
 const activityLabel = computed<string>(() => (props.part.activity ? ACTIVITY_LABELS[props.part.activity.state] : ''));
 
-/** 工具标题：文件操作显示文件路径，skill 显示技能名称，其余显示工具别名。 */
-const title = computed<string>(() => {
+/** 工具基础标题：文件操作显示文件路径，skill 显示技能名称，其余显示工具别名。 */
+const toolTitle = computed<string>(() => {
   const { part } = props;
   const presentation = resolvePresentation(part.toolName);
   const alias = presentation?.label ?? getActionLabel(part.toolName).alias;
@@ -256,6 +265,9 @@ const title = computed<string>(() => {
   return alias;
 });
 
+/** 工具标题显示文案：存在活动状态时优先显示活动状态，否则显示工具基础标题。 */
+const title = computed<string>(() => activityLabel.value || toolTitle.value);
+
 /** 根据工具状态计算预览内容：inputting 取输入值、executing 取输入、done 取结果。 */
 const previewValue = computed<unknown>(() => {
   const { part } = props;
@@ -267,7 +279,6 @@ const previewValue = computed<unknown>(() => {
 /** 判断是否有可展示的内容，done 状态始终有内容，其余状态需检查结构化值。 */
 const hasContent = computed<boolean>(() => {
   if (props.part.status === 'done') return true;
-  if (props.part.activity) return true;
   return hasStructuredValueContent(previewValue.value);
 });
 
@@ -412,24 +423,6 @@ async function handleToolControl(action: ChatRuntimeControlToolInput['action']):
 </script>
 
 <style scoped lang="less">
-.bubble-part-tool__icon {
-  flex-shrink: 0;
-}
-
-.bubble-part-tool__icon--spin {
-  animation: bubble-part-tool-spin 1.2s linear infinite;
-}
-
-@keyframes bubble-part-tool-spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .bubble-part-tool__name {
   flex: 1;
   width: 0;
@@ -441,5 +434,22 @@ async function handleToolControl(action: ChatRuntimeControlToolInput['action']):
 .bubble-part-tool__status--failure {
   margin-left: 8px;
   color: var(--color-error);
+}
+
+.bubble-part-tool__activity-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+  align-items: center;
+  padding-left: 6px;
+  margin-left: auto;
+}
+
+.bubble-part-tool__activity-actions :deep(.b-button) {
+  height: 20px;
+  padding: 0 6px;
+  font-size: 11px;
+  border-radius: 4px;
+  box-shadow: none;
 }
 </style>

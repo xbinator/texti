@@ -1,9 +1,6 @@
 <template>
   <BubblePart type="thinking" :has-content="hasContent" :default-collapsed="false">
-    <template #title>
-      <BIcon icon="lucide:sparkles" :size="14" />
-      深度思考
-    </template>
+    <template #title>深度思考</template>
     <BMessage :content="part.thinking" type="markdown" />
   </BubblePart>
 </template>

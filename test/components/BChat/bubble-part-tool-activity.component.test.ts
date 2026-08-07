@@ -60,6 +60,7 @@ function mountTool(part: ChatMessageToolPart, submitAction = vi.fn(), runtimeId:
     global: {
       stubs: {
         BButton: ButtonStub,
+        BCollapseTransition: { template: '<div data-test="collapse-transition"><slot /></div>' },
         BIcon: true,
         BMessage: true,
         BTruncateText: { props: ['text'], template: '<span>{{ text }}</span>' }
@@ -69,6 +70,32 @@ function mountTool(part: ChatMessageToolPart, submitAction = vi.fn(), runtimeId:
 }
 
 describe('BubblePartTool activity', (): void => {
+  it('uses persisted activity status as the title before falling back to the tool name', (): void => {
+    const wrapper = mountTool(createPart('executing'));
+    const title = wrapper.get('.message-bubble-part__title-text .bubble-part-tool__name');
+
+    expect(title.text()).toBe('执行中');
+
+    const fallback = mountTool({ ...createPart('executing'), activity: undefined, toolName: 'write_file', input: { path: 'src/example.ts' } });
+    expect(fallback.get('.message-bubble-part__title-text .bubble-part-tool__name').text()).toBe('src/example.ts');
+  });
+
+  it('renders idle controls inline in the title and keeps the content open when clicked', async (): Promise<void> => {
+    const submitAction = vi.fn();
+    const wrapper = mountTool({ ...createPart('running_idle'), input: { query: 'visible content' } }, submitAction);
+    const actions = wrapper.get('.message-bubble-part__title-text .bubble-part-tool__activity-actions');
+    const buttons = actions.findAll('button');
+
+    expect(buttons.map((button) => button.text())).toEqual(['继续等待', '停止']);
+    expect(wrapper.find('.bubble-part-tool__activity').exists()).toBe(false);
+    expect(wrapper.get('.message-bubble-part__content-wrap').isVisible()).toBe(true);
+
+    await buttons[0]?.trigger('click');
+
+    expect(submitAction).toHaveBeenCalledTimes(1);
+    expect(wrapper.get('.message-bubble-part__content-wrap').isVisible()).toBe(true);
+  });
+
   it('renders only persisted activity status labels', (): void => {
     const executing = mountTool(createPart('executing'));
     expect(executing.text()).toContain('执行中');
