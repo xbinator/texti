@@ -89,7 +89,7 @@ describe('page theme token styles', (): void => {
     const skillSource = readSource('src/views/skill/index.vue');
     const chatSource = readSource('src/views/chat/index.vue');
     const settingsSource = readSource('src/views/settings/index.vue');
-    const basicSettingsSource = readSource('src/views/settings/basic/index.vue');
+    const toolPermissionSource = readSource('src/views/settings/basic/components/ToolPermissionGrants.vue');
     const widgetSource = readSource('src/views/widget/index.vue');
     const providerDetailSource = readSource('src/views/settings/provider/detail.vue');
 
@@ -115,8 +115,8 @@ describe('page theme token styles', (): void => {
     expect(settingsSource).toContain('box-shadow: var(--button-active-shadow);');
     expect(settingsSource).toContain('box-shadow: var(--button-pressed-shadow);');
     expect(settingsSource).toContain('transform: translate(var(--interaction-press-offset), var(--interaction-press-offset));');
-    expect(basicSettingsSource).toContain('border: var(--surface-border-width) dashed var(--border-primary);');
-    expect(basicSettingsSource).toContain('border-radius: var(--surface-radius);');
+    expect(toolPermissionSource).toContain('border: var(--surface-border-width) dashed var(--border-primary);');
+    expect(toolPermissionSource).toContain('border-radius: var(--surface-radius);');
     expect(widgetSource).toContain('border: var(--surface-border-width) solid var(--border-primary);');
     expect(widgetSource).toContain('border-radius: var(--surface-radius);');
     expect(widgetSource).toContain('border-radius: var(--control-radius);');

@@ -84,9 +84,9 @@ describe('app rem scaling styles', (): void => {
   it('adds a root font size setting entry in basic settings', (): void => {
     const settingsSource = readSource('src/views/settings/basic/index.vue');
 
-    expect(settingsSource).toContain('界面大小');
+    expect(settingsSource).toContain('字体大小');
     expect(settingsSource).toContain('<BInputNumber');
-    expect(settingsSource).toContain('basic-settings__root-font-size-control');
+    expect(settingsSource).toContain(':control-width="280"');
     expect(settingsSource).toContain('@update:value="handleRootFontSizeChange"');
     expect(settingsSource).toContain('handleRootFontSizeChange');
     expect(settingsSource).toContain('settingStore.setRootFontSize');
@@ -95,12 +95,15 @@ describe('app rem scaling styles', (): void => {
   });
 
   it('keeps basic settings chrome authored in px units', (): void => {
-    const settingsSource = readSource('src/views/settings/basic/index.vue');
+    const settingsItemSource = readSource('src/views/settings/basic/components/SettingsItem.vue');
+    const permissionSource = readSource('src/views/settings/basic/components/ToolPermissionGrants.vue');
 
-    expect(settingsSource).toContain('min-height: 56px;');
-    expect(settingsSource).toContain('font-size: 12px;');
-    expect(settingsSource).toContain('padding: 12px 16px 16px;');
-    expect(settingsSource).not.toContain('var(--app-font-size-');
+    expect(settingsItemSource).toContain('min-height: 56px;');
+    expect(settingsItemSource).toContain('font-size: 12px;');
+    expect(settingsItemSource).toContain('padding: 0 16px;');
+    expect(settingsItemSource).not.toContain('var(--app-font-size-');
+    expect(permissionSource).toContain('padding: 12px 16px 16px;');
+    expect(permissionSource).not.toContain('var(--app-font-size-');
   });
 
   it('keeps core app chrome font sizes authored in px units', (): void => {
