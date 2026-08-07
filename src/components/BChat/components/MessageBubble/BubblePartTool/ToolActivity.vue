@@ -3,17 +3,17 @@
   @description 展示工具持久化活动状态，并提供空闲运行工具的控制按钮。
 -->
 <template>
-  <div :class="bem('activity', { [activity.state]: true })">
+  <div :class="bem('activity', { [activityState]: true })">
     <div :class="bem('activity-header')">
       <span :class="bem('activity-state')">{{ activityLabel }}</span>
       <span v-if="activityCount" :class="bem('activity-count')">{{ activityCount }}</span>
     </div>
-    <div v-if="activity.progress?.phase" :class="bem('activity-phase')">{{ activity.progress.phase }}</div>
+    <div v-if="activityPhase" :class="bem('activity-phase')">{{ activityPhase }}</div>
     <div v-if="activityMessage" :class="bem('activity-message')">{{ activityMessage }}</div>
-    <div v-if="activity.state === 'running_idle' && lastProgressText" :class="bem('activity-time')">{{ lastProgressText }}</div>
+    <div v-if="activityState === 'running_idle' && lastProgressText" :class="bem('activity-time')">{{ lastProgressText }}</div>
     <div v-if="showIdleControls" :class="bem('activity-actions')">
       <BButton
-        type="text"
+        type="secondary"
         size="mini"
         :disabled="controlPending !== null"
         :loading="controlPending === 'continue_waiting'"
@@ -21,7 +21,7 @@
       >
         继续等待
       </BButton>
-      <BButton type="text" size="mini" danger :disabled="controlPending !== null" :loading="controlPending === 'stop'" @click="emit('control', 'stop')">
+      <BButton type="secondary" size="mini" danger :disabled="controlPending !== null" :loading="controlPending === 'stop'" @click="emit('control', 'stop')">
         停止
       </BButton>
     </div>
@@ -31,6 +31,7 @@
 <script setup lang="ts">
 import type { ChatMessageToolPart } from 'types/chat';
 import type { ChatRuntimeControlToolInput } from 'types/chat-runtime';
+import { computed } from 'vue';
 import { createNamespace } from '@/utils/namespace';
 
 defineOptions({ name: 'ToolActivity' });
@@ -59,14 +60,24 @@ interface Emits {
   (event: 'control', action: ChatRuntimeControlToolInput['action']): void;
 }
 
-defineProps<Props>();
+const props = defineProps<Props>();
 const emit = defineEmits<Emits>();
 const [, bem] = createNamespace('', 'bubble-part-tool');
+
+/** 当前工具活动状态，用于样式修饰与空闲判断。 */
+const activityState = computed(() => props.activity.state);
+
+/** 当前进度阶段描述，无阶段时为空字符串。 */
+const activityPhase = computed(() => props.activity.progress?.phase ?? '');
 </script>
 
 <style scoped lang="less">
 .bubble-part-tool__activity {
-  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  padding: 0 8px;
   margin-bottom: 8px;
   font-size: 12px;
   color: var(--text-secondary);
@@ -121,6 +132,5 @@ const [, bem] = createNamespace('', 'bubble-part-tool');
 .bubble-part-tool__activity-actions {
   display: flex;
   gap: 4px;
-  margin-top: 6px;
 }
 </style>

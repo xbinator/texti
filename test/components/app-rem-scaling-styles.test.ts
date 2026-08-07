@@ -84,7 +84,7 @@ describe('app rem scaling styles', (): void => {
   it('adds a root font size setting entry in basic settings', (): void => {
     const settingsSource = readSource('src/views/settings/basic/index.vue');
 
-    expect(settingsSource).toContain('字体大小');
+    expect(settingsSource).toContain('大小');
     expect(settingsSource).toContain('<BInputNumber');
     expect(settingsSource).toContain(':control-width="280"');
     expect(settingsSource).toContain('@update:value="handleRootFontSizeChange"');
