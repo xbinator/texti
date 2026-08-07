@@ -4,13 +4,31 @@
  * @vitest-environment jsdom
  */
 import { createPinia, setActivePinia } from 'pinia';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { local } from '@/shared/storage/base';
 import { useSettingStore } from '@/stores/ui/setting';
 
 describe('setting store persistence', (): void => {
   beforeEach((): void => {
     localStorage.clear();
+    document.documentElement.style.fontSize = '';
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: vi.fn().mockReturnValue({
+        matches: false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn()
+      })
+    });
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      writable: true,
+      value: {
+        setWindowTitle: vi.fn().mockResolvedValue(undefined),
+        updateMenuItem: vi.fn()
+      }
+    });
     setActivePinia(createPinia());
   });
 
@@ -30,5 +48,30 @@ describe('setting store persistence', (): void => {
     local.setItem('app_settings', { themePreset: 'graphite' });
 
     expect(useSettingStore().themePreset).toBe('default');
+  });
+
+  it('normalizes an invalid persisted root font size', (): void => {
+    local.setItem('app_settings', { rootFontSize: 100 });
+
+    expect(useSettingStore().rootFontSize).toBe(14);
+  });
+
+  it('applies root font size changes to the document element', (): void => {
+    const settingStore = useSettingStore();
+
+    settingStore.setRootFontSize(16);
+
+    expect(settingStore.rootFontSize).toBe(16);
+    expect(document.documentElement.style.fontSize).toBe('16px');
+    expect(local.getItem<{ rootFontSize?: number }>('app_settings')?.rootFontSize).toBe(16);
+  });
+
+  it('restores persisted root font size during init', (): void => {
+    local.setItem('app_settings', { rootFontSize: 15 });
+    const settingStore = useSettingStore();
+
+    settingStore.init();
+
+    expect(document.documentElement.style.fontSize).toBe('15px');
   });
 });

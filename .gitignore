@@ -29,6 +29,7 @@ dist-electron
 
 # Auto-generated files
 types/components.d.ts
+*.tsbuildinfo
 
 # Local git worktrees
 .worktrees/

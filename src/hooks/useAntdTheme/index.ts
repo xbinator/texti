@@ -37,7 +37,7 @@ export function useAntdTheme(): UseAntdThemeResult {
   const antdTheme = computed<AntdThemeConfig>(() => {
     const isDark = settingStore.resolvedTheme === 'dark';
     const tokens = getResolvedTokens(settingStore.themePreset, isDark ? 'dark' : 'light');
-    const { token, components } = toAntdToken(tokens);
+    const { token, components } = toAntdToken(tokens, settingStore.rootFontSize);
 
     return {
       algorithm: isDark ? darkAlgorithm : defaultAlgorithm,

@@ -23,6 +23,27 @@
       </div>
     </SettingsSection>
 
+    <SettingsSection title="界面">
+      <div class="basic-settings__item">
+        <div class="basic-settings__meta">
+          <div class="basic-settings__label">界面大小</div>
+        </div>
+        <div class="basic-settings__root-font-size-control">
+          <BInputNumber
+            :value="settingStore.rootFontSize"
+            :min="ROOT_FONT_SIZE_MIN"
+            :max="ROOT_FONT_SIZE_MAX"
+            :step="ROOT_FONT_SIZE_STEP"
+            :precision="0"
+            :default-value="ROOT_FONT_SIZE_DEFAULT"
+            @update:value="handleRootFontSizeChange"
+          >
+            <template #addonAfter>px</template>
+          </BInputNumber>
+        </div>
+      </div>
+    </SettingsSection>
+
     <SettingsSection title="编辑器">
       <div class="basic-settings__item">
         <div class="basic-settings__meta">
@@ -84,7 +105,7 @@ import { useChatPermissionStore } from '@/stores/chat/permission';
 import type { EditorViewMode, EditorPageWidth, EditorSaveStrategy } from '@/stores/editor/preferences';
 import { useEditorPreferencesStore } from '@/stores/editor/preferences';
 import type { ThemeMode } from '@/stores/ui/setting';
-import { useSettingStore } from '@/stores/ui/setting';
+import { ROOT_FONT_SIZE_DEFAULT, ROOT_FONT_SIZE_MAX, ROOT_FONT_SIZE_MIN, useSettingStore } from '@/stores/ui/setting';
 import { getPresetList } from '@/theme';
 import SettingsPage from '@/views/settings/_components/SettingsPage.vue';
 import SettingsSection from '@/views/settings/_components/SettingsSection.vue';
@@ -123,6 +144,11 @@ const themeOptions: SelectOption[] = [
  * 主题风格选项，从注册表动态获取。
  */
 const presetOptions = computed<SelectOption[]>(() => getPresetList().map((p) => ({ value: p.id, label: p.label })));
+
+/**
+ * 应用界面根字号输入步进。
+ */
+const ROOT_FONT_SIZE_STEP = 1;
 
 /**
  * 默认视图模式选项。
@@ -185,6 +211,14 @@ function handleThemeChange(value: string | number): void {
  */
 function handlePresetChange(value: string | number): void {
   settingStore.setThemePreset(value as string);
+}
+
+/**
+ * 处理界面根字号变更。
+ * @param value - 新的根字号
+ */
+function handleRootFontSizeChange(value: string | number): void {
+  settingStore.setRootFontSize(Number(value));
 }
 
 /**
@@ -272,6 +306,10 @@ function handleClearAlwaysToolPermissions(): void {
   color: var(--text-tertiary);
 }
 
+.basic-settings__root-font-size-control {
+  width: 280px;
+}
+
 .basic-settings__permission-panel {
   padding: 12px 16px 16px;
 }
@@ -339,6 +377,10 @@ function handleClearAlwaysToolPermissions(): void {
     align-items: flex-start;
 
     :deep(.b-select) {
+      width: 100%;
+    }
+
+    .basic-settings__root-font-size-control {
       width: 100%;
     }
   }

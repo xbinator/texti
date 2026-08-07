@@ -4,7 +4,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import type { ThemeTokens } from '@/theme';
-import { getResolvedTokens, toAntdToken, validateTokens } from '@/theme';
+import { getResolvedTokens, toAntdToken, toCssVars, validateTokens } from '@/theme';
 
 /**
  * Ant Design 设计 Token 探针。
@@ -182,7 +182,7 @@ describe('theme design token derivation', (): void => {
     expect(antd.components.Button.fontFamily).toContain('Pixelify Sans');
     expect(antd.components.Input.borderRadius).toBe(0);
     expect(antd.components.Input.lineWidth).toBe(2);
-    expect(antd.components.Input).not.toHaveProperty('controlHeight');
+    expect(antd.components.Input.controlHeight).toBe(32);
     expect(antd.components.Input.paddingInline).toBe(12);
     expect(antd.components.Input.colorTextPlaceholder).toBe('rgb(58 51 42 / 70%)');
     expect(antd.components.Input.activeShadow).toBe('2px 2px 0 0 #2e5dd6');
@@ -217,5 +217,17 @@ describe('theme design token derivation', (): void => {
     expect(antd.components.Select.borderRadius).toBe(8);
     expect(antd.components.Dropdown.borderRadiusLG).toBe(20);
     expect(antd.components.Dropdown.lineWidth).toBe(2);
+  });
+
+  it('emits scalable rem values for runtime CSS dimension tokens', (): void => {
+    const vars = toCssVars(createDesignTokenProbe());
+
+    expect(vars['--input-padding-inline']).toBe('0.8571rem');
+    expect(vars['--input-gap']).toBe('0.7143rem');
+    expect(vars['--control-border-width']).toBe('0.1429rem');
+    expect(vars['--input-keycap-border-width']).toBe('0.1429rem');
+    expect(vars['--border-width-hairline']).toBe('1px');
+    expect(vars['--button-shadow']).toBe('0.1429rem 0.1429rem 0 0 #161310');
+    expect(vars['--input-active-shadow']).toBe('0.1429rem 0.1429rem 0 0 #2e5dd6');
   });
 });

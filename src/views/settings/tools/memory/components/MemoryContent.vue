@@ -53,11 +53,7 @@ function buildResetConfirmContent(): VNode {
     h(
       'div',
       {
-        style: {
-          marginTop: '8px',
-          fontSize: '12px',
-          color: 'var(--text-tertiary)'
-        }
+        class: 'memory-content-reset-hint'
       },
       RESET_CONFIRM_HINT
     )
@@ -137,5 +133,11 @@ async function handleReset(): Promise<void> {
     color: var(--color-danger);
     background: var(--bg-hover);
   }
+}
+
+:global(.memory-content-reset-hint) {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-tertiary);
 }
 </style>

@@ -24,6 +24,10 @@ interface AntdThemeToken {
   borderRadiusSM: number;
   lineWidth: number;
   fontFamily: string;
+  fontSize: number;
+  controlHeight: number;
+  controlHeightSM: number;
+  controlHeightLG: number;
 }
 
 /**
@@ -66,6 +70,9 @@ const DROPDOWN_COMPONENTS = ['Select', 'Cascader', 'TreeSelect', 'AutoComplete']
  * Ant Design 接收无单位 px 数值；相对单位在主题层按 CSS 默认字号归一化。
  */
 const CSS_RELATIVE_UNIT_BASE_PX = 16;
+const DEFAULT_ROOT_FONT_SIZE = 14;
+const CSS_VAR_REM_PRECISION = 4;
+const CSS_VAR_MIN_PIXEL_VALUE = 1;
 
 /**
  * camelCase 转 kebab-case。
@@ -103,6 +110,81 @@ function parseDimension(value: string, fallback: number): number {
 }
 
 /**
+ * 格式化 rem 数值，移除无意义尾随 0。
+ * @param value - rem 数值
+ * @returns rem 数值字符串
+ */
+function formatRem(value: number): string {
+  return Number(value.toFixed(CSS_VAR_REM_PRECISION)).toString();
+}
+
+/**
+ * 判断主题 CSS 变量是否属于可缩放尺寸语义。
+ * @param groupKey - ThemeTokens 顶层分组
+ * @param propKey - 分组内属性名
+ * @returns 是否需要把 px 单位转换为 rem
+ */
+function isScalableToken(groupKey: string, propKey: string): boolean {
+  if (groupKey === 'radius' || groupKey === 'borderWidth' || groupKey === 'shadow') return true;
+  if (groupKey === 'control' || groupKey === 'surface' || groupKey === 'overlay' || groupKey === 'interaction') return true;
+  if (groupKey === 'button') return ['borderWidth', 'shadow', 'activeShadow', 'pressedShadow'].includes(propKey);
+
+  if (groupKey === 'input') {
+    return [
+      'radius',
+      'borderWidth',
+      'paddingInline',
+      'paddingBlock',
+      'gap',
+      'shadow',
+      'activeShadow',
+      'keycapSize',
+      'keycapRadius',
+      'keycapBorderWidth',
+      'keycapShadow'
+    ].includes(propKey);
+  }
+
+  return false;
+}
+
+/**
+ * 将 CSS 值中的可缩放 px 尺寸转换为 rem。
+ * @param value - CSS token 值
+ * @returns 转换后的 CSS token 值
+ */
+function convertPxToRem(value: string): string {
+  return value.replace(/(-?\d*\.?\d+)px\b/giu, (source: string, rawValue: string): string => {
+    const pxValue = Number.parseFloat(rawValue);
+    if (!Number.isFinite(pxValue) || Math.abs(pxValue) <= CSS_VAR_MIN_PIXEL_VALUE) return source;
+
+    return `${formatRem(pxValue / DEFAULT_ROOT_FONT_SIZE)}rem`;
+  });
+}
+
+/**
+ * 按 14px 设计基准比例缩放 Ant Design 数字尺寸。
+ * @param value - 14px 设计基准下的 px 尺寸
+ * @param rootFontSize - 当前根字号
+ * @returns Ant Design 数字 token
+ */
+function scaleMetric(value: number, rootFontSize: number): number {
+  return Number(((value / DEFAULT_ROOT_FONT_SIZE) * rootFontSize).toFixed(4));
+}
+
+/**
+ * 缩放 Ant Design 数字尺寸，同时保留 1px 发丝线。
+ * @param value - 14px 设计基准下的 px 尺寸
+ * @param rootFontSize - 当前根字号
+ * @returns Ant Design 数字 token
+ */
+function scaleDimension(value: number, rootFontSize: number): number {
+  if (Math.abs(value) <= CSS_VAR_MIN_PIXEL_VALUE) return value;
+
+  return scaleMetric(value, rootFontSize);
+}
+
+/**
  * 分组名到 CSS 变量前缀的映射。
  * richEditor 组保持 --editor- 前缀以兼容现有 Less 引用。
  * usagePanel 组保持 --usage- 前缀以兼容现有 Less 引用。
@@ -125,7 +207,7 @@ export function toCssVars(tokens: ThemeTokens): Record<string, string> {
 
     for (const [propKey, value] of Object.entries(group as Record<string, string>)) {
       const cssVarName = `--${toKebab(prefix)}-${toKebab(propKey)}`;
-      result[cssVarName] = value;
+      result[cssVarName] = isScalableToken(groupKey, propKey) ? convertPxToRem(value) : value;
     }
   }
 
@@ -141,24 +223,35 @@ export function toCssVars(tokens: ThemeTokens): Record<string, string> {
  * 使弹出面板背景与主题 dropdown 语义保持一致。
  * Drawer 单独覆盖 colorBgElevated 为 bg.primary，使其与页面主背景保持一致。
  * @param tokens - 主题 Token 对象
+ * @param rootFontSize - 当前应用根字号，作为 14px 设计基准的缩放目标
  * @returns Ant Design 完整主题配置（全局 token + 组件级 token）
  */
-export function toAntdToken(tokens: ThemeTokens): AntdThemeConfig {
+export function toAntdToken(tokens: ThemeTokens, rootFontSize: number = DEFAULT_ROOT_FONT_SIZE): AntdThemeConfig {
   const inputComponentTokens: AntdComponentTokens = {};
-  const controlRadius = parseDimension(tokens.control.radius, 6);
-  const surfaceRadius = parseDimension(tokens.surface.radius, 8);
-  const overlayRadius = parseDimension(tokens.overlay.radius, 8);
-  const controlLineWidth = parseDimension(tokens.control.borderWidth, 1);
-  const overlayLineWidth = parseDimension(tokens.overlay.borderWidth, 1);
-  const inputRadius = parseDimension(tokens.input.radius, controlRadius);
-  const inputLineWidth = parseDimension(tokens.input.borderWidth, controlLineWidth);
-  const inputPaddingInline = parseDimension(tokens.input.paddingInline, 12);
+  const rawControlRadius = parseDimension(tokens.control.radius, 6);
+  const rawControlLineWidth = parseDimension(tokens.control.borderWidth, 1);
+  const controlRadius = scaleDimension(rawControlRadius, rootFontSize);
+  const surfaceRadius = scaleDimension(parseDimension(tokens.surface.radius, 8), rootFontSize);
+  const overlayRadius = scaleDimension(parseDimension(tokens.overlay.radius, 8), rootFontSize);
+  const controlLineWidth = scaleDimension(rawControlLineWidth, rootFontSize);
+  const overlayLineWidth = scaleDimension(parseDimension(tokens.overlay.borderWidth, 1), rootFontSize);
+  const inputRadius = scaleDimension(parseDimension(tokens.input.radius, rawControlRadius), rootFontSize);
+  const inputLineWidth = scaleDimension(parseDimension(tokens.input.borderWidth, rawControlLineWidth), rootFontSize);
+  const inputPaddingInline = scaleDimension(parseDimension(tokens.input.paddingInline, 12), rootFontSize);
+  const fontSize = scaleMetric(14, rootFontSize);
+  const controlHeight = scaleMetric(32, rootFontSize);
+  const controlHeightSM = scaleMetric(26, rootFontSize);
+  const controlHeightLG = scaleMetric(38, rootFontSize);
+  const borderRadiusSM = scaleDimension(parseDimension(tokens.radius.xs, 4), rootFontSize);
 
   for (const component of INPUT_COMPONENTS) {
     inputComponentTokens[component] = {
       colorBgContainer: tokens.bg.primary,
       borderRadius: controlRadius,
-      lineWidth: controlLineWidth
+      lineWidth: controlLineWidth,
+      controlHeight,
+      controlHeightSM,
+      controlHeightLG
     };
   }
 
@@ -195,7 +288,11 @@ export function toAntdToken(tokens: ThemeTokens): AntdThemeConfig {
   inputComponentTokens.Button = {
     borderRadius: controlRadius,
     lineWidth: controlLineWidth,
-    fontFamily: tokens.font.display
+    fontFamily: tokens.font.display,
+    fontSize,
+    controlHeight,
+    controlHeightSM,
+    controlHeightLG
   };
   inputComponentTokens.Modal = {
     borderRadiusLG: overlayRadius
@@ -225,9 +322,13 @@ export function toAntdToken(tokens: ThemeTokens): AntdThemeConfig {
       controlOutline: tokens.color.controlOutline,
       borderRadius: controlRadius,
       borderRadiusLG: surfaceRadius,
-      borderRadiusSM: parseDimension(tokens.radius.xs, 4),
+      borderRadiusSM,
       lineWidth: controlLineWidth,
-      fontFamily: tokens.font.sans
+      fontFamily: tokens.font.sans,
+      fontSize,
+      controlHeight,
+      controlHeightSM,
+      controlHeightLG
     },
     components: inputComponentTokens
   };

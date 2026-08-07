@@ -17,6 +17,9 @@ const SETTINGS_STORAGE_KEY = 'app_settings';
 const LEGACY_THEME_STORAGE_KEY = 'app_theme';
 const LEGACY_SIDEBAR_VISIBLE_KEY = 'sidebar_visible';
 const LEGACY_SIDEBAR_WIDTH_KEY = 'sidebar_width';
+export const ROOT_FONT_SIZE_DEFAULT = 14;
+export const ROOT_FONT_SIZE_MIN = 12;
+export const ROOT_FONT_SIZE_MAX = 18;
 
 interface PersistedSettingState {
   chatSidebarActiveSessionId: string | null;
@@ -27,6 +30,8 @@ interface PersistedSettingState {
   theme: ThemeMode;
   /** 主题预设 ID，如 'default'、'classic' */
   themePreset: string;
+  /** 应用根字号，控制 rem UI 缩放 */
+  rootFontSize: number;
   sidebarVisible: boolean;
   sidebarWidth: number;
 }
@@ -42,6 +47,7 @@ const DEFAULT_SETTINGS: PersistedSettingState = {
   settingsSidebarCollapsed: true,
   theme: 'system',
   themePreset: 'default',
+  rootFontSize: ROOT_FONT_SIZE_DEFAULT,
   sidebarVisible: false,
   sidebarWidth: 340
 };
@@ -64,8 +70,28 @@ function applyTheme(theme: ThemeMode, presetId: string): void {
   }
 }
 
+/**
+ * 应用根字号到文档根元素。
+ * @param size - 根字号像素值
+ */
+function applyRootFontSize(size: number): void {
+  document.documentElement.style.fontSize = `${size}px`;
+}
+
 function isThemeMode(value: unknown): value is ThemeMode {
   return value === 'dark' || value === 'light' || value === 'system';
+}
+
+/**
+ * 规范化应用根字号。
+ * @param value - 未知持久化值
+ * @returns 合法根字号
+ */
+function normalizeRootFontSize(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return ROOT_FONT_SIZE_DEFAULT;
+  if (value < ROOT_FONT_SIZE_MIN || value > ROOT_FONT_SIZE_MAX) return ROOT_FONT_SIZE_DEFAULT;
+
+  return Math.round(value);
 }
 
 function normalizeSidebarWidth(value: unknown): number {
@@ -108,6 +134,7 @@ function normalizeSettings(value: unknown): PersistedSettingState {
     settingsSidebarCollapsed: merged.settingsSidebarCollapsed,
     theme: merged.theme,
     themePreset: normalizeThemePreset(merged.themePreset),
+    rootFontSize: normalizeRootFontSize(merged.rootFontSize),
     sidebarVisible: merged.sidebarVisible,
     sidebarWidth: merged.sidebarWidth
   };
@@ -184,6 +211,7 @@ export const useSettingStore = defineStore('setting', {
         settingsSidebarCollapsed: this.settingsSidebarCollapsed,
         theme: this.theme,
         themePreset: this.themePreset,
+        rootFontSize: this.rootFontSize,
         sidebarVisible: this.sidebarVisible,
         sidebarWidth: this.sidebarWidth
       };
@@ -221,6 +249,16 @@ export const useSettingStore = defineStore('setting', {
       this.themePreset = presetId;
       this.persistSettings();
       applyTheme(this.theme, presetId);
+    },
+
+    /**
+     * 设置应用根字号。
+     * @param size - 根字号像素值
+     */
+    setRootFontSize(size: number): void {
+      this.rootFontSize = normalizeRootFontSize(size);
+      this.persistSettings();
+      applyRootFontSize(this.rootFontSize);
     },
 
     // ==================== 侧边栏设置 ====================
@@ -305,6 +343,7 @@ export const useSettingStore = defineStore('setting', {
      */
     init(): void {
       this.initTheme();
+      applyRootFontSize(this.rootFontSize);
       // 标题不保存到本地，每次启动使用默认值
       native.setWindowTitle(this.title);
       this.syncNativeMenuState();
