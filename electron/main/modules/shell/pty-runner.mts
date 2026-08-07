@@ -29,7 +29,7 @@ const TREE_TRACK_INTERVAL_MS = 1_000;
 /** terminal_update 事件最小发送间隔。 */
 const TERMINAL_UPDATE_INTERVAL_MS = 50;
 
-/** PTY 事件接收函数。 */
+/** Shell 有序运行事件接收函数。 */
 export type ShellRunEventSink = (event: ShellRunEventEnvelope) => void;
 
 /** PTY runner 创建选项。 */
@@ -125,7 +125,7 @@ export function createPtyShellRunner(options: CreatePtyRunnerOptions = {}): PtyS
     }
 
     try {
-      // projector 与原生 node-pty 都只在请求 PTY 能力时加载，普通 pipes 命令不触碰原生依赖。
+      // 原生 node-pty 仅在请求 PTY 能力时加载；projector 也由普通 pipe runner 复用。
       const ptyFactory = options.ptyFactory ?? createNativePtyFactory();
       projector = createScreenProjector({ columns: DEFAULT_COLUMNS, rows: DEFAULT_ROWS });
       process = ptyFactory.spawn({ shell: request.shell, command: request.command, cwd: request.cwd, columns: DEFAULT_COLUMNS, rows: DEFAULT_ROWS });

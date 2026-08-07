@@ -69,17 +69,24 @@ function mountTool(part: ChatMessageToolPart, submitAction = vi.fn(), runtimeId:
 }
 
 describe('BubblePartTool activity', (): void => {
-  it('renders persisted progress and distinct waiting states', (): void => {
+  it('renders only persisted activity status labels', (): void => {
     const executing = mountTool(createPart('executing'));
     expect(executing.text()).toContain('执行中');
-    expect(executing.text()).toContain('download');
-    expect(executing.text()).toContain('4 / 10');
-    expect(executing.text()).toContain('已下载 4 项');
+    expect(executing.text()).not.toContain('download');
+    expect(executing.text()).not.toContain('4 / 10');
+    expect(executing.text()).not.toContain('已下载 4 项');
+    expect(executing.text()).not.toContain('1 分钟前有进展');
+
+    const waitingUser = mountTool(createPart('waiting_user'));
+    expect(waitingUser.text()).toContain('等待用户');
+    expect(waitingUser.text()).not.toContain('请选择目标文件');
+
+    const waitingExternal = mountTool(createPart('waiting_external'));
+    expect(waitingExternal.text()).toContain('等待外部条件');
+    expect(waitingExternal.text()).not.toContain('等待远端任务');
 
     const labels = new Map<NonNullable<ChatMessageToolPart['activity']>['state'], string>([
       ['running_idle', '仍在运行'],
-      ['waiting_user', '等待用户'],
-      ['waiting_external', '等待外部条件'],
       ['stopping', '正在停止'],
       ['interrupted', '已中断']
     ]);

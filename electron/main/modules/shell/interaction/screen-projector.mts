@@ -1,6 +1,6 @@
 /**
  * @file screen-projector.mts
- * @description 使用 headless terminal 将 PTY 控制序列投影为有界纯文本 Screen Snapshot。
+ * @description 使用 headless terminal 将终端控制序列投影为有界纯文本 Screen Snapshot。
  */
 import { createRequire } from 'node:module';
 import type { ShellScreenActivity, ShellScreenSnapshot } from './types.mjs';
@@ -26,6 +26,8 @@ export interface ScreenProjectorOptions {
   columns: number;
   /** 终端行数。 */
   rows: number;
+  /** 是否让换行符同时回到第 0 列，普通 pipe 输出需要启用。 */
+  convertEol?: boolean;
 }
 
 /** 有界纯文本投影。 */
@@ -38,7 +40,7 @@ export interface BoundedTerminalOutput {
 
 /** 终端快照 projector。 */
 export interface TerminalSnapshotProjector {
-  /** 写入 PTY 原始数据并等待解析完成。 */
+  /** 写入终端原始数据并等待解析完成。 */
   write(data: string): Promise<void>;
   /** 读取当前可见屏幕。 */
   snapshot(now: number, maxChars?: number): ShellScreenSnapshot;
@@ -108,7 +110,13 @@ function findSelectedIndex(lines: string[]): number | undefined {
  */
 export function createScreenProjector(options: ScreenProjectorOptions): TerminalSnapshotProjector {
   const Terminal = loadTerminal();
-  const terminal = new Terminal({ cols: options.columns, rows: options.rows, scrollback: DEFAULT_SCROLLBACK_ROWS, allowProposedApi: true });
+  const terminal = new Terminal({
+    cols: options.columns,
+    rows: options.rows,
+    convertEol: options.convertEol ?? false,
+    scrollback: DEFAULT_SCROLLBACK_ROWS,
+    allowProposedApi: true
+  });
   let sequence = 0;
   let cursorVisible = true;
   let disposed = false;

@@ -4,13 +4,7 @@
 -->
 <template>
   <div :class="bem('activity', { [activityState]: true })">
-    <div :class="bem('activity-header')">
-      <span :class="bem('activity-state')">{{ activityLabel }}</span>
-      <span v-if="activityCount" :class="bem('activity-count')">{{ activityCount }}</span>
-    </div>
-    <div v-if="activityPhase" :class="bem('activity-phase')">{{ activityPhase }}</div>
-    <div v-if="activityMessage" :class="bem('activity-message')">{{ activityMessage }}</div>
-    <div v-if="activityState === 'running_idle' && lastProgressText" :class="bem('activity-time')">{{ lastProgressText }}</div>
+    <span :class="bem('activity-state')">{{ activityLabel }}</span>
     <div v-if="showIdleControls" :class="bem('activity-actions')">
       <BButton
         type="secondary"
@@ -42,12 +36,6 @@ interface Props {
   activity: NonNullable<ChatMessageToolPart['activity']>;
   /** 当前活动状态文案。 */
   activityLabel: string;
-  /** 当前进度数量文案。 */
-  activityCount: string;
-  /** 当前活动状态的补充说明。 */
-  activityMessage: string;
-  /** 最后实质进展的相对时间。 */
-  lastProgressText: string;
   /** 是否展示继续等待和停止按钮。 */
   showIdleControls: boolean;
   /** 当前正在提交的控制动作。 */
@@ -66,9 +54,6 @@ const [, bem] = createNamespace('', 'bubble-part-tool');
 
 /** 当前工具活动状态，用于样式修饰与空闲判断。 */
 const activityState = computed(() => props.activity.state);
-
-/** 当前进度阶段描述，无阶段时为空字符串。 */
-const activityPhase = computed(() => props.activity.progress?.phase ?? '');
 </script>
 
 <style scoped lang="less">
@@ -96,37 +81,9 @@ const activityPhase = computed(() => props.activity.progress?.phase ?? '');
   background: var(--color-error-bg, rgb(255 0 0 / 8%));
 }
 
-.bubble-part-tool__activity-header {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
 .bubble-part-tool__activity-state {
   font-weight: 500;
   color: var(--text-primary);
-}
-
-.bubble-part-tool__activity-count,
-.bubble-part-tool__activity-time {
-  color: var(--text-tertiary);
-}
-
-.bubble-part-tool__activity-phase {
-  margin-top: 4px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-tertiary);
-}
-
-.bubble-part-tool__activity-message {
-  margin-top: 2px;
-  white-space: pre-wrap;
-}
-
-.bubble-part-tool__activity-time {
-  margin-top: 2px;
-  font-size: 11px;
 }
 
 .bubble-part-tool__activity-actions {

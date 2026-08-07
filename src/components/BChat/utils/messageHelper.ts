@@ -83,6 +83,8 @@ export type WidgetToolPart = ChatMessageToolPart & { result: ToolResult & { stat
 
 /** Shell 命令实时输出最多保留片段数量。 */
 const MAX_SHELL_OUTPUT_CHUNK_COUNT = 80;
+/** Shell 命令实时输出最多保留字符数量。 */
+const MAX_SHELL_OUTPUT_CHAR_COUNT = 12_000;
 
 // ─── 内部工具函数 ────────────────────────────────────────────────────────────
 
@@ -93,6 +95,32 @@ const MAX_SHELL_OUTPUT_CHUNK_COUNT = 80;
  */
 function toJsonValue(value: unknown): JSONValue {
   return JSON.parse(JSON.stringify(value)) as JSONValue;
+}
+
+/**
+ * 同时按片段数和字符数保留 Shell 输出尾部。
+ * @param chunks - 按接收顺序排列的输出片段
+ * @returns 满足容量边界的输出片段
+ */
+function boundShellOutput(chunks: ChatMessageShellOutputChunk[]): ChatMessageShellOutputChunk[] {
+  const recentChunks = chunks.slice(-MAX_SHELL_OUTPUT_CHUNK_COUNT);
+  const boundedChunks: ChatMessageShellOutputChunk[] = [];
+  let remainingChars = MAX_SHELL_OUTPUT_CHAR_COUNT;
+
+  // 从最新片段向前收集，边界落在片段中间时只裁剪最旧片段的头部。
+  for (let index = recentChunks.length - 1; index >= 0 && remainingChars > 0; index -= 1) {
+    const chunk = recentChunks[index];
+    if (!chunk) continue;
+    if (chunk.text.length <= remainingChars) {
+      boundedChunks.unshift(chunk);
+      remainingChars -= chunk.text.length;
+      continue;
+    }
+    boundedChunks.unshift({ ...chunk, text: chunk.text.slice(-remainingChars) });
+    remainingChars = 0;
+  }
+
+  return boundedChunks;
 }
 
 /**
@@ -268,17 +296,19 @@ export const append = {
    * 追加 Shell 命令实时输出片段。
    */
   shellOutputPart(message: Message, commandId: string, chunk: ChatMessageShellOutputChunk): void {
-    const existingPart = message.parts.find((part): part is ChatMessageToolPart => part.type === 'tool' && part.toolCallId === commandId);
+    const existingPart = message.parts.find(
+      (part): part is ChatMessageToolPart => part.type === 'tool' && part.toolCallId === commandId && part.toolName === 'run_shell_command'
+    );
     if (!existingPart) {
       return;
     }
 
     const output = [...(existingPart.shellOutput ?? []), chunk];
-    existingPart.shellOutput = output.slice(Math.max(0, output.length - MAX_SHELL_OUTPUT_CHUNK_COUNT));
+    existingPart.shellOutput = boundShellOutput(output);
   },
 
   /**
-   * 将有序 Shell PTY 事件应用到对应工具片段。
+   * 将有序 Shell 事件应用到对应工具片段。
    * @param message - 目标 assistant 消息
    * @param envelope - Shell 运行事件
    */
@@ -287,6 +317,8 @@ export const append = {
       (item): item is ChatMessageToolPart => item.type === 'tool' && item.toolCallId === envelope.commandId && item.toolName === 'run_shell_command'
     );
     if (!part) return;
+    // 孤立 finished 不应创建空画面并遮盖 pipe raw fallback；权威完成态由工具结果接管。
+    if (!part.shellRunState && envelope.event.type === 'finished') return;
 
     const state: ChatMessageShellRunState = part.shellRunState ?? {
       terminalContent: '',

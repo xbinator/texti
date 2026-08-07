@@ -18,7 +18,7 @@ import type {
   ChatRuntimeToolCancelledEvent,
   ChatRuntimeToolRequestEvent
 } from 'types/chat-runtime';
-import type { ElectronShellRunEventEnvelope } from 'types/electron-api';
+import type { ElectronShellCommandOutputChunk, ElectronShellRunEventEnvelope } from 'types/electron-api';
 import { onScopeDispose } from 'vue';
 import { findIndex, findLastIndex } from 'lodash-es';
 import type { ChatActorSystem } from '@/ai/chat/actorSystem';
@@ -65,7 +65,7 @@ interface ToolActivityFlight {
   heartbeatTimer: ReturnType<typeof setInterval> | null;
 }
 
-/** 单个 auto-default Shell 工具的 renderer 路由状态。 */
+/** 单个 Shell 工具的 renderer 路由状态。 */
 interface ShellEventRoute extends Pick<ChatRuntimeToolRequestEvent, 'runtimeId' | 'sessionId' | 'toolCallId'> {
   /** 异常事件缺失时的有界回收定时器。 */
   cleanupTimer: ReturnType<typeof setTimeout> | null;
@@ -73,16 +73,17 @@ interface ShellEventRoute extends Pick<ChatRuntimeToolRequestEvent, 'runtimeId' 
   reportProgress: (progress: Omit<ChatToolProgressSnapshot, 'updatedAt'>) => void;
   /** 最后已上报的终端屏幕，用于跳过重复刷新。 */
   lastTerminalContent: string;
+  /** 普通管道模式已经接收的累计输出字符数。 */
+  outputChars: number;
 }
 
 /**
- * 判断工具请求是否会产生 Shell PTY 有序事件。
+ * 判断工具请求是否为 Shell 命令。
  * @param event - Runtime 工具请求
- * @returns 是否为 auto-default Shell 请求
+ * @returns 是否为 Shell 请求
  */
-function hasShellRunEvents(event: ChatRuntimeToolRequestEvent): boolean {
-  if (event.toolName !== 'run_shell_command' || typeof event.input !== 'object' || event.input === null || Array.isArray(event.input)) return false;
-  return (event.input as Record<string, unknown>).interactionMode === 'auto-default';
+function isShellRequest(event: ChatRuntimeToolRequestEvent): boolean {
+  return event.toolName === 'run_shell_command';
 }
 
 /**
@@ -414,14 +415,15 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
     };
     toolActivityFlights.set(abortKey, activityFlight);
     const activityReporter = createActivityReporter(activityFlight);
-    if (hasShellRunEvents(event)) {
+    if (isShellRequest(event)) {
       shellRoutes.set(shellCommandId, {
         runtimeId: event.runtimeId,
         sessionId: event.sessionId,
         toolCallId: event.toolCallId,
         cleanupTimer: null,
         reportProgress: activityReporter.progress,
-        lastTerminalContent: ''
+        lastTerminalContent: '',
+        outputChars: 0
       });
     }
 
@@ -458,7 +460,7 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
   }
 
   /**
-   * 将 Shell PTY 事件路由到拥有该 toolCallId 的会话。
+   * 将 Shell 有序事件路由到拥有该 toolCallId 的会话。
    * @param event - Shell 有序运行事件
    */
   function handleShellRunEvent(event: ElectronShellRunEventEnvelope): void {
@@ -476,11 +478,14 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
     actorSystem.emitSessionEvent(route.sessionId, { type: 'shellRunEvent', event: translatedEvent });
     if (event.event.type === 'terminal_update' && event.event.content !== route.lastTerminalContent) {
       route.lastTerminalContent = event.event.content;
-      route.reportProgress({
-        phase: 'shell_output',
-        completed: event.event.content.length,
-        message: createShellSummary(event.event.content)
-      });
+      // pipe 已通过 raw chunk 上报累计进展；只有 PTY 需要由 Screen Snapshot 承担进展上报。
+      if (route.outputChars === 0) {
+        route.reportProgress({
+          phase: 'shell_output',
+          completed: event.event.content.length,
+          message: createShellSummary(event.event.content)
+        });
+      }
     } else if (event.event.type === 'auto_answer') {
       route.reportProgress({ phase: 'shell_auto_answer', completed: event.event.count, message: `已自动响应 ${event.event.count} 次` });
     } else if (event.event.type === 'finished') {
@@ -490,6 +495,26 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
       if (route.cleanupTimer) clearTimeout(route.cleanupTimer);
       shellRoutes.delete(event.commandId);
     }
+  }
+
+  /**
+   * 将普通 Shell 管道输出路由到拥有该 toolCallId 的会话。
+   * @param chunk - Shell stdout 或 stderr 增量片段
+   */
+  function handleShellOutput(chunk: ElectronShellCommandOutputChunk): void {
+    if (chunk.text.length === 0) return;
+    const route = shellRoutes.get(chunk.commandId);
+    if (!route || !isManagedRuntime(actorSystem, route.runtimeId)) return;
+    route.outputChars += chunk.text.length;
+    actorSystem.emitSessionEvent(route.sessionId, {
+      type: 'shellCommandOutput',
+      chunk: { ...chunk, commandId: route.toolCallId }
+    });
+    route.reportProgress({
+      phase: 'shell_output',
+      completed: route.outputChars,
+      message: createShellSummary(chunk.text)
+    });
   }
 
   /** 中止 main 已停止等待的 renderer 本地工具。 */
@@ -562,6 +587,15 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
     return electronAPI.onShellRunEvent(handleShellRunEvent);
   }
 
+  /**
+   * 兼容尚未暴露普通 Shell 管道输出 bridge 的旧 preload。
+   * @returns Shell 管道输出监听释放函数
+   */
+  function subscribeShellOutput(): () => void {
+    if (typeof electronAPI.onShellCommandOutput !== 'function') return (): void => undefined;
+    return electronAPI.onShellCommandOutput(handleShellOutput);
+  }
+
   const disposers = [
     electronAPI.chatRuntimeOnMessageCreated(handleMessageCreated),
     electronAPI.chatRuntimeOnMessageUpdated(handleMessageUpdated),
@@ -571,6 +605,7 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
       handleToolRequest(event).catch(() => undefined);
     }),
     electronAPI.chatRuntimeOnToolCancelled(handleToolCancelled),
+    subscribeShellOutput(),
     subscribeShellEvents(),
     electronAPI.chatRuntimeOnConfirmationRequested((event) => {
       handleConfirmationRequest(event).catch(() => undefined);

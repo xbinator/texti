@@ -406,7 +406,7 @@ const electronAPI: ElectronAPI = {
   },
 
   /**
-   * 监听 Shell PTY 有序运行事件。
+   * 监听 Shell 有序运行事件。
    * @param callback - 运行事件回调
    * @returns 取消监听函数
    */

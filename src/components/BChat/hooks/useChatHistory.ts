@@ -3,8 +3,9 @@
  * @description 聊天历史加载 hook
  */
 import type { Message } from '../utils/types';
-import type { ChatMessageHistoryCursor } from 'types/chat';
+import type { ChatMessageHistoryCursor, ChatMessagePart, ChatMessageToolPart } from 'types/chat';
 import { ref } from 'vue';
+import { keyBy } from 'lodash-es';
 import { useChatSessionStore } from '@/stores/chat/session';
 import { userChoice } from '../utils/messageHelper';
 
@@ -15,6 +16,30 @@ import { userChoice } from '../utils/messageHelper';
  */
 function normalizeLoadedMessages(loadedMessages: Message[]): Message[] {
   return loadedMessages.map(userChoice.normalizePendingState);
+}
+
+/**
+ * 在 Main 权威消息更新中保留执行中 Shell 的 renderer 临时状态。
+ * @param current - renderer 当前消息
+ * @param next - Runtime 最新消息
+ * @returns 只补回缺失 Shell 临时字段的最新消息
+ */
+function preserveShellState(current: Message, next: Message): Message {
+  const currentTools = keyBy(
+    current.parts.filter((part: ChatMessagePart): part is ChatMessageToolPart => part.type === 'tool' && part.toolName === 'run_shell_command'),
+    'toolCallId'
+  );
+  const parts = next.parts.map((part: ChatMessagePart): ChatMessagePart => {
+    if (part.type !== 'tool' || part.toolName !== 'run_shell_command' || part.status === 'done') return part;
+    const previous = currentTools[part.toolCallId];
+    if (!previous) return part;
+    return {
+      ...part,
+      ...(part.shellOutput === undefined && previous.shellOutput !== undefined ? { shellOutput: previous.shellOutput } : {}),
+      ...(part.shellRunState === undefined && previous.shellRunState !== undefined ? { shellRunState: previous.shellRunState } : {})
+    };
+  });
+  return { ...next, parts };
 }
 
 /**
@@ -123,7 +148,10 @@ export function useChatHistory() {
     const normalizedMessage = userChoice.normalizePendingState(nextMessage);
     const index = messages.value.findIndex((message: Message): boolean => message.id === normalizedMessage.id);
     if (index < 0) messages.value.push(normalizedMessage);
-    else messages.value.splice(index, 1, { ...messages.value[index], ...normalizedMessage });
+    else {
+      const mergedMessage = preserveShellState(messages.value[index], normalizedMessage);
+      messages.value.splice(index, 1, { ...messages.value[index], ...mergedMessage });
+    }
   }
 
   /**

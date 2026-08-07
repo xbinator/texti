@@ -69,6 +69,133 @@ describe('BubblePartTool Shell display', (): void => {
     expect(wrapper.findComponent({ name: 'ConfirmationSheet' }).exists()).toBe(false);
   });
 
+  it('renders ordinary pipe output while the Shell tool is executing', (): void => {
+    const part: ChatMessageToolPart = {
+      id: 'part-pipe',
+      type: 'tool',
+      toolCallId: 'command-pipe',
+      toolName: 'run_shell_command',
+      status: 'executing',
+      input: { command: 'npx skills add example' },
+      shellOutput: [
+        { commandId: 'command-pipe', stream: 'stdout', text: 'Resolving package\n', sequence: 1, createdAt: 'now' },
+        { commandId: 'command-pipe', stream: 'stderr', text: 'Waiting for input', sequence: 2, createdAt: 'now' }
+      ]
+    };
+    const wrapper = mount(BubblePartTool, {
+      props: { part },
+      global: {
+        stubs: {
+          BIcon: true,
+          BTruncateText: { props: ['text'], template: '<span>{{ text }}</span>' }
+        }
+      }
+    });
+
+    const output = wrapper.find('.bubble-part-tool__shell-output');
+    expect(output.text()).toContain('Resolving package');
+    expect(output.text()).toContain('Waiting for input');
+    expect(output.text().indexOf('Resolving package')).toBeLessThan(output.text().indexOf('Waiting for input'));
+  });
+
+  it('does not fall back to raw output when a projected screen is empty', (): void => {
+    const part: ChatMessageToolPart = {
+      id: 'part-empty-screen',
+      type: 'tool',
+      toolCallId: 'command-empty-screen',
+      toolName: 'run_shell_command',
+      status: 'executing',
+      input: { command: 'printf output' },
+      shellOutput: [{ commandId: 'command-empty-screen', stream: 'stdout', text: 'stale raw', sequence: 1, createdAt: 'now' }],
+      shellRunState: { terminalContent: '', autoAnswers: [], lastSequence: 1, finished: false }
+    };
+    const wrapper = mount(BubblePartTool, {
+      props: { part },
+      global: {
+        stubs: {
+          BIcon: true,
+          BTruncateText: { props: ['text'], template: '<span>{{ text }}</span>' }
+        }
+      }
+    });
+
+    expect(wrapper.text()).not.toContain('stale raw');
+    expect(wrapper.find('.bubble-part-tool__shell-output').exists()).toBe(false);
+  });
+
+  it('keeps terminal output on a fixed character grid', (): void => {
+    const source = readBubbleSource();
+    const outputRule = source.match(/\.bubble-part-tool__shell-output\s*\{[^}]*\}/u)?.[0] ?? '';
+
+    expect(outputRule).toContain('white-space: pre;');
+    expect(outputRule).not.toContain('pre-wrap');
+    expect(outputRule).toContain('overflow-wrap: normal;');
+    expect(outputRule).toContain('word-break: normal;');
+  });
+
+  it('uses the final structured output after a Shell tool finishes', (): void => {
+    const part: ChatMessageToolPart = {
+      id: 'part-final',
+      type: 'tool',
+      toolCallId: 'command-final',
+      toolName: 'run_shell_command',
+      status: 'done',
+      input: { command: 'printf final' },
+      shellOutput: [{ commandId: 'command-final', stream: 'stdout', text: 'stale pipe', sequence: 1, createdAt: 'now' }],
+      shellRunState: { terminalContent: 'stale pty', autoAnswers: [], lastSequence: 1, finished: true },
+      result: {
+        toolName: 'run_shell_command',
+        status: 'success',
+        data: { command: 'printf final', outputMode: 'pipes', stdout: 'final stdout', stderr: 'final stderr' }
+      }
+    };
+    const wrapper = mount(BubblePartTool, {
+      props: { part },
+      global: {
+        stubs: {
+          BIcon: true,
+          BTruncateText: { props: ['text'], template: '<span>{{ text }}</span>' }
+        }
+      }
+    });
+
+    const output = wrapper.find('.bubble-part-tool__shell-output');
+    expect(output.text()).toContain('final stdout');
+    expect(output.text()).toContain('final stderr');
+    expect(output.text()).not.toContain('stale pipe');
+    expect(output.text()).not.toContain('stale pty');
+  });
+
+  it('does not restore stale live output when the final structured output is empty', (): void => {
+    const part: ChatMessageToolPart = {
+      id: 'part-empty-final',
+      type: 'tool',
+      toolCallId: 'command-empty-final',
+      toolName: 'run_shell_command',
+      status: 'done',
+      input: { command: 'true' },
+      shellOutput: [{ commandId: 'command-empty-final', stream: 'stdout', text: 'stale pipe', sequence: 1, createdAt: 'now' }],
+      shellRunState: { terminalContent: 'stale pty', autoAnswers: [], lastSequence: 1, finished: true },
+      result: {
+        toolName: 'run_shell_command',
+        status: 'success',
+        data: { command: 'true', outputMode: 'pipes', stdout: '', stderr: '' }
+      }
+    };
+    const wrapper = mount(BubblePartTool, {
+      props: { part },
+      global: {
+        stubs: {
+          BIcon: true,
+          BTruncateText: { props: ['text'], template: '<span>{{ text }}</span>' }
+        }
+      }
+    });
+
+    expect(wrapper.text()).not.toContain('stale pipe');
+    expect(wrapper.text()).not.toContain('stale pty');
+  });
+
   it('does not repeat a successful command as a finished summary', (): void => {
     const part: ChatMessageToolPart = {
       id: 'part-success',

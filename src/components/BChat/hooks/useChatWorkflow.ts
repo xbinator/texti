@@ -764,6 +764,10 @@ export function useChatWorkflow(options: UseChatWorkflowOptions): UseChatWorkflo
 
   /** 处理切回会话时重放的待确认交互。 */
   async function handleSessionUIEvent(event: ChatSessionUIEvent): Promise<void> {
+    if (event.type === 'shellCommandOutput') {
+      for (const message of options.messages.value) append.shellOutputPart(message, event.chunk.commandId, event.chunk);
+      return;
+    }
     if (event.type === 'shellRunEvent') {
       for (const message of options.messages.value) append.shellRunEventPart(message, event.event);
       return;

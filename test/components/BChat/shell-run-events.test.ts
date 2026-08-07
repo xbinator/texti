@@ -1,6 +1,6 @@
 /**
  * @file shell-run-events.test.ts
- * @description Shell PTY UI 状态的原位快照、事件顺序和冻结语义测试。
+ * @description Shell UI 状态的原位快照、事件顺序和冻结语义测试。
  */
 import { describe, expect, it } from 'vitest';
 import { append } from '@/components/BChat/utils/messageHelper';
@@ -66,5 +66,38 @@ describe('Shell run event message state', (): void => {
 
     const part = message.parts[0];
     expect(part?.type === 'tool' ? part.shellRunState : undefined).toBeUndefined();
+  });
+
+  it('does not create an empty terminal state for an isolated finished event', (): void => {
+    const message = createMessage();
+    const part = message.parts[0];
+    if (part?.type !== 'tool') throw new Error('测试消息必须包含 Shell tool part');
+    part.shellOutput = [{ commandId: 'command-1', stream: 'stdout', text: 'raw fallback', sequence: 1, createdAt: 'now' }];
+
+    append.shellRunEventPart(message, {
+      commandId: 'command-1',
+      sequence: 1,
+      createdAt: 'now',
+      event: {
+        type: 'finished',
+        result: {
+          commandId: 'command-1',
+          shell: 'bash',
+          command: 'echo',
+          cwd: '/workspace',
+          exitCode: 0,
+          signal: null,
+          durationMs: 1,
+          timedOut: false,
+          truncated: false,
+          outputMode: 'pipes',
+          terminalOutput: 'raw fallback',
+          termination: { kind: 'exit', exitCode: 0 }
+        }
+      }
+    });
+
+    expect(part.shellRunState).toBeUndefined();
+    expect(part.shellOutput?.map((chunk): string => chunk.text).join('')).toBe('raw fallback');
   });
 });

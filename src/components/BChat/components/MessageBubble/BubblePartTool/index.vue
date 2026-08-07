@@ -23,9 +23,6 @@
       v-if="part.activity"
       :activity="part.activity"
       :activity-label="activityLabel"
-      :activity-count="activityCount"
-      :activity-message="activityMessage"
-      :last-progress-text="lastProgressText"
       :show-idle-controls="showIdleControls"
       :control-pending="controlPending"
       @control="handleToolControl"
@@ -240,31 +237,6 @@ const defaultCollapsed = computed<boolean>(() => props.part.status !== 'inputtin
 /** 当前活动状态文案。 */
 const activityLabel = computed<string>(() => (props.part.activity ? ACTIVITY_LABELS[props.part.activity.state] : ''));
 
-/** 当前进度数量文案。 */
-const activityCount = computed<string>(() => {
-  const progress = props.part.activity?.progress;
-  if (progress?.completed === undefined) return '';
-  return progress.total === undefined ? `${progress.completed}` : `${progress.completed} / ${progress.total}`;
-});
-
-/** 当前活动状态的补充说明。 */
-const activityMessage = computed<string>(() => {
-  const { activity } = props.part;
-  if (!activity) return '';
-  if (activity.state === 'waiting_user') return activity.userPrompt ?? '';
-  if (activity.state === 'waiting_external') return activity.externalWait?.reason ?? '';
-  return activity.progress?.message ?? '';
-});
-
-/** 最后实质进展的相对时间。 */
-const lastProgressText = computed<string>(() => {
-  const lastProgressAt = props.part.activity?.lastProgressAt;
-  if (!lastProgressAt) return '';
-  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - lastProgressAt) / 1_000));
-  if (elapsedSeconds < 60) return `${elapsedSeconds} 秒前有进展`;
-  return `${Math.floor(elapsedSeconds / 60)} 分钟前有进展`;
-});
-
 /** 工具标题：文件操作显示文件路径，skill 显示技能名称，其余显示工具别名。 */
 const title = computed<string>(() => {
   const { part } = props;
@@ -364,14 +336,21 @@ const shellCommandContent = computed<string>(() => {
   return typeof resultCommand === 'string' ? resultCommand : '';
 });
 
-/** Shell 当前屏幕；实时状态不存在时回退最终 terminalOutput。 */
-const shellTerminalContent = computed<string>(() => {
-  if (props.part.shellRunState?.terminalContent) return props.part.shellRunState.terminalContent;
+/** Shell 最终结构化结果中的终端内容。 */
+const shellFinalContent = computed<string>(() => {
   const terminalOutput = shellResultData.value?.terminalOutput;
   if (typeof terminalOutput === 'string') return terminalOutput;
   const stdout = shellResultData.value?.stdout;
   const stderr = shellResultData.value?.stderr;
   return [stdout, stderr].filter((value): value is string => typeof value === 'string' && value.length > 0).join('\n');
+});
+
+/** Shell 当前展示内容；完成态以最终结果为准，执行态优先使用终端屏幕。 */
+const shellTerminalContent = computed<string>(() => {
+  if (props.part.status === 'done' && shellResultData.value) return shellFinalContent.value;
+  if (props.part.shellRunState) return props.part.shellRunState.terminalContent;
+  const pipeOutput = props.part.shellOutput?.map((chunk): string => chunk.text).join('') ?? '';
+  return pipeOutput || shellFinalContent.value;
 });
 
 /** Shell 仅在失败或取消时展示需要用户关注的弱提示。 */

@@ -139,7 +139,7 @@ export interface ShellCommandRunResult {
   stdout?: string;
   /** 管道模式 stderr。 */
   stderr?: string;
-  /** PTY 模式去除终端控制序列后的有界纯文本输出。 */
+  /** 去除终端控制序列后的有界纯文本输出。 */
   terminalOutput?: string;
   /** 权威终止语义。 */
   termination: ShellCommandTermination;
@@ -154,13 +154,13 @@ export interface ShellCommandRunResult {
   };
 }
 
-/** Shell PTY 有序运行事件。 */
+/** Shell 有序运行事件。 */
 export type ShellRunEvent =
   | { type: 'terminal_update'; content: string }
   | { type: 'auto_answer'; count: number }
   | { type: 'finished'; result: ShellCommandRunResult };
 
-/** Shell PTY 事件信封。 */
+/** Shell 有序运行事件信封。 */
 export interface ShellRunEventEnvelope {
   /** 命令唯一标识。 */
   commandId: string;

@@ -2,6 +2,7 @@
  * @file use-chat-history.test.ts
  * @description BChat 历史快照与 Runtime 实时增量合并测试。
  */
+import type { ChatMessageToolPart } from 'types/chat';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatHistory } from '@/components/BChat/hooks/useChatHistory';
@@ -26,6 +27,47 @@ function createMessage(id: string, content: string): Message {
   };
 }
 
+/**
+ * 创建包含 Shell 工具片段的 Runtime 消息。
+ * @param status - 工具运行状态
+ * @param withTransient - 是否包含 renderer 临时终端态
+ * @returns Shell 工具消息
+ */
+function createShellMessage(status: 'executing' | 'done', withTransient: boolean): Message {
+  const part: ChatMessageToolPart = {
+    id: 'shell-part',
+    type: 'tool',
+    toolCallId: 'shell-call',
+    toolName: 'run_shell_command',
+    status,
+    input: { command: 'printf output' },
+    ...(withTransient
+      ? {
+          shellOutput: [{ commandId: 'shell-call', stream: 'stdout', text: 'raw output', sequence: 1, createdAt: 'now' }],
+          shellRunState: { terminalContent: 'stable screen', autoAnswers: [], lastSequence: 1, finished: false }
+        }
+      : {}),
+    ...(status === 'done'
+      ? {
+          result: {
+            toolName: 'run_shell_command',
+            status: 'success' as const,
+            data: { terminalOutput: 'final output', outputMode: 'pipes' }
+          }
+        }
+      : {})
+  };
+  return {
+    id: 'shell-message',
+    role: 'assistant',
+    content: '',
+    parts: [part],
+    createdAt: '2026-08-07T00:00:00.000Z',
+    loading: status !== 'done',
+    finished: status === 'done'
+  };
+}
+
 describe('useChatHistory', (): void => {
   beforeEach((): void => {
     setActivePinia(createPinia());
@@ -40,6 +82,29 @@ describe('useChatHistory', (): void => {
     history.mergeLoadedMessages([createMessage('session-b-message', 'old persisted content')], baselineRevision);
 
     expect(history.messages.value).toEqual([expect.objectContaining({ id: 'session-b-message', content: 'new live content' })]);
+  });
+
+  it('preserves renderer Shell state across executing message updates', (): void => {
+    const history = useChatHistory();
+    history.setLoadedMessages([createShellMessage('executing', true)]);
+
+    history.upsertLiveMessage(createShellMessage('executing', false));
+
+    const part = history.messages.value[0]?.parts[0];
+    expect(part?.type === 'tool' ? part.shellRunState?.terminalContent : undefined).toBe('stable screen');
+    expect(part?.type === 'tool' ? part.shellOutput?.[0]?.text : undefined).toBe('raw output');
+  });
+
+  it('drops renderer Shell state when the incoming tool is done', (): void => {
+    const history = useChatHistory();
+    history.setLoadedMessages([createShellMessage('executing', true)]);
+
+    history.upsertLiveMessage(createShellMessage('done', false));
+
+    const part = history.messages.value[0]?.parts[0];
+    expect(part?.type === 'tool' ? part.shellRunState : undefined).toBeUndefined();
+    expect(part?.type === 'tool' ? part.shellOutput : undefined).toBeUndefined();
+    expect(part?.type === 'tool' ? part.result : undefined).toMatchObject({ status: 'success', data: { terminalOutput: 'final output' } });
   });
 
   it('discards an older-page response after the active session changes', async (): Promise<void> => {

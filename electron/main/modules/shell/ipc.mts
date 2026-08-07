@@ -10,7 +10,7 @@ import { analyzeShellCommandSafety } from './safety.mjs';
 
 /** Shell 命令输出事件名称。 */
 export const SHELL_COMMAND_OUTPUT_EVENT = 'shell:output';
-/** Shell PTY 有序运行事件名称。 */
+/** Shell 有序运行事件名称。 */
 export const SHELL_RUN_EVENT = 'shell:run-event';
 
 /**

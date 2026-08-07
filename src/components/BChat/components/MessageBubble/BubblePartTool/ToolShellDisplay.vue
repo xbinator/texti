@@ -41,14 +41,16 @@ const [, bem] = createNamespace('', 'bubble-part-tool');
   overflow: auto;
   font-family: var(--font-mono);
   font-size: 11px;
-  line-height: 1.5;
+  line-height: 1.2;
   background: var(--color-fill-tertiary, rgb(0 0 0 / 3%));
   border-radius: 4px;
 }
 
 .bubble-part-tool__shell-output {
   color: var(--text-secondary);
-  white-space: pre-wrap;
+  word-break: normal;
+  overflow-wrap: normal;
+  white-space: pre;
 }
 
 .bubble-part-tool__shell-command + .bubble-part-tool__shell-output {

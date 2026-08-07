@@ -5,13 +5,37 @@
 import { spawn } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import path from 'node:path';
-import type { ShellCommandOutputChunk, ShellCommandRunRequest, ShellCommandRunResult, ShellCommandTermination } from './types.mjs';
+import type { ShellCommandOutputChunk, ShellCommandRunRequest, ShellCommandRunResult, ShellCommandTermination, ShellRunEvent } from './types.mjs';
 import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from 'node:child_process';
+import { debounce } from 'lodash-es';
+import { asyncTo } from '../../../../src/utils/asyncTo.js';
 import { getAutoDefaultCapability, type ShellAutoDefaultCapability } from './interaction/capability.mjs';
+import { createScreenProjector, type ScreenProjectorOptions, type TerminalSnapshotProjector } from './interaction/screen-projector.mjs';
 import { createPtyShellRunner, type PtyShellRunner, type ShellRunEventSink } from './pty-runner.mjs';
 
 /** 默认最终输出截断字符数。 */
 const DEFAULT_MAX_OUTPUT_CHARS = 20_000;
+
+/** 普通 pipe 输出使用的固定终端列数。 */
+const DEFAULT_TERMINAL_COLUMNS = 100;
+
+/** 普通 pipe 输出使用的固定终端行数。 */
+const DEFAULT_TERMINAL_ROWS = 30;
+
+/** 普通 pipe 实时 Screen Snapshot 最大字符数。 */
+const DEFAULT_SNAPSHOT_CHARS = 12_000;
+
+/** 普通 pipe Screen Snapshot 静止后发布等待时间。 */
+const TERMINAL_UPDATE_SETTLE_MS = 16;
+
+/** 普通 pipe Screen Snapshot 持续变化时的最大发布等待时间。 */
+const TERMINAL_UPDATE_MAX_WAIT_MS = 50;
+
+/** 投影等待文本达到 1 MiB 时暂停 child 输出流。 */
+const PROJECTION_HIGH_WATER_CHARS = 1_024 * 1_024;
+
+/** 投影等待文本降至 512 KiB 时恢复 child 输出流。 */
+const PROJECTION_LOW_WATER_CHARS = 512 * 1_024;
 
 /** SIGTERM 后等待进程退出的宽限期（毫秒），超时后升级为 SIGKILL。 */
 const GRACE_PERIOD_MS = 3_000;
@@ -97,6 +121,9 @@ export type ShellCommandOutputSink = (chunk: ShellCommandOutputChunk) => void;
 /** Shell 命令 spawn 函数。 */
 export type ShellCommandSpawn = (command: string, args: string[], options: SpawnOptionsWithoutStdio) => ChildProcessWithoutNullStreams;
 
+/** Shell 终端投影器创建函数。 */
+export type ScreenProjectorFactory = (options: ScreenProjectorOptions) => TerminalSnapshotProjector;
+
 /**
  * Shell 命令 runner 创建选项。
  */
@@ -107,6 +134,8 @@ export interface CreateShellCommandRunnerOptions {
   ptyRunner?: PtyShellRunner;
   /** 获取版本化 auto-default capability。 */
   getAutoDefaultCapability?: () => ShellAutoDefaultCapability;
+  /** 普通 pipe 输出投影器创建函数，测试时可注入。 */
+  screenProjectorFactory?: ScreenProjectorFactory;
 }
 
 /**
@@ -205,6 +234,19 @@ function appendBoundedOutput(current: string, next: string, maxChars: number): {
 }
 
 /**
+ * 安全释放终端投影器，清理异常不能改变 Shell 命令生命周期。
+ * @param projector - 待释放投影器
+ */
+function safeDisposeProjector(projector: TerminalSnapshotProjector | undefined): void {
+  if (!projector) return;
+  try {
+    projector.dispose();
+  } catch {
+    // headless terminal 清理失败不影响原始 Shell 进程与输出。
+  }
+}
+
+/**
  * 创建 Shell 命令 runner。
  * @param options - runner 创建选项
  * @returns Shell 命令 runner
@@ -213,6 +255,7 @@ export function createShellCommandRunner(options: CreateShellCommandRunnerOption
   const spawnProcess = options.spawnProcess ?? spawn;
   const ptyRunner = options.ptyRunner ?? createPtyShellRunner();
   const resolveAutoDefaultCapability = options.getAutoDefaultCapability ?? getAutoDefaultCapability;
+  const screenProjectorFactory = options.screenProjectorFactory ?? createScreenProjector;
   const activeCommands = new Map<string, ActiveCommand>();
 
   /**
@@ -236,12 +279,27 @@ export function createShellCommandRunner(options: CreateShellCommandRunnerOption
     const maxOutputChars = request.maxOutputChars ?? DEFAULT_MAX_OUTPUT_CHARS;
     const startedAt = Date.now();
     const spawnCommand = resolveSpawnCommand(request);
-    const child = spawnProcess(spawnCommand.command, spawnCommand.args, {
-      cwd: request.cwd,
-      shell: false,
-      env: buildMinimalEnv(),
-      detached: true
-    });
+    let projector: TerminalSnapshotProjector | undefined;
+
+    // 先初始化显示旁路再 spawn，避免首次加载 headless terminal 延迟注册输出监听器。
+    try {
+      projector = screenProjectorFactory({ columns: DEFAULT_TERMINAL_COLUMNS, rows: DEFAULT_TERMINAL_ROWS, convertEol: true });
+    } catch {
+      projector = undefined;
+    }
+
+    let child: ChildProcessWithoutNullStreams;
+    try {
+      child = spawnProcess(spawnCommand.command, spawnCommand.args, {
+        cwd: request.cwd,
+        shell: false,
+        env: buildMinimalEnv(),
+        detached: true
+      });
+    } catch (error: unknown) {
+      safeDisposeProjector(projector);
+      throw error;
+    }
     const activeCommand: ActiveCommand = {
       child,
       timedOut: false,
@@ -255,11 +313,142 @@ export function createShellCommandRunner(options: CreateShellCommandRunnerOption
     let truncated = false;
     let sequence = 0;
     let settled = false;
+    let projectionQueue = Promise.resolve();
+    let pendingProjectionChars = 0;
+    let projectionStreamsPaused = false;
+    let runEventSequence = 0;
+    let pendingTerminalContent: string | null = null;
+    let lastTerminalContent: string | null = null;
 
     activeCommands.set(request.commandId, activeCommand);
 
     /** 可选主超时定时器；Runtime 管理的命令不创建绝对时限。 */
     let timeout: ReturnType<typeof setTimeout> | null = null;
+
+    /**
+     * 释放当前投影器，释放异常不能改变命令结果。
+     */
+    function releaseProjector(): void {
+      const activeProjector = projector;
+      projector = undefined;
+      safeDisposeProjector(activeProjector);
+    }
+
+    /**
+     * 安全发送实时输出，renderer 断开不能改变命令生命周期。
+     * @param chunk - 待发送输出片段
+     */
+    function emitOutput(chunk: ShellCommandOutputChunk): void {
+      try {
+        sink?.(chunk);
+      } catch {
+        // 实时显示是旁路；最终结构化结果仍由 run Promise 返回。
+      }
+    }
+
+    /**
+     * 安全发送 Shell 有序运行事件，renderer 断开不能改变命令生命周期。
+     * @param event - 待发送运行事件
+     */
+    function emitRunEvent(event: ShellRunEvent): void {
+      runEventSequence += 1;
+      try {
+        eventSink?.({ commandId: request.commandId, sequence: runEventSequence, createdAt: new Date().toISOString(), event });
+      } catch {
+        // Screen Snapshot 是显示旁路；最终结构化结果仍由 run Promise 返回。
+      }
+    }
+
+    /**
+     * 发布 trailing settle 后的 Screen Snapshot。
+     */
+    function publishTerminalUpdate(): void {
+      const content = pendingTerminalContent;
+      pendingTerminalContent = null;
+      if (content === null || content === lastTerminalContent) return;
+      // 已有非空画面时忽略擦除与重绘之间的瞬时空帧，避免终端块高度归零。
+      if (content === '' && Boolean(lastTerminalContent)) return;
+      lastTerminalContent = content;
+      emitRunEvent({ type: 'terminal_update', content });
+    }
+
+    /** trailing settle 发布器；maxWait 保证持续输出不会饿死画面刷新。 */
+    const scheduleTerminalUpdate = debounce(publishTerminalUpdate, TERMINAL_UPDATE_SETTLE_MS, {
+      leading: false,
+      trailing: true,
+      maxWait: TERMINAL_UPDATE_MAX_WAIT_MS
+    });
+
+    /**
+     * 立即发布当前待处理的稳定 Screen Snapshot。
+     */
+    function flushTerminalUpdate(): void {
+      scheduleTerminalUpdate.flush();
+    }
+
+    /**
+     * 在 trailing settle 窗口内只保留最新 Screen Snapshot。
+     * @param content - 最新终端屏幕
+     */
+    function queueTerminalUpdate(content: string): void {
+      pendingTerminalContent = content;
+      scheduleTerminalUpdate();
+    }
+
+    /**
+     * 投影积压达到高水位时暂停两条输出流，对 child 施加自然 pipe 背压。
+     */
+    function pauseStreams(): void {
+      if (projectionStreamsPaused || pendingProjectionChars < PROJECTION_HIGH_WATER_CHARS) return;
+      projectionStreamsPaused = true;
+      child.stdout.pause();
+      child.stderr.pause();
+    }
+
+    /**
+     * 投影积压降到低水位后恢复两条输出流。
+     * @param force - 清理阶段是否忽略低水位条件
+     */
+    function resumeStreams(force = false): void {
+      if (!projectionStreamsPaused || (!force && pendingProjectionChars > PROJECTION_LOW_WATER_CHARS)) return;
+      projectionStreamsPaused = false;
+      child.stdout.resume();
+      child.stderr.resume();
+    }
+
+    /**
+     * 按原始 chunk sequence 串行解释终端控制序列。
+     * @param text - 原始输出文本
+     */
+    function queueProjection(text: string): void {
+      if (!projector) return;
+      pendingProjectionChars += text.length;
+      pauseStreams();
+      projectionQueue = projectionQueue.then(async (): Promise<void> => {
+        try {
+          const activeProjector = projector;
+          if (!activeProjector) return;
+
+          const [writeError] = await asyncTo(activeProjector.write(text));
+          if (writeError) {
+            // 当前与后续 chunk 在异步写入失败后关闭显示旁路，raw 输出已经即时发送。
+            releaseProjector();
+            return;
+          }
+
+          try {
+            const terminalContent = activeProjector.snapshot(Date.now(), DEFAULT_SNAPSHOT_CHARS).content;
+            queueTerminalUpdate(terminalContent);
+          } catch {
+            // 同步快照失败同样关闭显示旁路，raw 输出不受影响。
+            releaseProjector();
+          }
+        } finally {
+          pendingProjectionChars = Math.max(0, pendingProjectionChars - text.length);
+          resumeStreams();
+        }
+      });
+    }
 
     /**
      * 清理命令：清除定时器、从活跃列表移除。
@@ -273,6 +462,10 @@ export function createShellCommandRunner(options: CreateShellCommandRunnerOption
         clearTimeout(activeCommand.graceTimer);
         activeCommand.graceTimer = null;
       }
+      scheduleTerminalUpdate.cancel();
+      pendingTerminalContent = null;
+      resumeStreams(true);
+      releaseProjector();
       activeCommands.delete(request.commandId);
     }
 
@@ -291,16 +484,79 @@ export function createShellCommandRunner(options: CreateShellCommandRunnerOption
       }
       truncated = truncated || bounded.truncated;
       sequence += 1;
-      sink?.({
+      const outputChunk: ShellCommandOutputChunk = {
         commandId: request.commandId,
         stream,
         text,
         sequence,
         createdAt: new Date().toISOString()
-      });
+      };
+      emitOutput(outputChunk);
+      queueProjection(text);
     }
 
     return new Promise<ShellCommandRunResult>((resolve, reject) => {
+      /**
+       * 等待实时投影队列后返回普通 pipe 最终结果。
+       * @param exitCode - 进程退出码
+       * @param signal - 进程退出信号
+       * @param termination - 权威终止语义
+       */
+      async function resolveResult(exitCode: number | null, signal: string | null, termination: ShellCommandTermination): Promise<void> {
+        if (settled) return;
+        settled = true;
+        const finishedAt = Date.now();
+        await projectionQueue;
+        flushTerminalUpdate();
+
+        let terminalOutput: string | undefined;
+        let terminalTruncated = false;
+        const activeProjector = projector;
+        if (activeProjector) {
+          try {
+            const projected = activeProjector.projectOutput(maxOutputChars);
+            terminalOutput = projected.content;
+            terminalTruncated = projected.truncated;
+          } catch {
+            // 最终投影失败时省略 terminalOutput，保留原始 stdout/stderr。
+            releaseProjector();
+          }
+        }
+
+        const result: ShellCommandRunResult = {
+          commandId: request.commandId,
+          shell: request.shell,
+          command: request.command,
+          cwd: request.cwd,
+          exitCode,
+          signal,
+          durationMs: finishedAt - startedAt,
+          timedOut: activeCommand.timedOut,
+          stdout,
+          stderr,
+          truncated: truncated || terminalTruncated,
+          outputMode: 'pipes',
+          ...(terminalOutput !== undefined ? { terminalOutput } : {}),
+          termination
+        };
+        cleanup();
+        emitRunEvent({ type: 'finished', result });
+        resolve(result);
+      }
+
+      /**
+       * 等待已排队投影并释放资源后维持原有 child error reject 语义。
+       * @param error - 子进程错误
+       */
+      async function rejectResult(error: Error): Promise<void> {
+        if (settled) return;
+        settled = true;
+        await projectionQueue;
+        flushTerminalUpdate();
+        cleanup();
+        reject(error);
+      }
+
       /**
        * 强制结束：SIGTERM → grace period → SIGKILL → 强制 resolve。
        * cancel 和 timeout 共用此状态机，确保 Promise 始终能 settle。
@@ -308,7 +564,7 @@ export function createShellCommandRunner(options: CreateShellCommandRunnerOption
        */
       function doForceTerminate(reason: 'timeout' | 'cancel'): void {
         // 已进入终止流程则跳过，防止重复 cancel 重复安排定时器
-        if (activeCommand.terminating) return;
+        if (settled || activeCommand.terminating) return;
         activeCommand.terminating = true;
 
         // 终止流程启动后清除主超时定时器，避免重复触发
@@ -330,23 +586,7 @@ export function createShellCommandRunner(options: CreateShellCommandRunnerOption
           // SIGKILL 后仍未退出则强制 resolve
           activeCommand.graceTimer = setTimeout(() => {
             if (settled) return;
-            settled = true;
-            cleanup();
-            resolve({
-              commandId: request.commandId,
-              shell: request.shell,
-              command: request.command,
-              cwd: request.cwd,
-              exitCode: null,
-              signal: 'SIGKILL',
-              durationMs: Date.now() - startedAt,
-              timedOut: activeCommand.timedOut,
-              stdout,
-              stderr,
-              truncated,
-              outputMode: 'pipes',
-              termination: activeCommand.timedOut ? { kind: 'tool_timeout' } : { kind: 'cancelled' }
-            });
+            resolveResult(null, 'SIGKILL', activeCommand.timedOut ? { kind: 'tool_timeout' } : { kind: 'cancelled' });
           }, GRACE_PERIOD_MS);
         }, GRACE_PERIOD_MS);
       }
@@ -361,39 +601,17 @@ export function createShellCommandRunner(options: CreateShellCommandRunnerOption
       child.stdout.on('data', (chunk: Buffer | string) => handleOutput('stdout', chunk));
       child.stderr.on('data', (chunk: Buffer | string) => handleOutput('stderr', chunk));
       child.on('error', (error: Error) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        cleanup();
-        reject(error);
+        rejectResult(error);
       });
-      child.on('exit', (exitCode: number | null, signal: NodeJS.Signals | null) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        cleanup();
+      // close 保证 stdio 已关闭；exit 之后仍可能有尚未消费的 stdout/stderr 尾部。
+      child.on('close', (exitCode: number | null, signal: NodeJS.Signals | null) => {
+        if (settled) return;
         let termination: ShellCommandTermination;
         if (activeCommand.terminationReason === 'timeout') termination = { kind: 'tool_timeout' };
         else if (activeCommand.terminationReason === 'cancel') termination = { kind: 'cancelled' };
         else if (exitCode !== null) termination = { kind: 'exit', exitCode };
         else termination = { kind: 'signal', signal: signal ?? 'unknown' };
-        resolve({
-          commandId: request.commandId,
-          shell: request.shell,
-          command: request.command,
-          cwd: request.cwd,
-          exitCode,
-          signal,
-          durationMs: Date.now() - startedAt,
-          timedOut: activeCommand.timedOut,
-          stdout,
-          stderr,
-          truncated,
-          outputMode: 'pipes',
-          termination
-        });
+        resolveResult(exitCode, signal, termination);
       });
     });
   }

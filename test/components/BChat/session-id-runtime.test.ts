@@ -28,6 +28,7 @@ import { defineComponent, h, type PropType } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, shallowMount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ChatActorSystem } from '@/ai/chat/actorSystem';
 import type { BuildMemoryContextOptions } from '@/ai/memory/types';
 import type { ToastItem } from '@/components/BChat/components/InteractionContainer/types';
 import BChat from '@/components/BChat/index.vue';
@@ -129,7 +130,8 @@ const electronAPIMock = vi.hoisted(() => ({
   })
 }));
 const actorSystemMockState = vi.hoisted(() => ({
-  registerRuntime: vi.fn()
+  registerRuntime: vi.fn(),
+  current: undefined as ChatActorSystem | undefined
 }));
 
 const autoNameMockState = vi.hoisted(() => ({
@@ -276,6 +278,7 @@ vi.mock('@/hooks/useChat/useActorSystem', async (importOriginal) => {
     ...actual,
     useActorSystem: () => {
       const actorSystem = actual.useActorSystem();
+      actorSystemMockState.current = actorSystem;
       const registerRuntime = actorSystem.registerRuntime.bind(actorSystem);
       actorSystem.registerRuntime = (address, capabilities): void => {
         actorSystemMockState.registerRuntime(address, capabilities);
@@ -883,6 +886,7 @@ describe('BChat sessionId runtime', (): void => {
     resetRuntimeEventListeners(runtimeListeners);
     conversationViewMockState.scrollToBottom.mockReset();
     actorSystemMockState.registerRuntime.mockReset();
+    actorSystemMockState.current = undefined;
     toolContextRegistry.clear();
     agentTaskEventMockState.listener = undefined;
     agentTaskEventMockState.dispose.mockReset();
@@ -937,6 +941,46 @@ describe('BChat sessionId runtime', (): void => {
     });
     getModelToolSupportMock.mockResolvedValue({ supported: true });
     useSettingStore().setSidebarVisible(true);
+  });
+
+  it('applies Session pipe output events to the matching Shell tool part', async (): Promise<void> => {
+    chatStoreMock.getSessionMessages.mockResolvedValue([
+      {
+        id: 'assistant-shell',
+        role: 'assistant',
+        content: '',
+        parts: [
+          {
+            id: 'shell-part',
+            type: 'tool',
+            toolCallId: 'shell-call',
+            toolName: 'run_shell_command',
+            status: 'executing',
+            input: { command: 'npx skills add example' }
+          }
+        ],
+        createdAt: '2026-08-07T00:00:00.000Z',
+        loading: true,
+        finished: false
+      }
+    ]);
+    const wrapper = mountBChat('session-active');
+    await flushPromises();
+    const actorSystem = actorSystemMockState.current;
+    if (!actorSystem) throw new Error('Expected BChat actor system');
+
+    actorSystem.emitSessionEvent('session-active', {
+      type: 'shellCommandOutput',
+      chunk: { commandId: 'shell-call', stream: 'stdout', text: 'installing\n', sequence: 1, createdAt: 'now' }
+    });
+    await flushPromises();
+
+    const visibleMessages = wrapper.findComponent(ConversationViewStub).props('messages') as Message[];
+    const shellPart = visibleMessages[0]?.parts[0];
+    expect(shellPart?.type === 'tool' ? shellPart.shellOutput : undefined).toEqual([
+      { commandId: 'shell-call', stream: 'stdout', text: 'installing\n', sequence: 1, createdAt: 'now' }
+    ]);
+    wrapper.unmount();
   });
 
   it('loads a directly opened session before resolving its runtime model', async (): Promise<void> => {

@@ -340,7 +340,7 @@ export interface ElectronShellCommandRunResult {
   stdout?: string;
   /** 管道模式 stderr。 */
   stderr?: string;
-  /** PTY 模式去除终端控制序列后的有界纯文本输出。 */
+  /** 去除终端控制序列后的有界纯文本输出。 */
   terminalOutput?: string;
   /** 权威终止语义。 */
   termination: ElectronShellCommandTermination;
@@ -355,13 +355,13 @@ export interface ElectronShellCommandRunResult {
   };
 }
 
-/** Shell PTY 有序运行事件。 */
+/** Shell 有序运行事件。 */
 export type ElectronShellRunEvent =
   | { type: 'terminal_update'; content: string }
   | { type: 'auto_answer'; count: number }
   | { type: 'finished'; result: ElectronShellCommandRunResult };
 
-/** Shell PTY 事件信封。 */
+/** Shell 有序运行事件信封。 */
 export interface ElectronShellRunEventEnvelope {
   /** 命令唯一标识。 */
   commandId: string;

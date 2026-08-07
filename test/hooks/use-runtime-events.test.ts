@@ -15,7 +15,7 @@ import type {
   ChatRuntimeToolCancelledEvent,
   ChatRuntimeToolRequestEvent
 } from 'types/chat-runtime';
-import type { ElectronShellRunEventEnvelope } from 'types/electron-api';
+import type { ElectronShellCommandOutputChunk, ElectronShellRunEventEnvelope } from 'types/electron-api';
 import { effectScope, ref } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -36,6 +36,7 @@ const runtimeListeners = vi.hoisted(() => ({
   confirmation: undefined as ((event: ChatRuntimeConfirmationRequestEvent) => void) | undefined,
   toolRequest: undefined as ((event: ChatRuntimeToolRequestEvent) => void) | undefined,
   toolCancelled: undefined as ((event: ChatRuntimeToolCancelledEvent) => void) | undefined,
+  shellOutput: undefined as ((event: ElectronShellCommandOutputChunk) => void) | undefined,
   shellRunEvent: undefined as ((event: ElectronShellRunEventEnvelope) => void) | undefined,
   complete: undefined as ((event: ChatRuntimeCompleteEvent) => void) | undefined,
   error: undefined as ((event: ChatRuntimeErrorEvent) => void) | undefined
@@ -45,6 +46,12 @@ const runtimeCommands = vi.hoisted(() => ({
   submitConfirmation: vi.fn(),
   submitToolActivity: vi.fn(),
   submitToolResult: vi.fn()
+}));
+
+/** 测试中的 preload 能力开关。 */
+const preloadCapabilities = vi.hoisted(() => ({
+  /** 是否暴露普通 Shell 管道输出监听器。 */
+  shellOutput: true
 }));
 
 vi.mock('@/shared/platform/electron-api', () => ({
@@ -73,6 +80,14 @@ vi.mock('@/shared/platform/electron-api', () => ({
       runtimeListeners.toolCancelled = listener;
       return vi.fn();
     }),
+    ...(preloadCapabilities.shellOutput
+      ? {
+          onShellCommandOutput: vi.fn((listener: (event: ElectronShellCommandOutputChunk) => void): (() => void) => {
+            runtimeListeners.shellOutput = listener;
+            return vi.fn();
+          })
+        }
+      : {}),
     onShellRunEvent: vi.fn((listener: (event: ElectronShellRunEventEnvelope) => void): (() => void) => {
       runtimeListeners.shellRunEvent = listener;
       return vi.fn();
@@ -121,6 +136,7 @@ function createEventBase(): {
 describe('useRuntimeEvents', (): void => {
   beforeEach((): void => {
     setActivePinia(createPinia());
+    preloadCapabilities.shellOutput = true;
     runtimeCommands.submitConfirmation.mockReset();
     runtimeCommands.submitConfirmation.mockResolvedValue({ ok: true });
     runtimeCommands.submitToolActivity.mockReset();
@@ -130,6 +146,184 @@ describe('useRuntimeEvents', (): void => {
     for (const key of Object.keys(runtimeListeners) as Array<keyof typeof runtimeListeners>) {
       runtimeListeners[key] = undefined;
     }
+  });
+
+  it('routes ordinary Shell pipe output by Runtime and reports cumulative progress', async (): Promise<void> => {
+    const pendingResolvers: Array<() => void> = [];
+    const tool: AIToolExecutor = {
+      definition: {
+        name: 'run_shell_command',
+        description: 'test pipe shell',
+        source: 'builtin',
+        parameters: { type: 'object', properties: {} },
+        riskLevel: 'dangerous',
+        requiresActiveDocument: false
+      },
+      execute: vi.fn(
+        (): Promise<{ toolName: string; status: 'success'; data: Record<string, never> }> =>
+          new Promise((resolve) => {
+            pendingResolvers.push((): void => resolve({ toolName: 'run_shell_command', status: 'success', data: {} }));
+          })
+      )
+    };
+    const system = createChatActorSystem();
+    system.start();
+    const visibleA = vi.fn();
+    const visibleB = vi.fn();
+
+    // 两个 Session 故意复用 toolCallId，用于验证编码 commandId 的隔离作用。
+    for (const route of [
+      { sessionId: 'session-a', runtimeId: 'runtime-a', visible: visibleA },
+      { sessionId: 'session-b', runtimeId: 'runtime-b', visible: visibleB }
+    ]) {
+      const session = system.ensureSession(route.sessionId);
+      session.send({ type: 'session.submit', input: { messageId: `user-${route.runtimeId}`, createdAt: 'now', content: 'hello', parts: [] } });
+      session.send({ type: 'session.prepared' });
+      const turnId = session.getSnapshot().context.turnRef?.getSnapshot().context.turnId;
+      system.registerRuntime(
+        {
+          sessionId: route.sessionId,
+          turnId: turnId as string,
+          agentId: 'primary',
+          runtimeId: route.runtimeId,
+          rootRuntimeId: route.runtimeId
+        },
+        { tools: [tool], getToolContext: () => undefined, handleBridgeRequest: async (): Promise<unknown> => undefined }
+      );
+      system.send({ type: 'runtime.event', runtimeId: route.runtimeId, event: { type: 'runtime.started', runtimeId: route.runtimeId } });
+      system.subscribeSessionEvents(route.sessionId, route.visible);
+    }
+
+    const scope = effectScope();
+    scope.run((): void => useRuntimeEvents(system));
+    runtimeListeners.toolRequest?.({
+      ...createEventBase(),
+      runtimeId: 'runtime-a',
+      sessionId: 'session-a',
+      rootRuntimeId: 'runtime-a',
+      toolCallId: 'same-call',
+      toolName: 'run_shell_command',
+      input: { interactionMode: 'none' }
+    });
+    runtimeListeners.toolRequest?.({
+      ...createEventBase(),
+      runtimeId: 'runtime-b',
+      sessionId: 'session-b',
+      rootRuntimeId: 'runtime-b',
+      toolCallId: 'same-call',
+      toolName: 'run_shell_command',
+      input: { interactionMode: 'none' }
+    });
+    await Promise.resolve();
+
+    runtimeListeners.shellOutput?.({
+      commandId: createShellCommandId('runtime-a', 'same-call'),
+      stream: 'stdout',
+      text: 'out-a',
+      sequence: 1,
+      createdAt: 'now'
+    });
+    runtimeListeners.shellOutput?.({
+      commandId: createShellCommandId('runtime-b', 'same-call'),
+      stream: 'stderr',
+      text: 'err-b',
+      sequence: 1,
+      createdAt: 'now'
+    });
+    runtimeListeners.shellOutput?.({
+      commandId: createShellCommandId('runtime-a', 'same-call'),
+      stream: 'stderr',
+      text: 'err-a',
+      sequence: 2,
+      createdAt: 'now'
+    });
+    runtimeListeners.shellOutput?.({
+      commandId: createShellCommandId('unknown-runtime', 'same-call'),
+      stream: 'stdout',
+      text: 'ignored',
+      sequence: 1,
+      createdAt: 'now'
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(visibleA).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'shellCommandOutput',
+        chunk: expect.objectContaining({ commandId: 'same-call', stream: 'stdout', text: 'out-a' })
+      })
+    );
+    expect(visibleA).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'shellCommandOutput',
+        chunk: expect.objectContaining({ commandId: 'same-call', stream: 'stderr', text: 'err-a' })
+      })
+    );
+    expect(visibleA).not.toHaveBeenCalledWith(expect.objectContaining({ chunk: expect.objectContaining({ text: 'err-b' }) }));
+    expect(visibleB).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'shellCommandOutput',
+        chunk: expect.objectContaining({ commandId: 'same-call', stream: 'stderr', text: 'err-b' })
+      })
+    );
+    expect(visibleB).not.toHaveBeenCalledWith(expect.objectContaining({ chunk: expect.objectContaining({ text: 'out-a' }) }));
+    await vi.waitFor((): void => {
+      expect(runtimeCommands.submitToolActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          runtimeId: 'runtime-a',
+          toolCallId: 'same-call',
+          activity: { kind: 'progress', progress: { phase: 'shell_output', completed: 10, message: 'err-a' } }
+        })
+      );
+    });
+
+    const progressCount = runtimeCommands.submitToolActivity.mock.calls.filter(
+      ([input]): boolean => input.runtimeId === 'runtime-a' && input.activity.kind === 'progress'
+    ).length;
+    runtimeListeners.shellRunEvent?.({
+      commandId: createShellCommandId('runtime-a', 'same-call'),
+      sequence: 1,
+      createdAt: 'now',
+      event: { type: 'terminal_update', content: 'out-aerr-a' }
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(
+      runtimeCommands.submitToolActivity.mock.calls.filter(([input]): boolean => input.runtimeId === 'runtime-a' && input.activity.kind === 'progress')
+    ).toHaveLength(progressCount);
+
+    const visibleACallCount = visibleA.mock.calls.length;
+    system.unregisterRuntime('runtime-a');
+    runtimeListeners.shellOutput?.({
+      commandId: createShellCommandId('runtime-a', 'same-call'),
+      stream: 'stdout',
+      text: 'unmanaged',
+      sequence: 3,
+      createdAt: 'now'
+    });
+    expect(visibleA).toHaveBeenCalledTimes(visibleACallCount);
+
+    pendingResolvers.forEach((resolvePending: () => void): void => resolvePending());
+    await Promise.resolve();
+    await Promise.resolve();
+    scope.stop();
+    system.stop();
+  });
+
+  it('initializes without the optional Shell pipe output preload bridge', (): void => {
+    preloadCapabilities.shellOutput = false;
+    const system = createChatActorSystem();
+    system.start();
+    const scope = effectScope();
+
+    expect((): void => {
+      scope.run((): void => useRuntimeEvents(system));
+    }).not.toThrow();
+
+    expect(runtimeListeners.shellOutput).toBeUndefined();
+    scope.stop();
+    system.stop();
   });
 
   it('auto-approves remembered confirmation grants without moving the Session to waiting', async (): Promise<void> => {

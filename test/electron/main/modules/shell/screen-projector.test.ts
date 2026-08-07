@@ -6,6 +6,15 @@ import { describe, expect, it } from 'vitest';
 import { createScreenProjector } from '../../../../../electron/main/modules/shell/interaction/screen-projector.mts';
 
 describe('TerminalSnapshotProjector', (): void => {
+  it('returns to column zero for pipe line feeds when convertEol is enabled', async (): Promise<void> => {
+    const projector = createScreenProjector({ columns: 40, rows: 8, convertEol: true });
+
+    await projector.write('alpha\nbeta\ngamma');
+
+    expect(projector.snapshot(Date.now()).content).toBe('alpha\nbeta\ngamma');
+    projector.dispose();
+  });
+
   it('applies carriage-return redraw instead of appending raw text', async (): Promise<void> => {
     const projector = createScreenProjector({ columns: 40, rows: 6 });
 

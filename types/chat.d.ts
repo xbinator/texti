@@ -416,7 +416,7 @@ export interface ChatMessageShellOutputChunk {
   createdAt: string;
 }
 
-/** Shell PTY 在 renderer 中维护的临时显示状态。 */
+/** Shell 在 renderer 中维护的临时终端显示状态。 */
 export interface ChatMessageShellRunState {
   /** 最新当前屏幕快照。 */
   terminalContent: string;
@@ -455,7 +455,7 @@ export interface ChatMessageToolPart extends ChatMessagePartBase {
   activity?: ChatToolActivitySnapshot;
   /** Shell 命令实时输出缓冲，仅 run_shell_command 使用 */
   shellOutput?: ChatMessageShellOutputChunk[];
-  /** Shell PTY 临时 UI 状态，不进入模型工具结果。 */
+  /** Shell 临时终端 UI 状态，不进入模型工具结果。 */
   shellRunState?: ChatMessageShellRunState;
 }
 
