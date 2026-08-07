@@ -82,6 +82,17 @@ const BButtonStub = defineComponent({
 });
 
 /**
+ * BInputNumber 测试替身，避免依赖组件自动导入。
+ */
+const BInputNumberStub = defineComponent({
+  name: 'BInputNumber',
+  props: {
+    value: { type: [String, Number], default: '' }
+  },
+  template: '<input class="b-input-number-stub" :value="value" />'
+});
+
+/**
  * 挂载基础设置页。
  * @returns 组件 wrapper
  */
@@ -92,7 +103,8 @@ function mountBasicSettingsPage(): VueWrapper {
         SettingsPage: SettingsPageStub,
         SettingsSection: SettingsSectionStub,
         BSelect: BSelectStub,
-        BButton: BButtonStub
+        BButton: BButtonStub,
+        BInputNumber: BInputNumberStub
       }
     }
   });
@@ -121,7 +133,7 @@ function findButtonByText(wrapper: VueWrapper, text: string): DOMWrapper<HTMLBut
  * @returns 权限行包装器
  */
 function findPermissionRow(wrapper: VueWrapper, label: string): DOMWrapper<Element> {
-  const row = wrapper.findAll('.basic-settings__permission-row').find((item: DOMWrapper<Element>): boolean => item.text().includes(label));
+  const row = wrapper.findAll('.basic-tool-permissions__row').find((item: DOMWrapper<Element>): boolean => item.text().includes(label));
 
   if (!row) {
     throw new Error(`未找到权限行：${label}`);
