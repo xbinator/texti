@@ -77,7 +77,7 @@ describe('BCommandPanel sources', (): void => {
     openSessionMock.mockReset();
   });
 
-  it('filters jump commands and exposes routeInput without trailing space', async (): Promise<void> => {
+  it('filters command menu items and exposes plain routeInput values', async (): Promise<void> => {
     const source = createJumpSource();
 
     expect(await source.search('')).toEqual([
@@ -90,7 +90,7 @@ describe('BCommandPanel sources', (): void => {
             kind: 'jump',
             description: '切换当前使用的模型',
             hideIcon: true,
-            routeInput: '> model'
+            routeInput: 'model'
           },
           {
             key: 'jump:chat',
@@ -98,7 +98,7 @@ describe('BCommandPanel sources', (): void => {
             kind: 'jump',
             description: '搜索聊天历史会话',
             hideIcon: true,
-            routeInput: '> chat'
+            routeInput: 'chat'
           }
         ]
       }
@@ -256,18 +256,27 @@ describe('BCommandPanel sources', (): void => {
     expect(groups).toEqual([]);
   });
 
-  it('hint source exposes a single > jump item', async (): Promise<void> => {
+  it('hint source exposes model and chat command items', async (): Promise<void> => {
     const source = createHintSource();
     const groups = await source.search('');
     expect(groups).toHaveLength(1);
-    expect(groups[0]?.items).toHaveLength(1);
-    expect(groups[0]?.items[0]).toMatchObject({
-      key: 'hint:jump',
-      kind: 'jump',
-      title: '>',
-      description: '运行命令',
-      hideIcon: true,
-      routeInput: '>'
-    });
+    expect(groups[0]?.items).toEqual([
+      {
+        key: 'hint:model',
+        kind: 'jump',
+        title: 'model',
+        description: '切换当前使用的模型',
+        hideIcon: true,
+        routeInput: 'model'
+      },
+      {
+        key: 'hint:chat',
+        kind: 'jump',
+        title: 'chat',
+        description: '搜索聊天历史会话',
+        hideIcon: true,
+        routeInput: 'chat'
+      }
+    ]);
   });
 });

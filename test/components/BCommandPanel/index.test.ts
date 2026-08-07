@@ -3,6 +3,7 @@
  * @description 验证 BCommandPanel 弹窗、输入路由、键盘导航和选择行为。
  * @vitest-environment jsdom
  */
+import type { ChatSession } from 'types/chat';
 import { defineComponent, nextTick } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
@@ -24,6 +25,18 @@ interface RecentStoreMock {
   removeFile: ReturnType<typeof vi.fn>;
 }
 
+/**
+ * 聊天会话 store 测试替身。
+ */
+interface ChatSessionStoreMock {
+  /** 当前已加载会话。 */
+  sessions: ChatSession[];
+  /** 确保会话已加载。 */
+  ensureSessions: ReturnType<typeof vi.fn>;
+  /** 按 ID 加载会话。 */
+  loadSessionById: ReturnType<typeof vi.fn>;
+}
+
 const recentStoreMock = vi.hoisted<RecentStoreMock>(() => ({
   recentRecords: [],
   ensureLoaded: vi.fn(),
@@ -31,6 +44,7 @@ const recentStoreMock = vi.hoisted<RecentStoreMock>(() => ({
 }));
 const routerPushMock = vi.hoisted(() => vi.fn<(_path: string) => Promise<void>>());
 const loadSessionByIdMock = vi.hoisted(() => vi.fn<(_sessionId: string) => Promise<unknown>>());
+const ensureSessionsMock = vi.hoisted(() => vi.fn<() => Promise<void>>());
 const removeTabMock = vi.hoisted(() => vi.fn<(_id: string) => void>());
 const openDocumentMock = vi.hoisted(() => vi.fn<(_record: Extract<RecentRecord, { type: 'file' }>) => Promise<unknown>>());
 const openFileByPathMock = vi.hoisted(() => vi.fn<(_path: string) => Promise<void>>());
@@ -58,6 +72,11 @@ const serviceModelStoreMock = vi.hoisted(() => ({
   loadChatModel: loadChatModelMock,
   setChatModel: setChatModelMock
 }));
+const chatSessionStoreMock = vi.hoisted<ChatSessionStoreMock>(() => ({
+  sessions: [],
+  ensureSessions: ensureSessionsMock,
+  loadSessionById: loadSessionByIdMock
+}));
 
 vi.mock('@/stores/workspace/recent', () => ({
   useRecentStore: () => recentStoreMock
@@ -70,9 +89,7 @@ vi.mock('vue-router', () => ({
 }));
 
 vi.mock('@/stores/chat/session', () => ({
-  useChatSessionStore: () => ({
-    loadSessionById: loadSessionByIdMock
-  })
+  useChatSessionStore: () => chatSessionStoreMock
 }));
 
 vi.mock('@/stores/workspace/tabs', () => ({
@@ -215,6 +232,25 @@ function createChatRecord(overrides: Partial<Extract<RecentRecord, { type: 'chat
 }
 
 /**
+ * 创建聊天会话。
+ * @param overrides - 覆盖字段
+ * @returns 聊天会话
+ */
+function createChatSession(overrides: Partial<ChatSession> = {}): ChatSession {
+  const now = new Date().toISOString();
+
+  return {
+    id: 'session-command',
+    type: 'assistant',
+    title: '重构计划',
+    createdAt: now,
+    updatedAt: now,
+    lastMessageAt: now,
+    ...overrides
+  };
+}
+
+/**
  * 挂载命令面板。
  * @returns 组件包装器
  */
@@ -264,6 +300,9 @@ describe('BCommandPanel', (): void => {
     recentStoreMock.removeFile.mockResolvedValue(undefined);
     routerPushMock.mockReset();
     routerPushMock.mockResolvedValue(undefined);
+    chatSessionStoreMock.sessions = [createChatSession()];
+    ensureSessionsMock.mockReset();
+    ensureSessionsMock.mockResolvedValue(undefined);
     loadSessionByIdMock.mockReset();
     loadSessionByIdMock.mockResolvedValue({ id: 'session-a' });
     removeTabMock.mockClear();
@@ -288,28 +327,52 @@ describe('BCommandPanel', (): void => {
     expect(wrapper.text()).toContain('/tmp/alpha.md');
   });
 
-  it('routes jump input to model list and routes deletion back to jump commands', async (): Promise<void> => {
+  it('routes ? command menu selection to model list with a plain prefix', async (): Promise<void> => {
     const wrapper = mountCommandPanel();
     await openPanel('recent');
     const input = wrapper.find('input.a-input-stub');
 
-    await input.setValue('>');
+    await input.setValue('?');
     await flushPromises();
     expect(wrapper.text()).toContain('model');
+    expect(wrapper.text()).toContain('chat');
     expect(wrapper.text()).not.toContain('> model');
 
     await wrapper.findAll('.b-command-panel__item')[0].trigger('click');
     await flushPromises();
-    expect((input.element as HTMLInputElement).value).toBe('> model ');
-    expect((input.element as HTMLInputElement).selectionStart).toBe('> model '.length);
-    expect((input.element as HTMLInputElement).selectionEnd).toBe('> model '.length);
+    expect((input.element as HTMLInputElement).value).toBe('model ');
+    expect((input.element as HTMLInputElement).selectionStart).toBe('model '.length);
+    expect((input.element as HTMLInputElement).selectionEnd).toBe('model '.length);
     expect(wrapper.text()).toContain('GPT 4o');
 
-    await input.setValue('> mo');
+    await input.setValue('model');
     await flushPromises();
-    expect(wrapper.text()).toContain('model');
-    expect(wrapper.text()).not.toContain('> model');
     expect(wrapper.text()).not.toContain('GPT 4o');
+    expect(wrapper.text()).toContain('没有匹配的最近记录');
+
+    await input.setValue('model ');
+    await flushPromises();
+    expect(wrapper.text()).toContain('GPT 4o');
+  });
+
+  it('routes direct chat prefix input to chat session search', async (): Promise<void> => {
+    const wrapper = mountCommandPanel();
+    await openPanel('recent');
+    const input = wrapper.find('input.a-input-stub');
+
+    await input.setValue('chat');
+    await flushPromises();
+    expect(ensureSessionsMock).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain('没有匹配的最近记录');
+
+    await input.setValue('chat 重构');
+    await flushPromises();
+    expect(ensureSessionsMock).toHaveBeenCalled();
+    expect(wrapper.text()).toContain('重构计划');
+
+    await wrapper.find('.b-command-panel__item').trigger('click');
+    await flushPromises();
+    expect(routerPushMock).toHaveBeenCalledWith('/chat/session-command');
   });
 
   it('locks model scope to model source', async (): Promise<void> => {
@@ -458,13 +521,14 @@ describe('BCommandPanel', (): void => {
     expect(wrapper.find('.b-modal-stub').exists()).toBe(false);
   });
 
-  it('renders jump empty state', async (): Promise<void> => {
+  it('treats removed > command input as recent search text', async (): Promise<void> => {
     const wrapper = mountCommandPanel();
     await openPanel('recent');
 
     await wrapper.find('input.a-input-stub').setValue('> models');
     await flushPromises();
 
-    expect(wrapper.text()).toContain('没有匹配的跳转命令');
+    expect(wrapper.text()).toContain('没有匹配的最近记录');
+    expect(wrapper.text()).not.toContain('model');
   });
 });

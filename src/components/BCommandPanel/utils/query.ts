@@ -4,10 +4,12 @@
  */
 import type { CommandPanelQueryRoute, CommandPanelScope } from '../types';
 
-/** 跳转命令前缀。 */
-const JUMP_PREFIX = '>';
-/** 查看命令提示前缀。 */
-const HINT_PREFIX = '?';
+/** 查看命令菜单输入。 */
+const HINT_INPUT = '?';
+/** 模型命令前缀。 */
+const MODEL_PREFIX_RE = /^model\s+(.*)$/;
+/** 聊天命令前缀。 */
+const CHAT_PREFIX_RE = /^chat\s+(.*)$/;
 
 /**
  * 解析命令面板当前输入。
@@ -16,32 +18,28 @@ const HINT_PREFIX = '?';
  * @returns source 路由和搜索词
  */
 export function parseCommandPanelQuery(scope: CommandPanelScope, input: string): CommandPanelQueryRoute {
-  const value = input.trim();
+  const keyword = input.trim();
 
   if (scope === 'model') {
-    return { sourceId: 'model', keyword: value };
+    return { sourceId: 'model', keyword };
   }
 
-  if (value.startsWith(HINT_PREFIX)) {
-    return { sourceId: 'hint', keyword: value.slice(HINT_PREFIX.length).trim() };
+  if (keyword === HINT_INPUT) {
+    return { sourceId: 'hint', keyword: '' };
   }
 
-  if (!value.startsWith(JUMP_PREFIX)) {
-    return { sourceId: 'recent', keyword: value };
-  }
-
-  const jumpBody = value.slice(JUMP_PREFIX.length).trimStart();
-  const modelMatch = /^model(?:\s+(.*)|\s*)$/.exec(jumpBody);
+  const commandInput = input.trimStart();
+  const modelMatch = MODEL_PREFIX_RE.exec(commandInput);
 
   if (modelMatch) {
     return { sourceId: 'model', keyword: (modelMatch[1] ?? '').trim() };
   }
 
-  const chatMatch = /^chat(?:\s+(.*)|\s*)$/.exec(jumpBody);
+  const chatMatch = CHAT_PREFIX_RE.exec(commandInput);
 
   if (chatMatch) {
     return { sourceId: 'chat', keyword: (chatMatch[1] ?? '').trim() };
   }
 
-  return { sourceId: 'jump', keyword: jumpBody.trim() };
+  return { sourceId: 'recent', keyword };
 }

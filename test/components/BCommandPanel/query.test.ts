@@ -15,34 +15,28 @@ describe('parseCommandPanelQuery', (): void => {
   it('routes normal recent input to recent source', (): void => {
     expect(parseCommandPanelQuery('recent', '')).toEqual({ sourceId: 'recent', keyword: '' });
     expect(parseCommandPanelQuery('recent', 'alpha')).toEqual({ sourceId: 'recent', keyword: 'alpha' });
+    expect(parseCommandPanelQuery('recent', 'model')).toEqual({ sourceId: 'recent', keyword: 'model' });
+    expect(parseCommandPanelQuery('recent', 'chat')).toEqual({ sourceId: 'recent', keyword: 'chat' });
+    expect(parseCommandPanelQuery('recent', '>')).toEqual({ sourceId: 'recent', keyword: '>' });
   });
 
-  it('routes ? hint prefix to hint source', (): void => {
+  it('routes exact ? input to hint source', (): void => {
     expect(parseCommandPanelQuery('recent', '?')).toEqual({ sourceId: 'hint', keyword: '' });
-    expect(parseCommandPanelQuery('recent', '?m')).toEqual({ sourceId: 'hint', keyword: 'm' });
-    expect(parseCommandPanelQuery('recent', '? mo')).toEqual({ sourceId: 'hint', keyword: 'mo' });
+    expect(parseCommandPanelQuery('recent', '?m')).toEqual({ sourceId: 'recent', keyword: '?m' });
+    expect(parseCommandPanelQuery('recent', '? mo')).toEqual({ sourceId: 'recent', keyword: '? mo' });
   });
 
-  it('routes incomplete jump input to jump source', (): void => {
-    expect(parseCommandPanelQuery('recent', '>')).toEqual({ sourceId: 'jump', keyword: '' });
-    expect(parseCommandPanelQuery('recent', '> mo')).toEqual({ sourceId: 'jump', keyword: 'mo' });
-    expect(parseCommandPanelQuery('recent', '> models')).toEqual({ sourceId: 'jump', keyword: 'models' });
-    expect(parseCommandPanelQuery('recent', '> modelx')).toEqual({ sourceId: 'jump', keyword: 'modelx' });
-    expect(parseCommandPanelQuery('recent', '> cha')).toEqual({ sourceId: 'jump', keyword: 'cha' });
-    expect(parseCommandPanelQuery('recent', '> chats')).toEqual({ sourceId: 'jump', keyword: 'chats' });
+  it('routes model prefix with trailing space to model source', (): void => {
+    expect(parseCommandPanelQuery('recent', 'model ')).toEqual({ sourceId: 'model', keyword: '' });
+    expect(parseCommandPanelQuery('recent', 'model qwen')).toEqual({ sourceId: 'model', keyword: 'qwen' });
+    expect(parseCommandPanelQuery('recent', 'model qwen extra')).toEqual({ sourceId: 'model', keyword: 'qwen extra' });
+    expect(parseCommandPanelQuery('recent', 'modelx ')).toEqual({ sourceId: 'recent', keyword: 'modelx' });
   });
 
-  it('routes model jump command to model source', (): void => {
-    expect(parseCommandPanelQuery('recent', '> model')).toEqual({ sourceId: 'model', keyword: '' });
-    expect(parseCommandPanelQuery('recent', '> model ')).toEqual({ sourceId: 'model', keyword: '' });
-    expect(parseCommandPanelQuery('recent', '> model qwen')).toEqual({ sourceId: 'model', keyword: 'qwen' });
-    expect(parseCommandPanelQuery('recent', '> model qwen extra')).toEqual({ sourceId: 'model', keyword: 'qwen extra' });
-  });
-
-  it('routes chat jump command to chat source', (): void => {
-    expect(parseCommandPanelQuery('recent', '> chat')).toEqual({ sourceId: 'chat', keyword: '' });
-    expect(parseCommandPanelQuery('recent', '> chat ')).toEqual({ sourceId: 'chat', keyword: '' });
-    expect(parseCommandPanelQuery('recent', '> chat 重构')).toEqual({ sourceId: 'chat', keyword: '重构' });
-    expect(parseCommandPanelQuery('recent', '> chat 重构 计划')).toEqual({ sourceId: 'chat', keyword: '重构 计划' });
+  it('routes chat prefix with trailing space to chat source', (): void => {
+    expect(parseCommandPanelQuery('recent', 'chat ')).toEqual({ sourceId: 'chat', keyword: '' });
+    expect(parseCommandPanelQuery('recent', 'chat 重构')).toEqual({ sourceId: 'chat', keyword: '重构' });
+    expect(parseCommandPanelQuery('recent', 'chat 重构 计划')).toEqual({ sourceId: 'chat', keyword: '重构 计划' });
+    expect(parseCommandPanelQuery('recent', 'chats ')).toEqual({ sourceId: 'recent', keyword: 'chats' });
   });
 });

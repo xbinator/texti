@@ -8,11 +8,11 @@ import type { CommandPanelGroup, CommandPanelSource } from '../types';
 const JUMP_GROUP_KEY = 'jump';
 
 /** 跳转到模型选择的命令。 */
-const MODEL_ROUTE_INPUT = '> model';
+const MODEL_ROUTE_INPUT = 'model';
 /** 跳转到模型选择的显示名称。 */
 const MODEL_ROUTE_TITLE = 'model';
 /** 跳转到聊天历史搜索的命令。 */
-const CHAT_ROUTE_INPUT = '> chat';
+const CHAT_ROUTE_INPUT = 'chat';
 /** 跳转到聊天历史搜索的显示名称。 */
 const CHAT_ROUTE_TITLE = 'chat';
 
