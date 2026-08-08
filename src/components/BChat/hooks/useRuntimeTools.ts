@@ -7,7 +7,16 @@ import type { ChatRuntimePageEnvironmentContext, ChatRuntimeSkillSnapshot, ChatT
 import type { Ref } from 'vue';
 import { uniq } from 'lodash-es';
 import type { SkillDefinition } from '@/ai/skill/types';
-import { createBuiltinTools, isBuiltinToolName, OPEN_WIDGET_TOOL_NAME, READ_DIRECTORY_TOOL_NAME, SKILL_TOOL_NAME, WIDGET_TOOL_NAME } from '@/ai/tools/builtin';
+import {
+  createBuiltinTools,
+  GLOB_TOOL_NAME,
+  GREP_TOOL_NAME,
+  isBuiltinToolName,
+  OPEN_WIDGET_TOOL_NAME,
+  READ_DIRECTORY_TOOL_NAME,
+  SKILL_TOOL_NAME,
+  WIDGET_TOOL_NAME
+} from '@/ai/tools/builtin';
 import { createSkillTool } from '@/ai/tools/builtin/SkillTool';
 import { createOpenWidgetTool, createWidgetTool } from '@/ai/tools/builtin/WidgetTool';
 import type { AIToolConfirmationAdapter } from '@/ai/tools/confirmation';
@@ -53,6 +62,9 @@ interface PendingQuestionSnapshot {
   /** 发起 Question 的工具调用 ID。 */
   toolCallId: string;
 }
+
+/** 依赖已选工作区才能稳定解释目录边界的发现工具。 */
+const WORKSPACE_DISCOVERY_TOOL_NAMES = new Set<string>([READ_DIRECTORY_TOOL_NAME, GLOB_TOOL_NAME, GREP_TOOL_NAME]);
 
 /**
  * 校验最终 Runtime 工具名称唯一，避免 schema 与执行器选择不一致。
@@ -259,7 +271,7 @@ export function useRuntimeTools(options: UseRuntimeToolsOptions): UseRuntimeTool
     const applicationTools = applicationCandidates.filter((tool: AIToolExecutor): boolean => {
       if (hiddenNames.has(tool.definition.name)) return false;
       if (!isBuiltinToolName(tool.definition.name)) return false;
-      if (tool.definition.name === READ_DIRECTORY_TOOL_NAME && !hasWorkspace) return false;
+      if (WORKSPACE_DISCOVERY_TOOL_NAMES.has(tool.definition.name) && !hasWorkspace) return false;
       return true;
     });
     return validateToolNames([...applicationTools, ...pageTools]);

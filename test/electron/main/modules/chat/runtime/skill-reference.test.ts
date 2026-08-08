@@ -144,6 +144,29 @@ describe('ChatRuntime SkillReference context', (): void => {
     expect(selectedText).toContain('</runtime_context>\n<user_request>\n$weather & travel 查询上海\n</user_request>');
   });
 
+  it('tells the model when no workspace is selected', (): void => {
+    const runtime = {
+      ...createRuntime(),
+      runtimeContext: {
+        environment: {
+          targetMessageId: 'user-selected',
+          metadata: {
+            operatingSystem: 'macOS',
+            timezone: 'Asia/Shanghai',
+            currentDate: '2026-08-08',
+            currentTime: '2026-08-08 10:11:12'
+          }
+        },
+        skill: undefined
+      }
+    } as ActiveChatRuntime;
+    const projected = applyRuntimeContext([createUserMessage('user-selected')], runtime);
+    const selectedText = String(toRuntimeModelMessages(projected)[0]?.content);
+
+    expect(selectedText).toContain('Workspace root: not selected');
+    expect(selectedText).not.toContain('Workspace root: undefined');
+  });
+
   it('projects persisted SkillReference parts as readable names without loading content', (): void => {
     const modelMessages = toRuntimeModelMessages([createUserMessage('user-history-only')]);
 

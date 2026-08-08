@@ -102,7 +102,7 @@ function createEnvironmentSection(runtime: ActiveChatRuntime): string | undefine
     createMetadataLine('Timezone', environment.metadata.timezone),
     createMetadataLine('Current date', environment.metadata.currentDate),
     createMetadataLine('Current time', environment.metadata.currentTime),
-    createMetadataLine('Workspace root', environment.metadata.workspaceRoot)
+    createMetadataLine('Workspace root', environment.metadata.workspaceRoot?.trim() ? environment.metadata.workspaceRoot : 'not selected')
   ].filter((line): line is string => Boolean(line));
   const sections = Array.isArray(environment.sections) ? environment.sections : [];
   const sectionLines = sections.slice(0, MAX_ENVIRONMENT_SECTION_COUNT).flatMap(createRegisteredSection);

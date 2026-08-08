@@ -302,6 +302,8 @@ vi.mock('@/ai/tools/builtin', () => ({
   createBuiltinTools: builtinToolsMockState.createBuiltinTools,
   isBuiltinToolName: vi.fn(() => true),
   EDIT_MEMORY_TOOL_NAME: 'edit_memory',
+  GLOB_TOOL_NAME: 'glob',
+  GREP_TOOL_NAME: 'grep',
   OPEN_RESOURCE_TOOL_NAME: 'open_resource',
   OPEN_WIDGET_TOOL_NAME: 'open_widget',
   OPERATE_CURRENT_WEBPAGE_TOOL_NAME: 'operate_current_webpage',

@@ -13,6 +13,14 @@ import { createMainToolFailureResult } from './results.mjs';
 /** 用户主目录下允许只读工具直接访问的工具数据目录。 */
 const TRUSTED_HOME_READ_DIRECTORY_NAMES = ['.agents', '.tibis'] as const;
 
+/** 文件读取真实目标。 */
+export interface RuntimeRealReadTarget {
+  /** realpath 后用于确认与读取的目标路径。 */
+  filePath: string;
+  /** 真实路径是否需要按工作区外路径确认。 */
+  outsideWorkspace: boolean;
+}
+
 /**
  * 判断文件路径是否为绝对路径。
  * @param filePath - 文件路径
@@ -120,7 +128,7 @@ export function resolveRuntimeReadTarget(filePath: string, workspaceRoot: string
       return createMainToolFailureResult(toolName, 'INVALID_INPUT', '未配置工作区时不能读取相对路径');
     }
 
-    return { filePath, outsideWorkspace: false };
+    return { filePath, outsideWorkspace: true };
   }
 
   const resolvedRoot = path.resolve(workspaceRoot);
@@ -140,6 +148,45 @@ export function resolveRuntimeReadTarget(filePath: string, workspaceRoot: string
 }
 
 /**
+ * 根据 realpath 判断只读目标是否仍需要工作区外确认。
+ * @param target - 词法解析后的读取目标
+ * @param realFilePath - realpath 后的目标路径
+ * @param realWorkspaceRoot - realpath 后的工作区根目录
+ * @returns 是否需要工作区外确认
+ */
+export function isRuntimeRealReadTargetOutsideWorkspace(target: RuntimeReadTarget, realFilePath: string, realWorkspaceRoot: string | undefined): boolean {
+  let { outsideWorkspace } = target;
+
+  if (realWorkspaceRoot) {
+    outsideWorkspace = !isRuntimePathInsideWorkspace(realFilePath, realWorkspaceRoot);
+  }
+
+  if (isRuntimeTrustedHomeReadPath(realFilePath)) {
+    outsideWorkspace = false;
+  }
+
+  return outsideWorkspace;
+}
+
+/**
+ * 解析只读目标的真实路径，并基于 realpath 复核工作区与用户级可信目录边界。
+ * @param target - 词法解析后的读取目标
+ * @param workspaceRoot - 工作区根目录
+ * @returns 真实读取目标
+ */
+export async function resolveRuntimeRealReadTarget(target: RuntimeReadTarget, workspaceRoot: string | undefined): Promise<RuntimeRealReadTarget> {
+  const realFilePath = await fs.promises.realpath(target.filePath);
+  const realWorkspaceRoot = workspaceRoot ? await fs.promises.realpath(workspaceRoot) : undefined;
+  const realPathOutsideWorkspace = realWorkspaceRoot ? !isRuntimePathInsideWorkspace(realFilePath, realWorkspaceRoot) : false;
+  const outsideWorkspace = isRuntimeRealReadTargetOutsideWorkspace(target, realFilePath, realWorkspaceRoot);
+
+  return {
+    filePath: outsideWorkspace || realPathOutsideWorkspace ? realFilePath : target.filePath,
+    outsideWorkspace
+  };
+}
+
+/**
  * 解析 write_file 目标路径。
  * @param filePath - 原始文件路径
  * @param workspaceRoot - 工作区根目录
@@ -155,7 +202,7 @@ export function resolveRuntimeWriteTarget(filePath: string, workspaceRoot: strin
       return { type: 'draft', originalPath: filePath };
     }
 
-    return { type: 'file', filePath, outsideWorkspace: false };
+    return { type: 'file', filePath, outsideWorkspace: true };
   }
 
   const resolvedRoot = path.resolve(workspaceRoot);

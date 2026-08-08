@@ -250,6 +250,76 @@ describe('createMainToolExecutor', (): void => {
     }
   });
 
+  it('confirms read_file absolute paths when no workspace is selected', async (): Promise<void> => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tibis-runtime-tools-'));
+    try {
+      const targetPath = path.join(tempRoot, 'outside.txt');
+      await fs.writeFile(targetPath, 'secret', 'utf8');
+      const requestConfirmation = vi.fn(async () => ({ approved: true }));
+      const executeMainTool = createMainToolExecutor({
+        now: () => '2026-06-19T00:00:00.000Z',
+        async requestBridge() {
+          return { status: 'failure', error: { code: 'EDITOR_UNAVAILABLE', message: 'no editor' } };
+        },
+        requestConfirmation
+      });
+
+      const result = await executeMainTool({
+        runtime,
+        toolCallId: 'tool-call-read-no-workspace-absolute-1',
+        toolName: 'read_file',
+        input: { path: targetPath }
+      });
+
+      expect(result).toMatchObject({
+        toolName: 'read_file',
+        status: 'success',
+        data: { content: 'secret' }
+      });
+      expect(requestConfirmation).toHaveBeenCalledTimes(1);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('confirms the real read_file symlink target when no workspace is selected', async (): Promise<void> => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tibis-runtime-tools-'));
+    try {
+      const outsideRoot = path.join(tempRoot, 'outside');
+      const outsideFile = path.join(outsideRoot, 'secret.md');
+      const linkedFile = path.join(tempRoot, 'linked-secret.md');
+      await fs.mkdir(outsideRoot);
+      await fs.writeFile(outsideFile, 'outside secret', 'utf8');
+      await fs.symlink(outsideFile, linkedFile);
+      const realOutsideFile = await fs.realpath(outsideFile);
+      const confirmationRequests: MainToolConfirmationRequest[] = [];
+      const executeMainTool = createMainToolExecutor({
+        now: () => '2026-08-08T00:00:00.000Z',
+        async requestBridge() {
+          return { status: 'failure', error: { code: 'EDITOR_UNAVAILABLE', message: 'no editor' } };
+        },
+        async requestConfirmation(input: MainToolConfirmationRequest): Promise<{ approved: true }> {
+          confirmationRequests.push(input);
+          return { approved: true };
+        }
+      });
+
+      const result = await executeMainTool({
+        runtime,
+        toolCallId: 'tool-call-read-no-workspace-symlink-1',
+        toolName: 'read_file',
+        input: { path: linkedFile }
+      });
+
+      expect(result).toMatchObject({ toolName: 'read_file', status: 'success', data: { path: realOutsideFile, content: 'outside secret' } });
+      expect(confirmationRequests).toHaveLength(1);
+      expect(confirmationRequests[0]?.request.beforeText).toBe(realOutsideFile);
+      expect(confirmationRequests[0]?.request.description).toContain(realOutsideFile);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it('reads absolute paths under trusted home tool directories without confirmation', async (): Promise<void> => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tibis-runtime-tools-'));
     const originalHome = process.env.HOME;
@@ -294,6 +364,45 @@ describe('createMainToolExecutor', (): void => {
           });
         })
       );
+      expect(requestConfirmation).not.toHaveBeenCalled();
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = originalUserProfile;
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('reads trusted home tool files without confirmation when no workspace is selected', async (): Promise<void> => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tibis-runtime-tools-'));
+    const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
+    try {
+      const homeRoot = path.join(tempRoot, 'home');
+      const trustedFile = path.join(homeRoot, '.agents', 'skills', 'demo', 'SKILL.md');
+      await fs.mkdir(path.dirname(trustedFile), { recursive: true });
+      await fs.writeFile(trustedFile, 'trusted skill', 'utf8');
+      process.env.HOME = homeRoot;
+      process.env.USERPROFILE = homeRoot;
+
+      const requestConfirmation = vi.fn(async () => ({ approved: true }));
+      const executeMainTool = createMainToolExecutor({
+        now: () => '2026-06-19T00:00:00.000Z',
+        async requestBridge() {
+          return { status: 'failure', error: { code: 'EDITOR_UNAVAILABLE', message: 'no editor' } };
+        },
+        requestConfirmation
+      });
+
+      const result = await executeMainTool({
+        runtime,
+        toolCallId: 'tool-call-read-trusted-no-workspace-1',
+        toolName: 'read_file',
+        input: { path: trustedFile }
+      });
+
+      expect(result).toMatchObject({ toolName: 'read_file', status: 'success', data: { content: 'trusted skill' } });
       expect(requestConfirmation).not.toHaveBeenCalled();
     } finally {
       if (originalHome === undefined) delete process.env.HOME;
@@ -416,6 +525,47 @@ describe('createMainToolExecutor', (): void => {
         toolName: 'read_directory',
         status: 'failure',
         error: { code: 'PERMISSION_DENIED' }
+      });
+      expect(requestConfirmation).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('requires a workspace before directory or search tools can inspect paths', async (): Promise<void> => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tibis-runtime-tools-'));
+    try {
+      await fs.writeFile(path.join(tempRoot, 'target.ts'), 'const target = 1;\n', 'utf8');
+      const requestConfirmation = vi.fn(async () => ({ approved: true }));
+      const executeMainTool = createMainToolExecutor({
+        ...createMainToolDependencies([]),
+        requestConfirmation
+      });
+      const cases: readonly { readonly toolName: string; readonly input: Record<string, unknown> }[] = [
+        { toolName: 'read_directory', input: { path: tempRoot } },
+        { toolName: 'glob', input: { pattern: '**/*.ts', path: tempRoot } },
+        { toolName: 'grep', input: { pattern: 'target', path: tempRoot } }
+      ];
+
+      const results = await Promise.all(
+        cases.map((currentCase) =>
+          executeMainTool({
+            runtime,
+            toolCallId: `tool-call-no-workspace-${currentCase.toolName}`,
+            toolName: currentCase.toolName,
+            input: currentCase.input
+          })
+        )
+      );
+
+      results.forEach((result, index): void => {
+        const currentCase = cases[index];
+        if (!currentCase) throw new Error('缺少工作区工具测试用例');
+        expect(result).toMatchObject({
+          toolName: currentCase.toolName,
+          status: 'failure',
+          error: { code: 'PERMISSION_DENIED' }
+        });
       });
       expect(requestConfirmation).not.toHaveBeenCalled();
     } finally {
@@ -624,6 +774,7 @@ describe('createMainToolExecutor', (): void => {
       await fs.mkdir(workspaceRoot);
       await fs.mkdir(outsideRoot);
       await fs.writeFile(path.join(outsideRoot, 'outside.ts'), 'outside', 'utf8');
+      const realOutsideRoot = await fs.realpath(outsideRoot);
       const requestConfirmation = vi.fn(async () => ({ approved: true }));
       const executeMainTool = createMainToolExecutor({
         ...createMainToolDependencies([]),
@@ -640,7 +791,7 @@ describe('createMainToolExecutor', (): void => {
       expect(result).toMatchObject({
         toolName: 'glob',
         status: 'success',
-        data: { path: outsideRoot, count: 1 }
+        data: { path: realOutsideRoot, count: 1 }
       });
       expect(requestConfirmation).toHaveBeenCalledTimes(1);
     } finally {
@@ -760,6 +911,37 @@ describe('createMainToolExecutor', (): void => {
     }
   });
 
+  it('marks absolute write_file targets as dangerous when no workspace is selected', async (): Promise<void> => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tibis-runtime-tools-'));
+    try {
+      const targetPath = path.join(tempRoot, 'created.md');
+      const confirmationRequests: MainToolConfirmationRequest[] = [];
+      const executeMainTool = createMainToolExecutor({
+        now: () => '2026-08-08T00:00:00.000Z',
+        async requestBridge() {
+          return { status: 'failure', error: { code: 'EDITOR_UNAVAILABLE', message: 'no editor' } };
+        },
+        async requestConfirmation(input: MainToolConfirmationRequest): Promise<{ approved: true }> {
+          confirmationRequests.push(input);
+          return { approved: true };
+        }
+      });
+
+      const result = await executeMainTool({
+        runtime,
+        toolCallId: 'tool-call-write-no-workspace-absolute-1',
+        toolName: 'write_file',
+        input: { path: targetPath, content: '# Created' }
+      });
+      const realTargetPath = await fs.realpath(targetPath);
+
+      expect(result).toMatchObject({ toolName: 'write_file', status: 'success', data: { path: realTargetPath, created: true } });
+      expect(confirmationRequests[0]?.request).toMatchObject({ riskLevel: 'dangerous' });
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it('overwrites existing real files directly on disk without renderer bridge', async (): Promise<void> => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tibis-runtime-tools-'));
     try {
@@ -817,6 +999,77 @@ describe('createMainToolExecutor', (): void => {
       expect(result).toMatchObject({ toolName: 'edit_file', status: 'success', data: { path: targetPath, content: 'after value', replacedCount: 1 } });
       await expect(fs.readFile(targetPath, 'utf8')).resolves.toBe('after value');
       expect(requestBridge).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('marks absolute edit_file targets as dangerous when no workspace is selected', async (): Promise<void> => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tibis-runtime-tools-'));
+    try {
+      const targetPath = path.join(tempRoot, 'report.md');
+      await fs.writeFile(targetPath, 'before value', 'utf8');
+      const confirmationRequests: MainToolConfirmationRequest[] = [];
+      const executeMainTool = createMainToolExecutor({
+        now: () => '2026-08-08T00:00:00.000Z',
+        async requestBridge() {
+          return { status: 'failure', error: { code: 'EDITOR_UNAVAILABLE', message: 'no editor' } };
+        },
+        async requestConfirmation(input: MainToolConfirmationRequest): Promise<{ approved: true }> {
+          confirmationRequests.push(input);
+          return { approved: true };
+        }
+      });
+
+      const result = await executeMainTool({
+        runtime,
+        toolCallId: 'tool-call-edit-no-workspace-absolute-1',
+        toolName: 'edit_file',
+        input: { path: targetPath, oldString: 'before', newString: 'after' }
+      });
+      const realTargetPath = await fs.realpath(targetPath);
+
+      expect(result).toMatchObject({ toolName: 'edit_file', status: 'success', data: { path: realTargetPath, content: 'after value' } });
+      expect(confirmationRequests[0]?.request).toMatchObject({ riskLevel: 'dangerous' });
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('confirms the real edit_file symlink target when no workspace is selected', async (): Promise<void> => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tibis-runtime-tools-'));
+    try {
+      const outsideRoot = path.join(tempRoot, 'outside');
+      const outsideFile = path.join(outsideRoot, 'report.md');
+      const linkedFile = path.join(tempRoot, 'linked-report.md');
+      await fs.mkdir(outsideRoot);
+      await fs.writeFile(outsideFile, 'before value', 'utf8');
+      await fs.symlink(outsideFile, linkedFile);
+      const realOutsideFile = await fs.realpath(outsideFile);
+      const confirmationRequests: MainToolConfirmationRequest[] = [];
+      const executeMainTool = createMainToolExecutor({
+        now: () => '2026-08-08T00:00:00.000Z',
+        async requestBridge() {
+          return { status: 'failure', error: { code: 'EDITOR_UNAVAILABLE', message: 'no editor' } };
+        },
+        async requestConfirmation(input: MainToolConfirmationRequest): Promise<{ approved: true }> {
+          confirmationRequests.push(input);
+          return { approved: true };
+        }
+      });
+
+      const result = await executeMainTool({
+        runtime,
+        toolCallId: 'tool-call-edit-no-workspace-symlink-1',
+        toolName: 'edit_file',
+        input: { path: linkedFile, oldString: 'before', newString: 'after' }
+      });
+
+      expect(result).toMatchObject({ toolName: 'edit_file', status: 'success', data: { path: realOutsideFile, content: 'after value' } });
+      expect(confirmationRequests).toHaveLength(1);
+      expect(confirmationRequests[0]?.request).toMatchObject({ riskLevel: 'dangerous' });
+      expect(confirmationRequests[0]?.request.description).toContain(realOutsideFile);
+      await expect(fs.readFile(outsideFile, 'utf8')).resolves.toBe('after value');
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
@@ -1450,5 +1703,79 @@ describe('createMainToolExecutor', (): void => {
     });
     expect(bridgeRequests).toEqual([]);
     expect(requestConfirmation).not.toHaveBeenCalled();
+  });
+
+  it('confirms open_resource workspace symlinks that resolve outside the workspace', async (): Promise<void> => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tibis-runtime-tools-'));
+    try {
+      const workspaceRoot = path.join(tempRoot, 'workspace');
+      const outsideRoot = path.join(tempRoot, 'outside');
+      const outsideFile = path.join(outsideRoot, 'report.md');
+      const linkedFile = path.join(workspaceRoot, 'linked-report.md');
+      await fs.mkdir(workspaceRoot);
+      await fs.mkdir(outsideRoot);
+      await fs.writeFile(outsideFile, '# Outside', 'utf8');
+      await fs.symlink(outsideFile, linkedFile);
+      const realOutsideFile = await fs.realpath(outsideFile);
+      const bridgeRequests: MainToolBridgeRequest[] = [];
+      const confirmationRequests: MainToolConfirmationRequest[] = [];
+      const executeMainTool = createMainToolExecutor({
+        now: () => '2026-08-08T00:00:00.000Z',
+        async requestBridge(input: MainToolBridgeRequest) {
+          bridgeRequests.push(input);
+          const payload = input.payload as { path: string };
+          return { status: 'success', data: { path: payload.path, resourceType: 'file', opened: true } };
+        },
+        async requestConfirmation(input: MainToolConfirmationRequest): Promise<{ approved: true }> {
+          confirmationRequests.push(input);
+          return { approved: true };
+        }
+      });
+
+      const result = await executeMainTool({
+        runtime: { ...runtime, workspaceRoot },
+        toolCallId: 'tool-call-open-resource-workspace-symlink-1',
+        toolName: 'open_resource',
+        input: { path: 'linked-report.md' }
+      });
+
+      expect(result).toMatchObject({ toolName: 'open_resource', status: 'success', data: { path: realOutsideFile } });
+      expect(confirmationRequests).toHaveLength(1);
+      expect(confirmationRequests[0]?.request.beforeText).toBe(realOutsideFile);
+      expect(bridgeRequests[0]?.payload).toMatchObject({ path: realOutsideFile, resourceType: 'file' });
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('confirms open_resource absolute file paths when no workspace is selected', async (): Promise<void> => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tibis-runtime-tools-'));
+    try {
+      const targetPath = path.join(tempRoot, 'report.md');
+      await fs.writeFile(targetPath, '# Report', 'utf8');
+      const bridgeRequests: MainToolBridgeRequest[] = [];
+      const requestConfirmation = vi.fn(async () => ({ approved: true }));
+      const executeMainTool = createMainToolExecutor({
+        now: () => '2026-08-08T00:00:00.000Z',
+        async requestBridge(input: MainToolBridgeRequest) {
+          bridgeRequests.push(input);
+          return { status: 'success', data: { path: targetPath, resourceType: 'file', opened: true } };
+        },
+        requestConfirmation
+      });
+
+      const result = await executeMainTool({
+        runtime,
+        toolCallId: 'tool-call-open-resource-no-workspace-1',
+        toolName: 'open_resource',
+        input: { path: targetPath }
+      });
+
+      expect(result).toMatchObject({ toolName: 'open_resource', status: 'success' });
+      expect(requestConfirmation).toHaveBeenCalledTimes(1);
+      expect(bridgeRequests).toHaveLength(1);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
   });
 });

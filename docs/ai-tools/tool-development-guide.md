@@ -540,6 +540,8 @@ renderer-local 工具不要写入 `shared/ai/tools/<PascalCaseTool>/index.ts`，
 
 只读不等于永远不确认。读取工作区外绝对路径、敏感设置或本地资源时，仍应走确认。
 
+目录发现类工具依赖已选择工作区才能稳定解释边界。无工作区时，Chat 不暴露 `read_directory`、`glob` 和 `grep`；如果恢复或异常路径仍调用这些工具，主进程必须返回 `PERMISSION_DENIED`，不得改用应用目录、用户主目录或最近目录作为隐式工作区。无工作区时保留 `read_file` 与 `open_resource` 的显式绝对路径能力，但本地绝对路径必须走读取确认；绝对 `write_file` / `edit_file` 视为工作区外路径并使用 `dangerous` 风险确认。所有本地文件工具确认前都必须用 `realpath` 复核符号链接目标；只要真实落点需要确认，确认卡和后续执行都使用真实路径，避免 workspace 内 symlink 或无工作区绝对 symlink 掩盖实际目标。
+
 ### exposure
 
 `shared/ai/tools` registry 的 `exposure` 只决定应用级工具在聊天侧是否默认暴露：

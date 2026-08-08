@@ -46,8 +46,9 @@ import {
 import { isRecord, isRuntimeFileContentSnapshot, isRuntimeOpenDraftResult } from '../guards.mjs';
 import {
   isRuntimePathInsideWorkspace,
-  isRuntimeTrustedHomeReadPath,
+  isRuntimeRealReadTargetOutsideWorkspace,
   isRuntimeUnsavedPath,
+  resolveRuntimeRealReadTarget,
   resolveRuntimeReadTarget,
   resolveRuntimeWriteTarget
 } from '../paths.mjs';
@@ -92,6 +93,15 @@ type RuntimeFileWriteTarget = Extract<RuntimeWriteTarget, { type: 'file' }>;
  */
 export function isFileTool(toolName: string): boolean {
   return FILE_TOOL_NAMES.has(toolName);
+}
+
+/**
+ * 要求当前 Runtime 已选择工作区。
+ * @param input - 工具执行输入
+ * @returns 未选择工作区时的失败结果
+ */
+function requireWorkspace(input: ChatRuntimeMainToolExecutionInput): AIToolExecutionResult | undefined {
+  return input.runtime.workspaceRoot ? undefined : createMainToolFailureResult(input.toolName, 'PERMISSION_DENIED', '未选择工作区，无法使用目录或搜索工具');
 }
 
 /**
@@ -352,7 +362,7 @@ async function resolveRuntimeWriteDestination(target: RuntimeFileWriteTarget, wo
   const realWorkspaceRoot = workspaceRoot ? await fs.realpath(workspaceRoot) : undefined;
   const realPathOutsideWorkspace = realWorkspaceRoot ? !isRuntimePathInsideWorkspace(realFilePath, realWorkspaceRoot) : false;
   const outsideWorkspace = target.outsideWorkspace || realPathOutsideWorkspace;
-  const displayPath = !target.outsideWorkspace && realPathOutsideWorkspace ? realFilePath : target.filePath;
+  const displayPath = outsideWorkspace ? realFilePath : target.filePath;
 
   return { type: 'file', filePath: displayPath, sourcePath: target.filePath, writePath: realFilePath, outsideWorkspace };
 }
@@ -481,53 +491,6 @@ function applyRuntimeStringReplacement(content: string, oldString: string, newSt
   };
 }
 
-/** 文件读取真实目标。 */
-interface RuntimeRealReadTarget {
-  /** realpath 后用于确认与读取的目标路径。 */
-  filePath: string;
-  /** 真实路径是否需要按工作区外路径确认。 */
-  outsideWorkspace: boolean;
-}
-
-/**
- * 根据 realpath 判断只读目标是否仍需要工作区外确认。
- * @param target - 词法解析后的读取目标
- * @param realFilePath - realpath 后的目标路径
- * @param realWorkspaceRoot - realpath 后的工作区根目录
- * @returns 是否需要工作区外确认
- */
-function isRuntimeRealReadTargetOutsideWorkspace(target: RuntimeReadTarget, realFilePath: string, realWorkspaceRoot: string | undefined): boolean {
-  let { outsideWorkspace } = target;
-
-  if (realWorkspaceRoot) {
-    outsideWorkspace = !isRuntimePathInsideWorkspace(realFilePath, realWorkspaceRoot);
-  }
-
-  if (isRuntimeTrustedHomeReadPath(realFilePath)) {
-    outsideWorkspace = false;
-  }
-
-  return outsideWorkspace;
-}
-
-/**
- * 解析只读目标的真实路径，并基于 realpath 复核工作区与用户级可信目录边界。
- * @param target - 词法解析后的读取目标
- * @param workspaceRoot - 工作区根目录
- * @returns 真实读取目标
- */
-async function resolveRuntimeRealReadTarget(target: RuntimeReadTarget, workspaceRoot: string | undefined): Promise<RuntimeRealReadTarget> {
-  const realFilePath = await fs.realpath(target.filePath);
-  const realWorkspaceRoot = workspaceRoot ? await fs.realpath(workspaceRoot) : undefined;
-  const realPathOutsideWorkspace = realWorkspaceRoot ? !isRuntimePathInsideWorkspace(realFilePath, realWorkspaceRoot) : false;
-  const outsideWorkspace = isRuntimeRealReadTargetOutsideWorkspace(target, realFilePath, realWorkspaceRoot);
-
-  return {
-    filePath: !target.outsideWorkspace && realPathOutsideWorkspace ? realFilePath : target.filePath,
-    outsideWorkspace
-  };
-}
-
 /**
  * 执行 read_file 工具。
  * @param input - 工具执行输入
@@ -604,6 +567,9 @@ async function executeReadFileTool(input: ChatRuntimeMainToolExecutionInput, dep
  * @returns 工具执行结果
  */
 async function executeReadDirectoryTool(input: ChatRuntimeMainToolExecutionInput, deps: MainToolsDependencies): Promise<AIToolExecutionResult> {
+  const workspaceError = requireWorkspace(input);
+  if (workspaceError) return workspaceError;
+
   const normalizedInput = normalizeRuntimeReadDirectoryInput(input.input);
   if ('status' in normalizedInput) return normalizedInput;
 
@@ -660,7 +626,7 @@ async function resolveRuntimeRealSearchTarget(target: RuntimeReadTarget, workspa
   const outsideWorkspace = isRuntimeRealReadTargetOutsideWorkspace(target, realFilePath, realWorkspaceRoot);
 
   return {
-    filePath: !target.outsideWorkspace && realPathOutsideWorkspace ? realFilePath : target.filePath,
+    filePath: outsideWorkspace || realPathOutsideWorkspace ? realFilePath : target.filePath,
     outsideWorkspace
   };
 }
@@ -712,6 +678,9 @@ function createRuntimeSearchFailureResult(toolName: string, error: unknown): AIT
  * @returns 工具执行结果
  */
 async function executeGlobTool(input: ChatRuntimeMainToolExecutionInput, deps: MainToolsDependencies): Promise<AIToolExecutionResult> {
+  const workspaceError = requireWorkspace(input);
+  if (workspaceError) return workspaceError;
+
   const normalizedInput = normalizeRuntimeGlobInput(input.input);
   if ('status' in normalizedInput) return normalizedInput;
 
@@ -748,6 +717,9 @@ async function executeGlobTool(input: ChatRuntimeMainToolExecutionInput, deps: M
  * @returns 工具执行结果
  */
 async function executeGrepTool(input: ChatRuntimeMainToolExecutionInput, deps: MainToolsDependencies): Promise<AIToolExecutionResult> {
+  const workspaceError = requireWorkspace(input);
+  if (workspaceError) return workspaceError;
+
   const normalizedInput = normalizeRuntimeGrepInput(input.input);
   if ('status' in normalizedInput) return normalizedInput;
 

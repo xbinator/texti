@@ -50,7 +50,9 @@ const builtinMockState = vi.hoisted(() => {
     createExecutor,
     createBuiltinTools: vi.fn<(options?: BuiltinToolOptionsFixture) => ReturnType<typeof createExecutor>[]>(() => [
       createExecutor('open_resource'),
-      createExecutor('read_directory')
+      createExecutor('read_directory'),
+      createExecutor('glob'),
+      createExecutor('grep')
     ])
   };
 });
@@ -117,9 +119,13 @@ const widgetRuntimeMockState = vi.hoisted(() => {
 
 vi.mock('@/ai/tools/builtin', () => ({
   createBuiltinTools: builtinMockState.createBuiltinTools,
-  isBuiltinToolName: vi.fn((toolName: string): boolean => ['open_resource', 'read_directory', 'skill', 'widget', 'open_widget'].includes(toolName)),
+  isBuiltinToolName: vi.fn((toolName: string): boolean =>
+    ['open_resource', 'read_directory', 'glob', 'grep', 'skill', 'widget', 'open_widget'].includes(toolName)
+  ),
   OPEN_RESOURCE_TOOL_NAME: 'open_resource',
   READ_DIRECTORY_TOOL_NAME: 'read_directory',
+  GLOB_TOOL_NAME: 'glob',
+  GREP_TOOL_NAME: 'grep',
   OPEN_WIDGET_TOOL_NAME: 'open_widget',
   SKILL_TOOL_NAME: 'skill',
   WIDGET_TOOL_NAME: 'widget'
@@ -278,15 +284,18 @@ describe('useRuntimeTools', () => {
     expect(activeToolNames).not.toContain('open_resource');
   });
 
-  it('uses the injected session workspace when exposing directory tools', (): void => {
+  it('uses the injected session workspace when exposing workspace-scoped discovery tools', (): void => {
     const workspaceRoot = ref<string | null>(null);
     const runtimeTools = createRuntimeTools(workspaceRoot);
 
-    expect(readActiveToolNames(runtimeTools.getActiveTools)).not.toContain('read_directory');
+    const noWorkspaceToolNames = readActiveToolNames(runtimeTools.getActiveTools);
+    expect(noWorkspaceToolNames).not.toContain('read_directory');
+    expect(noWorkspaceToolNames).not.toContain('glob');
+    expect(noWorkspaceToolNames).not.toContain('grep');
 
     workspaceRoot.value = '/private/tmp/project';
 
-    expect(readActiveToolNames(runtimeTools.getActiveTools)).toContain('read_directory');
+    expect(readActiveToolNames(runtimeTools.getActiveTools)).toEqual(expect.arrayContaining(['read_directory', 'glob', 'grep']));
   });
 
   it('does not add page tools when a provider only registers environment context', (): void => {

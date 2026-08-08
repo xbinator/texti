@@ -10,7 +10,7 @@ describe('runtime file paths', (): void => {
     'recognizes Windows absolute path %s',
     (filePath: string): void => {
       expect(isAbsoluteRuntimeFilePath(filePath)).toBe(true);
-      expect(resolveRuntimeWriteTarget(filePath, undefined)).toMatchObject({ type: 'file', filePath });
+      expect(resolveRuntimeWriteTarget(filePath, undefined)).toMatchObject({ type: 'file', filePath, outsideWorkspace: true });
     }
   );
 

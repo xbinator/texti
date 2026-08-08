@@ -7,7 +7,7 @@ import type { MainToolsDependencies, RuntimeOpenResourceInput, RuntimeOpenResour
 import type { AIToolExecutionResult } from 'types/ai';
 import { OPEN_RESOURCE_TOOL_NAME, RESOURCE_TOOL_NAMES, RUNTIME_URL_PROTOCOL_RE } from '../constants.mjs';
 import { isRecord, isRuntimeOpenResourceResult, isRuntimeOpenResourceType } from '../guards.mjs';
-import { resolveRuntimeReadTarget } from '../paths.mjs';
+import { resolveRuntimeRealReadTarget, resolveRuntimeReadTarget } from '../paths.mjs';
 import { createBridgeFailureResult, createMainDeniedResult, createMainToolFailureResult, createMainToolSuccessResult } from '../results.mjs';
 
 /**
@@ -83,8 +83,16 @@ export async function executeResourceTool(input: ChatRuntimeMainToolExecutionInp
     const target = resolveRuntimeReadTarget(normalizedInput.path, input.runtime.workspaceRoot, input.toolName);
     if ('status' in target) return target;
 
-    bridgeInput = { ...normalizedInput, path: target.filePath };
-    if (target.outsideWorkspace) {
+    let realTarget = target;
+    try {
+      realTarget = await resolveRuntimeRealReadTarget(target, input.runtime.workspaceRoot);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '解析本地文件真实路径失败';
+      return createMainToolFailureResult(input.toolName, 'EXECUTION_FAILED', message);
+    }
+
+    bridgeInput = { ...normalizedInput, path: realTarget.filePath };
+    if (realTarget.outsideWorkspace) {
       const decision = await deps.requestConfirmation({
         runtimeId: input.runtime.runtimeId,
         toolCallId: input.toolCallId,
@@ -92,9 +100,9 @@ export async function executeResourceTool(input: ChatRuntimeMainToolExecutionInp
           toolCallId: input.toolCallId,
           toolName: OPEN_RESOURCE_TOOL_NAME,
           title: 'AI 想要打开本地文件',
-          description: `AI 请求打开本地文件：${target.filePath}`,
+          description: `AI 请求打开本地文件：${realTarget.filePath}`,
           riskLevel: 'read',
-          beforeText: target.filePath
+          beforeText: realTarget.filePath
         }
       });
       if (!decision.approved) return createMainDeniedResult(input.toolName);

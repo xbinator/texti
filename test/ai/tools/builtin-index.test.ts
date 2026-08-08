@@ -10,7 +10,7 @@ import {
   DEFAULT_BUILTIN_READONLY_TOOL_NAMES,
   DEFAULT_BUILTIN_WRITABLE_TOOL_NAMES
 } from '@/ai/tools/builtin';
-import { DELEGATE_TASK_TOOL_NAME, GLOB_TOOL_NAME, GREP_TOOL_NAME } from '@/ai/tools/catalog/runtimeTools';
+import { DELEGATE_TASK_TOOL_NAME, GLOB_TOOL_NAME, GREP_TOOL_NAME, READ_DIRECTORY_TOOL_NAME } from '@/ai/tools/catalog/runtimeTools';
 import { getToolNamesByExposure } from '../../../shared/ai/tools/index.js';
 
 describe('builtin tools index', (): void => {
@@ -34,6 +34,14 @@ describe('builtin tools index', (): void => {
     expect(toolNames).not.toEqual(
       expect.arrayContaining(['get_current_time', 'read_current_document', 'read_current_webpage', 'read_current_widget', 'operate_current_webpage'])
     );
+  });
+
+  it('keeps workspace discovery tools hidden when no workspace exists', (): void => {
+    const toolNames = createBuiltinTools().map((tool) => tool.definition.name);
+
+    expect(toolNames).not.toContain(READ_DIRECTORY_TOOL_NAME);
+    expect(toolNames).not.toContain(GLOB_TOOL_NAME);
+    expect(toolNames).not.toContain(GREP_TOOL_NAME);
   });
 
   it('keeps workspace file search tools available when a workspace exists', (): void => {
