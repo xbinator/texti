@@ -9,6 +9,7 @@ import { mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import HeaderTab from '@/layouts/default/components/HeaderTab.vue';
 import type { Tab, TabStatus } from '@/stores/workspace/tabs';
+import { useTabsStore } from '@/stores/workspace/tabs';
 
 const headerTabSource = readFileSync('src/layouts/default/components/HeaderTab.vue', 'utf8');
 
@@ -56,6 +57,22 @@ function mountHeaderTab(status?: TabStatus): ReturnType<typeof mount> {
   });
 }
 
+/**
+ * 读取指定样式选择器的规则内容。
+ * @param selector - 样式选择器
+ * @returns 规则体内容，未找到时返回空字符串
+ */
+function getStyleRule(selector: string): string {
+  const start = headerTabSource.indexOf(`${selector} {`);
+  if (start < 0) {
+    return '';
+  }
+
+  const bodyStart = headerTabSource.indexOf('{', start) + 1;
+  const bodyEnd = headerTabSource.indexOf('\n}', bodyStart);
+  return headerTabSource.slice(bodyStart, bodyEnd);
+}
+
 describe('HeaderTab generic status', (): void => {
   beforeEach((): void => {
     localStorage.clear();
@@ -90,6 +107,21 @@ describe('HeaderTab generic status', (): void => {
     expect(wrapper.find('.recent-icon-stub').exists()).toBe(true);
   });
 
+  it('renders dirty title color and mark after title text', (): void => {
+    const tabsStore = useTabsStore();
+    tabsStore.setDirty(tab.id);
+    const wrapper = mountHeaderTab();
+    const childClassNames = Array.from(wrapper.get('.header-tab__title').element.children, (child: Element): string => child.getAttribute('class') ?? '');
+    const titleRule = getStyleRule('.header-tab__title-text--dirty');
+    const dirtyMarkRule = getStyleRule('.header-tab__dirty-mark');
+
+    expect(childClassNames).toEqual(['recent-icon-stub header-tab__icon', 'header-tab__title-text header-tab__title-text--dirty', 'header-tab__dirty-mark']);
+    expect(wrapper.get('.header-tab__dirty-mark').text()).toBe('*');
+    expect(titleRule).toContain('color: var(--warning-color, var(--color-warning, #faad14));');
+    expect(dirtyMarkRule).toContain('margin-left: 2px;');
+    expect(dirtyMarkRule).not.toContain('margin-right: 2px;');
+  });
+
   it('emits the original contextmenu event from the tab root', async (): Promise<void> => {
     const wrapper = mountHeaderTab();
 
@@ -114,5 +146,32 @@ describe('HeaderTab generic status', (): void => {
     expect(headerTabSource).not.toContain('resolveTabIconRecentRecord');
     expect(headerTabSource).not.toContain('resolveTabIconFileName');
     expect(headerTabSource).not.toContain('resolveTabRecentRecord');
+  });
+
+  it('renders close button as a right-side title cover until hover', (): void => {
+    const tabRule = getStyleRule('.header-tab');
+    const closeRule = getStyleRule('.header-tab__close');
+    const revealRule = getStyleRule('.header-tab:hover .header-tab__close,\n.header-tab:focus-within .header-tab__close');
+    const activeCloseRule = getStyleRule('.header-tab.is-active .header-tab__close');
+
+    expect(tabRule).toContain('padding: 0 10px;');
+    expect(tabRule).not.toContain('padding: 0 4px 0 10px;');
+    expect(closeRule).toContain('position: absolute;');
+    expect(closeRule).toContain('top: 0;');
+    expect(closeRule).toContain('right: 0;');
+    expect(closeRule).toContain('width: 28px;');
+    expect(closeRule).toContain('height: 100%;');
+    expect(closeRule).toContain('pointer-events: none;');
+    expect(closeRule).toContain('background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg-secondary);');
+    expect(closeRule).toContain('border-radius: 0 var(--control-radius) var(--control-radius) 0;');
+    expect(closeRule).not.toContain('background: transparent;');
+    expect(closeRule).not.toContain('margin-left: 4px;');
+    expect(closeRule).not.toContain('transform: translateY(-50%);');
+    expect(revealRule).toContain('opacity: 1;');
+    expect(revealRule).toContain('pointer-events: auto;');
+    expect(activeCloseRule).toContain('background: linear-gradient(var(--bg-active, transparent), var(--bg-active, transparent)), var(--bg-secondary);');
+    expect(activeCloseRule).not.toContain('background: var(--bg-active, var(--bg-hover));');
+    expect(headerTabSource).toContain('<Icon icon="ic:round-close" width="16" height="16" />');
+    expect(headerTabSource).toContain('.header-tab .header-tab__close:hover');
   });
 });

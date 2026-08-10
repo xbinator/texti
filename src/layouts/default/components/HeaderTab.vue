@@ -5,17 +5,17 @@
 <template>
   <div ref="rootRef" class="header-tab" :class="tabClass" @click="emit('click')" @contextmenu.prevent="emit('contextmenu', $event)">
     <div class="header-tab__title">
-      <span v-if="tabsStore.isDirty(tab.id)" class="header-tab__dirty-mark">*</span>
       <!-- 运行状态与最近记录图标互斥展示 -->
       <span v-if="statusVisual" :class="['header-tab__status', statusVisual.className]">
         <Icon v-if="statusVisual.icon" :icon="statusVisual.icon" width="13" height="13" />
       </span>
       <BRecentIcon v-else class="header-tab__icon" v-bind="tabIconProps" :size="14" />
-      <span class="header-tab__title-text">{{ tab.title }}</span>
+      <span class="header-tab__title-text" :class="{ 'header-tab__title-text--dirty': isDirty }">{{ tab.title }}</span>
+      <span v-if="isDirty" class="header-tab__dirty-mark">*</span>
     </div>
 
     <button class="header-tab__close" @pointerdown.stop @click.stop="emit('close')">
-      <Icon icon="ic:round-close" width="12" height="12" />
+      <Icon icon="ic:round-close" width="16" height="16" />
     </button>
   </div>
 </template>
@@ -82,6 +82,9 @@ const rootRef = ref<HTMLElement | null>(null);
 
 /** 当前标签页是否为激活状态。 */
 const isActive = computed<boolean>(() => props.tab.path === route.fullPath);
+
+/** 当前标签页是否存在未保存草稿。 */
+const isDirty = computed<boolean>(() => tabsStore.isDirty(props.tab.id));
 
 /** 标签页样式状态映射。 */
 const tabClass = computed<Record<string, boolean>>(() => ({
@@ -166,7 +169,7 @@ const statusVisual = computed<StatusVisual | undefined>(() => (props.status ? ST
   flex-shrink: 0;
   align-items: center;
   height: 28px;
-  padding: 0 4px 0 10px;
+  padding: 0 10px;
   color: var(--text-primary);
   cursor: pointer;
   background: var(--bg-secondary);
@@ -220,8 +223,9 @@ const statusVisual = computed<StatusVisual | undefined>(() => (props.status ? ST
 
 .header-tab__dirty-mark {
   flex-shrink: 0;
-  margin-right: 2px;
+  margin-left: 2px;
   font-weight: 700;
+  color: var(--warning-color, var(--color-warning, #faad14));
 }
 
 .header-tab__status {
@@ -261,36 +265,42 @@ const statusVisual = computed<StatusVisual | undefined>(() => (props.status ? ST
   white-space: nowrap;
 }
 
+.header-tab__title-text--dirty {
+  color: var(--warning-color, var(--color-warning, #faad14));
+}
+
 .header-tab__close {
+  position: absolute;
+  top: 0;
+  right: 0;
   display: flex;
-  flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
-  margin-left: 4px;
+  width: 28px;
+  height: 100%;
   color: var(--text-secondary);
+  pointer-events: none;
   cursor: pointer;
-  background: transparent;
+  background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg-secondary);
   border: none;
-  border-radius: var(--control-radius);
+  border-radius: 0 var(--control-radius) var(--control-radius) 0;
   opacity: 0;
   transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard),
     opacity var(--motion-duration-base) var(--motion-easing-standard);
-
-  &:hover {
-    color: var(--text-primary);
-    background: var(--bg-hover-secondary, rgb(0 0 0 / 10%));
-  }
 }
 
 .header-tab:hover .header-tab__close,
-.header-tab.is-active .header-tab__close {
+.header-tab:focus-within .header-tab__close {
+  pointer-events: auto;
   opacity: 1;
 }
 
-:deep(.dark) .header-tab__close:hover {
-  background: rgb(255 255 255 / 10%);
+.header-tab.is-active .header-tab__close {
+  background: linear-gradient(var(--bg-active, transparent), var(--bg-active, transparent)), var(--bg-secondary);
+}
+
+.header-tab .header-tab__close:hover {
+  color: var(--text-primary);
 }
 
 @keyframes header-tab-status-spin {
