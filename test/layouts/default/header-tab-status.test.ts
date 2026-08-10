@@ -58,19 +58,69 @@ function mountHeaderTab(status?: TabStatus): ReturnType<typeof mount> {
 }
 
 /**
- * 读取指定样式选择器的规则内容。
+ * 转义选择器文本用于正则匹配。
+ * @param value - 原始选择器文本
+ * @returns 正则安全的选择器文本
+ */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * 生成可匹配 Less 多行选择器缩进的正则片段。
+ * @param selector - 样式选择器
+ * @returns 选择器正则片段
+ */
+function createSelectorPattern(selector: string): string {
+  return escapeRegExp(selector).replace(/\n[ \t]*/gu, '\\n[ \\t]*');
+}
+
+/**
+ * 查找指定选择器所在规则的源码起点。
+ * @param selector - 样式选择器
+ * @returns 规则起点索引，未找到时返回 -1
+ */
+function findRuleStart(selector: string): number {
+  const selectorPattern = createSelectorPattern(selector);
+  const match = new RegExp(`(?:^|\\n)[ \\t]*${selectorPattern}[ \\t]*\\{`, 'u').exec(headerTabSource);
+
+  if (!match) {
+    return -1;
+  }
+
+  return match.index + (match[0].startsWith('\n') ? 1 : 0);
+}
+
+/**
+ * 读取指定样式选择器的规则内容，支持 Less 嵌套块。
  * @param selector - 样式选择器
  * @returns 规则体内容，未找到时返回空字符串
  */
 function getStyleRule(selector: string): string {
-  const start = headerTabSource.indexOf(`${selector} {`);
+  const start = findRuleStart(selector);
   if (start < 0) {
     return '';
   }
 
   const bodyStart = headerTabSource.indexOf('{', start) + 1;
-  const bodyEnd = headerTabSource.indexOf('\n}', bodyStart);
-  return headerTabSource.slice(bodyStart, bodyEnd);
+  let depth = 1;
+
+  for (let index = bodyStart; index < headerTabSource.length; index += 1) {
+    const char = headerTabSource[index];
+
+    // Less 支持嵌套规则，按大括号深度找到当前规则的真实结束位置。
+    if (char === '{') {
+      depth += 1;
+    } else if (char === '}') {
+      depth -= 1;
+
+      if (depth === 0) {
+        return headerTabSource.slice(bodyStart, index);
+      }
+    }
+  }
+
+  return '';
 }
 
 describe('HeaderTab generic status', (): void => {
@@ -151,8 +201,8 @@ describe('HeaderTab generic status', (): void => {
   it('renders close button as a right-side title cover until hover', (): void => {
     const tabRule = getStyleRule('.header-tab');
     const closeRule = getStyleRule('.header-tab__close');
-    const revealRule = getStyleRule('.header-tab:hover .header-tab__close,\n.header-tab:focus-within .header-tab__close');
-    const activeCloseRule = getStyleRule('.header-tab.is-active .header-tab__close');
+    const revealRule = getStyleRule('&:hover .header-tab__close,\n&:focus-within .header-tab__close');
+    const activeCloseRule = getStyleRule('&.is-active .header-tab__close');
 
     expect(tabRule).toContain('padding: 0 10px;');
     expect(tabRule).not.toContain('padding: 0 4px 0 10px;');
@@ -172,6 +222,6 @@ describe('HeaderTab generic status', (): void => {
     expect(activeCloseRule).toContain('background: linear-gradient(var(--bg-active, transparent), var(--bg-active, transparent)), var(--bg-secondary);');
     expect(activeCloseRule).not.toContain('background: var(--bg-active, var(--bg-hover));');
     expect(headerTabSource).toContain('<Icon icon="ic:round-close" width="16" height="16" />');
-    expect(headerTabSource).toContain('.header-tab .header-tab__close:hover');
+    expect(headerTabSource).toContain('.header-tab__close:hover');
   });
 });
