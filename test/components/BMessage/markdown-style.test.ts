@@ -82,11 +82,20 @@ describe('BMessage markdown style', () => {
     const scrollerRule = extractRuleBlock(source, '.b-message__table-scroller');
     const tableRule = extractRuleBlock(source, '.b-message__table-scroller > table');
 
+    expect(scrollerRule).toMatch(/container-type:\s*inline-size;/);
     expect(scrollerRule).toMatch(/max-width:\s*100%;/);
     expect(scrollerRule).toMatch(/overflow-x:\s*auto;/);
     expect(tableRule).toMatch(/width:\s*max-content;/);
     expect(tableRule).toMatch(/min-width:\s*100%;/);
     expect(tableRule).toMatch(/margin:\s*0;/);
+  });
+
+  it('limits wide table cell content by the table container width', (): void => {
+    const source = readMessageSource();
+    const cellContentRule = extractRuleBlock(source, '.b-message__table-cell-content');
+
+    expect(cellContentRule).toMatch(/max-width:\s*60cqw;/);
+    expect(cellContentRule).toMatch(/overflow-wrap:\s*anywhere;/);
   });
 
   it('uses a single scroll container for BMessage code blocks', (): void => {

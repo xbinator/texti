@@ -220,6 +220,23 @@ describe('BMessage node renderer', () => {
     expect(wrapper.find('.b-message__markdown > table').exists()).toBe(false);
   });
 
+  it('wraps table cell content for responsive width limiting', async (): Promise<void> => {
+    const wrapper = mount(BMessage, {
+      props: {
+        type: 'markdown',
+        content: '| Name | Value |\n| --- | --- |\n| one | very-long-unbroken-content |'
+      }
+    });
+
+    await waitMessageRender();
+
+    const cellContents = wrapper.findAll('.b-message__table-cell-content');
+
+    expect(cellContents).toHaveLength(4);
+    expect(wrapper.find('td .b-message__table-cell-content').text()).toBe('one');
+    expect(wrapper.find('th .b-message__table-cell-content').text()).toBe('Name');
+  });
+
   it('renders component placeholder nodes without recursive block components', (): void => {
     const wrapper = mount(MessageNodes, {
       props: {

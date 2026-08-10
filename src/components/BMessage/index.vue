@@ -294,6 +294,7 @@ onScopeDispose(() => {
   min-width: 0;
   max-width: 100%;
   margin: 0.6em 0;
+  container-type: inline-size;
   overflow-x: auto;
   .scrollbar-base();
 }
@@ -302,6 +303,11 @@ onScopeDispose(() => {
   width: max-content;
   min-width: 100%;
   margin: 0;
+}
+
+.b-message__table-cell-content {
+  max-width: 60cqw;
+  overflow-wrap: anywhere;
 }
 
 .b-message__cursor {

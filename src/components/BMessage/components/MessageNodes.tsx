@@ -84,7 +84,9 @@ function renderListItem(item: ListItemNode, context: MessageNodeRenderContext | 
  * @returns 单元格 VNode
  */
 function renderTableCell(tag: 'th' | 'td', cell: TableCellNode, context: MessageNodeRenderContext | null): VNodeChild {
-  return h(tag, { key: cell.id, style: { textAlign: cell.align || undefined } }, renderInlineNodes(cell.children, context));
+  return h(tag, { key: cell.id, style: { textAlign: cell.align || undefined } }, [
+    h('div', { class: bem('table-cell-content') }, renderInlineNodes(cell.children, context))
+  ]);
 }
 
 /**
