@@ -14,3 +14,9 @@ export const REQUEST_MAX_RESPONSE_BYTES = 1_000_000;
 
 /** 托管 request 最大并发数。 */
 export const REQUEST_MAX_CONCURRENT = 4;
+
+/** 托管 request 最大等待任务数。 */
+export const REQUEST_MAX_PENDING = 64;
+
+/** 单个渲染进程最多同时持有的托管 request 数。 */
+export const REQUEST_MAX_PENDING_PER_SENDER = 16;

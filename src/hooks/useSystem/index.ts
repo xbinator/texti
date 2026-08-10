@@ -47,7 +47,7 @@ export function useSystem(): void {
   // 注册默认处理器：将系统传入的文件路径在编辑器中打开
   const { openFileByPath } = useNavigate();
   const router = useRouter();
-  onSystemOpenFile((filePath: string) => openFileByPath(filePath));
+  const unregisterDefaultOpenFile = onSystemOpenFile((filePath: string) => openFileByPath(filePath));
 
   onMounted(() => {
     // 非 Electron 环境（如纯 Web 降级）不注册任何系统级监听
@@ -72,6 +72,7 @@ export function useSystem(): void {
   });
 
   onUnmounted(() => {
+    unregisterDefaultOpenFile();
     unregisterOpenFileListener?.();
     unregisterWebviewNewTabListener?.();
   });

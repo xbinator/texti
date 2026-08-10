@@ -28,7 +28,12 @@ import type {
 } from 'types/chat-agent';
 import { describe, expect, it, vi } from 'vitest';
 import { AGENT_CANONICAL_PAYLOAD_MAX_BYTES } from '../../../../../../electron/main/modules/chat/agents/contracts.mts';
-import { createAgentTaskProjector, createTaskProjectionPump, type AgentTaskProjector } from '../../../../../../electron/main/modules/chat/agents/service.mts';
+import {
+  AGENT_TASK_PROJECTION_CACHE_LIMIT,
+  createAgentTaskProjector,
+  createTaskProjectionPump,
+  type AgentTaskProjector
+} from '../../../../../../electron/main/modules/chat/agents/service.mts';
 
 /** 公开投影中禁止出现的常见秘密形态。 */
 const PUBLIC_SECRET_PATTERN = new RegExp(
@@ -586,6 +591,30 @@ describe('public Agent Task projection protocol', (): void => {
     pump.enqueue('task-a');
     scheduled.shift()?.();
     expect(published.map((event): string => event.task.taskId)).toEqual(['task-b', 'task-a']);
+  });
+
+  it('bounds retained published Task sequences and evicts the oldest identity', (): void => {
+    const scheduled: Array<() => void> = [];
+    const published: ChatAgentTaskUpdatedEvent[] = [];
+    const pump = createTaskProjectionPump({
+      projectSummary: (taskId): ChatAgentTaskEventSnapshot => ({ ...summaryFixture, taskId, taskSequence: 1 }),
+      publish: (event): void => {
+        published.push(event);
+      },
+      reportError: (): void => undefined,
+      schedule: (flush): void => {
+        scheduled.push(flush);
+      }
+    });
+
+    for (let index = 0; index <= AGENT_TASK_PROJECTION_CACHE_LIMIT; index += 1) {
+      pump.enqueue(`bounded-task-${index}`);
+    }
+    scheduled.shift()?.();
+    pump.enqueue('bounded-task-0');
+    scheduled.shift()?.();
+
+    expect(published).toHaveLength(AGENT_TASK_PROJECTION_CACHE_LIMIT + 2);
   });
 
   it('keeps Summary, Detail, and Tombstone as strict record-state branches', (): void => {

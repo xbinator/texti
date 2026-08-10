@@ -26,6 +26,7 @@ import {
   hashExecutionPlanSnapshot
 } from '../../../../../../electron/main/modules/chat/agents/contracts.mjs';
 import {
+  AGENT_COMMIT_JOURNAL_CACHE_LIMIT,
   createAgentFileCommitter,
   type AgentAtomicFileWriter,
   type AgentCommitCrashPoint,
@@ -542,6 +543,42 @@ afterEach(async (): Promise<void> => {
 });
 
 describe('agent file committer', (): void => {
+  it('bounds retained Task journal lookup entries during recovery', async (): Promise<void> => {
+    const journals = Array.from(
+      { length: AGENT_COMMIT_JOURNAL_CACHE_LIMIT + 1 },
+      (_value, index): AgentCommitJournalRecord => ({
+        journalId: `journal-${index}`,
+        taskId: `task-${index}`,
+        attemptId: `attempt-${index}`,
+        changesetId: `changeset-${index}`,
+        confirmationId: `confirmation-${index}`,
+        confirmationVersion: 1,
+        planHash: 'a'.repeat(64),
+        intent: {} as AgentCommitJournalRecord['intent'],
+        intentHash: 'b'.repeat(64),
+        status: 'cancelled',
+        appliedOperationIds: [],
+        createdAt: NOW,
+        updatedAt: NOW,
+        finalizedAt: NOW
+      })
+    );
+    const store = {
+      listUnfinishedJournals: (): AgentCommitJournalRecord[] => journals
+    } as unknown as AgentFileCommitStore;
+    const committer = createAgentFileCommitter({
+      store,
+      journalRoot: '/private/journals',
+      now: (): string => NOW,
+      createId: (): string => 'unused-journal',
+      getPermissionScopeIds: (): readonly string[] => []
+    });
+
+    await committer.recover();
+
+    expect(committer.getRetainedJournalCount()).toBe(AGENT_COMMIT_JOURNAL_CACHE_LIMIT);
+  });
+
   it('creates a durable journal before atomically applying and finalizing approved content', async (): Promise<void> => {
     const fixture = await createFixture();
     const store = createMemoryStore(fixture.changeset);

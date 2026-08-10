@@ -99,6 +99,17 @@ interface WorkerSuccessFixture {
   warnings: string[];
 }
 
+/** Worker 解析失败响应。 */
+interface WorkerErrorFixture {
+  /** 响应类型。 */
+  type: 'error';
+  /** 用户可见错误。 */
+  error: string;
+}
+
+/** Worker 测试响应联合。 */
+type WorkerResponseFixture = WorkerSuccessFixture | WorkerErrorFixture;
+
 /** Worker 测试响应。 */
 const workerSuccessResponse: WorkerSuccessFixture = {
   type: 'success',
@@ -144,24 +155,34 @@ function createDeferred<T>(): Deferred<T> {
  * Worker 测试替身。
  */
 class WorkerStub {
+  /** 当前测试创建的 Worker 实例。 */
+  // eslint-disable-next-line no-use-before-define -- 类级注册表需保留 WorkerStub 的完整实例类型。
+  static instances: WorkerStub[] = [];
+
+  /** postMessage 时触发的终态分支。 */
+  static mode: 'success' | 'parse-error' | 'pending' = 'success';
+
   /** 成功消息回调。 */
-  onmessage: ((event: MessageEvent<WorkerSuccessFixture>) => void) | null = null;
+  onmessage: ((event: MessageEvent<WorkerResponseFixture>) => void) | null = null;
 
   /** 错误消息回调。 */
   onerror: ((event: ErrorEvent) => void) | null = null;
+
+  /** 终止调用 mock。 */
+  terminate = vi.fn<() => void>();
+
+  /** 登记新 Worker 实例。 */
+  constructor() {
+    WorkerStub.instances.push(this);
+  }
 
   /**
    * 发送解析请求。
    */
   postMessage(): void {
-    this.onmessage?.({ data: workerSuccessResponse } as MessageEvent<WorkerSuccessFixture>);
-  }
-
-  /**
-   * 终止 Worker。
-   */
-  terminate(): void {
-    // 测试替身无需清理真实线程。
+    if (WorkerStub.mode === 'pending') return;
+    const data: WorkerResponseFixture = WorkerStub.mode === 'parse-error' ? { type: 'error', error: 'Invalid skill package' } : workerSuccessResponse;
+    this.onmessage?.({ data } as MessageEvent<WorkerResponseFixture>);
   }
 }
 
@@ -267,10 +288,13 @@ function findButtonByText(wrapper: VueWrapper, text: string): DOMWrapper<HTMLBut
 /**
  * 上传测试文件。
  * @param wrapper - 组件包装器
+ * @param file - 可选自定义文件
  */
-async function uploadSkillPackage(wrapper: VueWrapper): Promise<void> {
+async function uploadSkillPackage(
+  wrapper: VueWrapper,
+  file: File = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], 'demo.skill', { type: 'application/zip' })
+): Promise<void> {
   const input = wrapper.find<HTMLInputElement>('input[type="file"]');
-  const file = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], 'demo.skill', { type: 'application/zip' });
 
   Object.defineProperty(input.element, 'files', {
     value: [file],
@@ -286,6 +310,8 @@ describe('SkillCreator', (): void => {
   });
 
   beforeEach((): void => {
+    WorkerStub.instances = [];
+    WorkerStub.mode = 'success';
     vi.stubGlobal('Worker', WorkerStub);
     electronAPIMock.acquireDirectoryInstallLock.mockReset();
     electronAPIMock.ensureDir.mockReset();
@@ -331,6 +357,49 @@ describe('SkillCreator', (): void => {
     expect(electronAPIMock.writeFile).toHaveBeenCalledWith(expect.stringContaining('/SKILL.md'), workerSuccessResponse.rawSkillMd);
     expect(saveBinaryFileCall?.[1]).toMatch(/\/assets\/icon\.bin$/u);
     expect(Array.from(new Uint8Array(savedContent))).toEqual([5, 6, 7]);
+  });
+
+  it('terminates the parser Worker after a successful response', async (): Promise<void> => {
+    const wrapper = mountSkillCreator();
+
+    await uploadSkillPackage(wrapper);
+
+    expect(WorkerStub.instances[0]?.terminate).toHaveBeenCalledOnce();
+  });
+
+  it('terminates the parser Worker after a parse-error response', async (): Promise<void> => {
+    WorkerStub.mode = 'parse-error';
+    const wrapper = mountSkillCreator();
+
+    await uploadSkillPackage(wrapper);
+
+    expect(messageMock.error).toHaveBeenCalledWith('Invalid skill package');
+    expect(WorkerStub.instances[0]?.terminate).toHaveBeenCalledOnce();
+  });
+
+  it('terminates an active parser Worker when the component unmounts', async (): Promise<void> => {
+    WorkerStub.mode = 'pending';
+    const wrapper = mountSkillCreator();
+
+    await uploadSkillPackage(wrapper);
+    wrapper.unmount();
+
+    expect(WorkerStub.instances[0]?.terminate).toHaveBeenCalledOnce();
+  });
+
+  it('terminates the parser Worker when reading the selected file fails', async (): Promise<void> => {
+    WorkerStub.mode = 'pending';
+    const wrapper = mountSkillCreator();
+    const file = new File([new Uint8Array([0x50, 0x4b])], 'broken.skill', { type: 'application/zip' });
+    Object.defineProperty(file, 'arrayBuffer', {
+      configurable: true,
+      value: vi.fn(async (): Promise<ArrayBuffer> => Promise.reject(new Error('read failed')))
+    });
+
+    await uploadSkillPackage(wrapper, file);
+
+    expect(messageMock.error).toHaveBeenCalledWith('读取 Skill 包失败');
+    expect(WorkerStub.instances[0]?.terminate).toHaveBeenCalledOnce();
   });
 
   it('ignores repeated install clicks while an install is already running', async (): Promise<void> => {

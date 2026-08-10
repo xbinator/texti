@@ -251,6 +251,33 @@ export const useChatAgentTaskStore = defineStore('chat-agent-task', () => {
   const sessionGenerations = new Map<string, number>();
   const incompatibleVersions = new Map<string, number>();
   const pageRecoveryTasks = new Set<string>();
+  /** Session 生命周期 epoch；释放后旧异步响应不得重新写回。 */
+  const sessionEpochs = new Map<string, number>();
+  /** Store 实例内单调递增的 epoch 序号。 */
+  let sessionEpochSequence = 0;
+
+  /**
+   * 获取 Session 当前生命周期 epoch，不存在时创建一个新 epoch。
+   * @param sessionId - Session 身份
+   * @returns 当前生命周期 epoch
+   */
+  function getSessionEpoch(sessionId: string): number {
+    const currentEpoch = sessionEpochs.get(sessionId);
+    if (currentEpoch !== undefined) return currentEpoch;
+    sessionEpochSequence += 1;
+    sessionEpochs.set(sessionId, sessionEpochSequence);
+    return sessionEpochSequence;
+  }
+
+  /**
+   * 判断异步请求是否仍属于 Session 当前生命周期。
+   * @param sessionId - Session 身份
+   * @param epoch - 请求发起时冻结的 epoch
+   * @returns Session 尚未释放且 epoch 未变化时返回 true
+   */
+  function isCurrentEpoch(sessionId: string, epoch: number): boolean {
+    return sessionEpochs.get(sessionId) === epoch;
+  }
 
   /**
    * 标记 Session 的最新恢复已失败。
@@ -380,11 +407,12 @@ export const useChatAgentTaskStore = defineStore('chat-agent-task', () => {
    * @param taskId - Task 身份
    * @returns 收敛后的 Detail、tombstone 或 null
    */
-  async function runEnsureTask(sessionId: string, taskId: string, expected?: AgentTaskExpectedPosition): Promise<ChatAgentTaskSnapshot | null> {
+  async function runEnsureTask(sessionId: string, taskId: string, epoch: number, expected?: AgentTaskExpectedPosition): Promise<ChatAgentTaskSnapshot | null> {
     const responsePromise = Promise.resolve()
       .then(() => getElectronAPI().chatAgentGetTask({ sessionId, taskId }))
       .then(unwrapAgentResult);
     const [requestError, snapshot] = await asyncTo<ChatAgentGetTaskResult>(responsePromise);
+    if (!isCurrentEpoch(sessionId, epoch)) return null;
     if (requestError || snapshot === undefined) {
       logger.error(`[chat-agent-task-get-failed] sessionId=${sessionId} taskId=${taskId} code=${readErrorCode(requestError ?? new Error())}`);
       return null;
@@ -431,7 +459,8 @@ export const useChatAgentTaskStore = defineStore('chat-agent-task', () => {
     const flightKey = createTaskFlightKey(sessionId, taskId, expected);
     const existingFlight = taskFlights.get(flightKey);
     if (existingFlight) return existingFlight;
-    const flight = runEnsureTask(sessionId, taskId, expected).finally((): void => {
+    const epoch = getSessionEpoch(sessionId);
+    const flight = runEnsureTask(sessionId, taskId, epoch, expected).finally((): void => {
       if (taskFlights.get(flightKey) === flight) taskFlights.delete(flightKey);
     });
     taskFlights.set(flightKey, flight);
@@ -541,11 +570,12 @@ export const useChatAgentTaskStore = defineStore('chat-agent-task', () => {
    * @param sessionId - Session 身份
    * @param generation - 当前请求 generation
    */
-  async function runEnsureSession(sessionId: string, generation: number): Promise<void> {
+  async function runEnsureSession(sessionId: string, generation: number, epoch: number): Promise<void> {
     const responsePromise = Promise.resolve()
       .then(() => getElectronAPI().chatAgentListTasks({ sessionId, limit: TASK_PAGE_LIMIT }))
       .then(unwrapAgentResult);
     const [requestError, page] = await asyncTo(responsePromise);
+    if (!isCurrentEpoch(sessionId, epoch)) return;
     if (requestError || !page) {
       if (isLatestGeneration(sessionId, generation)) markSessionStale(sessionId);
       logger.error(`[chat-agent-task-list-failed] sessionId=${sessionId} code=${readErrorCode(requestError ?? new Error())}`);
@@ -564,8 +594,8 @@ export const useChatAgentTaskStore = defineStore('chat-agent-task', () => {
    * @param generation - 请求 generation
    * @returns 实际请求 Promise
    */
-  function startEnsureFlight(sessionId: string, generation: number): Promise<void> {
-    const flight = runEnsureSession(sessionId, generation).finally((): void => {
+  function startEnsureFlight(sessionId: string, generation: number, epoch: number): Promise<void> {
+    const flight = runEnsureSession(sessionId, generation, epoch).finally((): void => {
       if (ensureFlights.get(sessionId) === flight) ensureFlights.delete(sessionId);
     });
     ensureFlights.set(sessionId, flight);
@@ -578,18 +608,19 @@ export const useChatAgentTaskStore = defineStore('chat-agent-task', () => {
    * @param sessionId - Session 身份
    * @returns 当前 dirty drain 完成 Promise
    */
-  async function drainForcedRefresh(sessionId: string): Promise<void> {
+  async function drainForcedRefresh(sessionId: string, epoch: number): Promise<void> {
     const existingFlight = ensureFlights.get(sessionId);
     if (existingFlight) await existingFlight;
+    if (!isCurrentEpoch(sessionId, epoch)) return;
 
     activeForceSessions.add(sessionId);
     dirtyForceSessions.delete(sessionId);
-    await startEnsureFlight(sessionId, nextGeneration(sessionId));
+    await startEnsureFlight(sessionId, nextGeneration(sessionId), epoch);
     activeForceSessions.delete(sessionId);
 
-    if (!dirtyForceSessions.has(sessionId)) return;
+    if (!isCurrentEpoch(sessionId, epoch) || !dirtyForceSessions.has(sessionId)) return;
     dirtyForceSessions.delete(sessionId);
-    return drainForcedRefresh(sessionId);
+    return drainForcedRefresh(sessionId, epoch);
   }
 
   /**
@@ -609,8 +640,9 @@ export const useChatAgentTaskStore = defineStore('chat-agent-task', () => {
     }
 
     // 首次 force 立即使旧普通请求失去元状态写权；微任务启动前的重复 force 合并。
+    const epoch = getSessionEpoch(sessionId);
     nextGeneration(sessionId);
-    const forceFlight = Promise.resolve().then((): Promise<void> => drainForcedRefresh(sessionId));
+    const forceFlight = Promise.resolve().then((): Promise<void> => drainForcedRefresh(sessionId, epoch));
     const trackedFlight = forceFlight.finally((): void => {
       activeForceSessions.delete(sessionId);
       dirtyForceSessions.delete(sessionId);
@@ -635,7 +667,7 @@ export const useChatAgentTaskStore = defineStore('chat-agent-task', () => {
     if (loadedSessions.value[sessionId] && !staleSessions.value[sessionId]) return Promise.resolve();
 
     const generation = nextGeneration(sessionId);
-    return startEnsureFlight(sessionId, generation);
+    return startEnsureFlight(sessionId, generation, getSessionEpoch(sessionId));
   }
 
   /**
@@ -644,11 +676,12 @@ export const useChatAgentTaskStore = defineStore('chat-agent-task', () => {
    * @param cursor - 发起请求时冻结的 cursor
    * @param generation - 当前请求 generation
    */
-  async function runNextPage(sessionId: string, cursor: string, generation: number): Promise<void> {
+  async function runNextPage(sessionId: string, cursor: string, generation: number, epoch: number): Promise<void> {
     const responsePromise = Promise.resolve()
       .then(() => getElectronAPI().chatAgentListTasks({ sessionId, cursor, limit: TASK_PAGE_LIMIT }))
       .then(unwrapAgentResult);
     const [requestError, page] = await asyncTo(responsePromise);
+    if (!isCurrentEpoch(sessionId, epoch)) return;
     if (requestError || !page) {
       if (isLatestGeneration(sessionId, generation)) markSessionStale(sessionId);
       logger.error(`[chat-agent-task-page-failed] sessionId=${sessionId} code=${readErrorCode(requestError ?? new Error())}`);
@@ -674,7 +707,7 @@ export const useChatAgentTaskStore = defineStore('chat-agent-task', () => {
     if (!cursor) return Promise.resolve();
 
     const generation = nextGeneration(sessionId);
-    const flight = runNextPage(sessionId, cursor, generation).finally((): void => {
+    const flight = runNextPage(sessionId, cursor, generation, getSessionEpoch(sessionId)).finally((): void => {
       if (nextPageFlights.get(sessionId) === flight) nextPageFlights.delete(sessionId);
     });
     nextPageFlights.set(sessionId, flight);
@@ -711,6 +744,53 @@ export const useChatAgentTaskStore = defineStore('chat-agent-task', () => {
     return taskId ? tasksById.value[taskId] : undefined;
   }
 
+  /**
+   * 释放一个 Session 的全部投影、索引和运行态，并使迟到异步响应失效。
+   * @param sessionId - Session 身份
+   */
+  function releaseSession(sessionId: string): void {
+    if (!isIdentity(sessionId)) return;
+    const sessionPrefix = encodeKeyPart(sessionId);
+    const releasedTaskIds = new Set<string>();
+
+    for (const [taskId, snapshot] of Object.entries(tasksById.value)) {
+      if (snapshot.sessionId === sessionId) releasedTaskIds.add(taskId);
+    }
+    for (const [taskId, snapshot] of Object.entries(detailsById.value)) {
+      if (snapshot.sessionId === sessionId) releasedTaskIds.add(taskId);
+    }
+    for (const [indexKey, taskId] of Object.entries(taskIdsByMessageToolCall.value)) {
+      if (!indexKey.startsWith(sessionPrefix)) continue;
+      releasedTaskIds.add(taskId);
+      delete taskIdsByMessageToolCall.value[indexKey];
+    }
+    for (const taskId of releasedTaskIds) {
+      delete tasksById.value[taskId];
+      delete detailsById.value[taskId];
+      delete taskCursors.value[taskId];
+    }
+
+    delete loadedSessions.value[sessionId];
+    delete staleSessions.value[sessionId];
+    delete incompatibleSessions.value[sessionId];
+    delete sessionNextCursors.value[sessionId];
+    sessionGenerations.delete(sessionId);
+    incompatibleVersions.delete(sessionId);
+    ensureFlights.delete(sessionId);
+    forceRefreshFlights.delete(sessionId);
+    activeForceSessions.delete(sessionId);
+    dirtyForceSessions.delete(sessionId);
+    nextPageFlights.delete(sessionId);
+    sessionEpochs.delete(sessionId);
+
+    for (const flightKey of taskFlights.keys()) {
+      if (flightKey.startsWith(sessionPrefix)) taskFlights.delete(flightKey);
+    }
+    for (const recoveryKey of pageRecoveryTasks) {
+      if (recoveryKey.startsWith(sessionPrefix)) pageRecoveryTasks.delete(recoveryKey);
+    }
+  }
+
   return {
     tasksById,
     detailsById,
@@ -727,6 +807,7 @@ export const useChatAgentTaskStore = defineStore('chat-agent-task', () => {
     ensureTask,
     loadNextPage,
     findTask,
-    markSessionStale
+    markSessionStale,
+    releaseSession
   };
 });

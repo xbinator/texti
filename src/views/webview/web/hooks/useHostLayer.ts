@@ -3,10 +3,20 @@
  * @description 管理 `<webview>` 宿主层与占位容器的位置/尺寸同步，封装 RAF 调度与生命周期绑定。
  */
 import type { WebviewTag } from 'electron';
-import { onActivated, onDeactivated, onMounted, type Ref } from 'vue';
+import { onActivated, onDeactivated, onMounted, onUnmounted, type Ref } from 'vue';
 import { useEventListener, useResizeObserver } from '@vueuse/core';
 import { ensureWebviewHostLayer, hideWebviewHostLayer, showWebviewHostLayer } from '../utils/hosting';
 import { resolveVisibleWebviewBounds } from '../utils/viewportBounds';
+
+/** WebView 宿主层同步控制器。 */
+export interface HostLayerController {
+  /** 立即同步宿主层范围。 */
+  syncHostLayerBounds: () => void;
+  /** 请求下一帧同步宿主层范围。 */
+  requestSyncHostLayerBounds: () => void;
+  /** 取消待执行同步帧。 */
+  cancelSync: () => void;
+}
 
 /**
  * 创建宿主层同步控制器，将占位容器的可见区域映射到 body 上的宿主层。
@@ -21,7 +31,7 @@ export function useHostLayer(
   webviewContainerRef: Ref<HTMLElement | null>,
   webviewContentRef: Ref<HTMLElement | null>,
   webviewElementRef: Ref<WebviewTag | null>
-) {
+): HostLayerController {
   let frame: number | null = null;
 
   /**
@@ -88,9 +98,16 @@ export function useHostLayer(
     }
   }
 
+  /** 停用宿主层并取消尚未执行的同步帧。 */
+  function deactivateHostLayer(): void {
+    cancelSync();
+    hideWebviewHostLayer(ensureWebviewHostLayer(document, routeFullPath));
+  }
+
   onMounted(requestSyncHostLayerBounds);
   onActivated(requestSyncHostLayerBounds);
-  onDeactivated(() => hideWebviewHostLayer(ensureWebviewHostLayer(document, routeFullPath)));
+  onDeactivated(deactivateHostLayer);
+  onUnmounted(cancelSync);
 
   useResizeObserver(webviewContainerRef, requestSyncHostLayerBounds);
   useResizeObserver(webviewContentRef, requestSyncHostLayerBounds);

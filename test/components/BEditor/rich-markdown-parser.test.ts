@@ -5,7 +5,12 @@
  */
 import type { JSONContent } from '@tiptap/core';
 import { describe, expect, it } from 'vitest';
-import { parseMarkdownForRichLoad } from '@/components/BEditor/utils/richMarkdownParser';
+import {
+  getRichParseEngineCacheSize,
+  parseMarkdownForRichLoad,
+  releaseRichParseEngine,
+  RICH_PARSE_ENGINE_CACHE_LIMIT
+} from '@/components/BEditor/utils/richMarkdownParser';
 
 /**
  * 提取 JSONContent 树中的纯文本内容。
@@ -120,6 +125,20 @@ function countMarks(node: JSONContent, markType: string): number {
 }
 
 describe('BEditor rich Markdown parser', (): void => {
+  it('bounds parse engines and releases one editor explicitly', async (): Promise<void> => {
+    const editorIds = Array.from({ length: 100 }, (_value, index): string => `bounded-engine-${index}`);
+
+    for (const editorId of editorIds) {
+      // eslint-disable-next-line no-await-in-loop -- 顺序创建用于验证 LRU 上限。
+      await parseMarkdownForRichLoad(`# ${editorId}`, editorId, '1');
+    }
+
+    expect(getRichParseEngineCacheSize()).toBe(RICH_PARSE_ENGINE_CACHE_LIMIT);
+
+    editorIds.forEach(releaseRichParseEngine);
+    expect(getRichParseEngineCacheSize()).toBe(0);
+  });
+
   it('does not create strikethrough marks for ATDD single-tilde ranges', async (): Promise<void> => {
     const markdown = ['REQ-5/6/7→ATDD-1~3、REQ-8/9/10→ATDD-4~6、REQ-12~16→ATDD-8~11。', '', '显式删除线仍应生效：~~已删除~~。'].join('\n');
 

@@ -1071,6 +1071,9 @@ export interface AgentTaskProjectionPump {
   enqueue(taskId: string): void;
 }
 
+/** Task 投影 Pump 最多保留的已发布序列数。 */
+export const AGENT_TASK_PROJECTION_CACHE_LIMIT = 512;
+
 /**
  * 创建不影响持久化返回值的 Task 投影 Pump。
  * @param input - 投影、发布、报告和调度依赖
@@ -1090,6 +1093,21 @@ export function createTaskProjectionPump(input: {
   const lastPublished = new Map<string, number>();
   const schedule = input.schedule ?? queueMicrotask;
   let scheduled = false;
+
+  /**
+   * 记录最近发布序列，并淘汰最旧 Task 去重状态。
+   * @param taskId - Task 身份
+   * @param taskSequence - 已发布序列
+   */
+  function rememberPublishedTask(taskId: string, taskSequence: number): void {
+    lastPublished.delete(taskId);
+    lastPublished.set(taskId, taskSequence);
+    while (lastPublished.size > AGENT_TASK_PROJECTION_CACHE_LIMIT) {
+      const oldestTaskId = lastPublished.keys().next().value;
+      if (typeof oldestTaskId !== 'string') break;
+      lastPublished.delete(oldestTaskId);
+    }
+  }
 
   /**
    * 吞掉错误报告器自身异常。
@@ -1118,7 +1136,7 @@ export function createTaskProjectionPump(input: {
           task,
           taskSequence: task.taskSequence
         });
-        lastPublished.set(taskId, task.taskSequence);
+        rememberPublishedTask(taskId, task.taskSequence);
       } catch {
         pending.add(taskId);
         report('agent_task_projection_publish_failed');

@@ -27,6 +27,7 @@ import type { Message } from '@/components/BChat/utils/types';
 import { getElectronAPI, unwrap } from '@/shared/platform/electron-api';
 import { createChatRecentId } from '@/shared/storage';
 import { isDatabaseInitializationRaceError, retryDuringDatabaseInitialization } from '@/shared/storage/utils/database';
+import { useChatAgentTaskStore } from '@/stores/chat/agentTask';
 import { useRecentStore } from '@/stores/workspace/recent';
 import { asyncTo } from '@/utils/asyncTo';
 import { useTodoStore } from './todo';
@@ -690,6 +691,7 @@ export const useChatSessionStore = defineStore('chat', {
         unwrap(result);
       });
       this.sessions = removeSession(this.sessions, sessionId);
+      useChatAgentTaskStore().releaseSession(sessionId);
       await asyncTo(useRecentStore().removeFile(createChatRecentId(sessionId)));
 
       // 级联清理该会话的 todo 数据（在 unwrap 成功后执行，try-catch 防止中断删除流程）

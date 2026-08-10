@@ -207,4 +207,15 @@ describe('webview recent record', () => {
 
     wrapper.unmount();
   });
+
+  it('cancels a pending recent-record write when the page unmounts', async (): Promise<void> => {
+    const wrapper = mountWebviewPage();
+    const element = webviewElementHolder.value;
+
+    element?.dispatchEvent(createNavigateEvent('https://example.com'));
+    wrapper.unmount();
+    await vi.advanceTimersByTimeAsync(350);
+
+    expect(addWebviewRecordMock).not.toHaveBeenCalled();
+  });
 });

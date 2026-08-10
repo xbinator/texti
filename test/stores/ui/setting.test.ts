@@ -8,18 +8,25 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { local } from '@/shared/storage/base';
 import { useSettingStore } from '@/stores/ui/setting';
 
+/** 系统主题监听注册 mock。 */
+const addThemeListener = vi.fn<(_type: string, _listener: (event: MediaQueryListEvent) => void) => void>();
+/** 系统主题监听移除 mock。 */
+const removeThemeListener = vi.fn<(_type: string, _listener: (event: MediaQueryListEvent) => void) => void>();
+
 describe('setting store persistence', (): void => {
   beforeEach((): void => {
     localStorage.clear();
     document.documentElement.style.fontSize = '';
     document.documentElement.style.removeProperty('--font-sans');
+    addThemeListener.mockReset();
+    removeThemeListener.mockReset();
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       writable: true,
       value: vi.fn().mockReturnValue({
         matches: false,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn()
+        addEventListener: addThemeListener,
+        removeEventListener: removeThemeListener
       })
     });
     Object.defineProperty(window, 'electronAPI', {
@@ -110,5 +117,19 @@ describe('setting store persistence', (): void => {
     settingStore.setDefaultFontStyle('theme');
 
     expect(document.documentElement.style.getPropertyValue('--font-sans')).toBe('');
+  });
+
+  it('keeps one system-theme listener across repeated initialization and disposes it', (): void => {
+    const settingStore = useSettingStore();
+
+    settingStore.initTheme();
+    const firstListener = addThemeListener.mock.calls[0]?.[1];
+    settingStore.initTheme();
+    const secondListener = addThemeListener.mock.calls[1]?.[1];
+
+    expect(removeThemeListener).toHaveBeenCalledWith('change', firstListener);
+    settingStore.disposeTheme();
+    expect(removeThemeListener).toHaveBeenCalledWith('change', secondListener);
+    expect(removeThemeListener).toHaveBeenCalledTimes(2);
   });
 });

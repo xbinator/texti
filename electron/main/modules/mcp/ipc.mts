@@ -7,6 +7,7 @@ import { ipcMain, BrowserWindow } from 'electron';
 import {
   connectMcpServer,
   disconnectMcpServer,
+  forgetMcpServer,
   getMcpDiscoveryCache,
   getMcpStatus,
   refreshMcpDiscovery,
@@ -33,6 +34,7 @@ export function registerMcpHandlers(): void {
   ipcMain.handle('tools:mcp:refresh-discovery', async (_event, server: MCPServerConfig) => refreshMcpDiscovery(server));
   ipcMain.handle('tools:mcp:connect', async (_event, server: MCPServerConfig) => connectMcpServer(server));
   ipcMain.handle('tools:mcp:disconnect', (_event, serverId: string) => disconnectMcpServer(serverId));
+  ipcMain.handle('tools:mcp:forget', (_event, serverId: string) => forgetMcpServer(serverId));
   ipcMain.handle('tools:mcp:restart', async (_event, server: MCPServerConfig) => restartMcpServer(server));
 
   ipcMain.handle('tools:mcp:oauth:start', async (_event, server: MCPServerConfig) => {

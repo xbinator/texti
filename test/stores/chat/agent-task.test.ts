@@ -167,6 +167,85 @@ describe('useChatAgentTaskStore', (): void => {
     expect(store.tasksById['task-1']).toMatchObject({ summary: 'event' });
   });
 
+  it('releases only the selected Session projection and runtime metadata', (): void => {
+    const store = useChatAgentTaskStore();
+    const firstTask = createDetail({ taskSequence: 2 });
+    const secondTask = createDetail({
+      taskId: 'task-2',
+      sessionId: 'session-2',
+      turnId: 'turn-2',
+      checkpointId: 'checkpoint-2',
+      assistantMessageId: 'assistant-2',
+      toolCallId: 'tool-call-2',
+      agentId: 'agent-2',
+      taskSequence: 3
+    });
+    store.applyDetail(firstTask);
+    store.applyDetail(secondTask);
+    store.loadedSessions['session-1'] = true;
+    store.loadedSessions['session-2'] = true;
+    store.staleSessions['session-1'] = true;
+    store.incompatibleSessions['session-1'] = true;
+    store.sessionNextCursors['session-1'] = 'cursor-1';
+
+    store.releaseSession('session-1');
+
+    expect(store.tasksById['task-1']).toBeUndefined();
+    expect(store.detailsById['task-1']).toBeUndefined();
+    expect(store.taskCursors['task-1']).toBeUndefined();
+    expect(store.findTask('session-1', 'assistant-1', 'tool-call-1')).toBeUndefined();
+    expect(store.loadedSessions['session-1']).toBeUndefined();
+    expect(store.staleSessions['session-1']).toBeUndefined();
+    expect(store.incompatibleSessions['session-1']).toBeUndefined();
+    expect(store.sessionNextCursors['session-1']).toBeUndefined();
+    expect(store.tasksById['task-2']).toBeDefined();
+    expect(store.detailsById['task-2']).toBeDefined();
+    expect(store.loadedSessions['session-2']).toBe(true);
+  });
+
+  it('does not restore a released Session from a late list response', async (): Promise<void> => {
+    const deferred = createDeferred<ChatAgentHandlerResult<ChatAgentListTasksResult>>();
+    agentAPI.listTasks.mockReturnValue(deferred.promise);
+    const store = useChatAgentTaskStore();
+    const recovery = store.ensureSession('session-1');
+    await Promise.resolve();
+
+    store.releaseSession('session-1');
+    deferred.resolve(createPage([createSummary({ taskSequence: 4 })], 'cursor-late'));
+    await recovery;
+
+    expect(store.tasksById['task-1']).toBeUndefined();
+    expect(store.loadedSessions['session-1']).toBeUndefined();
+    expect(store.sessionNextCursors['session-1']).toBeUndefined();
+  });
+
+  it('returns all projections to zero after 100 Session lifecycle cycles', (): void => {
+    const store = useChatAgentTaskStore();
+
+    for (let index = 0; index < 100; index += 1) {
+      const sessionId = `stress-session-${index}`;
+      const taskId = `stress-task-${index}`;
+      store.applyDetail(
+        createDetail({
+          taskId,
+          sessionId,
+          turnId: `stress-turn-${index}`,
+          checkpointId: `stress-checkpoint-${index}`,
+          assistantMessageId: `stress-assistant-${index}`,
+          toolCallId: `stress-tool-${index}`,
+          agentId: `stress-agent-${index}`
+        })
+      );
+      store.loadedSessions[sessionId] = true;
+      store.releaseSession(sessionId);
+    }
+
+    expect(Object.keys(store.tasksById)).toHaveLength(0);
+    expect(Object.keys(store.detailsById)).toHaveLength(0);
+    expect(Object.keys(store.taskCursors)).toHaveLength(0);
+    expect(Object.keys(store.loadedSessions)).toHaveLength(0);
+  });
+
   it('ignores duplicate and lower sequences but accepts a sequence jump', (): void => {
     const store = useChatAgentTaskStore();
     expect(store.applySummary(createSummary({ taskSequence: 4 }))).toBe('applied');

@@ -94,6 +94,22 @@ export function setStatus(serverId: string, runtimeStatus: MCPRuntimeStatus, dis
 }
 
 /**
+ * 删除指定 server 的运行状态。
+ * @param serverId - server ID
+ */
+export function deleteStatus(serverId: string): void {
+  statusByServerId.delete(serverId);
+}
+
+/**
+ * 获取当前实际缓存的状态数量，用于生命周期诊断与压力验证。
+ * @returns 状态缓存条目数
+ */
+export function getStatusCount(): number {
+  return statusByServerId.size;
+}
+
+/**
  * 清除所有状态，主要用于测试。
  */
 export function clearAllStatus(): void {

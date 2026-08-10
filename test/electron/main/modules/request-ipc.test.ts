@@ -4,8 +4,41 @@
  */
 import type { RequestInput } from 'types/request';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { REQUEST_MAX_RESPONSE_BYTES } from '../../../../electron/main/modules/request/core/constants.mts';
+import { REQUEST_MAX_CONCURRENT, REQUEST_MAX_PENDING, REQUEST_MAX_RESPONSE_BYTES } from '../../../../electron/main/modules/request/core/constants.mts';
+import { createRequestQueue } from '../../../../electron/main/modules/request/core/queue.mts';
+import { registerRequestHandlers } from '../../../../electron/main/modules/request/ipc.mts';
 import { runRequest } from '../../../../electron/main/modules/request/service.mts';
+
+/** IPC handler 注册替身。 */
+const ipcHandleMock = vi.hoisted(() => vi.fn());
+
+vi.mock('electron', () => ({
+  ipcMain: {
+    handle: ipcHandleMock
+  }
+}));
+
+/** 测试用 request IPC sender。 */
+interface RequestSenderFixture {
+  /** WebContents ID。 */
+  id: number;
+  /** 注册一次性销毁监听。 */
+  once: (eventName: 'destroyed', listener: () => void) => void;
+}
+
+/** request IPC handler。 */
+type RequestHandler = (event: { sender: RequestSenderFixture }, request: RequestInput) => Promise<unknown>;
+
+/**
+ * 读取 request IPC handler。
+ * @returns 已注册 handler
+ */
+function getRequestHandler(): RequestHandler {
+  registerRequestHandlers();
+  const registration = ipcHandleMock.mock.calls.find(([channel]) => channel === 'request:send');
+  if (typeof registration?.[1] !== 'function') throw new Error('request:send handler should be registered');
+  return registration[1] as RequestHandler;
+}
 
 afterEach((): void => {
   vi.useRealTimers();
@@ -233,7 +266,7 @@ describe('runRequest', (): void => {
     expect(maxRunningCount).toBe(4);
   });
 
-  it('keeps accepting waiting requests without a max queue size cap', async (): Promise<void> => {
+  it('rejects requests after the bounded waiting queue is full', async (): Promise<void> => {
     const releaseCallbacks: Array<() => void> = [];
     const fetchMock = vi.fn<typeof globalThis.fetch>().mockImplementation(async (): Promise<Response> => {
       await new Promise<void>((resolve) => {
@@ -243,12 +276,74 @@ describe('runRequest', (): void => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const requests = Array.from({ length: 40 }, (_item, index): Promise<unknown> => runRequest({ method: 'GET', url: `https://api.example.com/${index}` }));
+    const acceptedCount = REQUEST_MAX_CONCURRENT + REQUEST_MAX_PENDING;
+    const requests = Array.from(
+      { length: acceptedCount },
+      (_item, index): Promise<unknown> => runRequest({ method: 'GET', url: `https://api.example.com/${index}` })
+    );
+    const overflowRequest = runRequest({ method: 'GET', url: 'https://api.example.com/overflow' });
+    const overflowExpectation = expect(overflowRequest).rejects.toThrow('请求队列已满');
 
     await waitForRequestQueue();
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(REQUEST_MAX_CONCURRENT);
+    await overflowExpectation;
 
-    await releaseQueuedRequests(40, releaseCallbacks);
-    await expect(Promise.all(requests)).resolves.toHaveLength(40);
+    await releaseQueuedRequests(acceptedCount, releaseCallbacks);
+    await expect(Promise.all(requests)).resolves.toHaveLength(acceptedCount);
+  });
+
+  it('removes an aborted task while it is still waiting in the queue', async (): Promise<void> => {
+    const queue = createRequestQueue(1, 1);
+    let releaseActive = (): void => undefined;
+    const activeTask = queue.add(
+      async (): Promise<string> =>
+        new Promise<string>((resolve): void => {
+          releaseActive = (): void => resolve('active');
+        })
+    );
+    const controller = new AbortController();
+    const waitingTask = queue.add(async (): Promise<string> => 'waiting', { signal: controller.signal });
+
+    controller.abort(new Error('sender destroyed'));
+
+    await expect(waitingTask).rejects.toThrow('sender destroyed');
+    releaseActive();
+    await expect(activeTask).resolves.toBe('active');
+  });
+
+  it('returns to zero retained tasks after 100 queue lifecycle cycles', async (): Promise<void> => {
+    const queue = createRequestQueue(2, 4);
+
+    for (let index = 0; index < 100; index += 1) {
+      // eslint-disable-next-line no-await-in-loop -- 压力验证每轮完整结束后队列计数归零。
+      await queue.add(async (): Promise<number> => index);
+    }
+
+    expect(queue.getActiveCount()).toBe(0);
+    expect(queue.getPendingCount()).toBe(0);
+  });
+
+  it('aborts every owned request when the invoking webContents is destroyed', async (): Promise<void> => {
+    let handleDestroyed = (): void => undefined;
+    const sender: RequestSenderFixture = {
+      id: 71,
+      once: (_eventName, listener): void => {
+        handleDestroyed = listener;
+      }
+    };
+    const fetchMock = vi.fn<typeof globalThis.fetch>().mockImplementation((_input, init): Promise<Response> => {
+      return new Promise<Response>((_resolve, reject): void => {
+        init?.signal?.addEventListener('abort', (): void => reject(init.signal?.reason));
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const handler = getRequestHandler();
+    const request = handler({ sender }, { method: 'GET', url: 'https://api.example.com/owned' });
+    const requestExpectation = expect(request).rejects.toThrow('请求调用方已销毁');
+    await waitForRequestQueue();
+
+    handleDestroyed();
+
+    await requestExpectation;
   });
 });

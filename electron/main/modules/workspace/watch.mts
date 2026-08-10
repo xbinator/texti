@@ -149,12 +149,18 @@ export function isDirectoryWatchMatch(filePath: string, globPattern?: string, ro
 /**
  * 主进程文件监听服务，支持多个路径同时监听。
  */
-class FileWatchService {
+export class FileWatchService {
   /** 按文件路径保存已创建的 watcher。 */
   private readonly watchers = new Map<string, FileWatcher>();
 
   /** 按目录路径保存已创建的目录 watcher。 */
   private readonly directoryWatchers = new Map<string, FileWatcher>();
+
+  /** 按文件路径保存当前 owner 集合。 */
+  private readonly fileOwners = new Map<string, Set<number>>();
+
+  /** 按目录 watcher key 保存当前 owner 集合。 */
+  private readonly directoryOwners = new Map<string, Set<number>>();
 
   /** unlink 防抖定时器，用于合并 git 回退等场景的 unlink → add 序列。 */
   private readonly pendingUnlinks = new Map<string, NodeJS.Timeout>();
@@ -174,8 +180,12 @@ class FileWatchService {
   /**
    * 注册指定路径的文件监听；重复注册同一路径时保持幂等。
    * @param filePath - 需要监听的文件路径
+   * @param ownerId - 调用方 WebContents ID
    */
-  async watch(filePath: string): Promise<void> {
+  async watch(filePath: string, ownerId: number): Promise<void> {
+    const owners = this.fileOwners.get(filePath) ?? new Set<number>();
+    owners.add(ownerId);
+    this.fileOwners.set(filePath, owners);
     if (this.watchers.has(filePath)) return;
 
     const watcher = chokidar.watch(filePath, {
@@ -196,6 +206,8 @@ class FileWatchService {
     });
 
     watcher.on('unlink', (removedPath: string) => {
+      const previousTimer = this.pendingUnlinks.get(removedPath);
+      if (previousTimer) clearTimeout(previousTimer);
       const timer = setTimeout(() => {
         this.pendingUnlinks.delete(removedPath);
 
@@ -232,12 +244,23 @@ class FileWatchService {
   /**
    * 停止监听指定路径。
    * @param filePath - 需要停止监听的文件路径
+   * @param ownerId - 调用方 WebContents ID
    */
-  async unwatch(filePath: string): Promise<void> {
+  async unwatch(filePath: string, ownerId: number): Promise<void> {
+    const owners = this.fileOwners.get(filePath);
+    owners?.delete(ownerId);
+    if (owners && owners.size > 0) return;
+    this.fileOwners.delete(filePath);
+
     const watcher = this.watchers.get(filePath);
     if (!watcher) return;
 
     this.watchers.delete(filePath);
+    const pendingTimer = this.pendingUnlinks.get(filePath);
+    if (pendingTimer) {
+      clearTimeout(pendingTimer);
+      this.pendingUnlinks.delete(filePath);
+    }
     await watcher.close();
   }
 
@@ -245,9 +268,13 @@ class FileWatchService {
    * 注册指定目录的监听，文件变化时广播 skill:changed 事件。
    * @param dirPath - 需要监听的目录路径
    * @param globPattern - 可选文件匹配模式；为空时匹配目录内普通文件
+   * @param ownerId - 调用方 WebContents ID
    */
-  async watchDirectory(dirPath: string, globPattern?: string): Promise<void> {
+  async watchDirectory(dirPath: string, globPattern: string | undefined, ownerId: number): Promise<void> {
     const watcherKey = `${dirPath}:${globPattern ?? ''}`;
+    const owners = this.directoryOwners.get(watcherKey) ?? new Set<number>();
+    owners.add(ownerId);
+    this.directoryOwners.set(watcherKey, owners);
     if (this.directoryWatchers.has(watcherKey)) return;
 
     const watcher = chokidar.watch(dirPath, createDirectoryWatchOptions());
@@ -294,9 +321,15 @@ class FileWatchService {
    * 停止监听指定目录。
    * @param dirPath - 需要停止监听的目录路径
    * @param globPattern - 可选文件匹配模式；为空时匹配目录内普通文件
+   * @param ownerId - 调用方 WebContents ID
    */
-  async unwatchDirectory(dirPath: string, globPattern?: string): Promise<void> {
+  async unwatchDirectory(dirPath: string, globPattern: string | undefined, ownerId: number): Promise<void> {
     const watcherKey = `${dirPath}:${globPattern ?? ''}`;
+    const owners = this.directoryOwners.get(watcherKey);
+    owners?.delete(ownerId);
+    if (owners && owners.size > 0) return;
+    this.directoryOwners.delete(watcherKey);
+
     const watcher = this.directoryWatchers.get(watcherKey);
     if (!watcher) return;
 
@@ -317,13 +350,44 @@ class FileWatchService {
   }
 
   /**
+   * 释放指定 WebContents 持有的全部文件与目录 watcher。
+   * @param ownerId - 已销毁 WebContents ID
+   */
+  async releaseOwner(ownerId: number): Promise<void> {
+    const filePaths = [...this.fileOwners.entries()]
+      .filter(([, owners]: [string, Set<number>]): boolean => owners.has(ownerId))
+      .map(([filePath]: [string, Set<number>]): string => filePath);
+    const directoryEntries = [...this.directoryOwners.entries()]
+      .filter(([, owners]: [string, Set<number>]): boolean => owners.has(ownerId))
+      .map(([watcherKey]: [string, Set<number>]): [string, string | undefined] => {
+        const separatorIndex = watcherKey.lastIndexOf(':');
+        const globPattern = watcherKey.slice(separatorIndex + 1) || undefined;
+        return [watcherKey.slice(0, separatorIndex), globPattern];
+      });
+
+    await Promise.all([
+      ...filePaths.map((filePath: string): Promise<void> => this.unwatch(filePath, ownerId)),
+      ...directoryEntries.map(([dirPath, globPattern]: [string, string | undefined]): Promise<void> => this.unwatchDirectory(dirPath, globPattern, ownerId))
+    ]);
+  }
+
+  /**
    * 停止所有文件监听，用于应用退出或 watcher store dispose。
    */
-  async unwatchAll(): Promise<void> {
+  async unwatchAll(ownerId?: number): Promise<void> {
+    if (ownerId !== undefined) {
+      await this.releaseOwner(ownerId);
+      return;
+    }
+
     const fileWatchers = Array.from(this.watchers.values());
     const dirWatchers = Array.from(this.directoryWatchers.values());
     this.watchers.clear();
     this.directoryWatchers.clear();
+    this.fileOwners.clear();
+    this.directoryOwners.clear();
+    this.pendingUnlinks.forEach((timer: NodeJS.Timeout): void => clearTimeout(timer));
+    this.pendingUnlinks.clear();
     await Promise.all([...fileWatchers, ...dirWatchers].map((w) => w.close()));
   }
 }

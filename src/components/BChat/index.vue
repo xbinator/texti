@@ -277,7 +277,8 @@ watch(
 );
 watch(
   activeSessionId,
-  (sessionId: string | null): void => {
+  (sessionId: string | null, previousSessionId: string | null | undefined): void => {
+    if (previousSessionId && previousSessionId !== sessionId) agentTaskStore.releaseSession(previousSessionId);
     if (!sessionId) return;
     // 只使用运行时权威 activeSessionId，覆盖内部首轮创建但宿主尚未回写的窗口。
     agentTaskStore.ensureSession(sessionId);
@@ -670,6 +671,8 @@ const { handleSlashCommand } = useSlashCommands({
 onUnmounted((): void => {
   workflow.dispose();
   confirmationController.dispose();
+  const sessionId = activeSessionId.value;
+  if (sessionId) agentTaskStore.releaseSession(sessionId);
 });
 
 /** 暴露页面宿主管理会话所需的最小控制面。 */

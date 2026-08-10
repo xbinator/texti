@@ -5,6 +5,7 @@
 export {
   connectMcpServer,
   disconnectMcpServer,
+  forgetMcpServer,
   restartMcpServer,
   refreshMcpDiscovery,
   executeMcpTool,

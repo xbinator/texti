@@ -2,8 +2,9 @@
  * @file use-auto-name.test.ts
  * @description useAutoName Hook 单元测试，覆盖快照采集、防抖调度、chat 模型复用与标题持久化。
  */
+import { effectScope } from 'vue';
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { useAutoName } from '@/components/BChat/hooks/useAutoName';
+import { AUTO_NAME_PENDING_LIMIT, AUTO_NAME_SESSION_LIMIT, useAutoName } from '@/components/BChat/hooks/useAutoName';
 import { storeEvents } from '@/stores/helpers/events';
 
 /** mock ChatRuntime 自动命名命令。 */
@@ -160,6 +161,26 @@ describe('useAutoName', () => {
       expect(mockChatRuntimeAutoName).toHaveBeenCalledTimes(1);
     });
 
+    it('bounds completed Session retention and evicts the oldest identity', async (): Promise<void> => {
+      mockChatRuntimeAutoName.mockResolvedValue({ ok: true, data: { status: 'success', title: '压力标题' } });
+      const { captureSnapshot, scheduleAutoName } = useAutoName(createOptions());
+
+      for (let index = 0; index <= AUTO_NAME_SESSION_LIMIT; index += 1) {
+        const snapshot = captureSnapshot({ content: `AI回复-${index}` }, `session-${index}`);
+        if (!snapshot) throw new Error('auto_name_snapshot_missing');
+        scheduleAutoName(snapshot, () => false);
+        // eslint-disable-next-line no-await-in-loop -- 每轮需完成命名才能压力验证已完成会话留存上限。
+        await vi.advanceTimersByTimeAsync(300);
+      }
+
+      const oldestSnapshot = captureSnapshot({ content: '重新命名' }, 'session-0');
+      if (!oldestSnapshot) throw new Error('oldest_auto_name_snapshot_missing');
+      scheduleAutoName(oldestSnapshot, () => false);
+      await vi.advanceTimersByTimeAsync(300);
+
+      expect(mockChatRuntimeAutoName).toHaveBeenCalledTimes(AUTO_NAME_SESSION_LIMIT + 2);
+    });
+
     it('calls onTitlePersisted after successful naming', async (): Promise<void> => {
       mockChatRuntimeAutoName.mockResolvedValue({ ok: true, data: { status: 'success', title: '持久化测试' } });
 
@@ -208,6 +229,34 @@ describe('useAutoName', () => {
   // ─── 防抖调度 ───
 
   describe('debounce scheduling', () => {
+    it('bounds simultaneously pending Session timers', (): void => {
+      const { captureSnapshot, scheduleAutoName } = useAutoName(createOptions());
+
+      for (let index = 0; index <= AUTO_NAME_PENDING_LIMIT; index += 1) {
+        const snapshot = captureSnapshot({ content: `AI回复-${index}` }, `pending-session-${index}`);
+        if (!snapshot) throw new Error('pending_auto_name_snapshot_missing');
+        scheduleAutoName(snapshot, () => true);
+      }
+
+      expect(vi.getTimerCount()).toBe(AUTO_NAME_PENDING_LIMIT);
+      vi.clearAllTimers();
+    });
+
+    it('cancels pending naming tasks when the owning scope is disposed', async (): Promise<void> => {
+      const scope = effectScope();
+      const autoName = scope.run(() => useAutoName(createOptions()));
+      if (!autoName) throw new Error('auto_name_scope_missing');
+      const snapshot = autoName.captureSnapshot({ content: 'AI回复' }, 'session-1');
+      if (!snapshot) throw new Error('auto_name_snapshot_missing');
+      autoName.scheduleAutoName(snapshot, () => true);
+
+      scope.stop();
+      await vi.advanceTimersByTimeAsync(900);
+
+      expect(mockChatRuntimeAutoName).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
     it('delays naming by 300ms', async (): Promise<void> => {
       mockChatRuntimeAutoName.mockResolvedValue({ ok: true, data: { status: 'success', title: '延迟标题' } });
 

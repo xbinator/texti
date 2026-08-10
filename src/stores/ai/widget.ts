@@ -12,6 +12,8 @@ import { asyncTo } from '@/utils/asyncTo';
 
 /** localStorage 持久化键名。 */
 const STORAGE_KEY_DISABLED_IDS = 'widget.disabledIds';
+/** 每个 Store 实例最多保留的文件操作水位数量。 */
+export const RESOURCE_OPERATION_CACHE_LIMIT = 512;
 
 /**
  * 从 localStorage 加载数据。
@@ -101,6 +103,29 @@ export const useWidgetStore = defineStore('widget', () => {
   }
 
   /**
+   * 记录路径最新操作水位，并按最近写入顺序淘汰旧记录。
+   * @param filePath - Widget 文件路径
+   * @param operation - 已成功写回的操作序号
+   */
+  function recordResourceOperation(filePath: string, operation: number): void {
+    appliedOperationByPath.delete(filePath);
+    appliedOperationByPath.set(filePath, operation);
+    while (appliedOperationByPath.size > RESOURCE_OPERATION_CACHE_LIMIT) {
+      const oldestPath = appliedOperationByPath.keys().next().value;
+      if (oldestPath === undefined) break;
+      appliedOperationByPath.delete(oldestPath);
+    }
+  }
+
+  /**
+   * 获取当前保留的文件操作水位数量。
+   * @returns 文件操作水位数量
+   */
+  function getResourceOperationCount(): number {
+    return appliedOperationByPath.size;
+  }
+
+  /**
    * 判断小组件是否被用户持久化禁用。
    * @param id - 小组件 ID
    * @returns 是否禁用
@@ -121,7 +146,7 @@ export const useWidgetStore = defineStore('widget', () => {
     }
 
     const operation = nextResourceOperation();
-    appliedOperationByPath.set(widget.filePath, operation);
+    recordResourceOperation(widget.filePath, operation);
     widget.enabled = !widget.enabled;
     persistDisabledIds();
   }
@@ -153,7 +178,7 @@ export const useWidgetStore = defineStore('widget', () => {
     }
 
     if (filePath) {
-      appliedOperationByPath.set(filePath, operation);
+      recordResourceOperation(filePath, operation);
     }
 
     // unlink 事件只按文件路径匹配；其它事件允许按 filePath 或 id 兜底
@@ -397,6 +422,7 @@ export const useWidgetStore = defineStore('widget', () => {
     syncDirtyFromDisk,
     resolveLatestEnabledWidget,
     rescan,
-    waitForInit
+    waitForInit,
+    getResourceOperationCount
   };
 });

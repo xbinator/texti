@@ -12,6 +12,9 @@ import type {
 import { AGENT_MAX_DIFF_BYTES, hashAgentPayload, hashAgentText } from './contracts.mjs';
 import { AgentStoreProtocolError, type AgentDelegationStore, type CreateAgentConfirmationInput, type ResolveAgentConfirmationInput } from './types.mjs';
 
+/** Confirmation queue 最多保留的已发布 revision 数量。 */
+export const CONFIRMATION_REVISION_CACHE_LIMIT = 512;
+
 /** Confirmation queue 允许调用的最小持久化 Store 能力。 */
 export type AgentConfirmationQueueStore = Pick<
   AgentDelegationStore,
@@ -72,6 +75,12 @@ export interface AgentConfirmationQueue {
   listPending(): ChatAgentConfirmationSnapshot[];
   /** 启动或 Renderer 恢复时重发全部 pending 事实，不创建 waiter。 */
   recover(): void;
+}
+
+/** Confirmation queue 内存留存诊断能力。 */
+export interface AgentConfirmationDiagnostics {
+  /** @returns 当前保留的已发布 revision 数量。 */
+  getPublishedRevisionCount(): number;
 }
 
 /**
@@ -147,9 +156,24 @@ function projectDecision(snapshot: ChatAgentConfirmationSnapshot): AgentConfirma
  * @param dependencies - Store、diff 读取器与发布器
  * @returns confirmation queue
  */
-export function createAgentConfirmationQueue(dependencies: AgentConfirmationQueueDependencies): AgentConfirmationQueue {
+export function createAgentConfirmationQueue(dependencies: AgentConfirmationQueueDependencies): AgentConfirmationQueue & AgentConfirmationDiagnostics {
   const waiters = new Map<string, Set<ConfirmationWaiter>>();
   const publishedRevisions = new Map<string, string>();
+
+  /**
+   * 记录最近发布 revision，并淘汰最旧历史。
+   * @param confirmationId - confirmation 身份
+   * @param revision - 已发布 revision
+   */
+  function rememberPublishedRevision(confirmationId: string, revision: string): void {
+    publishedRevisions.delete(confirmationId);
+    publishedRevisions.set(confirmationId, revision);
+    while (publishedRevisions.size > CONFIRMATION_REVISION_CACHE_LIMIT) {
+      const oldestConfirmationId = publishedRevisions.keys().next().value;
+      if (oldestConfirmationId === undefined) break;
+      publishedRevisions.delete(oldestConfirmationId);
+    }
+  }
 
   /**
    * 发布新权威版本；Renderer 不在线时持久化事实仍保持有效。
@@ -165,7 +189,7 @@ export function createAgentConfirmationQueue(dependencies: AgentConfirmationQueu
         type: 'confirmation.updated',
         confirmation: snapshot
       });
-      publishedRevisions.set(snapshot.confirmationId, revision);
+      rememberPublishedRevision(snapshot.confirmationId, revision);
     } catch {
       // Renderer event 是可由 listPending 补偿的投影，发布失败不能回滚持久化决议。
     }
@@ -246,6 +270,10 @@ export function createAgentConfirmationQueue(dependencies: AgentConfirmationQueu
       dependencies.store.listPendingConfirmations().forEach((record): void => {
         publishSnapshot(projectConfirmation(record, dependencies.readUnifiedDiff), true);
       });
+    },
+
+    getPublishedRevisionCount(): number {
+      return publishedRevisions.size;
     }
   };
 }

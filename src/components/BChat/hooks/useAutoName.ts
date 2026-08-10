@@ -2,13 +2,19 @@
  * @file useAutoName.ts
  * @description 负责首轮会话的自动命名快照冻结、延迟调度与标题持久化
  */
-import { ref } from 'vue';
+import { getCurrentScope, onScopeDispose, ref } from 'vue';
 import type { Message } from '@/components/BChat/utils/types';
 import { getElectronAPI } from '@/shared/platform/electron-api';
 import { storeEvents } from '@/stores/helpers/events';
 import { asyncTo } from '@/utils/asyncTo';
 
 const DEBOUNCE_MS = 300;
+
+/** 最多保留的已完成自动命名会话数。 */
+export const AUTO_NAME_SESSION_LIMIT = 256;
+
+/** 最多同时保留的待执行自动命名任务数。 */
+export const AUTO_NAME_PENDING_LIMIT = 8;
 
 /**
  * 自动命名快照。
@@ -59,6 +65,47 @@ export function useAutoName(options: AutoNameOptions): {
   const pendingTasks = ref(new Map<string, PendingAutoNameTask>());
   /** Electron API。 */
   const electronAPI = getElectronAPI();
+  /** 所属 Vue scope 是否已释放。 */
+  let disposed = false;
+
+  /** 清理全部待命名定时器和会话去重状态。 */
+  function disposeAutoName(): void {
+    disposed = true;
+    for (const task of pendingTasks.value.values()) {
+      if (task.timer) clearTimeout(task.timer);
+    }
+    pendingTasks.value.clear();
+    namedSessionIds.value.clear();
+  }
+
+  if (getCurrentScope()) onScopeDispose(disposeAutoName);
+
+  /**
+   * 记录已完成会话并淘汰最旧去重标记。
+   * @param sessionId - 已命名会话 ID
+   */
+  function rememberNamedSession(sessionId: string): void {
+    namedSessionIds.value.delete(sessionId);
+    namedSessionIds.value.add(sessionId);
+    while (namedSessionIds.value.size > AUTO_NAME_SESSION_LIMIT) {
+      const oldestSessionId = namedSessionIds.value.values().next().value;
+      if (typeof oldestSessionId !== 'string') break;
+      namedSessionIds.value.delete(oldestSessionId);
+    }
+  }
+
+  /**
+   * 为新会话预留待执行槽位，并取消超出上限的最旧定时器。
+   */
+  function reservePendingSlot(): void {
+    while (pendingTasks.value.size >= AUTO_NAME_PENDING_LIMIT) {
+      const oldestSessionId = pendingTasks.value.keys().next().value;
+      if (typeof oldestSessionId !== 'string') break;
+      const oldestTask = pendingTasks.value.get(oldestSessionId);
+      if (oldestTask?.timer) clearTimeout(oldestTask.timer);
+      pendingTasks.value.delete(oldestSessionId);
+    }
+  }
 
   /**
    * 在任何异步持久化之前冻结会话 ID 与首轮内容。
@@ -84,7 +131,7 @@ export function useAutoName(options: AutoNameOptions): {
    * @param snapshot - 已冻结的首轮对话快照。
    */
   async function doAutoName(snapshot: AutoNameSnapshot): Promise<void> {
-    if (namedSessionIds.value.has(snapshot.sessionId)) {
+    if (disposed || namedSessionIds.value.has(snapshot.sessionId)) {
       return;
     }
 
@@ -93,9 +140,10 @@ export function useAutoName(options: AutoNameOptions): {
       userMessage: snapshot.userMessage,
       aiResponse: snapshot.aiResponse
     });
+    if (disposed) return;
 
     if (!result.ok || result.data?.status !== 'success') {
-      namedSessionIds.value.add(snapshot.sessionId);
+      rememberNamedSession(snapshot.sessionId);
       return;
     }
 
@@ -108,7 +156,7 @@ export function useAutoName(options: AutoNameOptions): {
     storeEvents.emitChatSessionTitleUpdated(snapshot.sessionId, result.data.title);
     // 列表刷新失败不影响已完成的持久化。
     await asyncTo(Promise.resolve(options.onTitlePersisted?.(snapshot.sessionId, result.data.title)));
-    namedSessionIds.value.add(snapshot.sessionId);
+    rememberNamedSession(snapshot.sessionId);
   }
 
   /**
@@ -117,6 +165,7 @@ export function useAutoName(options: AutoNameOptions): {
    * @param isLoading - 用于判断流式是否仍在继续。
    */
   function scheduleAutoName(snapshot: AutoNameSnapshot, isLoading: () => boolean): void {
+    if (disposed) return;
     const { sessionId } = snapshot;
     const task = pendingTasks.value.get(sessionId);
 
@@ -126,6 +175,7 @@ export function useAutoName(options: AutoNameOptions): {
         clearTimeout(task.timer);
       }
     } else {
+      reservePendingSlot();
       pendingTasks.value.set(sessionId, { snapshot, timer: null });
     }
 
@@ -135,6 +185,7 @@ export function useAutoName(options: AutoNameOptions): {
     }
 
     nextTask.timer = setTimeout(async () => {
+      if (disposed) return;
       const latestTask = pendingTasks.value.get(sessionId);
       const latestSnapshot = latestTask?.snapshot ?? snapshot;
 

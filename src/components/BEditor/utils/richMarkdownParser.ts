@@ -61,6 +61,9 @@ interface RichParseEngineCache {
  */
 const RICH_PARSE_CACHE_LIMIT = 2;
 
+/** 解析引擎 LRU 上限，作为编辑器显式释放之外的异常路径兜底。 */
+export const RICH_PARSE_ENGINE_CACHE_LIMIT = 8;
+
 /** 已解析文档的结果缓存（LRU） */
 const richParseCache: RichParseCacheEntry[] = [];
 
@@ -77,6 +80,8 @@ const parseEngineCache = new Map<string, RichParseEngineCache>();
 function getOrCreateParseEngine(editorInstanceId: string): RichParseEngineCache {
   const cached = parseEngineCache.get(editorInstanceId);
   if (cached) {
+    parseEngineCache.delete(editorInstanceId);
+    parseEngineCache.set(editorInstanceId, cached);
     return cached;
   }
 
@@ -89,7 +94,31 @@ function getOrCreateParseEngine(editorInstanceId: string): RichParseEngineCache 
 
   const entry: RichParseEngineCache = { schemaExtensions, markdownManager, sourceLineTracker };
   parseEngineCache.set(editorInstanceId, entry);
+  while (parseEngineCache.size > RICH_PARSE_ENGINE_CACHE_LIMIT) {
+    const oldestEditorId = parseEngineCache.keys().next().value;
+    if (typeof oldestEditorId !== 'string') break;
+    parseEngineCache.delete(oldestEditorId);
+  }
   return entry;
+}
+
+/**
+ * 释放指定编辑器的解析引擎和结果缓存。
+ * @param editorInstanceId - 编辑器实例 ID
+ */
+export function releaseRichParseEngine(editorInstanceId: string): void {
+  parseEngineCache.delete(editorInstanceId);
+  for (let index = richParseCache.length - 1; index >= 0; index -= 1) {
+    if (richParseCache[index]?.editorInstanceId === editorInstanceId) richParseCache.splice(index, 1);
+  }
+}
+
+/**
+ * 获取当前解析引擎数量，用于生命周期诊断与压力验证。
+ * @returns 解析引擎数量
+ */
+export function getRichParseEngineCacheSize(): number {
+  return parseEngineCache.size;
 }
 
 /**

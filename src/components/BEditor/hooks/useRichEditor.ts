@@ -2,12 +2,13 @@ import type { RichLoadState, RichLoadCancelReason, RichLoadCompletePayload, Rich
 import type { SearchScrollContext } from '../extensions/editorSearch';
 import type { Transaction } from '@tiptap/pm/state';
 import type { Ref, ComputedRef } from 'vue';
-import { ref, watch, computed } from 'vue';
+import { ref, watch, computed, onScopeDispose } from 'vue';
 import { useEditor, type Editor } from '@tiptap/vue-3';
 import { noop } from 'lodash-es';
 import { normalizeEditorContent } from '../extensions/emptyContent';
 import { handleRichSelectAllKeyboardEvent } from '../extensions/richSelectAll';
 import { getPersistedMarkdown } from '../utils/editorMarkdown';
+import { releaseRichParseEngine } from '../utils/richMarkdownParser';
 import { useContent } from './useContent';
 import { useExtensions } from './useExtensions';
 import { useRichEditorLoad, EMPTY_PARAGRAPH_JSON } from './useRichEditorLoad';
@@ -43,6 +44,8 @@ export function useRichEditor({ bodyContent, editable, editorInstanceId, onConte
     onSearchMatchFocus
   });
   const editorInstanceRef = ref<Editor>();
+
+  onScopeDispose((): void => releaseRichParseEngine(editorInstanceId.value));
 
   const isLargeDocument = computed(() => (bodyContent.value?.length ?? 0) > LARGE_DOCUMENT_THRESHOLD);
 

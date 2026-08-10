@@ -24,6 +24,11 @@ export interface KeepAliveCache {
    * @returns 包装组件
    */
   getRouteCacheComponent(route: RouteLocationNormalizedLoaded): VueComponent;
+  /**
+   * 淘汰不再属于活动标签页的包装组件。
+   * @param validCacheNames - KeepAlive 当前允许保留的组件名称
+   */
+  prune(validCacheNames: readonly string[]): void;
 }
 
 /**
@@ -77,8 +82,20 @@ export function useKeepAlive(): KeepAliveCache {
     return routeCacheComponent;
   }
 
+  /**
+   * 淘汰不再属于活动标签页的包装组件。
+   * @param validCacheNames - KeepAlive 当前允许保留的组件名称
+   */
+  function prune(validCacheNames: readonly string[]): void {
+    const validNames = new Set(validCacheNames);
+    for (const cacheName of routeCacheComponents.keys()) {
+      if (!validNames.has(cacheName)) routeCacheComponents.delete(cacheName);
+    }
+  }
+
   return {
     getRouteCacheKey: (route: RouteLocationNormalizedLoaded) => resolveRouteTabInfo(route).cacheKey,
-    getRouteCacheComponent
+    getRouteCacheComponent,
+    prune
   };
 }

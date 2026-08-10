@@ -10,7 +10,7 @@ import { clearAllDiscoveryCache, createDiscoverySuccessResult, createDiscoveryFa
 import { classifyMcpError } from './errors.mjs';
 import { registerNotificationHandlers } from './notifications.mjs';
 import { TibisOAuthProvider, AuthorizationPendingError, OAuthCallbackServer, clearOAuthCredentials, loadOAuthData } from './oauth/index.mjs';
-import { setStatus, clearAllStatus, getStatuses } from './status.mjs';
+import { setStatus, clearAllStatus, deleteStatus, getStatuses } from './status.mjs';
 import { createTransport } from './transport.mjs';
 
 /**
@@ -204,6 +204,25 @@ export async function disconnectMcpServer(serverId: string): Promise<void> {
   await closeSession(serverId);
   deleteDiscoveryCache(serverId);
   setStatus(serverId, 'idle', 'idle');
+}
+
+/**
+ * 完全遗忘指定 MCP server 的进程内资源。
+ * 删除或禁用配置时使用，不保留可见 idle 状态。
+ * @param serverId - server ID
+ */
+export async function forgetMcpServer(serverId: string): Promise<void> {
+  await closeSession(serverId);
+  deleteDiscoveryCache(serverId);
+  deleteStatus(serverId);
+}
+
+/**
+ * 获取当前活跃 MCP 会话数量，用于生命周期诊断与压力验证。
+ * @returns 活跃会话数量
+ */
+export function getMcpSessionCount(): number {
+  return sessionsByServerId.size;
 }
 
 /**

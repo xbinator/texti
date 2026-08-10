@@ -12,6 +12,8 @@ import { asyncTo } from '@/utils/asyncTo';
 
 /** localStorage 持久化键名。 */
 const STORAGE_KEY_DISABLED_NAMES = 'skill.disabledNames';
+/** 每个 Store 实例最多保留的文件操作水位数量。 */
+export const RESOURCE_OPERATION_CACHE_LIMIT = 512;
 
 /**
  * 从 localStorage 加载数据。
@@ -112,6 +114,29 @@ export const useSkillStore = defineStore('skill', () => {
   }
 
   /**
+   * 记录路径最新操作水位，并按最近写入顺序淘汰旧记录。
+   * @param filePath - Skill 文件路径
+   * @param operation - 已成功写回的操作序号
+   */
+  function recordResourceOperation(filePath: string, operation: number): void {
+    appliedOperationByPath.delete(filePath);
+    appliedOperationByPath.set(filePath, operation);
+    while (appliedOperationByPath.size > RESOURCE_OPERATION_CACHE_LIMIT) {
+      const oldestPath = appliedOperationByPath.keys().next().value;
+      if (oldestPath === undefined) break;
+      appliedOperationByPath.delete(oldestPath);
+    }
+  }
+
+  /**
+   * 获取当前保留的文件操作水位数量。
+   * @returns 文件操作水位数量
+   */
+  function getResourceOperationCount(): number {
+    return appliedOperationByPath.size;
+  }
+
+  /**
    * 合并磁盘定义与当前启用状态。
    * @param updatedSkill - 磁盘最新解析定义
    * @param existingSkill - Store 当前定义
@@ -144,7 +169,7 @@ export const useSkillStore = defineStore('skill', () => {
     }
 
     if (filePath) {
-      appliedOperationByPath.set(filePath, operation);
+      recordResourceOperation(filePath, operation);
     }
 
     // unlink 事件只按文件路径匹配；其它事件允许按 filePath 或 name 兜底
@@ -218,7 +243,7 @@ export const useSkillStore = defineStore('skill', () => {
     const skill = skills.value.find((s) => s.name === name);
     if (skill) {
       const operation = nextResourceOperation();
-      appliedOperationByPath.set(skill.filePath, operation);
+      recordResourceOperation(skill.filePath, operation);
       skill.enabled = !skill.enabled;
       persistDisabledNames();
     }
@@ -411,6 +436,7 @@ export const useSkillStore = defineStore('skill', () => {
     resolveLatestSkill,
     resolveLatestEnabledSkill,
     rescan,
-    waitForInit
+    waitForInit,
+    getResourceOperationCount
   };
 });

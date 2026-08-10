@@ -40,6 +40,9 @@ const PRIVATE_DIRECTORY_MODE = 0o700;
 /** journal 私有文件权限。 */
 const PRIVATE_FILE_MODE = 0o600;
 
+/** FileCommitter 最多保留的 Task 到 journal 快速索引数量。 */
+export const AGENT_COMMIT_JOURNAL_CACHE_LIMIT = 512;
+
 /** 测试和故障演练允许注入的精确崩溃点。 */
 export type AgentCommitCrashPoint = 'after_journal_created' | 'after_first_operation' | 'after_all_operations' | 'after_target_validation';
 
@@ -168,6 +171,12 @@ export interface AgentFileCommitter {
   cancelTask(taskId: string): Promise<AgentFileCommitCancelResult>;
   /** @returns 全部未完成 journal 的确定性恢复结果。 */
   recover(): Promise<AgentJournalRecoveryResult[]>;
+}
+
+/** File committer 内存留存诊断能力。 */
+export interface AgentFileCommitDiagnostics {
+  /** @returns 当前保留的 Task journal 快速索引数量。 */
+  getRetainedJournalCount(): number;
 }
 
 /** commit validation 或 recovery 使用的结构化错误。 */
@@ -1044,12 +1053,26 @@ async function applyJournal(
  * @param dependencies - Store、journal 根、权限和确定性依赖
  * @returns commit 与 recover 边界
  */
-export function createAgentFileCommitter(dependencies: AgentFileCommitDependencies): AgentFileCommitter {
+export function createAgentFileCommitter(dependencies: AgentFileCommitDependencies): AgentFileCommitter & AgentFileCommitDiagnostics {
   /** 每个 Task 的串行操作尾部。 */
   const taskTails = new Map<string, Promise<void>>();
 
   /** 当前实例已观察到的 Task journal。 */
   const taskJournals = new Map<string, AgentCommitJournalRecord>();
+
+  /**
+   * 记录最近访问的 Task journal，并淘汰最旧快速索引。
+   * @param journal - 最新权威 journal
+   */
+  function rememberTaskJournal(journal: AgentCommitJournalRecord): void {
+    taskJournals.delete(journal.taskId);
+    taskJournals.set(journal.taskId, journal);
+    while (taskJournals.size > AGENT_COMMIT_JOURNAL_CACHE_LIMIT) {
+      const oldestTaskId = taskJournals.keys().next().value;
+      if (oldestTaskId === undefined) break;
+      taskJournals.delete(oldestTaskId);
+    }
+  }
 
   /**
    * 把同一 Task 的 commit、cancel 与 recover 串行化。
@@ -1084,12 +1107,13 @@ export function createAgentFileCommitter(dependencies: AgentFileCommitDependenci
     if (remembered) {
       const current = dependencies.store.getCommitJournal(remembered.journalId);
       if (current) {
-        taskJournals.set(taskId, current);
+        rememberTaskJournal(current);
         return current;
       }
+      taskJournals.delete(taskId);
     }
     const journal = dependencies.store.listUnfinishedJournals().find((candidate): boolean => candidate.taskId === taskId) ?? null;
-    if (journal) taskJournals.set(taskId, journal);
+    if (journal) rememberTaskJournal(journal);
     return journal;
   }
 
@@ -1133,7 +1157,7 @@ export function createAgentFileCommitter(dependencies: AgentFileCommitDependenci
     }
     if (journal.status === 'created' && inspections.every((inspection): boolean => inspection.state === 'base')) {
       const cancelled = dependencies.store.cancelCommitJournal({ journalId: journal.journalId, occurredAt: dependencies.now() });
-      taskJournals.set(cancelled.taskId, cancelled);
+      rememberTaskJournal(cancelled);
       return {
         journalId: cancelled.journalId,
         status: 'cancelled',
@@ -1180,7 +1204,7 @@ export function createAgentFileCommitter(dependencies: AgentFileCommitDependenci
           intentHash: hashCommitIntentSnapshot(intent),
           occurredAt
         });
-        taskJournals.set(created.taskId, created);
+        rememberTaskJournal(created);
         dependencies.onPhase?.('journal-created');
         injectCommitCrash(dependencies, 'after_journal_created');
         return created;
@@ -1222,7 +1246,7 @@ export function createAgentFileCommitter(dependencies: AgentFileCommitDependenci
         if (!task) throw new AgentFileCommitError('commit_task_missing', 'Committed Task projection is missing');
         const result = createCommitResult(applied, input.changeset, task);
         const finalized = finalizeJournal(dependencies, applied, result);
-        taskJournals.set(finalized.journal.taskId, finalized.journal);
+        rememberTaskJournal(finalized.journal);
         return finalized;
       });
     },
@@ -1245,7 +1269,7 @@ export function createAgentFileCommitter(dependencies: AgentFileCommitDependenci
         }
         if (journal.status === 'created' && journal.appliedOperationIds.length === 0) {
           const cancelled = dependencies.store.cancelCommitJournal({ journalId: journal.journalId, occurredAt: dependencies.now() });
-          taskJournals.set(taskId, cancelled);
+          rememberTaskJournal(cancelled);
           return Object.freeze({ disposition: 'journal_cancelled', journal: cancelled });
         }
         if (journal.status === 'cancelled') {
@@ -1258,13 +1282,17 @@ export function createAgentFileCommitter(dependencies: AgentFileCommitDependenci
     async recover(): Promise<AgentJournalRecoveryResult[]> {
       const results: AgentJournalRecoveryResult[] = [];
       for (const journal of dependencies.store.listUnfinishedJournals()) {
-        taskJournals.set(journal.taskId, journal);
+        rememberTaskJournal(journal);
         // Recovery is deliberately serial so two journals never interleave Store transitions.
         // eslint-disable-next-line no-await-in-loop
         const [recoveryResult] = await Promise.allSettled([runTaskSerial(journal.taskId, (): Promise<AgentJournalRecoveryResult> => recoverJournal(journal))]);
         results.push(recoveryResult.status === 'fulfilled' ? recoveryResult.value : markRecoveryFailed(journal));
       }
       return results;
+    },
+
+    getRetainedJournalCount(): number {
+      return taskJournals.size;
     }
   };
 }

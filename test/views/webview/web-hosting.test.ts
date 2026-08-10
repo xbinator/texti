@@ -3,12 +3,17 @@
  * @description 验证 WebView 宿主层 DOM 节点管理。
  * @vitest-environment jsdom
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import type { WebviewTag } from 'electron';
+import { defineComponent, ref, type Ref } from 'vue';
+import { mount } from '@vue/test-utils';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { useHostLayer } from '@/views/webview/web/hooks/useHostLayer';
 import { ensureHostedWebviewElement, ensureWebviewHostLayer, WEBVIEW_HOST_LAYER_ID } from '@/views/webview/web/utils/hosting';
 
 describe('webview hosting', () => {
   afterEach((): void => {
     document.body.innerHTML = '';
+    vi.unstubAllGlobals();
   });
 
   it('creates short stable host layer ids from long route keys', (): void => {
@@ -38,5 +43,29 @@ describe('webview hosting', () => {
 
     expect(reusedElement).toBe(firstElement);
     expect(reusedElement.hasAttribute('allowpopups')).toBe(true);
+  });
+
+  it('cancels a pending host-layer animation frame on unmount', (): void => {
+    const requestFrame = vi.fn<(callback: FrameRequestCallback) => number>(() => 17);
+    const cancelFrame = vi.fn<(frameId: number) => void>();
+    vi.stubGlobal('requestAnimationFrame', requestFrame);
+    vi.stubGlobal('cancelAnimationFrame', cancelFrame);
+    const component = defineComponent({
+      name: 'HostLayerFixture',
+      setup(): Record<string, never> {
+        const container = ref<HTMLElement | null>(null);
+        const content = ref<HTMLElement | null>(null);
+        const webview = ref<WebviewTag | null>(null) as Ref<WebviewTag | null>;
+        useHostLayer('/webview/test', container, content, webview);
+        return {};
+      },
+      template: '<div />'
+    });
+
+    const wrapper = mount(component);
+    expect(requestFrame).toHaveBeenCalled();
+    wrapper.unmount();
+
+    expect(cancelFrame).toHaveBeenCalledWith(17);
   });
 });

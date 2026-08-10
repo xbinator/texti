@@ -20,7 +20,7 @@
 <script setup lang="ts">
 import type { AIProvider, AIProviderModel } from 'types/ai';
 import type { ComputedRef, Ref } from 'vue';
-import { ref, computed, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { message } from 'ant-design-vue';
@@ -94,6 +94,11 @@ watch(
     persistProviderConfig();
   }
 );
+
+/** 页面卸载时取消尚未执行的配置持久化。 */
+onUnmounted((): void => {
+  persistProviderConfig.cancel();
+});
 
 function handleEdit(): void {
   modalVisible.value = true;

@@ -118,6 +118,7 @@ export function useMenuAction(): void {
   });
 
   onUnmounted(() => {
+    settingStore.disposeTheme();
     if (unregisterMenuAction) {
       unregisterMenuAction();
     }

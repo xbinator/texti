@@ -89,7 +89,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, defineAsyncComponent, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { useEventListener } from '@vueuse/core';
@@ -122,7 +122,12 @@ const visible = reactive({ shortcutsHelp: false });
 const commandPanelStore = useCommandPanelStore();
 const settingStore = useSettingStore();
 const tabsStore = useTabsStore();
-const { getRouteCacheKey, getRouteCacheComponent } = useKeepAlive();
+const { getRouteCacheKey, getRouteCacheComponent, prune: pruneKeepAlive } = useKeepAlive();
+watch(
+  (): string[] => tabsStore.cachedComponentNames,
+  (cacheNames: string[]): void => pruneKeepAlive(cacheNames),
+  { immediate: true }
+);
 
 /** 应用级 Skill 与 Widget 资源扫描和目录监听。 */
 useWatchSkill();

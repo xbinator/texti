@@ -85,14 +85,36 @@ function loadWebContentsUrl(webContents: Electron.WebContents, url: string): voi
   webContents.loadURL(url).catch((error: unknown) => handleWebviewLoadError(error, url));
 }
 
-class WebViewManager {
-  private views: Map<string, WebContentsView> = new Map();
+/** 主进程托管的 WebContentsView 及其宿主所有权。 */
+interface ManagedWebView {
+  /** 实际 WebContentsView。 */
+  view: WebContentsView;
+  /** 创建该 View 的宿主窗口。 */
+  hostWindow: BrowserWindow;
+  /** 创建请求所属 WebContents ID。 */
+  ownerId: number;
+}
 
+class WebViewManager {
+  /** 按标签页保存的托管 View。 */
+  private views: Map<string, ManagedWebView> = new Map();
+
+  /** WebContentsView ID 到标签页 ID 的反向索引。 */
   private tabIdMap: Map<number, string> = new Map();
+
+  /** owner 到其创建标签页的索引。 */
+  private tabIdsByOwner: Map<number, Set<string>> = new Map();
 
   private activeTabId: string | null = null;
 
-  create(tabId: string, url: string): void {
+  /**
+   * 创建 owner 绑定的 WebContentsView。
+   * @param ownerId - 创建请求所属 WebContents ID
+   * @param hostWindow - View 实际挂载的窗口
+   * @param tabId - 标签页 ID
+   * @param url - 初始地址
+   */
+  create(ownerId: number, hostWindow: BrowserWindow, tabId: string, url: string): void {
     if (this.views.has(tabId)) {
       this.destroy(tabId);
     }
@@ -106,7 +128,7 @@ class WebViewManager {
       }
     });
 
-    this.attachListeners(view, tabId);
+    this.attachListeners(view, hostWindow, tabId);
     view.webContents.setWindowOpenHandler(({ url: openUrl }) => {
       shell.openExternal(openUrl);
       return { action: 'deny' };
@@ -120,72 +142,99 @@ class WebViewManager {
     // 设置 WebContentsView 圆角
     view.setBorderRadius(8);
 
-    const win = BrowserWindow.getAllWindows()[0];
-    win.contentView.addChildView(view);
+    hostWindow.contentView.addChildView(view);
     loadWebContentsUrl(view.webContents, url);
 
-    this.views.set(tabId, view);
+    this.views.set(tabId, { view, hostWindow, ownerId });
     this.tabIdMap.set(view.webContents.id, tabId);
+    const ownerTabIds = this.tabIdsByOwner.get(ownerId) ?? new Set<string>();
+    ownerTabIds.add(tabId);
+    this.tabIdsByOwner.set(ownerId, ownerTabIds);
   }
 
+  /**
+   * 销毁指定标签页的 View。
+   * @param tabId - 标签页 ID
+   */
   destroy(tabId: string): void {
-    const view = this.views.get(tabId);
-    if (!view) return;
-    const win = BrowserWindow.getAllWindows()[0];
-    win.contentView.removeChildView(view);
-    view.webContents.close();
+    const entry = this.views.get(tabId);
+    if (!entry) return;
+    const { view, hostWindow, ownerId } = entry;
+    try {
+      hostWindow.contentView.removeChildView(view);
+    } catch {
+      // 宿主窗口可能先于 renderer destroyed 事件关闭，仍需继续关闭 WebContents。
+    }
+    try {
+      view.webContents.close();
+    } catch {
+      // WebContents 可能已由 Electron 宿主销毁，仍需继续清理内存索引。
+    }
     this.tabIdMap.delete(view.webContents.id);
     this.views.delete(tabId);
+    const ownerTabIds = this.tabIdsByOwner.get(ownerId);
+    ownerTabIds?.delete(tabId);
+    if (ownerTabIds?.size === 0) this.tabIdsByOwner.delete(ownerId);
     if (this.activeTabId === tabId) {
       this.activeTabId = null;
     }
   }
 
+  /**
+   * 销毁指定 owner 创建的全部 View。
+   * @param ownerId - 已销毁 WebContents ID
+   */
+  destroyOwner(ownerId: number): void {
+    const tabIds = [...(this.tabIdsByOwner.get(ownerId) ?? [])];
+    tabIds.forEach((tabId: string): void => this.destroy(tabId));
+    this.tabIdsByOwner.delete(ownerId);
+  }
+
   navigate(tabId: string, url: string): void {
-    const view = this.views.get(tabId);
+    const view = this.views.get(tabId)?.view;
     if (!view) return;
     loadWebContentsUrl(view.webContents, url);
   }
 
   goBack(tabId: string): void {
-    const view = this.views.get(tabId);
+    const view = this.views.get(tabId)?.view;
     if (view?.webContents.navigationHistory.canGoBack()) {
       view.webContents.navigationHistory.goBack();
     }
   }
 
   goForward(tabId: string): void {
-    const view = this.views.get(tabId);
+    const view = this.views.get(tabId)?.view;
     if (view?.webContents.navigationHistory.canGoForward()) {
       view.webContents.navigationHistory.goForward();
     }
   }
 
   reload(tabId: string): void {
-    const view = this.views.get(tabId);
+    const view = this.views.get(tabId)?.view;
     view?.webContents.reload();
   }
 
   stop(tabId: string): void {
-    const view = this.views.get(tabId);
+    const view = this.views.get(tabId)?.view;
     view?.webContents.stop();
   }
 
   show(tabId: string): void {
     if (this.activeTabId === tabId) return;
     if (this.activeTabId) {
-      const prev = this.views.get(this.activeTabId);
+      const prev = this.views.get(this.activeTabId)?.view;
       prev?.setBounds({ x: 0, y: 0, width: 0, height: 0 });
     }
     this.activeTabId = tabId;
-    const view = this.views.get(tabId);
+    const view = this.views.get(tabId)?.view;
     if (view) {
       view.setBounds(this.lastBounds || { x: 0, y: 0, width: 800, height: 600 });
     }
   }
 
   hide(tabId: string): void {
-    const view = this.views.get(tabId);
+    const view = this.views.get(tabId)?.view;
     if (view) {
       this.lastBounds = view.getBounds();
       view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
@@ -198,7 +247,7 @@ class WebViewManager {
   private lastBounds: Electron.Rectangle | null = null;
 
   setBounds(tabId: string, bounds: Electron.Rectangle): void {
-    const view = this.views.get(tabId);
+    const view = this.views.get(tabId)?.view;
 
     if (!view) return;
 
@@ -207,9 +256,9 @@ class WebViewManager {
     view.setBounds({ x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) });
   }
 
-  private attachListeners(view: WebContentsView, tabId: string): void {
+  private attachListeners(view: WebContentsView, hostWindow: BrowserWindow, tabId: string): void {
     const send = (channel: string, ...args: unknown[]) => {
-      BrowserWindow.getAllWindows()[0]?.webContents.send(channel, tabId, ...args);
+      hostWindow.webContents.send(channel, tabId, ...args);
     };
 
     view.webContents.on('did-start-loading', () => {
@@ -249,9 +298,30 @@ class WebViewManager {
 
 const manager = new WebViewManager();
 
+/** 已注册销毁回收的宿主 WebContents ID。 */
+const trackedWebviewOwners = new Set<number>();
+
+/**
+ * 注册宿主 WebContents 销毁回收。
+ * @param event - WebView IPC 创建事件
+ */
+function trackWebviewOwner(event: IpcMainInvokeEvent): void {
+  const ownerId = event.sender.id;
+  if (trackedWebviewOwners.has(ownerId)) return;
+
+  trackedWebviewOwners.add(ownerId);
+  event.sender.once('destroyed', (): void => {
+    trackedWebviewOwners.delete(ownerId);
+    manager.destroyOwner(ownerId);
+  });
+}
+
 export function registerWebviewHandlers(): void {
-  ipcMain.handle('webview:create', (_event, tabId: string, url: string) => {
-    manager.create(tabId, url);
+  ipcMain.handle('webview:create', (event: IpcMainInvokeEvent, tabId: string, url: string) => {
+    const hostWindow = BrowserWindow.fromWebContents(event.sender) ?? BrowserWindow.getAllWindows()[0];
+    if (!hostWindow) throw new Error('WebView host window is unavailable');
+    trackWebviewOwner(event);
+    manager.create(event.sender.id, hostWindow, tabId, url);
   });
 
   ipcMain.handle('webview:destroy', (_event, tabId: string) => {

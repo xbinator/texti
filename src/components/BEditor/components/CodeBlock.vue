@@ -129,6 +129,8 @@ let mermaidInitialized = false;
 let mermaidCurrentTheme = '';
 let mermaidModule: typeof import('mermaid').default | null = null;
 const themeChangeCallbacks = new Set<() => void>();
+/** 模块级主题观察器，HMR 替换时需要显式断开。 */
+let mermaidThemeObserver: MutationObserver | null = null;
 
 /**
  * 通知已挂载的 Mermaid 预览在主题变化后重新渲染
@@ -138,10 +140,22 @@ function handleMermaidThemeChange(): void {
   themeChangeCallbacks.forEach((callback: () => void) => callback());
 }
 
-if (typeof window !== 'undefined') {
-  new MutationObserver(handleMermaidThemeChange).observe(document.documentElement, {
+if (typeof window !== 'undefined' && typeof MutationObserver !== 'undefined') {
+  mermaidThemeObserver = new MutationObserver(handleMermaidThemeChange);
+  mermaidThemeObserver.observe(document.documentElement, {
     attributes: true,
     attributeFilter: ['data-theme']
+  });
+}
+
+if (import.meta.hot) {
+  import.meta.hot.dispose((): void => {
+    mermaidThemeObserver?.disconnect();
+    mermaidThemeObserver = null;
+    themeChangeCallbacks.clear();
+    mermaidModule = null;
+    mermaidInitialized = false;
+    mermaidCurrentTheme = '';
   });
 }
 
@@ -499,6 +513,7 @@ onUnmounted(() => {
   isComponentMounted = false;
   // 使所有进行中的异步渲染失效
   mermaidRenderIndex++;
+  debouncedRenderMermaid.cancel();
   themeChangeCallbacks.delete(renderMermaid);
 
   if (resetTimer !== null) {

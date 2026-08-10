@@ -48,6 +48,9 @@ const DEFAULT_CANCEL_GRACE_MS = 2_000;
 /** 单次内存清理恢复 sweep 的最大尝试次数。 */
 const MAX_CLEANUP_SWEEP_ATTEMPTS = 3;
 
+/** Coordinator 最多保留的最近终态 Checkpoint 数。 */
+export const COORDINATOR_TERMINAL_STATE_LIMIT = 256;
+
 /** Coordinator 对一个 Checkpoint 的进程内执行状态。 */
 export type AgentCoordinatorState = 'idle' | 'planning' | 'running' | 'terminal';
 
@@ -795,7 +798,26 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
    * @param status - 新状态
    */
   function setState(checkpointId: string, status: AgentCoordinatorState): void {
+    if (status === 'idle') {
+      executions.delete(checkpointId);
+      return;
+    }
+
+    // 删除后重插，使 Map 顺序代表最近更新时间，便于按最旧终态淘汰。
+    executions.delete(checkpointId);
     executions.set(checkpointId, { status, updatedAt: dependencies.now() });
+    if (status !== 'terminal') return;
+
+    let terminalCount = 0;
+    for (const execution of executions.values()) {
+      if (execution.status === 'terminal') terminalCount += 1;
+    }
+    for (const [retainedCheckpointId, execution] of executions) {
+      if (terminalCount <= COORDINATOR_TERMINAL_STATE_LIMIT) break;
+      if (execution.status !== 'terminal') continue;
+      executions.delete(retainedCheckpointId);
+      terminalCount -= 1;
+    }
   }
 
   /**
@@ -806,14 +828,15 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
     let pending = [...actions];
     let firstFailure: unknown = new Error('coordinator_cleanup_failed');
     for (let attempt = 0; attempt < MAX_CLEANUP_SWEEP_ATTEMPTS && pending.length > 0; attempt += 1) {
+      // eslint-disable-next-line no-await-in-loop -- 每轮只重试上轮失败动作，不能并行跨轮执行。
       const outcomes = await Promise.allSettled(pending.map((action): Promise<void> => Promise.resolve().then(action)));
       const failedActions: TaskCleanupAction[] = [];
-      outcomes.forEach((outcome, index): void => {
-        if (outcome.status !== 'rejected') return;
+      for (const [index, outcome] of outcomes.entries()) {
+        if (outcome.status !== 'rejected') continue;
         if (failedActions.length === 0) firstFailure = outcome.reason;
         const action = pending[index];
         if (action) failedActions.push(action);
-      });
+      }
       pending = failedActions;
     }
     if (pending.length > 0) throw firstFailure;
@@ -838,7 +861,7 @@ export function createAgentCoordinator(dependencies: AgentCoordinatorDependencie
       if (cleanupSweeps.get(taskId) === sweep) cleanupSweeps.delete(taskId);
     });
     sweep.flight = execution;
-    void execution.catch((): void => {
+    execution.catch((): void => {
       if (cleanupSweeps.get(taskId) === sweep && sweep.flight === execution) sweep.flight = undefined;
     });
     return execution;

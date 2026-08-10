@@ -12,6 +12,7 @@ import CodeBlock from '@/components/BEditor/components/CodeBlock.vue';
 const copyTextMock = vi.hoisted(() => vi.fn());
 const copyImageMock = vi.hoisted(() => vi.fn().mockResolvedValue(true));
 const messageErrorMock = vi.hoisted(() => vi.fn());
+const debouncedCancelMock = vi.hoisted(() => vi.fn<() => void>());
 const mermaidMock = vi.hoisted(() => ({
   initialize: vi.fn(),
   render: vi.fn().mockResolvedValue({
@@ -22,7 +23,7 @@ const mermaidMock = vi.hoisted(() => ({
 const MERMAID_SVG_SELECTOR = '.mermaid-svg';
 
 vi.mock('@vueuse/core', () => ({
-  useDebounceFn: (callback: () => Promise<void>) => callback
+  useDebounceFn: (callback: () => Promise<void>) => Object.assign(callback, { cancel: debouncedCancelMock })
 }));
 
 vi.mock('@/hooks/useClipboard', () => ({
@@ -338,5 +339,13 @@ describe('CodeBlock', (): void => {
       trim: false
     });
     expect(copyImageMock).not.toHaveBeenCalled();
+  });
+
+  it('cancels the pending Mermaid debounce when the node view unmounts', (): void => {
+    const { wrapper } = mountCodeBlock(createCodeBlockNode('typescript', 'const value = 1;'));
+
+    wrapper.unmount();
+
+    expect(debouncedCancelMock).toHaveBeenCalledOnce();
   });
 });

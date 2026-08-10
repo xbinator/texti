@@ -16,6 +16,9 @@ export const DEFAULT_WORKSPACE_MENTION_LIMIT = 2000;
 /** 工作区文件提及成功结果默认缓存时间。 */
 export const DEFAULT_WORKSPACE_MENTION_CACHE_TTL_MS = 30_000;
 
+/** 工作区文件提及缓存最大条目数。 */
+export const WORKSPACE_MENTION_CACHE_LIMIT = 8;
+
 /** 单个 .gitignore 文件最多读取的行数。 */
 export const WORKSPACE_MENTION_GITIGNORE_READ_LIMIT = 1000;
 
@@ -164,6 +167,14 @@ const workspaceMentionInflightScans = new Map<string, Promise<WorkspaceMentionSc
 export function clearWorkspaceMentionCache(): void {
   workspaceMentionCache.clear();
   workspaceMentionInflightScans.clear();
+}
+
+/**
+ * 获取工作区文件提及缓存数量，用于生命周期诊断与压力验证。
+ * @returns 已完成扫描缓存数量
+ */
+export function getWorkspaceMentionCacheSize(): number {
+  return workspaceMentionCache.size;
 }
 
 /**
@@ -681,11 +692,14 @@ async function readCachedWorkspaceMentions(request: WorkspaceMentionScanRequest,
   const cacheKey = createScanCacheKey(request);
   const cached = workspaceMentionCache.get(cacheKey);
   if (useCache && cached && isFreshCache(cached, cacheTtlMs)) {
+    workspaceMentionCache.delete(cacheKey);
+    workspaceMentionCache.set(cacheKey, cached);
     return {
       files: cloneMentionFiles(cached.files),
       error: null
     };
   }
+  if (cached && !isFreshCache(cached, cacheTtlMs)) workspaceMentionCache.delete(cacheKey);
 
   const inflightScan = workspaceMentionInflightScans.get(cacheKey);
   if (useCache && inflightScan) {
@@ -709,10 +723,16 @@ async function readCachedWorkspaceMentions(request: WorkspaceMentionScanRequest,
   }
 
   if (!result.error) {
+    workspaceMentionCache.delete(cacheKey);
     workspaceMentionCache.set(cacheKey, {
       createdAt: Date.now(),
       files: cloneMentionFiles(result.files)
     });
+    while (workspaceMentionCache.size > WORKSPACE_MENTION_CACHE_LIMIT) {
+      const oldestCacheKey = workspaceMentionCache.keys().next().value;
+      if (typeof oldestCacheKey !== 'string') break;
+      workspaceMentionCache.delete(oldestCacheKey);
+    }
   }
 
   return {

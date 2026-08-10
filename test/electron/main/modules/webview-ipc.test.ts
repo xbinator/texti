@@ -29,6 +29,7 @@ const handleMock = vi.hoisted(() => vi.fn());
 const captureWebviewProtocolScreenshotMock = vi.hoisted(() => vi.fn().mockResolvedValue(new ArrayBuffer(1)));
 const webContentsViewMock = vi.hoisted(() => vi.fn());
 const getAllWindowsMock = vi.hoisted(() => vi.fn<() => TestBrowserWindow[]>(() => []));
+const fromWebContentsMock = vi.hoisted(() => vi.fn<(_sender: unknown) => TestBrowserWindow | null>(() => null));
 const clearCacheMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const clearStorageDataMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 
@@ -38,7 +39,8 @@ vi.mock('electron', () => ({
   },
   WebContentsView: webContentsViewMock,
   BrowserWindow: {
-    getAllWindows: getAllWindowsMock
+    getAllWindows: getAllWindowsMock,
+    fromWebContents: fromWebContentsMock
   },
   session: {
     fromPartition: vi.fn(() => ({
@@ -71,10 +73,18 @@ interface TestIpcInvokeEvent {
  */
 type CaptureProtocolScreenshotHandler = (event: TestIpcInvokeEvent, request: WebViewProtocolScreenshotRequest) => Promise<ArrayBuffer>;
 
+/** WebView owner sender 最小能力。 */
+interface TestOwnerSender {
+  /** WebContents ID。 */
+  id: number;
+  /** 注册一次性销毁监听。 */
+  once: (eventName: 'destroyed', listener: () => void) => void;
+}
+
 /**
  * WebView create IPC 处理函数。
  */
-type CreateWebviewHandler = (_event: unknown, tabId: string, url: string) => void;
+type CreateWebviewHandler = (event: { sender: TestOwnerSender }, tabId: string, url: string) => void;
 
 /**
  * WebView navigate IPC 处理函数。
@@ -194,6 +204,7 @@ describe('registerWebviewHandlers', () => {
     handleMock.mockClear();
     webContentsViewMock.mockReset();
     getAllWindowsMock.mockReturnValue([]);
+    fromWebContentsMock.mockReturnValue(null);
     captureWebviewProtocolScreenshotMock.mockClear();
     clearCacheMock.mockClear();
     clearStorageDataMock.mockClear();
@@ -238,11 +249,13 @@ describe('registerWebviewHandlers', () => {
         }
       }
     ]);
+    const sender: TestOwnerSender = { id: 88, once: vi.fn() };
     registerWebviewHandlers();
     const createHandler = getWebviewHandler<CreateWebviewHandler>('webview:create');
     const navigateHandler = getWebviewHandler<NavigateWebviewHandler>('webview:navigate');
+    const destroyHandler = getWebviewHandler<(_event: unknown, tabId: string) => void>('webview:destroy');
 
-    createHandler({}, 'tab-load', 'https://example.com/');
+    createHandler({ sender }, 'tab-load', 'https://example.com/');
     expect(loadURL).toHaveBeenCalledWith('https://example.com/');
     expect(loadResult.catchSpy).toHaveBeenCalledTimes(1);
 
@@ -252,6 +265,114 @@ describe('registerWebviewHandlers', () => {
     expect(loadURL).toHaveBeenCalledWith('https://example.org/');
     expect(loadResult.catchSpy).toHaveBeenCalledTimes(1);
     expect(() => loadResult.catchSpy.mock.calls[0]?.[0](new Error("ERR_ABORTED (-3) loading 'https://example.org/'"))).not.toThrow();
+    destroyHandler({}, 'tab-load');
+  });
+
+  it('destroys every WebContentsView owned by a destroyed sender', (): void => {
+    const loadResult = createCatchableLoadResult();
+    const view = createTestWebContentsView(vi.fn(() => loadResult.promise));
+    const hostWindow: TestBrowserWindow = {
+      contentView: {
+        addChildView: vi.fn(),
+        removeChildView: vi.fn()
+      },
+      webContents: {
+        send: vi.fn()
+      }
+    };
+    let handleDestroyed = (): void => undefined;
+    const sender: TestOwnerSender = {
+      id: 91,
+      once: (_eventName, listener): void => {
+        handleDestroyed = listener;
+      }
+    };
+    webContentsViewMock.mockImplementation(function WebContentsViewConstructor() {
+      return view;
+    });
+    getAllWindowsMock.mockReturnValue([hostWindow]);
+    fromWebContentsMock.mockReturnValue(hostWindow);
+    registerWebviewHandlers();
+    const createHandler = getWebviewHandler<CreateWebviewHandler>('webview:create');
+
+    createHandler({ sender }, 'owned-tab', 'https://example.com/owned');
+    handleDestroyed();
+
+    expect(hostWindow.contentView.removeChildView).toHaveBeenCalledWith(view);
+    expect(view.webContents.close).toHaveBeenCalledOnce();
+  });
+
+  it('still releases owner indexes when closing a WebContentsView throws', (): void => {
+    const loadResult = createCatchableLoadResult();
+    const view = createTestWebContentsView(vi.fn(() => loadResult.promise));
+    view.webContents.close = vi.fn((): void => {
+      throw new Error('already destroyed');
+    });
+    const hostWindow: TestBrowserWindow = {
+      contentView: {
+        addChildView: vi.fn(),
+        removeChildView: vi.fn()
+      },
+      webContents: {
+        send: vi.fn()
+      }
+    };
+    let handleDestroyed = (): void => undefined;
+    const sender: TestOwnerSender = {
+      id: 92,
+      once: (_eventName, listener): void => {
+        handleDestroyed = listener;
+      }
+    };
+    webContentsViewMock.mockImplementation(function WebContentsViewConstructor() {
+      return view;
+    });
+    getAllWindowsMock.mockReturnValue([hostWindow]);
+    fromWebContentsMock.mockReturnValue(hostWindow);
+    registerWebviewHandlers();
+    const createHandler = getWebviewHandler<CreateWebviewHandler>('webview:create');
+
+    createHandler({ sender }, 'throwing-close-tab', 'https://example.com/owned');
+
+    expect(handleDestroyed).not.toThrow();
+    expect(hostWindow.contentView.removeChildView).toHaveBeenCalledWith(view);
+  });
+
+  it('closes every view after 100 owner lifecycle cycles', (): void => {
+    const loadResult = createCatchableLoadResult();
+    const view = createTestWebContentsView(vi.fn(() => loadResult.promise));
+    const hostWindow: TestBrowserWindow = {
+      contentView: {
+        addChildView: vi.fn(),
+        removeChildView: vi.fn()
+      },
+      webContents: {
+        send: vi.fn()
+      }
+    };
+    webContentsViewMock.mockImplementation(function WebContentsViewConstructor() {
+      return view;
+    });
+    getAllWindowsMock.mockReturnValue([hostWindow]);
+    fromWebContentsMock.mockReturnValue(hostWindow);
+    registerWebviewHandlers();
+    const createHandler = getWebviewHandler<CreateWebviewHandler>('webview:create');
+
+    for (let cycle = 1; cycle <= 100; cycle += 1) {
+      const ownerId = 10_000 + cycle;
+      let handleDestroyed = (): void => undefined;
+      const sender: TestOwnerSender = {
+        id: ownerId,
+        once: (_eventName, listener): void => {
+          handleDestroyed = listener;
+        }
+      };
+      createHandler({ sender }, `stress-tab-${ownerId}`, `https://example.com/${ownerId}`);
+      handleDestroyed();
+    }
+
+    expect(hostWindow.contentView.removeChildView).toHaveBeenCalledTimes(100);
+    expect(view.webContents.close).toHaveBeenCalledTimes(100);
   });
 
   it('clears WebView cache and persistent browsing storage', async (): Promise<void> => {

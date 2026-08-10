@@ -4,7 +4,12 @@
  */
 import { nextTick, ref } from 'vue';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearWorkspaceMentionCache, useWorkspaceMentions } from '@/components/BChat/hooks/useWorkspaceMentions';
+import {
+  clearWorkspaceMentionCache,
+  getWorkspaceMentionCacheSize,
+  useWorkspaceMentions,
+  WORKSPACE_MENTION_CACHE_LIMIT
+} from '@/components/BChat/hooks/useWorkspaceMentions';
 import type { Native, ReadWorkspaceDirectoryEntry, ReadWorkspaceDirectoryResult, ReadWorkspaceFileResult } from '@/shared/platform/native/types';
 
 /** 原生工作区目录读取能力测试替身。 */
@@ -80,6 +85,23 @@ describe('useWorkspaceMentions', (): void => {
     mocks.readWorkspaceDirectory.mockReset();
     mocks.readWorkspaceFile.mockReset();
     mocks.readWorkspaceFile.mockRejectedValue(new Error('file not found'));
+  });
+
+  it('keeps completed workspace scans within the cache entry limit', async (): Promise<void> => {
+    mocks.readWorkspaceDirectory.mockImplementation(async (options): Promise<ReadWorkspaceDirectoryResult> => {
+      const workspaceRoot = options.workspaceRoot ?? '';
+      return createDirectoryResult(workspaceRoot, [createFileEntry('README.md', `${workspaceRoot}/README.md`)]);
+    });
+    const workspaceRoot = ref<string | null>('/workspace-0');
+    const scanner = useWorkspaceMentions({ workspaceRoot, enabled: ref(true) });
+
+    for (let index = 0; index < WORKSPACE_MENTION_CACHE_LIMIT + 3; index += 1) {
+      workspaceRoot.value = `/workspace-${index}`;
+      // eslint-disable-next-line no-await-in-loop -- 顺序切换 workspace 用于验证 LRU 上限。
+      await scanner.refresh();
+    }
+
+    expect(getWorkspaceMentionCacheSize()).toBe(WORKSPACE_MENTION_CACHE_LIMIT);
   });
 
   it('recursively collects workspace files as POSIX relative candidates and skips excluded directories', async (): Promise<void> => {

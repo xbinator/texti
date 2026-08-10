@@ -42,6 +42,7 @@ import { getElectronAPI, hasElectronAPI } from '@/shared/platform/electron-api';
 import type { MCPServerConfig, MCPDiscoveredToolSnapshot, MCPServerDiscoveryCache } from '@/shared/storage/tool-settings';
 import { DEFAULT_MCP_CONNECT_TIMEOUT_MS, DEFAULT_MCP_TOOL_CALL_TIMEOUT_MS } from '@/shared/storage/tool-settings';
 import { useToolSettingsStore } from '@/stores/ai/toolSettings';
+import { asyncTo } from '@/utils/asyncTo';
 import SettingsPage from '@/views/settings/_components/SettingsPage.vue';
 import SettingsSection from '@/views/settings/_components/SettingsSection.vue';
 import { MENU_ITEMS } from '@/views/settings/constants';
@@ -149,8 +150,13 @@ function handleCancelAdd(): void {
  * @param serverId - MCP server ID
  * @param patch - 更新字段
  */
-function handleServerPatch(serverId: string, patch: Partial<MCPServerConfig>): void {
-  store.updateMcpServer(serverId, patch);
+async function handleServerPatch(serverId: string, patch: Partial<MCPServerConfig>): Promise<void> {
+  const [updateError] = await asyncTo(store.updateMcpServer(serverId, patch));
+  if (updateError) return;
+
+  if (patch.enabled === false && hasElectronAPI()) {
+    await asyncTo(getElectronAPI().forgetMcpServer(serverId));
+  }
   requestStatusRefresh();
 }
 
@@ -158,8 +164,13 @@ function handleServerPatch(serverId: string, patch: Partial<MCPServerConfig>): v
  * 删除 MCP server。
  * @param serverId - MCP server ID
  */
-function handleRemoveServer(serverId: string): void {
-  store.removeMcpServer(serverId);
+async function handleRemoveServer(serverId: string): Promise<void> {
+  const [removeError] = await asyncTo(store.removeMcpServer(serverId));
+  if (removeError) return;
+
+  if (hasElectronAPI()) {
+    await asyncTo(getElectronAPI().forgetMcpServer(serverId));
+  }
   const nextStatuses = { ...statusByServerId.value };
   delete nextStatuses[serverId];
   statusByServerId.value = nextStatuses;

@@ -5,7 +5,7 @@
  */
 import { Script, createContext } from 'node:vm';
 import type { DidNavigateEvent, PageFaviconUpdatedEvent, WebviewTag } from 'electron';
-import { ref } from 'vue';
+import { effectScope, ref } from 'vue';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createElementSelectionScript, normalizeWebviewPageSnapshot, useWebView } from '@/views/webview/web/hooks/useWebView';
 import { TIBIS_WEBVIEW_HOST_CHANNEL } from '../../../shared/webview/host-bridge';
@@ -664,6 +664,32 @@ describe('useWebView', () => {
     deferredSnapshot.resolve(createRawPageSnapshot());
     await expect(readPromise).resolves.toMatchObject({ snapshotId: 'snap-1' });
     expect(controller.agentActivity.value).toMatchObject({ phase: 'success', label: '读取完成' });
+  });
+
+  it('clears internal activity and picker timers when the owning scope stops', async (): Promise<void> => {
+    vi.useFakeTimers();
+    const deferredSelection = createDeferred<unknown>();
+    const webviewElement = createScriptableWebview([createRawPageSnapshot()]);
+    webviewElement.executeJavaScript = vi.fn().mockImplementation((): Promise<unknown> => {
+      if (webviewElement.executeJavaScript && vi.mocked(webviewElement.executeJavaScript).mock.calls.length === 1) {
+        return Promise.resolve(createRawPageSnapshot());
+      }
+
+      return deferredSelection.promise;
+    });
+    const scope = effectScope();
+    const controller = scope.run(() => useWebView(ref<WebviewTag | null>(webviewElement)));
+    if (!controller) throw new Error('webview controller should be created inside the effect scope');
+
+    await controller.readPageSnapshot();
+    const selectionTask = controller.startElementSelection();
+
+    expect(vi.getTimerCount()).toBe(2);
+    scope.stop();
+    expect(vi.getTimerCount()).toBe(0);
+
+    deferredSelection.resolve(null);
+    await selectionTask;
   });
 
   it('shows webpage agent operation activity while an operation is pending', async (): Promise<void> => {

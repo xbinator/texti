@@ -30,6 +30,17 @@ export type DefaultFontStyle =
 
 type ResolvedTheme = 'dark' | 'light';
 
+/** 单个 Setting Store 实例注册的系统主题监听。 */
+interface ThemeListenerRegistration {
+  /** 系统主题查询对象。 */
+  mediaQuery: MediaQueryList;
+  /** change 事件回调。 */
+  listener: (event: MediaQueryListEvent) => void;
+}
+
+/** Store 实例到系统主题监听的弱引用注册表。 */
+const themeListenerRegistrations = new WeakMap<object, ThemeListenerRegistration>();
+
 const SETTINGS_STORAGE_KEY = 'app_settings';
 const LEGACY_THEME_STORAGE_KEY = 'app_theme';
 const LEGACY_SIDEBAR_VISIBLE_KEY = 'sidebar_visible';
@@ -405,6 +416,7 @@ export const useSettingStore = defineStore('setting', {
      * 初始化主题并监听系统主题变化
      */
     initTheme(): void {
+      this.disposeTheme();
       const tokens = getResolvedTokens(this.themePreset, 'light');
       validateTokens(tokens, 'light');
       const darkTokens = getResolvedTokens(this.themePreset, 'dark');
@@ -412,11 +424,22 @@ export const useSettingStore = defineStore('setting', {
       applyTheme(this.theme, this.themePreset);
 
       // 监听系统主题变化
-      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const listener = (): void => {
         if (this.theme === 'system') {
           applyTheme('system', this.themePreset);
         }
-      });
+      };
+      mediaQuery.addEventListener('change', listener);
+      themeListenerRegistrations.set(this, { mediaQuery, listener });
+    },
+
+    /** 释放当前 Store 实例注册的系统主题监听。 */
+    disposeTheme(): void {
+      const registration = themeListenerRegistrations.get(this);
+      if (!registration) return;
+      registration.mediaQuery.removeEventListener('change', registration.listener);
+      themeListenerRegistrations.delete(this);
     },
 
     // ==================== 窗口标题设置 ====================

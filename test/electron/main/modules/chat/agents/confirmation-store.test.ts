@@ -4,7 +4,11 @@
  */
 import type { AgentConfirmationRecord, AgentConfirmationRequestSnapshot, ChatAgentApplicationEvent } from 'types/chat-agent';
 import { describe, expect, it, vi } from 'vitest';
-import { createAgentConfirmationQueue, type AgentConfirmationQueueStore } from '../../../../../../electron/main/modules/chat/agents/confirmation-store.mjs';
+import {
+  CONFIRMATION_REVISION_CACHE_LIMIT,
+  createAgentConfirmationQueue,
+  type AgentConfirmationQueueStore
+} from '../../../../../../electron/main/modules/chat/agents/confirmation-store.mjs';
 import { hashAgentPayload, hashAgentText } from '../../../../../../electron/main/modules/chat/agents/contracts.mjs';
 import { AgentStoreProtocolError, type CreateAgentConfirmationInput } from '../../../../../../electron/main/modules/chat/agents/types.mjs';
 
@@ -276,5 +280,36 @@ describe('AgentConfirmationQueue', (): void => {
         decision: 'approved'
       })
     );
+  });
+
+  it('bounds published confirmation revision history', async (): Promise<void> => {
+    const fixture = createStore();
+    const queue = createAgentConfirmationQueue({
+      store: fixture.store,
+      readUnifiedDiff: (): string => UNIFIED_DIFF,
+      publish: vi.fn(),
+      now: (): string => '2026-07-27T00:02:00.000Z'
+    });
+
+    const decisions: Promise<unknown>[] = [];
+    for (let index = 0; index <= CONFIRMATION_REVISION_CACHE_LIMIT; index += 1) {
+      const confirmationId = `confirmation-${index}`;
+      decisions.push(
+        queue.request(
+          createInput(
+            createRequest({
+              confirmationId,
+              taskId: `task-${index}`,
+              changesetId: `changeset-${index}`,
+              unifiedDiffReference: `/private/overlay/${confirmationId}.diff`
+            })
+          )
+        )
+      );
+      queue.resolve({ confirmationId, expectedVersion: 1, decision: 'rejected' });
+    }
+    await Promise.all(decisions);
+
+    expect(queue.getPublishedRevisionCount()).toBe(CONFIRMATION_REVISION_CACHE_LIMIT);
   });
 });

@@ -11,13 +11,11 @@ import { useSystem } from '@/hooks/useSystem';
 /** Electron 打开文件监听取消函数 mock。 */
 const unregisterOpenFileListenerMock = vi.hoisted(() => vi.fn<() => void>());
 /** Electron 打开文件监听注册 mock。 */
-const onOpenFileMock = vi.hoisted(() => vi.fn<() => () => void>(() => unregisterOpenFileListenerMock));
+const onOpenFileMock = vi.hoisted(() => vi.fn<(_callback: (filePath: string) => void) => () => void>(() => unregisterOpenFileListenerMock));
 /** WebView 新标签页监听取消函数 mock。 */
 const unregisterWebviewNewTabListenerMock = vi.hoisted(() => vi.fn<() => void>());
 /** WebView 新标签页监听注册 mock。 */
-const onOpenInNewTabMock = vi.hoisted(
-  () => vi.fn<(callback: (url: string) => void) => () => void>(() => unregisterWebviewNewTabListenerMock)
-);
+const onOpenInNewTabMock = vi.hoisted(() => vi.fn<(callback: (url: string) => void) => () => void>(() => unregisterWebviewNewTabListenerMock));
 /** Electron API 可用性开关。 */
 const electronAvailable = vi.hoisted(() => ({ value: true }));
 /** 打开文件能力 mock。 */
@@ -100,6 +98,19 @@ describe('useSystem', (): void => {
 
     wrapper.unmount();
     expect(unregisterWebviewNewTabListenerMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retain the default file handler across component remounts', (): void => {
+    const firstWrapper = mount(UseSystemHost);
+    firstWrapper.unmount();
+    const secondWrapper = mount(UseSystemHost);
+    const callback = onOpenFileMock.mock.calls.at(-1)?.[0];
+
+    callback?.('/home/user/document.md');
+
+    expect(openFileByPathMock).toHaveBeenCalledOnce();
+    expect(openFileByPathMock).toHaveBeenCalledWith('/home/user/document.md');
+    secondWrapper.unmount();
   });
 
   it('does not register listeners outside Electron', (): void => {

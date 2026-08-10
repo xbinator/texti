@@ -7,7 +7,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
 import { parseWidgetJson } from '@/ai/widget/parser';
 import type { WidgetScannerAPI } from '@/ai/widget/scanner';
-import { useWidgetStore } from '@/stores/ai/widget';
+import { RESOURCE_OPERATION_CACHE_LIMIT, useWidgetStore } from '@/stores/ai/widget';
 import { posix } from '@/utils/file/posix';
 
 /**
@@ -319,5 +319,17 @@ describe('widget store', (): void => {
     await store.syncFromDisk();
 
     expect(store.getWidgetById('weather')?.enabled).toBe(false);
+  });
+
+  it('bounds retained per-path operation tombstones', (): void => {
+    const store = useWidgetStore();
+
+    for (let index = 0; index <= RESOURCE_OPERATION_CACHE_LIMIT; index += 1) {
+      const filePath = `/home/user/.tibis/widgets/widget-${index}/widget.json`;
+      const widget = parseWidgetJson(JSON.stringify({ name: `Widget ${index}`, description: 'Bounded tombstone test' }), filePath);
+      store.handleWidgetChange('unlink', widget);
+    }
+
+    expect(store.getResourceOperationCount()).toBe(RESOURCE_OPERATION_CACHE_LIMIT);
   });
 });

@@ -15,6 +15,8 @@ let menuActionCallback: ((_action: string) => void) | undefined;
 const onMenuActionMock = vi.hoisted(() => vi.fn<(_callback: (_action: string) => void) => () => void>());
 /** 设置初始化 mock。 */
 const settingInitMock = vi.hoisted(() => vi.fn<() => void>());
+/** 主题监听释放 mock。 */
+const disposeThemeMock = vi.hoisted(() => vi.fn<() => void>());
 /** 原生菜单状态同步 mock。 */
 const syncNativeMenuStateMock = vi.hoisted(() => vi.fn<() => void>());
 
@@ -27,6 +29,7 @@ vi.mock('@/shared/platform', () => ({
 vi.mock('@/stores/ui/setting', () => ({
   useSettingStore: () => ({
     init: settingInitMock,
+    disposeTheme: disposeThemeMock,
     setTheme: vi.fn<(_theme: 'light' | 'dark' | 'system') => void>()
   })
 }));
@@ -61,6 +64,7 @@ describe('useMenuAction', (): void => {
   beforeEach((): void => {
     menuActionCallback = undefined;
     settingInitMock.mockClear();
+    disposeThemeMock.mockClear();
     syncNativeMenuStateMock.mockClear();
     onMenuActionMock.mockReset();
     onMenuActionMock.mockImplementation((callback: (_action: string) => void): (() => void) => {
@@ -81,5 +85,6 @@ describe('useMenuAction', (): void => {
     expect(tabCloseHandler).toHaveBeenCalledTimes(1);
     unregister();
     wrapper.unmount();
+    expect(disposeThemeMock).toHaveBeenCalledOnce();
   });
 });

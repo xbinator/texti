@@ -35,6 +35,9 @@ const recentStoreMock = vi.hoisted(() => ({
   updateChatRecordTitle: vi.fn<(_sessionId: string, _title: string) => Promise<unknown>>(),
   removeFile: vi.fn<(..._ids: string[]) => Promise<void>>()
 }));
+const agentTaskStoreMock = vi.hoisted(() => ({
+  releaseSession: vi.fn<(sessionId: string) => void>()
+}));
 
 /**
  * 可由测试显式完成的异步结果。
@@ -89,6 +92,10 @@ vi.mock('@/shared/platform/electron-api', () => ({
 
 vi.mock('@/stores/workspace/recent', () => ({
   useRecentStore: () => recentStoreMock
+}));
+
+vi.mock('@/stores/chat/agentTask', () => ({
+  useChatAgentTaskStore: () => agentTaskStoreMock
 }));
 
 /**
@@ -200,6 +207,7 @@ describe('useChatSessionStore', () => {
     recentStoreMock.updateChatRecordTitle.mockResolvedValue(undefined);
     recentStoreMock.removeFile.mockReset();
     recentStoreMock.removeFile.mockResolvedValue(undefined);
+    agentTaskStoreMock.releaseSession.mockReset();
   });
 
   it('loads the session collection once and appends later pages without duplicates', async (): Promise<void> => {
@@ -599,6 +607,7 @@ describe('useChatSessionStore', () => {
     await store.deleteSession('session-a');
 
     expect(store.findSession('session-a')).toBeUndefined();
+    expect(agentTaskStoreMock.releaseSession).toHaveBeenCalledWith('session-a');
   });
 
   it('aborts only matching active Runtimes before deleting the session', async (): Promise<void> => {
@@ -706,6 +715,7 @@ describe('useChatSessionStore', () => {
     expect(store.findSession('session-a')?.title).toBe('会话 session-a');
     expect(recentStoreMock.updateChatRecordTitle).not.toHaveBeenCalled();
     expect(recentStoreMock.removeFile).not.toHaveBeenCalled();
+    expect(agentTaskStoreMock.releaseSession).not.toHaveBeenCalled();
   });
 
   it('throws the Electron branch error without returning a partial session', async (): Promise<void> => {

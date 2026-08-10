@@ -420,6 +420,7 @@ watch(activeUserAgent, (userAgent) => {
 });
 
 onBeforeUnmount(() => {
+  writeRecentWebviewRecord.cancel();
   if (webview.state.value.isElementSelecting) {
     webview.stopElementSelection().catch((err: unknown) => console.error('Element selection error:', err));
   }

@@ -80,7 +80,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, shallowRef, watch } from 'vue';
+import { computed, onUnmounted, ref, shallowRef, watch } from 'vue';
 import { Icon } from '@iconify/vue';
 import { message } from 'ant-design-vue';
 import type { SkillPackageResource } from '@/ai/skill/package';
@@ -130,6 +130,10 @@ const rawSkillMd = ref('');
 
 /** Worker 实例。 */
 let worker: Worker | null = null;
+/** 已终止 Worker 弱引用集合，确保每个线程只终止一次。 */
+const terminatedWorkers = new WeakSet<Worker>();
+/** 组件是否已卸载，用于阻止迟到的文件读取启动 Worker 任务。 */
+let disposed = false;
 
 /** 根据步骤动态设置模态框宽度。 */
 const modalWidth = computed(() => {
@@ -163,10 +167,17 @@ function createWorker(): Worker {
   return new Worker(new URL('@/ai/skill/installer.worker.ts', import.meta.url), { type: 'module' });
 }
 
-/** 终止并清理 Worker。 */
-function terminateWorker(): void {
-  worker?.terminate();
-  worker = null;
+/**
+ * 终止并清理指定 Worker。
+ * @param targetWorker - 要终止的 Worker，缺省为当前活动实例
+ */
+function terminateWorker(targetWorker: Worker | null = worker): void {
+  if (!targetWorker) return;
+  if (!terminatedWorkers.has(targetWorker)) {
+    terminatedWorkers.add(targetWorker);
+    targetWorker.terminate();
+  }
+  if (worker === targetWorker) worker = null;
 }
 
 /** 重置内部状态。 */
@@ -204,12 +215,14 @@ async function handleFileSelected(files: FileList): Promise<void> {
 
   // 终止旧 Worker，创建新实例
   terminateWorker();
-  worker = createWorker();
+  const parserWorker = createWorker();
+  worker = parserWorker;
 
-  worker.onmessage = ({ data }: MessageEvent) => {
+  parserWorker.onmessage = ({ data }: MessageEvent) => {
     if (data.type === 'error') {
       message.error(data.error);
       resetState();
+      terminateWorker(parserWorker);
       return;
     }
     if (data.type === 'success') {
@@ -219,18 +232,33 @@ async function handleFileSelected(files: FileList): Promise<void> {
       parsedResources.value = result.resources;
       parsedWarnings.value = result.warnings;
       step.value = 'preview';
+      terminateWorker(parserWorker);
     }
   };
 
-  worker.onerror = ({ message: msg }: ErrorEvent) => {
+  parserWorker.onerror = ({ message: msg }: ErrorEvent) => {
     message.error(`解析异常：${msg}`);
     resetState();
+    terminateWorker(parserWorker);
   };
 
   step.value = 'parsing';
-  const buffer = await file.arrayBuffer();
-  worker.postMessage({ type: 'parse', buffer }, [buffer]);
+  const [bufferError, buffer] = await asyncTo(file.arrayBuffer());
+  if (bufferError || !buffer) {
+    message.error('读取 Skill 包失败');
+    resetState();
+    terminateWorker(parserWorker);
+    return;
+  }
+  if (disposed || worker !== parserWorker) return;
+  parserWorker.postMessage({ type: 'parse', buffer }, [buffer]);
 }
+
+/** 组件卸载时终止仍在运行的解析线程。 */
+onUnmounted((): void => {
+  disposed = true;
+  terminateWorker();
+});
 
 /**
  * 获取 skills 目录路径。

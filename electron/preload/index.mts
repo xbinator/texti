@@ -746,6 +746,12 @@ const electronAPI: ElectronAPI = {
   disconnectMcpServer: (serverId) => ipcRenderer.invoke('tools:mcp:disconnect', serverId),
 
   /**
+   * 断开并遗忘 MCP server 的全部进程内状态
+   * @param serverId MCP server ID
+   */
+  forgetMcpServer: (serverId) => ipcRenderer.invoke('tools:mcp:forget', serverId),
+
+  /**
    * 重启 MCP server 并刷新 discovery
    * @param server MCP server 配置
    */

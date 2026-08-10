@@ -25,7 +25,11 @@ import type {
   ChatAgentResult
 } from 'types/chat-agent';
 import { describe, expect, it, vi } from 'vitest';
-import { createAgentCoordinator, type AgentCoordinatorDependencies } from '../../../../../../electron/main/modules/chat/agents/coordinator.mjs';
+import {
+  COORDINATOR_TERMINAL_STATE_LIMIT,
+  createAgentCoordinator,
+  type AgentCoordinatorDependencies
+} from '../../../../../../electron/main/modules/chat/agents/coordinator.mjs';
 
 /** 固定 Coordinator Outbox payload。 */
 const payload: AgentDelegationCreatedPayload = {
@@ -582,6 +586,24 @@ function createDependencies(tasks: AgentTaskRecord[]): {
 }
 
 describe('agent coordinator', (): void => {
+  it('bounds retained terminal Checkpoint states while preserving recent entries', async (): Promise<void> => {
+    const fixture = createDependencies([]);
+    fixture.listActive.mockReturnValue([]);
+    const coordinator = createAgentCoordinator(fixture.dependencies);
+
+    for (let index = 0; index <= COORDINATOR_TERMINAL_STATE_LIMIT; index += 1) {
+      // eslint-disable-next-line no-await-in-loop -- 每轮需先到达 terminal 状态才能确定验证 LRU 次序。
+      await coordinator.accept({
+        checkpointId: `checkpoint-${index}`,
+        sessionId: 'session-bounded',
+        turnId: `turn-${index}`
+      });
+    }
+
+    expect(coordinator.getCheckpointState('checkpoint-0')).toBe('idle');
+    expect(coordinator.getCheckpointState(`checkpoint-${COORDINATOR_TERMINAL_STATE_LIMIT}`)).toBe('terminal');
+  });
+
   it('reuses one cancelTask flight and terminalizes queued start without creating Runtime', async (): Promise<void> => {
     const task = createTask(1);
     const fixture = createDependencies([task]);
@@ -1571,7 +1593,9 @@ describe('agent coordinator', (): void => {
 
     await expect(coordinator.cancelTask(currentTask.taskId)).resolves.toBe('cancel_requested');
 
-    expect(fixture.dependencies.fileCommitter.cancelTask).toHaveBeenCalledWith(currentTask.taskId);
+    const { fileCommitter } = fixture.dependencies;
+    if (!fileCommitter) throw new Error('file committer should exist in this fixture');
+    expect(fileCommitter.cancelTask).toHaveBeenCalledWith(currentTask.taskId);
     expect(fixture.cancelTask).not.toHaveBeenCalled();
     expect(fixture.settleTask).toHaveBeenCalledWith(currentTask.taskId, currentTask.result?.usage);
   });

@@ -22,6 +22,9 @@ export interface OAuthCallbackResult {
 export class OAuthCallbackServer {
   private server: http.Server | null = null;
 
+  /** 当前回调等待的超时定时器。 */
+  private timeout: ReturnType<typeof setTimeout> | null = null;
+
   /**
    * 启动回调服务器并等待授权码。
    * @param state - 预期 CSRF state 参数
@@ -31,6 +34,22 @@ export class OAuthCallbackServer {
   async waitForCallback(state: string, timeoutMs = 300000): Promise<OAuthCallbackResult> {
     return new Promise((resolve, reject) => {
       let settled = false;
+
+      /**
+       * 通过唯一终态路径完成等待，并同步释放服务器和定时器。
+       * @param result - 成功结果或失败异常
+       */
+      const settle = (result: OAuthCallbackResult | Error): void => {
+        if (settled) return;
+        settled = true;
+        this.stop();
+        if (result instanceof Error) reject(result);
+        else resolve(result);
+      };
+
+      this.timeout = setTimeout((): void => {
+        settle(new Error('OAuth callback timeout'));
+      }, timeoutMs);
 
       this.server = http.createServer((req, res) => {
         if (!req.url?.startsWith('/mcp/oauth/callback')) {
@@ -46,31 +65,21 @@ export class OAuthCallbackServer {
         if (!code) {
           res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
           res.end('<h1>错误</h1><p>缺少授权码</p>');
-          if (!settled) {
-            settled = true;
-            reject(new Error('Missing authorization code'));
-          }
+          settle(new Error('Missing authorization code'));
           return;
         }
 
         if (state && receivedState !== state) {
           res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
           res.end('<h1>错误</h1><p>State 不匹配</p>');
-          if (!settled) {
-            settled = true;
-            reject(new Error('State mismatch'));
-          }
+          settle(new Error('State mismatch'));
           return;
         }
 
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end('<h1>授权成功</h1><p>您可以关闭此页面</p>');
 
-        if (!settled) {
-          settled = true;
-          resolve({ code, state: receivedState ?? undefined });
-        }
-        this.stop();
+        settle({ code, state: receivedState ?? undefined });
       });
 
       this.server.listen(OAUTH_CALLBACK_PORT, () => {
@@ -79,24 +88,11 @@ export class OAuthCallbackServer {
 
       this.server.on('error', (err: NodeJS.ErrnoException) => {
         if (err.code === 'EADDRINUSE') {
-          if (!settled) {
-            settled = true;
-            reject(new Error(`OAuth callback port ${OAUTH_CALLBACK_PORT} is already in use`));
-          }
-        } else if (!settled) {
-          settled = true;
-          reject(err);
+          settle(new Error(`OAuth callback port ${OAUTH_CALLBACK_PORT} is already in use`));
+        } else {
+          settle(err);
         }
-        this.stop();
       });
-
-      setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          reject(new Error('OAuth callback timeout'));
-        }
-        this.stop();
-      }, timeoutMs);
     });
   }
 
@@ -104,6 +100,10 @@ export class OAuthCallbackServer {
    * 停止回调服务器。
    */
   stop(): void {
+    if (this.timeout) {
+      clearTimeout(this.timeout);
+      this.timeout = null;
+    }
     if (this.server) {
       this.server.close();
       this.server = null;

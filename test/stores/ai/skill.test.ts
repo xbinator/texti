@@ -7,7 +7,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
 import { parseSkillMarkdown } from '@/ai/skill/parser';
 import type { SkillScannerAPI } from '@/ai/skill/scanner';
-import { useSkillStore } from '@/stores/ai/skill';
+import { RESOURCE_OPERATION_CACHE_LIMIT, useSkillStore } from '@/stores/ai/skill';
 
 /** Skill 测试文件路径。 */
 const SKILL_FILE_PATH = '/Users/test/.agents/skills/weather/SKILL.md';
@@ -219,5 +219,17 @@ describe('skill store disk freshness', (): void => {
     await store.syncFromDisk();
 
     expect(store.getSkillByName('weather')?.enabled).toBe(false);
+  });
+
+  it('bounds retained per-path operation tombstones', (): void => {
+    const store = useSkillStore();
+
+    for (let index = 0; index <= RESOURCE_OPERATION_CACHE_LIMIT; index += 1) {
+      const filePath = `/home/user/.agents/skills/skill-${index}/SKILL.md`;
+      const skill = parseSkillMarkdown(createSkillMarkdown(`instructions-${index}`, `skill-${index}`), filePath, { source: 'global' });
+      store.handleSkillChange('unlink', skill);
+    }
+
+    expect(store.getResourceOperationCount()).toBe(RESOURCE_OPERATION_CACHE_LIMIT);
   });
 });

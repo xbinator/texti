@@ -662,6 +662,7 @@ export interface ElectronAPI {
   refreshMcpDiscovery: (server: MCPServerConfig) => Promise<MCPDiscoveryRefreshResult>;
   connectMcpServer: (server: MCPServerConfig) => Promise<MCPDiscoveryRefreshResult>;
   disconnectMcpServer: (serverId: string) => Promise<void>;
+  forgetMcpServer: (serverId: string) => Promise<void>;
   restartMcpServer: (server: MCPServerConfig) => Promise<MCPDiscoveryRefreshResult>;
   /** 启动 OAuth 认证流程 */
   startMcpOAuth: (server: MCPServerConfig) => Promise<{ authorizationUrl: string }>;

@@ -25,6 +25,7 @@ const storeMock = vi.hoisted(() => ({
 /** Electron MCP API mock。 */
 const electronApiMock = vi.hoisted(() => ({
   clearMcpOAuth: vi.fn<(serverId: string) => Promise<void>>(),
+  forgetMcpServer: vi.fn<(serverId: string) => Promise<void>>(),
   getMcpDiscoveryCache: vi.fn<(serverId?: string) => Promise<null>>(),
   getMcpStatus: vi.fn<(serverIds: string[]) => Promise<unknown[]>>(),
   hasElectronAPI: vi.fn<() => boolean>(),
@@ -73,10 +74,12 @@ const ServerCardStub = defineComponent({
   props: {
     server: { type: Object as PropType<MCPServerConfig>, required: true }
   },
-  emits: ['edit', 'restart'],
+  emits: ['edit', 'patch', 'remove', 'restart'],
   template: `
     <article class="server-card-stub">
       <button class="edit-server" @click="$emit('edit', server)">{{ server.name }}</button>
+      <button class="disable-server" @click="$emit('patch', server.id, { enabled: false })">disable</button>
+      <button class="remove-server" @click="$emit('remove', server.id)">remove</button>
       <button class="restart-server" @click="$emit('restart', server)">restart</button>
     </article>
   `
@@ -144,6 +147,7 @@ describe('McpSettingsPage', (): void => {
     storeMock.removeMcpServer.mockResolvedValue(undefined);
     storeMock.updateMcpServer.mockResolvedValue(undefined);
     electronApiMock.clearMcpOAuth.mockReset();
+    electronApiMock.forgetMcpServer.mockReset();
     electronApiMock.getMcpDiscoveryCache.mockReset();
     electronApiMock.getMcpStatus.mockReset();
     electronApiMock.hasElectronAPI.mockReset();
@@ -151,6 +155,7 @@ describe('McpSettingsPage', (): void => {
     electronApiMock.restartMcpServer.mockReset();
     electronApiMock.startMcpOAuth.mockReset();
     electronApiMock.getMcpDiscoveryCache.mockResolvedValue(null);
+    electronApiMock.forgetMcpServer.mockResolvedValue(undefined);
     electronApiMock.getMcpStatus.mockResolvedValue([]);
     electronApiMock.hasElectronAPI.mockReturnValue(false);
     electronApiMock.refreshMcpDiscovery.mockResolvedValue({ ok: false });
@@ -200,6 +205,34 @@ describe('McpSettingsPage', (): void => {
 
     expect(electronApiMock.restartMcpServer).toHaveBeenCalledTimes(1);
     expect(electronApiMock.restartMcpServer.mock.calls[0]?.[0]).not.toHaveProperty('editorJsonText');
+    wrapper.unmount();
+  });
+
+  it('forgets the main-process runtime when disabling an MCP server', async (): Promise<void> => {
+    const server = createServer();
+    storeMock.mcp = { servers: [server] };
+    electronApiMock.hasElectronAPI.mockReturnValue(true);
+    const wrapper = mountMcpSettingsPage();
+
+    await wrapper.find('.disable-server').trigger('click');
+    await flushPromises();
+
+    expect(storeMock.updateMcpServer).toHaveBeenCalledWith(server.id, { enabled: false });
+    expect(electronApiMock.forgetMcpServer).toHaveBeenCalledWith(server.id);
+    wrapper.unmount();
+  });
+
+  it('forgets the main-process runtime when removing an MCP server', async (): Promise<void> => {
+    const server = createServer();
+    storeMock.mcp = { servers: [server] };
+    electronApiMock.hasElectronAPI.mockReturnValue(true);
+    const wrapper = mountMcpSettingsPage();
+
+    await wrapper.find('.remove-server').trigger('click');
+    await flushPromises();
+
+    expect(storeMock.removeMcpServer).toHaveBeenCalledWith(server.id);
+    expect(electronApiMock.forgetMcpServer).toHaveBeenCalledWith(server.id);
     wrapper.unmount();
   });
 });

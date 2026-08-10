@@ -3,7 +3,7 @@
  * @description 封装 `<webview>` 标签页面状态与导航控制。
  */
 import type { DidNavigateEvent, PageFaviconUpdatedEvent, PageTitleUpdatedEvent, WebviewTag } from 'electron';
-import { ref, type Ref } from 'vue';
+import { getCurrentScope, onScopeDispose, ref, type Ref } from 'vue';
 import type {
   WebviewAgentActivity,
   WebviewAgentActivityPhase,
@@ -284,6 +284,7 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
   let agentActivityClearTimer: number | null = null;
   let elementPickerMessageDrainTimer: number | null = null;
   let isElementPickerMessageDraining = false;
+  let disposed = false;
   const handledElementPickerMessageIds = new Set<string>();
 
   /**
@@ -406,6 +407,9 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
   function startElementPickerMessageDrain(instance: WebviewTag): void {
     stopElementPickerMessageDrain();
     handledElementPickerMessageIds.clear();
+    if (disposed) {
+      return;
+    }
     elementPickerMessageDrainTimer = window.setInterval(() => {
       drainElementPickerHostMessages(instance).catch((error: unknown) => {
         console.error('Failed to schedule WebView element picker message drain:', error);
@@ -419,6 +423,9 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
    * @param label - 状态文案
    */
   function startAgentActivity(phase: Extract<WebviewAgentActivityPhase, 'reading' | 'operating'>, label: string): void {
+    if (disposed) {
+      return;
+    }
     clearAgentActivityTimer();
     agentActivity.value = {
       phase,
@@ -433,6 +440,9 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
    * @param label - 状态文案
    */
   function finishAgentActivity(phase: Extract<WebviewAgentActivityPhase, 'success' | 'error'>, label: string): void {
+    if (disposed) {
+      return;
+    }
     const finishedAt = nowMs();
     agentActivity.value = {
       phase,
@@ -862,6 +872,23 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
   function handleAttachRejected(payload: { src: string; reason: string }): void {
     state.value.isLoading = false;
     console.error(`Webview attach rejected for ${payload.src}: ${payload.reason}`);
+  }
+
+  /**
+   * 释放控制器持有的定时器、轮询队列与页面快照引用。
+   */
+  function disposeRuntime(): void {
+    disposed = true;
+    clearAgentActivityTimer();
+    stopElementPickerMessageDrain();
+    handledElementPickerMessageIds.clear();
+    activeSnapshot = null;
+    pendingPageSnapshotRead = null;
+  }
+
+  // Hook 始终从组件 setup 中创建，跟随 effect scope 销毁内部资源。
+  if (getCurrentScope()) {
+    onScopeDispose(disposeRuntime);
   }
 
   const controller: WebviewController = {

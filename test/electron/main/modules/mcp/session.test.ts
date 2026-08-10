@@ -4,8 +4,16 @@
  */
 import type { MCPClientWrapper } from '../../../../../electron/main/modules/mcp/client.mjs';
 import type { MCPServerConfig } from 'types/ai';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { connectMcpServer, executeMcpTool } from '../../../../../electron/main/modules/mcp/session.mjs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  connectMcpServer,
+  executeMcpTool,
+  forgetMcpServer,
+  getMcpDiscoveryCache,
+  getMcpSessionCount,
+  resetMcpState
+} from '../../../../../electron/main/modules/mcp/session.mjs';
+import { getStatusCount } from '../../../../../electron/main/modules/mcp/status.mjs';
 
 /** MCP session 依赖 mock。 */
 const mocks = vi.hoisted(() => ({
@@ -49,6 +57,37 @@ function createServer(id = 'server-connect-abort'): MCPServerConfig {
 describe('MCP session cancellation', (): void => {
   beforeEach((): void => {
     vi.clearAllMocks();
+  });
+
+  afterEach(async (): Promise<void> => {
+    await resetMcpState();
+  });
+
+  it('forgets a connected server and removes every runtime cache entry', async (): Promise<void> => {
+    const server = createServer('server-forget');
+    const disconnect = vi.fn(async (): Promise<void> => undefined);
+    const wrapper: MCPClientWrapper = {
+      client: {} as MCPClientWrapper['client'],
+      server,
+      connect: vi.fn(async (): Promise<void> => undefined),
+      disconnect,
+      listTools: vi.fn(async (): Promise<[]> => []),
+      callTool: vi.fn(async (): Promise<unknown> => ({ content: [] })),
+      isConnected: vi.fn((): boolean => true)
+    };
+    mocks.createClient.mockResolvedValue(wrapper);
+
+    await expect(connectMcpServer(server)).resolves.toMatchObject({ ok: true });
+    expect(getMcpSessionCount()).toBe(1);
+    expect(getStatusCount()).toBe(1);
+    expect(getMcpDiscoveryCache()).toHaveLength(1);
+
+    await forgetMcpServer(server.id);
+
+    expect(disconnect).toHaveBeenCalledOnce();
+    expect(getMcpSessionCount()).toBe(0);
+    expect(getStatusCount()).toBe(0);
+    expect(getMcpDiscoveryCache()).toEqual([]);
   });
 
   it('disconnects an in-flight on-demand connection when the tool is aborted', async (): Promise<void> => {
