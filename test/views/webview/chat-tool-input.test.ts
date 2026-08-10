@@ -6,16 +6,19 @@ import { describe, expect, it } from 'vitest';
 import { normalizeWebpageInput } from '@/views/webview/web/hooks/chatToolInput';
 import type { WebviewOperateInput } from '@/views/webview/web/types';
 
+/** 完整合法的网页操作步骤记忆。 */
+const validStep = { evaluation: '', memory: 'fact', nextGoal: 'continue' };
+
 describe('WebView chat tool input', (): void => {
   it('accepts every supported action and removes history-only fields', (): void => {
     const inputs: unknown[] = [
-      { snapshotId: 'snap-1', step: { memory: 'fact' }, action: { type: 'click', index: 1, unknown: 'drop' } },
-      { snapshotId: 'snap-1', step: {}, action: { type: 'input', index: 1, text: 'hello', clear: false } },
-      { snapshotId: 'snap-1', step: {}, action: { type: 'select', index: 1, optionText: 'A' } },
-      { snapshotId: 'snap-1', step: {}, action: { type: 'press', index: 1, key: 'Enter' } },
-      { snapshotId: 'snap-1', step: {}, action: { type: 'scroll', index: 1, direction: 'down', pixels: 200 } },
-      { step: {}, action: { type: 'navigate', url: 'https://example.com' } },
-      { snapshotId: 'snap-1', step: {}, action: { type: 'wait', seconds: 1 } }
+      { snapshotId: 'snap-1', step: validStep, action: { type: 'click', index: 1, unknown: 'drop' } },
+      { snapshotId: 'snap-1', step: validStep, action: { type: 'input', index: 1, text: 'hello', clear: false } },
+      { snapshotId: 'snap-1', step: validStep, action: { type: 'select', index: 1, optionText: 'A' } },
+      { snapshotId: 'snap-1', step: validStep, action: { type: 'press', index: 1, key: 'Enter' } },
+      { snapshotId: 'snap-1', step: validStep, action: { type: 'scroll', index: 1, direction: 'down', pixels: 200 } },
+      { snapshotId: '', step: validStep, action: { type: 'navigate', url: 'https://example.com' } },
+      { snapshotId: 'snap-1', step: validStep, action: { type: 'wait', seconds: 1 } }
     ];
 
     const normalized = inputs.map((input: unknown): WebviewOperateInput | undefined => normalizeWebpageInput(input));
@@ -38,7 +41,12 @@ describe('WebView chat tool input', (): void => {
       { snapshotId: 'snap-1', action: { type: 'scroll', direction: 'down', index: Number.POSITIVE_INFINITY } },
       { snapshotId: 'snap-1', action: { type: 'wait', seconds: 10 } },
       { snapshotId: 'snap-1', action: { type: 'press', index: 1, key: 'Space' } },
-      { action: { type: 'navigate', url: '' } }
+      { action: { type: 'navigate', url: '' } },
+      { snapshotId: 'snap-1', action: { type: 'click', index: 1 } },
+      { snapshotId: 'snap-1', step: {}, action: { type: 'click', index: 1 } },
+      { snapshotId: 'snap-1', step: { ...validStep, evaluation: 1 }, action: { type: 'click', index: 1 } },
+      { snapshotId: 'snap-1', step: { ...validStep, memory: 'x'.repeat(1_201) }, action: { type: 'click', index: 1 } },
+      { snapshotId: 'snap-1', step: { ...validStep, unknown: true }, action: { type: 'click', index: 1 } }
     ];
 
     expect(invalidInputs.map((input: unknown): WebviewOperateInput | undefined => normalizeWebpageInput(input))).toEqual(

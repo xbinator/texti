@@ -4,7 +4,7 @@
  * @vitest-environment jsdom
  */
 import { Script, createContext } from 'node:vm';
-import type { DidNavigateEvent, PageFaviconUpdatedEvent, WebviewTag } from 'electron';
+import type { DidNavigateEvent, DidStartNavigationEvent, PageFaviconUpdatedEvent, WebviewTag } from 'electron';
 import { effectScope, ref } from 'vue';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createElementSelectionScript, normalizeWebviewPageSnapshot, useWebView } from '@/views/webview/web/hooks/useWebView';
@@ -664,6 +664,33 @@ describe('useWebView', () => {
     deferredSnapshot.resolve(createRawPageSnapshot());
     await expect(readPromise).resolves.toMatchObject({ snapshotId: 'snap-1' });
     expect(controller.agentActivity.value).toMatchObject({ phase: 'success', label: '读取完成' });
+  });
+
+  it('rejects page operations while a snapshot read is pending', async (): Promise<void> => {
+    const deferredSnapshot = createDeferred<unknown>();
+    const webviewElement = createScriptableWebview([deferredSnapshot.promise]);
+    webviewElement.loadURL = vi.fn();
+    const controller = useWebView(ref<WebviewTag | null>(webviewElement));
+
+    const readPromise = controller.readPageSnapshot();
+    const navigation = controller.operatePage({ action: { type: 'navigate', url: 'https://example.org' } });
+    deferredSnapshot.resolve(createRawPageSnapshot());
+
+    await expect(navigation).rejects.toMatchObject({ code: 'PAGE_LOADING' });
+    await expect(readPromise).resolves.toMatchObject({ snapshotId: 'snap-1' });
+    expect(webviewElement.loadURL).not.toHaveBeenCalled();
+  });
+
+  it('rejects a late snapshot read after main-frame navigation invalidates it', async (): Promise<void> => {
+    const deferredSnapshot = createDeferred<unknown>();
+    const webviewElement = createScriptableWebview([deferredSnapshot.promise]);
+    const controller = useWebView(ref<WebviewTag | null>(webviewElement));
+
+    const readPromise = controller.readPageSnapshot();
+    controller.handleDidStartNavigation({ url: 'https://example.org', isMainFrame: true, isInPlace: false } as DidStartNavigationEvent);
+    deferredSnapshot.resolve(createRawPageSnapshot());
+
+    await expect(readPromise).rejects.toMatchObject({ code: 'STALE_SNAPSHOT' });
   });
 
   it('clears internal activity and picker timers when the owning scope stops', async (): Promise<void> => {
@@ -1513,6 +1540,129 @@ describe('useWebView', () => {
     expect(webviewElement.executeJavaScript).toHaveBeenCalledTimes(2);
   });
 
+  it('requires a fresh snapshot after every page operation', async (): Promise<void> => {
+    const webviewElement = createScriptableWebview([
+      createRawPageSnapshot(),
+      {
+        ok: true,
+        action: 'click',
+        target: { index: 1, label: 'Search', tagName: 'BUTTON' },
+        message: 'clicked',
+        navigationStarted: false,
+        pageChanged: true,
+        shouldReadAgain: true
+      }
+    ]);
+    const controller = useWebView(ref<WebviewTag | null>(webviewElement));
+    const snapshot = await controller.readPageSnapshot();
+    const operation = { snapshotId: snapshot.snapshotId ?? '', action: { type: 'click' as const, index: 1 } };
+
+    await expect(controller.operatePage(operation)).resolves.toMatchObject({ ok: true, action: 'click' });
+    await expect(controller.operatePage(operation)).rejects.toMatchObject({ code: 'STALE_SNAPSHOT' });
+    expect(webviewElement.executeJavaScript).toHaveBeenCalledTimes(2);
+  });
+
+  it('consumes the active snapshot before concurrent page operations can reuse it', async (): Promise<void> => {
+    const operationDeferred = createDeferred<unknown>();
+    const webviewElement = createScriptableWebview([createRawPageSnapshot(), operationDeferred.promise, operationDeferred.promise]);
+    const controller = useWebView(ref<WebviewTag | null>(webviewElement));
+    const snapshot = await controller.readPageSnapshot();
+    const operation = { snapshotId: snapshot.snapshotId ?? '', action: { type: 'click' as const, index: 1 } };
+
+    const firstOperation = controller.operatePage(operation);
+    const secondOperation = controller.operatePage(operation);
+    operationDeferred.resolve({
+      ok: true,
+      action: 'click',
+      target: { index: 1, label: 'Search', tagName: 'BUTTON' },
+      message: 'clicked',
+      navigationStarted: false,
+      pageChanged: true,
+      shouldReadAgain: true
+    });
+
+    await expect(firstOperation).resolves.toMatchObject({ ok: true, action: 'click' });
+    await expect(secondOperation).rejects.toMatchObject({ code: 'STALE_SNAPSHOT' });
+    expect(webviewElement.executeJavaScript).toHaveBeenCalledTimes(2);
+  });
+
+  it('blocks snapshot reads until the current page operation settles', async (): Promise<void> => {
+    const operationDeferred = createDeferred<unknown>();
+    const webviewElement = createScriptableWebview([createRawPageSnapshot(), operationDeferred.promise, createRawPageSnapshot('snap-2')]);
+    const controller = useWebView(ref<WebviewTag | null>(webviewElement));
+    const snapshot = await controller.readPageSnapshot();
+
+    const operation = controller.operatePage({ snapshotId: snapshot.snapshotId ?? '', action: { type: 'click', index: 1 } });
+    const overlappingRead = controller.readPageSnapshot();
+    operationDeferred.resolve({
+      ok: true,
+      action: 'click',
+      target: { index: 1, label: 'Search', tagName: 'BUTTON' },
+      message: 'clicked',
+      navigationStarted: false,
+      pageChanged: true,
+      shouldReadAgain: true
+    });
+
+    await expect(operation).resolves.toMatchObject({ ok: true, action: 'click' });
+    await expect(overlappingRead).rejects.toMatchObject({ code: 'PAGE_LOADING' });
+    await expect(controller.readPageSnapshot()).resolves.toMatchObject({ snapshotId: 'snap-2' });
+    expect(webviewElement.executeJavaScript).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps reads blocked after caller abort until the page operation itself settles', async (): Promise<void> => {
+    const operationDeferred = createDeferred<unknown>();
+    const webviewElement = createScriptableWebview([createRawPageSnapshot(), operationDeferred.promise, createRawPageSnapshot('snap-2')]);
+    const controller = useWebView(ref<WebviewTag | null>(webviewElement));
+    const snapshot = await controller.readPageSnapshot();
+    const abortController = new AbortController();
+
+    const operation = controller.operatePage({ snapshotId: snapshot.snapshotId ?? '', action: { type: 'click', index: 1 } }, abortController.signal);
+    abortController.abort();
+
+    await expect(operation).rejects.toMatchObject({ code: 'RUNTIME_INTERRUPTED' });
+    await expect(controller.readPageSnapshot()).rejects.toMatchObject({ code: 'PAGE_LOADING' });
+
+    operationDeferred.resolve({
+      ok: true,
+      action: 'click',
+      target: { index: 1, label: 'Search', tagName: 'BUTTON' },
+      message: 'clicked',
+      navigationStarted: false,
+      pageChanged: true,
+      shouldReadAgain: true
+    });
+    await new Promise<void>((resolve): void => {
+      window.setTimeout(resolve, 0);
+    });
+
+    await expect(controller.readPageSnapshot()).resolves.toMatchObject({ snapshotId: 'snap-2' });
+  });
+
+  it('rejects navigation while another page operation is pending', async (): Promise<void> => {
+    const operationDeferred = createDeferred<unknown>();
+    const webviewElement = createScriptableWebview([createRawPageSnapshot(), operationDeferred.promise]);
+    webviewElement.loadURL = vi.fn();
+    const controller = useWebView(ref<WebviewTag | null>(webviewElement));
+    const snapshot = await controller.readPageSnapshot();
+
+    const operation = controller.operatePage({ snapshotId: snapshot.snapshotId ?? '', action: { type: 'click', index: 1 } });
+    const overlappingNavigation = controller.operatePage({ action: { type: 'navigate', url: 'https://example.org' } });
+    operationDeferred.resolve({
+      ok: true,
+      action: 'click',
+      target: { index: 1, label: 'Search', tagName: 'BUTTON' },
+      message: 'clicked',
+      navigationStarted: false,
+      pageChanged: true,
+      shouldReadAgain: true
+    });
+
+    await expect(operation).resolves.toMatchObject({ ok: true, action: 'click' });
+    await expect(overlappingNavigation).rejects.toMatchObject({ code: 'PAGE_LOADING' });
+    expect(webviewElement.loadURL).not.toHaveBeenCalled();
+  });
+
   it('keeps the active snapshot usable after the former time-only expiry window', async (): Promise<void> => {
     const performanceNow = vi.spyOn(globalThis.performance, 'now').mockReturnValue(0);
     const webviewElement = createScriptableWebview([
@@ -1650,6 +1800,45 @@ describe('useWebView', () => {
     expect(result).toMatchObject({ ok: true, action: 'click', target: { index: 1, label: '同页入口', tagName: 'BUTTON' } });
   });
 
+  it('invalidates the active snapshot when a main-frame document navigation starts', async (): Promise<void> => {
+    const webviewElement = createScriptableWebview([createRawPageSnapshot()]);
+    const controller = useWebView(ref<WebviewTag | null>(webviewElement));
+    const snapshot = await controller.readPageSnapshot();
+
+    controller.handleDidStartNavigation({ url: 'https://example.com', isMainFrame: true, isInPlace: false } as DidStartNavigationEvent);
+
+    expect(controller.state.value.isLoading).toBe(true);
+    await expect(controller.operatePage({ snapshotId: snapshot.snapshotId ?? '', action: { type: 'click', index: 1 } })).rejects.toMatchObject({
+      code: 'STALE_SNAPSHOT'
+    });
+    expect(webviewElement.executeJavaScript).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves the active snapshot for in-page and subframe navigation starts', async (): Promise<void> => {
+    const webviewElement = createScriptableWebview([
+      createRawPageSnapshot(),
+      {
+        ok: true,
+        action: 'click',
+        target: { index: 1, label: 'Search', tagName: 'BUTTON' },
+        message: 'clicked',
+        navigationStarted: false,
+        pageChanged: true,
+        shouldReadAgain: true
+      }
+    ]);
+    const controller = useWebView(ref<WebviewTag | null>(webviewElement));
+    const snapshot = await controller.readPageSnapshot();
+
+    controller.handleDidStartNavigation({ url: 'https://example.com#details', isMainFrame: true, isInPlace: true } as DidStartNavigationEvent);
+    controller.handleDidStartNavigation({ url: 'https://frame.example.com', isMainFrame: false, isInPlace: false } as DidStartNavigationEvent);
+
+    await expect(controller.operatePage({ snapshotId: snapshot.snapshotId ?? '', action: { type: 'click', index: 1 } })).resolves.toMatchObject({
+      ok: true,
+      action: 'click'
+    });
+  });
+
   it('handles aborted loadURL promises when navigating from the address bar', (): void => {
     const webviewElement = createScriptableWebview([]);
     const loadResult = createCatchableLoadResult();
@@ -1678,6 +1867,19 @@ describe('useWebView', () => {
     expect(loadResult.catchSpy).toHaveBeenCalledTimes(1);
     expect(webviewElement.executeJavaScript).not.toHaveBeenCalled();
     expect(result).toMatchObject({ ok: true, action: 'navigate', pageChanged: true, shouldReadAgain: true });
+  });
+
+  it('prevents an immediate stale-page read after programmatic navigation starts', async (): Promise<void> => {
+    const webviewElement = createScriptableWebview([createRawPageSnapshot()]);
+    webviewElement.loadURL = vi.fn();
+    const controller = useWebView(ref<WebviewTag | null>(webviewElement));
+
+    await controller.operatePage({ action: { type: 'navigate', url: 'https://example.org' } });
+    const immediateRead = controller.readPageSnapshot();
+
+    await expect(immediateRead).rejects.toMatchObject({ code: 'PAGE_LOADING' });
+    expect(controller.state.value.isLoading).toBe(true);
+    expect(webviewElement.executeJavaScript).not.toHaveBeenCalled();
   });
 
   it('does not start webpage reads or navigation after the runtime is interrupted', async (): Promise<void> => {

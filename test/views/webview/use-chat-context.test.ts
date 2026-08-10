@@ -93,9 +93,12 @@ describe('useChatContext', (): void => {
     const confirmation = createConfirmation(true);
     const executors = tools.getBoundTools(binding, { confirmation });
     const readTool = executors.find((tool): boolean => tool.definition.name === 'read_current_webpage');
-    if (!readTool) throw new Error('read_current_webpage should be registered');
+    const operateTool = executors.find((tool): boolean => tool.definition.name === 'operate_current_webpage');
+    if (!readTool || !operateTool) throw new Error('WebView tools should be registered');
 
     await expect(readTool.execute({})).resolves.toEqual({ toolName: 'read_current_webpage', status: 'success', data: pageSnapshot });
+    expect(operateTool.definition.parameters.required).toEqual(['snapshotId', 'step', 'action']);
+    expect(operateTool.definition.parameters.properties.snapshotId).toMatchObject({ type: 'string' });
     expect(tools.getHiddenToolNames(binding)).toEqual(['open_resource']);
     expect(tools.getPresentation(binding, 'read_current_webpage')).toEqual(expect.objectContaining({ label: '读取当前网页' }));
     expect(tools.getPresentation(binding, 'operate_current_webpage')).toEqual(expect.objectContaining({ label: '操作当前网页' }));
@@ -129,9 +132,31 @@ describe('useChatContext', (): void => {
       .find((tool): boolean => tool.definition.name === 'operate_current_webpage');
     if (!operateTool) throw new Error('operate_current_webpage should be registered');
 
-    await expect(operateTool.execute({ action: { type: 'click', index: 1 } })).resolves.toMatchObject({
+    await expect(
+      operateTool.execute({
+        step: { evaluation: '', memory: '', nextGoal: 'scroll' },
+        action: { type: 'scroll', direction: 'down', pixels: 700 }
+      })
+    ).resolves.toMatchObject({
       status: 'failure',
-      error: { code: 'INVALID_INPUT' }
+      error: {
+        code: 'INVALID_INPUT',
+        message: '非 navigate 网页操作缺少 snapshotId，请先调用 read_current_webpage 获取最新快照'
+      }
+    });
+    expect(confirmation.confirm).not.toHaveBeenCalled();
+
+    await expect(
+      operateTool.execute({
+        snapshotId: 'snapshot-a',
+        action: { type: 'scroll', direction: 'down', pixels: 700 }
+      })
+    ).resolves.toMatchObject({
+      status: 'failure',
+      error: {
+        code: 'INVALID_INPUT',
+        message: '网页操作 step 参数无效，必须提供 evaluation、memory 和 nextGoal'
+      }
     });
     expect(confirmation.confirm).not.toHaveBeenCalled();
 

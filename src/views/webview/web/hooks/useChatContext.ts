@@ -17,6 +17,8 @@ import {
   SUPPORTED_WEBPAGE_SCROLL_DIRECTIONS,
   WEBPAGE_OPERATION_LIMITS,
   WEBPAGE_STEP_LIMITS,
+  isWebpageStep,
+  normalizeWebpageAction,
   normalizeWebpageInput
 } from './chatToolInput';
 import { isWebpageResult, isWebpageSnapshot, sanitizeWebpageError, sanitizeWebpageResult } from './chatToolResult';
@@ -198,6 +200,24 @@ function createToolError(code: AIToolExecutionError['code'], message: string): E
 }
 
 /**
+ * 获取网页操作输入的安全错误消息。
+ * @param input - 原始模型工具输入
+ * @returns 可返回给模型的输入错误消息
+ */
+function getInputError(input: unknown): string {
+  const record = typeof input === 'object' && input !== null && !Array.isArray(input) ? (input as Record<string, unknown>) : undefined;
+  const action = normalizeWebpageAction(record?.action);
+  const snapshotId = record?.snapshotId;
+  if (action && action.type !== 'navigate' && (typeof snapshotId !== 'string' || !snapshotId.trim())) {
+    return '非 navigate 网页操作缺少 snapshotId，请先调用 read_current_webpage 获取最新快照';
+  }
+  if (!isWebpageStep(record?.step)) {
+    return '网页操作 step 参数无效，必须提供 evaluation、memory 和 nextGoal';
+  }
+  return '网页操作参数无效';
+}
+
+/**
  * 创建 WebView 操作确认描述。
  * @param input - 已归一化工具输入
  * @returns 确认描述
@@ -242,7 +262,7 @@ export function useChatContext(options: UseChatContextOptions): void {
    */
   async function operatePage(input: unknown, metadata?: AIToolExecutionMetadata): Promise<AIToolExecutionResult> {
     const normalized = normalizeWebpageInput(input);
-    if (!normalized) return createToolFailureResult(OPERATE_CURRENT_WEBPAGE_TOOL_NAME, 'INVALID_INPUT', '网页操作参数无效');
+    if (!normalized) return createToolFailureResult(OPERATE_CURRENT_WEBPAGE_TOOL_NAME, 'INVALID_INPUT', getInputError(input));
     const [error, result] = await asyncTo(options.context.operatePage(normalized, metadata?.abortSignal));
     if (error) {
       const safeError = sanitizeWebpageError(error.cause ?? error);
@@ -275,7 +295,7 @@ export function useChatContext(options: UseChatContextOptions): void {
    */
   function createConfirmation(input: unknown): ToolContextConfirmation {
     const normalized = normalizeWebpageInput(input);
-    if (!normalized) throw createToolError('INVALID_INPUT', '网页操作参数无效');
+    if (!normalized) throw createToolError('INVALID_INPUT', getInputError(input));
     return {
       title: '操作当前网页',
       description: createConfirmationText(normalized),
@@ -319,7 +339,7 @@ export function useChatContext(options: UseChatContextOptions): void {
         name: OPERATE_CURRENT_WEBPAGE_TOOL_NAME,
         description:
           '操作当前激活 WebView 页面。页面内可操作项必须使用 read_current_webpage 返回的 [N]，再执行 click、input、select、press 或 scroll；不要用 navigate 替代页面文字、链接、按钮或卡片。' +
-          'navigate 仅用于用户明确提供 URL、要求地址栏导航或切换到某网址，无需 snapshotId。文本框输入后需要按键时使用 press Enter；不接受 CSS selector 或任意 JavaScript。' +
+          'navigate 仅用于用户明确提供 URL、要求地址栏导航或切换到某网址，不依赖页面快照且 snapshotId 传空字符串。文本框输入后需要按键时使用 press Enter；不接受 CSS selector 或任意 JavaScript。' +
           '每次操作都要用 step 记录对上一步的简短评估、跨步骤业务事实和本次目标；操作后必须重新调用 read_current_webpage，禁止在 step 中保存快照句柄、选择器、DOM 或大段页面原文。',
         source: 'builtin',
         riskLevel: 'write',
@@ -332,14 +352,13 @@ export function useChatContext(options: UseChatContextOptions): void {
           properties: {
             snapshotId: {
               type: 'string',
-              minLength: 1,
               maxLength: WEBPAGE_OPERATION_LIMITS.snapshotId,
-              description: 'read_current_webpage 返回的 snapshotId；非 navigate 动作必须提供。页面内可操作项不得改用 navigate。'
+              description: '非 navigate 动作传 read_current_webpage 返回的 snapshotId；navigate 传空字符串。页面内可操作项不得改用 navigate。'
             },
             step: WEBPAGE_STEP_MEMORY_SCHEMA,
             action: WEBPAGE_OPERATION_ACTION_SCHEMA
           },
-          required: ['step', 'action'],
+          required: ['snapshotId', 'step', 'action'],
           additionalProperties: false
         }
       },

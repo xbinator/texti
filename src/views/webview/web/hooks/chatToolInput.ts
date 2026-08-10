@@ -110,6 +110,26 @@ function isPressKey(value: unknown): value is WebviewPressKey {
 }
 
 /**
+ * 判断值是否为完整且有界的网页操作步骤记忆。
+ * @param value - 待判断值
+ * @returns 是否符合公开 step 契约
+ */
+export function isWebpageStep(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value);
+  return (
+    keys.length === 3 &&
+    keys.every((key: string): boolean => key === 'evaluation' || key === 'memory' || key === 'nextGoal') &&
+    typeof value.evaluation === 'string' &&
+    value.evaluation.length <= WEBPAGE_STEP_LIMITS.evaluation &&
+    typeof value.memory === 'string' &&
+    value.memory.length <= WEBPAGE_STEP_LIMITS.memory &&
+    typeof value.nextGoal === 'string' &&
+    value.nextGoal.length <= WEBPAGE_STEP_LIMITS.nextGoal
+  );
+}
+
+/**
  * 按公开协议白名单清理网页操作动作。
  * @param value - 原始网页操作动作
  * @returns 不包含未知或越界字段的动作
@@ -191,9 +211,10 @@ export function normalizeWebpageAction(value: unknown): WebviewOperateAction | u
 export function normalizeWebpageInput(value: unknown): WebviewOperateInput | undefined {
   if (!isRecord(value)) return undefined;
   const action = normalizeWebpageAction(value.action);
-  if (!action) return undefined;
+  if (!action || !isWebpageStep(value.step)) return undefined;
   const snapshotId = typeof value.snapshotId === 'string' ? value.snapshotId : undefined;
-  if (snapshotId !== undefined && (snapshotId.length > WEBPAGE_OPERATION_LIMITS.snapshotId || !snapshotId.trim())) return undefined;
-  if (action.type !== 'navigate' && !snapshotId) return undefined;
-  return { ...(snapshotId ? { snapshotId } : {}), action };
+  if (snapshotId !== undefined && snapshotId.length > WEBPAGE_OPERATION_LIMITS.snapshotId) return undefined;
+  const normalizedSnapshotId = snapshotId?.trim();
+  if (action.type !== 'navigate' && !normalizedSnapshotId) return undefined;
+  return { ...(normalizedSnapshotId ? { snapshotId: normalizedSnapshotId } : {}), action };
 }

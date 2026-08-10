@@ -248,6 +248,7 @@ function handlePageFaviconUpdated(event: PageFaviconUpdatedEvent): void {
  */
 const webviewEventMap: Array<{ name: string; handler: EventListener | ((event: Event) => void); useCapture?: boolean }> = [
   { name: 'did-start-loading', handler: webview.handleDidStartLoading as EventListener },
+  { name: 'did-start-navigation', handler: webview.handleDidStartNavigation as EventListener },
   { name: 'dom-ready', handler: webview.handleDomReady as EventListener },
   { name: 'did-navigate', handler: webview.handleDidNavigate as EventListener },
   { name: 'did-navigate-in-page', handler: webview.handleDidNavigate as EventListener },

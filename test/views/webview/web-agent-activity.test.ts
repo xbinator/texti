@@ -61,6 +61,7 @@ interface Deferred<T> {
 }
 
 const registeredContextHolder = vi.hoisted<{ value: WebviewToolContext | null }>(() => ({ value: null }));
+const webviewElementHolder = vi.hoisted<{ value: HTMLElement | null }>(() => ({ value: null }));
 const executeJavaScriptMock = vi.hoisted(() => vi.fn<(_script: string) => Promise<unknown>>());
 
 vi.mock('vue-router', () => ({
@@ -151,6 +152,7 @@ vi.mock('@/views/webview/web/utils/hosting', () => ({
     element.reload = vi.fn();
     element.stop = vi.fn();
     element.setUserAgent = vi.fn();
+    webviewElementHolder.value = element;
     return element;
   }
 }));
@@ -223,6 +225,7 @@ function findAgentActivityElement(wrapper: VueWrapper, selector: string): Elemen
 describe('webview agent activity overlay', () => {
   beforeEach((): void => {
     registeredContextHolder.value = null;
+    webviewElementHolder.value = null;
     executeJavaScriptMock.mockReset();
   });
 
@@ -254,6 +257,30 @@ describe('webview agent activity overlay', () => {
     const successOverlay = findAgentActivityElement(wrapper, '.webview-agent-activity--success');
     expect(successOverlay?.textContent).toContain('读取完成');
 
+    wrapper.unmount();
+  });
+
+  it('binds main-frame navigation starts to invalidate an in-flight snapshot read', async (): Promise<void> => {
+    const deferredSnapshot = createDeferred<unknown>();
+    executeJavaScriptMock.mockReturnValue(deferredSnapshot.promise);
+    const wrapper = mountWebviewPage();
+    const context = registeredContextHolder.value;
+    const element = webviewElementHolder.value;
+    if (!context || !element) {
+      throw new Error('webview context and element should be registered');
+    }
+
+    const readPromise = context.readPageSnapshot();
+    const navigationEvent = new Event('did-start-navigation');
+    Object.defineProperties(navigationEvent, {
+      url: { value: 'https://example.org' },
+      isMainFrame: { value: true },
+      isInPlace: { value: false }
+    });
+    element.dispatchEvent(navigationEvent);
+    deferredSnapshot.resolve(createRawPageSnapshot());
+
+    await expect(readPromise).rejects.toMatchObject({ code: 'STALE_SNAPSHOT' });
     wrapper.unmount();
   });
 });

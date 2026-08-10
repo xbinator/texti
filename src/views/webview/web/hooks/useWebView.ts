@@ -2,7 +2,7 @@
  * @file useWebView.ts
  * @description 封装 `<webview>` 标签页面状态与导航控制。
  */
-import type { DidNavigateEvent, PageFaviconUpdatedEvent, PageTitleUpdatedEvent, WebviewTag } from 'electron';
+import type { DidNavigateEvent, DidStartNavigationEvent, PageFaviconUpdatedEvent, PageTitleUpdatedEvent, WebviewTag } from 'electron';
 import { getCurrentScope, onScopeDispose, ref, type Ref } from 'vue';
 import type {
   WebviewAgentActivity,
@@ -280,7 +280,9 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
   let isDomReady = false;
   let pendingUserAgent = '';
   let pendingPageSnapshotRead: Promise<WebviewPageSnapshot> | null = null;
+  let pendingPageOperation: Promise<unknown> | null = null;
   let activeSnapshot: ActiveWebviewSnapshot | null = null;
+  let pageSnapshotEpoch = 0;
   let agentActivityClearTimer: number | null = null;
   let elementPickerMessageDrainTimer: number | null = null;
   let isElementPickerMessageDraining = false;
@@ -301,6 +303,25 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
    */
   function createSnapshotId(): string {
     return `webview-snapshot-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+
+  /**
+   * 失效当前页面快照，并推进世代号以拒绝迟到的读取结果。
+   */
+  function invalidatePageSnapshot(): void {
+    pageSnapshotEpoch += 1;
+    activeSnapshot = null;
+  }
+
+  /**
+   * 立即把当前页面标记为加载中，并清理依赖旧文档的展示状态。
+   */
+  function markPageLoading(): void {
+    state.value.isLoading = true;
+    state.value.isElementSelecting = false;
+    state.value.loadProgress = 0.1;
+    state.value.favicon = '';
+    selectedElement.value = null;
   }
 
   /**
@@ -568,8 +589,8 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
     if (signal?.aborted) {
       throw createWebviewOperationError('RUNTIME_INTERRUPTED');
     }
-    if (state.value.isLoading) {
-      throw new Error('当前页面正在导航，请稍后重试');
+    if (state.value.isLoading || pendingPageOperation) {
+      throw createWebviewOperationError('PAGE_LOADING');
     }
 
     if (pendingPageSnapshotRead) {
@@ -582,6 +603,7 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
       throw new Error('当前页面尚未准备好读取，请稍后重试');
     }
 
+    const readEpoch = pageSnapshotEpoch;
     startAgentActivity('reading', '正在读取网页');
     let rawRead: Promise<unknown>;
     try {
@@ -593,6 +615,9 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
 
     pendingPageSnapshotRead = withWebviewPageReadTimeout(
       rawRead.then((value: unknown) => {
+        if (readEpoch !== pageSnapshotEpoch) {
+          throw createWebviewOperationError('STALE_SNAPSHOT');
+        }
         if (!isWebviewPageSnapshot(value)) {
           throw new Error('页面快照格式无效');
         }
@@ -635,14 +660,22 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
     if (!instance || typeof executeJavaScript !== 'function') {
       throw createWebviewOperationError('EDITOR_UNAVAILABLE');
     }
+    if (pendingPageSnapshotRead) {
+      throw createWebviewOperationError('PAGE_LOADING');
+    }
 
     if (input.action.type === 'navigate') {
+      if (state.value.isLoading || pendingPageOperation) {
+        throw createWebviewOperationError('PAGE_LOADING');
+      }
+
       startAgentActivity('operating', '正在操作网页');
       try {
         const targetUrl = normalizeWebviewUrl(input.action.url);
         state.value.url = targetUrl;
-        activeSnapshot = null;
+        invalidatePageSnapshot();
         loadWebviewUrl(instance, targetUrl);
+        markPageLoading();
 
         const result: WebviewOperateResult = {
           ok: true,
@@ -661,11 +694,12 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
       }
     }
 
-    if (!input.snapshotId || !activeSnapshot || activeSnapshot.id !== input.snapshotId) {
+    const operationSnapshot = activeSnapshot;
+    if (!input.snapshotId || !operationSnapshot || operationSnapshot.id !== input.snapshotId) {
       throw createWebviewOperationError('STALE_SNAPSHOT');
     }
 
-    if (state.value.url && state.value.url !== activeSnapshot.url) {
+    if (state.value.url && state.value.url !== operationSnapshot.url) {
       throw createWebviewOperationError('STALE_SNAPSHOT');
     }
 
@@ -673,10 +707,21 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
       throw createWebviewOperationError('PAGE_LOADING');
     }
 
+    // 快照是一次性操作凭证：脚本开始前原子消费，阻止顺序或并发调用复用旧页面状态。
+    invalidatePageSnapshot();
     startAgentActivity('operating', '正在操作网页');
     try {
-      const rawOperation = executeJavaScript.call(instance, createPageOperationScript(input, activeSnapshot.elements)) as Promise<unknown>;
-      const result = await withWebviewAbort(withWebviewPageOperationTimeout(rawOperation), signal);
+      const rawOperation = executeJavaScript.call(instance, createPageOperationScript(input, operationSnapshot.elements)) as Promise<unknown>;
+      const operationPromise = withWebviewPageOperationTimeout(rawOperation);
+      pendingPageOperation = operationPromise;
+      operationPromise
+        .finally((): void => {
+          if (pendingPageOperation === operationPromise) {
+            pendingPageOperation = null;
+          }
+        })
+        .catch((): undefined => undefined);
+      const result = await withWebviewAbort(operationPromise, signal);
       if (!isWebviewOperateResult(result)) {
         throw createWebviewOperationError('EXECUTION_FAILED', '页面操作结果格式无效');
       }
@@ -799,11 +844,20 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
    * 处理开始加载事件。
    */
   function handleDidStartLoading(): void {
-    state.value.isLoading = true;
-    state.value.isElementSelecting = false;
-    state.value.loadProgress = 0.1;
-    state.value.favicon = '';
-    selectedElement.value = null;
+    markPageLoading();
+  }
+
+  /**
+   * 处理导航开始事件，在新主文档提交前失效旧页面快照。
+   * @param event - 导航开始事件
+   */
+  function handleDidStartNavigation(event: DidStartNavigationEvent): void {
+    if (!event.isMainFrame || event.isInPlace) {
+      return;
+    }
+
+    invalidatePageSnapshot();
+    markPageLoading();
   }
 
   /**
@@ -829,7 +883,7 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
     const shouldInvalidateSnapshot = !activeSnapshot || activeSnapshot.url !== event.url;
     state.value.url = event.url;
     if (shouldInvalidateSnapshot) {
-      activeSnapshot = null;
+      invalidatePageSnapshot();
       selectedElement.value = null;
     }
     syncNavigationState();
@@ -882,8 +936,9 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
     clearAgentActivityTimer();
     stopElementPickerMessageDrain();
     handledElementPickerMessageIds.clear();
-    activeSnapshot = null;
+    invalidatePageSnapshot();
     pendingPageSnapshotRead = null;
+    pendingPageOperation = null;
   }
 
   // Hook 始终从组件 setup 中创建，跟随 effect scope 销毁内部资源。
@@ -912,6 +967,7 @@ export function useWebView(webviewRef: Ref<WebviewTag | null>) {
 
     attachInitialUrl,
     handleDidStartLoading,
+    handleDidStartNavigation,
     handleDomReady,
     handleDidNavigate,
     handleTitleUpdated,
