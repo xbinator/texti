@@ -10,11 +10,9 @@
   "explorer.fileNesting.enabled": true,
   "explorer.fileNesting.expand": false,
   "explorer.fileNesting.patterns": {
-    ".gitignore": ".gitattributes",
-    ".eslintrc.cjs": ".eslintignore, .prettierignore, .prettierrc, prettier.config.cjs, commitlint.config.js, .editorconfig",
-    ".stylelintrc.cjs": ".stylelintignore",
+    ".eslintrc.cjs": ".eslintignore, prettier.config.cjs, .editorconfig",
     "README.md": "*.md",
-    "tsconfig.json": "tsconfig.*.json, jsconfig.json",
-    "package.json": "pnpm-lock.yaml, .npmrc, .nvmrc, pnpm-workspace.yaml, electron-builder.yml, logo.svg"
+    "tsconfig.json": "tsconfig.*.json",
+    "package.json": "pnpm-lock.yaml, .npmrc, .nvmrc, electron-builder.yml"
   }
 }
