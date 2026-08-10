@@ -88,4 +88,21 @@ describe('BEditor rich selection styles', (): void => {
 
     expect(source).not.toContain('::highlight(b-markdown-ai-selection-highlight)');
   });
+
+  it('positions table gap cursor as a vertical caret at the previous table end', (): void => {
+    const source = readPaneRichEditorSource();
+    const tableGapCursorRuleBody = extractStyleRuleBody(source, '.b-markdown-table + .ProseMirror-gapcursor');
+    const tableGapCursorLineRuleBody = extractStyleRuleBody(source, '.b-markdown-table + .ProseMirror-gapcursor::after');
+
+    expect(tableGapCursorRuleBody).toContain('position: relative;');
+    expect(tableGapCursorRuleBody).toContain('height: 0;');
+    expect(tableGapCursorLineRuleBody).toContain('top: -2em;');
+    expect(tableGapCursorLineRuleBody).toContain('left: 100%;');
+    expect(tableGapCursorLineRuleBody).not.toContain('left: 0;');
+    expect(tableGapCursorLineRuleBody).toContain('width: 0;');
+    expect(tableGapCursorLineRuleBody).toContain('height: 1.4em;');
+    expect(tableGapCursorLineRuleBody).not.toContain('width: 100%;');
+    expect(tableGapCursorLineRuleBody).toContain('border-left: 1px solid var(--editor-caret);');
+    expect(tableGapCursorLineRuleBody).toContain('border-top: 0;');
+  });
 });

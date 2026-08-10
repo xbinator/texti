@@ -1406,9 +1406,7 @@ export function useExtensions(editorInstanceId: Ref<string>, options: UseExtensi
       strike: false,
       underline: false,
       // 禁用拖拽光标（拖拽时的蓝色插入线）
-      dropcursor: false,
-      // 禁用间隙光标
-      gapcursor: false
+      dropcursor: false
     }),
     Placeholder.configure({ emptyEditorClass: 'is-editor-empty', placeholder: resolveRichEditorPlaceholder }),
     Markdown,
@@ -1827,8 +1825,7 @@ export function createRichMarkdownSchemaExtensions(
       paragraph: false,
       strike: false,
       underline: false,
-      dropcursor: false,
-      gapcursor: false
+      dropcursor: false
     }),
     Markdown,
     FrontMatter,
