@@ -3,7 +3,7 @@
  * @description 使用单个 Vue 组件将 BMessage AST 渲染为原生 VNode。
  */
 /* eslint-disable no-use-before-define -- 列表与引用节点需要递归渲染块节点。 */
-import type { BlockNode, InlineNode, ListItemNode, MessageNodeRenderContext, TableCellNode } from '../types';
+import type { BlockNode, InlineNode, ListItemNode, MessageNodeRenderContext, TableBlockNode, TableCellNode } from '../types';
 import type { PropType, VNodeChild } from 'vue';
 import { defineComponent, h, inject } from 'vue';
 import { createNamespace } from '@/utils/namespace';
@@ -88,6 +88,36 @@ function renderTableCell(tag: 'th' | 'td', cell: TableCellNode, context: Message
 }
 
 /**
+ * 渲染表格块并限制外层宽度。
+ * @param node - 表格块节点
+ * @param context - 消息交互上下文
+ * @returns 表格滚动容器 VNode
+ */
+function renderTable(node: TableBlockNode, context: MessageNodeRenderContext | null): VNodeChild {
+  return h('div', { key: node.id, class: bem('table-scroller') }, [
+    h('table', [
+      h('thead', [
+        h(
+          'tr',
+          node.header.map((cell: TableCellNode): VNodeChild => renderTableCell('th', cell, context))
+        )
+      ]),
+      h(
+        'tbody',
+        node.rows.map(
+          (row: TableCellNode[], rowIndex: number): VNodeChild =>
+            h(
+              'tr',
+              { key: rowIndex },
+              row.map((cell: TableCellNode): VNodeChild => renderTableCell('td', cell, context))
+            )
+        )
+      )
+    ])
+  ]);
+}
+
+/**
  * 渲染块节点列表。
  * @param nodes - 块节点列表
  * @param context - 消息交互上下文
@@ -107,27 +137,7 @@ function renderBlockNodes(nodes: BlockNode[], context: MessageNodeRenderContext 
     if (node.type === 'blockquote') return h('blockquote', { key: node.id }, renderBlockNodes(node.children, context));
     if (node.type === 'code') return h(CodeBlockNode, { key: node.id, node });
     if (node.type === 'math') return h(MathBlockNode, { key: node.id, text: node.text });
-    if (node.type === 'table') {
-      return h('table', { key: node.id }, [
-        h('thead', [
-          h(
-            'tr',
-            node.header.map((cell: TableCellNode): VNodeChild => renderTableCell('th', cell, context))
-          )
-        ]),
-        h(
-          'tbody',
-          node.rows.map(
-            (row: TableCellNode[], rowIndex: number): VNodeChild =>
-              h(
-                'tr',
-                { key: rowIndex },
-                row.map((cell: TableCellNode): VNodeChild => renderTableCell('td', cell, context))
-              )
-          )
-        )
-      ]);
-    }
+    if (node.type === 'table') return renderTable(node, context);
     if (node.type === 'hr') return h('hr', { key: node.id });
     if (node.type === 'component') {
       return h('div', { key: node.id, class: 'b-message__component-placeholder' }, node.componentName);

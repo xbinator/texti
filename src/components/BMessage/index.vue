@@ -290,6 +290,20 @@ onScopeDispose(() => {
   }
 }
 
+.b-message__table-scroller {
+  min-width: 0;
+  max-width: 100%;
+  margin: 0.6em 0;
+  overflow-x: auto;
+  .scrollbar-base();
+}
+
+.b-message__table-scroller > table {
+  width: max-content;
+  min-width: 100%;
+  margin: 0;
+}
+
 .b-message__cursor {
   display: inline-block;
   width: 1px;

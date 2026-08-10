@@ -22,6 +22,14 @@ function readCodeBlockNodeSource(): string {
 }
 
 /**
+ * 读取 BMessage 组件源码。
+ * @returns BMessage Vue 源码
+ */
+function readMessageSource(): string {
+  return readFileSync(new URL('../../../src/components/BMessage/index.vue', import.meta.url), 'utf8');
+}
+
+/**
  * 提取指定选择器的首个样式块内容。
  * @param source - 样式源码
  * @param selector - CSS 选择器
@@ -65,8 +73,20 @@ describe('BMessage markdown style', () => {
 
     expect(style).toMatch(/li:has\(>\s*input\[type='checkbox'\]\)\s*>\s*\.b-message__code-block[\s\S]*\{[\s\S]*grid-column:\s*2;/);
     expect(style).toMatch(/li:has\(>\s*input\[type='checkbox'\]\)\s*>\s*blockquote[\s\S]*\{[\s\S]*grid-column:\s*2;/);
-    expect(style).toMatch(/li:has\(>\s*input\[type='checkbox'\]\)\s*>\s*table[\s\S]*\{[\s\S]*grid-column:\s*2;/);
+    expect(style).toMatch(/li:has\(>\s*input\[type='checkbox'\]\)\s*>\s*\.b-message__table-scroller[\s\S]*\{[\s\S]*grid-column:\s*2;/);
     expect(style).toMatch(/li:has\(>\s*input\[type='checkbox'\]\)\s*>\s*hr[\s\S]*\{[\s\S]*grid-column:\s*2;/);
+  });
+
+  it('bounds markdown table overflow inside the message width', (): void => {
+    const source = readMessageSource();
+    const scrollerRule = extractRuleBlock(source, '.b-message__table-scroller');
+    const tableRule = extractRuleBlock(source, '.b-message__table-scroller > table');
+
+    expect(scrollerRule).toMatch(/max-width:\s*100%;/);
+    expect(scrollerRule).toMatch(/overflow-x:\s*auto;/);
+    expect(tableRule).toMatch(/width:\s*max-content;/);
+    expect(tableRule).toMatch(/min-width:\s*100%;/);
+    expect(tableRule).toMatch(/margin:\s*0;/);
   });
 
   it('uses a single scroll container for BMessage code blocks', (): void => {

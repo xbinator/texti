@@ -203,6 +203,23 @@ describe('BMessage node renderer', () => {
     expect(wrapper.find('hr').exists()).toBe(true);
   });
 
+  it('wraps markdown tables in a bounded horizontal scroller', async (): Promise<void> => {
+    const wrapper = mount(BMessage, {
+      props: {
+        type: 'markdown',
+        content: '| 长列标题 | 另一个长列标题 |\n| --- | --- |\n| very-long-unbroken-content | value |'
+      }
+    });
+
+    await waitMessageRender();
+
+    const tableScroller = wrapper.find('.b-message__table-scroller');
+
+    expect(tableScroller.exists()).toBe(true);
+    expect(tableScroller.find('table').exists()).toBe(true);
+    expect(wrapper.find('.b-message__markdown > table').exists()).toBe(false);
+  });
+
   it('renders component placeholder nodes without recursive block components', (): void => {
     const wrapper = mount(MessageNodes, {
       props: {
