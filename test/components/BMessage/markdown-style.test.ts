@@ -98,6 +98,22 @@ describe('BMessage markdown style', () => {
     expect(cellContentRule).toMatch(/overflow-wrap:\s*anywhere;/);
   });
 
+  it('keeps the table copy button sticky and centered in the header row', (): void => {
+    const source = readMessageSource();
+    const toolbarRule = extractRuleBlock(source, '.b-message__table-toolbar');
+    const copyRule = extractRuleBlock(source, '.b-message__table-copy');
+
+    expect(toolbarRule).toMatch(/position:\s*sticky;/);
+    expect(toolbarRule).toMatch(/left:\s*0;/);
+    expect(toolbarRule).toMatch(/display:\s*flex;/);
+    expect(toolbarRule).toMatch(/justify-content:\s*flex-end;/);
+    expect(toolbarRule).toMatch(/width:\s*100%;/);
+    expect(toolbarRule).toMatch(/height:\s*0;/);
+    expect(copyRule).not.toMatch(/position:\s*absolute;/);
+    expect(copyRule).toMatch(/margin:\s*4px\s+8px\s+0\s+0;/);
+    expect(copyRule).toMatch(/pointer-events:\s*auto;/);
+  });
+
   it('uses a single scroll container for BMessage code blocks', (): void => {
     const source = readCodeBlockNodeSource();
     const preRule = extractRuleBlock(source, '.b-message__code-pre');

@@ -6,6 +6,8 @@
 import type { BlockNode, InlineNode, ListItemNode, MessageNodeRenderContext, TableBlockNode, TableCellNode } from '../types';
 import type { PropType, VNodeChild } from 'vue';
 import { defineComponent, h, inject } from 'vue';
+import BIcon from '@/components/BIcon/index.vue';
+import { useClipboard } from '@/hooks/useClipboard';
 import { createNamespace } from '@/utils/namespace';
 import { MESSAGE_NODE_RENDER_CONTEXT_KEY } from '../types';
 import CodeBlockNode from './CodeBlockNode.vue';
@@ -21,6 +23,60 @@ const [, bem] = createNamespace('message');
 interface Props {
   /** 顶层块节点。 */
   blocks: BlockNode[];
+}
+
+/**
+ * 表格复制处理函数。
+ */
+type TableCopyHandler = (node: TableBlockNode, event: MouseEvent) => Promise<void>;
+
+/**
+ * 将行内节点转为复制用纯文本。
+ * @param nodes - 行内节点列表
+ * @returns 纯文本内容
+ */
+function toPlainText(nodes: InlineNode[]): string {
+  return nodes
+    .map((node: InlineNode): string => {
+      if (node.type === 'text') return node.text;
+      if (node.type === 'code') return node.text;
+      if (node.type === 'math') return node.text;
+      if (node.type === 'image') return node.alt;
+      if (node.type === 'break') return '\n';
+      if (node.type === 'cursor') return '';
+      return toPlainText(node.children);
+    })
+    .join('');
+}
+
+/**
+ * 清理 TSV 单元格内容，避免破坏行列结构。
+ * @param text - 原始单元格文本
+ * @returns 可安全复制为 TSV 的文本
+ */
+function sanitizeCellText(text: string): string {
+  return text
+    .replace(/[\t\r\n]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * 将表格行转为 TSV 行。
+ * @param cells - 表格单元格列表
+ * @returns TSV 行文本
+ */
+function formatTableRow(cells: TableCellNode[]): string {
+  return cells.map((cell: TableCellNode): string => sanitizeCellText(toPlainText(cell.children))).join('\t');
+}
+
+/**
+ * 将表格节点转为 TSV 文本。
+ * @param node - 表格块节点
+ * @returns TSV 文本
+ */
+function formatTableTsv(node: TableBlockNode): string {
+  return [formatTableRow(node.header), ...node.rows.map((row: TableCellNode[]): string => formatTableRow(row))].join('\n');
 }
 
 /**
@@ -65,14 +121,15 @@ function renderInlineNode(node: InlineNode, key: number, context: MessageNodeRen
  * 渲染列表项。
  * @param item - 列表项
  * @param context - 消息交互上下文
+ * @param onTableCopy - 表格复制处理函数
  * @returns 列表项 VNode
  */
-function renderListItem(item: ListItemNode, context: MessageNodeRenderContext | null): VNodeChild {
+function renderListItem(item: ListItemNode, context: MessageNodeRenderContext | null, onTableCopy: TableCopyHandler): VNodeChild {
   const children: VNodeChild[] = [];
   if (item.task) {
     children.push(h('input', { type: 'checkbox', disabled: true, checked: item.checked }));
   }
-  children.push(...renderBlockNodes(item.children, context));
+  children.push(...renderBlockNodes(item.children, context, onTableCopy));
   return h('li', { key: item.id }, children);
 }
 
@@ -93,10 +150,24 @@ function renderTableCell(tag: 'th' | 'td', cell: TableCellNode, context: Message
  * 渲染表格块并限制外层宽度。
  * @param node - 表格块节点
  * @param context - 消息交互上下文
+ * @param onTableCopy - 表格复制处理函数
  * @returns 表格滚动容器 VNode
  */
-function renderTable(node: TableBlockNode, context: MessageNodeRenderContext | null): VNodeChild {
+function renderTable(node: TableBlockNode, context: MessageNodeRenderContext | null, onTableCopy: TableCopyHandler): VNodeChild {
   return h('div', { key: node.id, class: bem('table-scroller') }, [
+    h('div', { class: bem('table-toolbar') }, [
+      h(
+        'button',
+        {
+          type: 'button',
+          class: bem('table-copy'),
+          title: '复制表格',
+          'aria-label': '复制表格',
+          onClick: (event: MouseEvent): Promise<void> => onTableCopy(node, event)
+        },
+        [h(BIcon, { icon: 'lucide:copy', size: 14 })]
+      )
+    ]),
     h('table', [
       h('thead', [
         h(
@@ -123,9 +194,10 @@ function renderTable(node: TableBlockNode, context: MessageNodeRenderContext | n
  * 渲染块节点列表。
  * @param nodes - 块节点列表
  * @param context - 消息交互上下文
+ * @param onTableCopy - 表格复制处理函数
  * @returns VNode 子节点
  */
-function renderBlockNodes(nodes: BlockNode[], context: MessageNodeRenderContext | null): VNodeChild[] {
+function renderBlockNodes(nodes: BlockNode[], context: MessageNodeRenderContext | null, onTableCopy: TableCopyHandler): VNodeChild[] {
   return nodes.map((node: BlockNode): VNodeChild => {
     if (node.type === 'paragraph') return h('p', { key: node.id }, renderInlineNodes(node.children, context));
     if (node.type === 'heading') return h(`h${node.depth}`, { key: node.id }, renderInlineNodes(node.children, context));
@@ -133,13 +205,13 @@ function renderBlockNodes(nodes: BlockNode[], context: MessageNodeRenderContext 
       return h(
         node.ordered ? 'ol' : 'ul',
         { key: node.id, start: node.ordered ? node.start || undefined : undefined },
-        node.items.map((item: ListItemNode): VNodeChild => renderListItem(item, context))
+        node.items.map((item: ListItemNode): VNodeChild => renderListItem(item, context, onTableCopy))
       );
     }
-    if (node.type === 'blockquote') return h('blockquote', { key: node.id }, renderBlockNodes(node.children, context));
+    if (node.type === 'blockquote') return h('blockquote', { key: node.id }, renderBlockNodes(node.children, context, onTableCopy));
     if (node.type === 'code') return h(CodeBlockNode, { key: node.id, node });
     if (node.type === 'math') return h(MathBlockNode, { key: node.id, text: node.text });
-    if (node.type === 'table') return renderTable(node, context);
+    if (node.type === 'table') return renderTable(node, context, onTableCopy);
     if (node.type === 'hr') return h('hr', { key: node.id });
     if (node.type === 'component') {
       return h('div', { key: node.id, class: 'b-message__component-placeholder' }, node.componentName);
@@ -158,6 +230,23 @@ export default defineComponent({
   },
   setup(props: Props): () => VNodeChild {
     const context = inject(MESSAGE_NODE_RENDER_CONTEXT_KEY, null);
-    return (): VNodeChild => renderBlockNodes(props.blocks, context);
+    const { clipboard } = useClipboard();
+
+    /**
+     * 复制表格为 TSV 文本。
+     * @param node - 表格块节点
+     * @param event - 鼠标点击事件
+     */
+    async function handleTableCopy(node: TableBlockNode, event: MouseEvent): Promise<void> {
+      event.preventDefault();
+      event.stopPropagation();
+
+      await clipboard(formatTableTsv(node), {
+        successMessage: '表格已复制',
+        trim: false
+      });
+    }
+
+    return (): VNodeChild => renderBlockNodes(props.blocks, context, handleTableCopy);
   }
 });

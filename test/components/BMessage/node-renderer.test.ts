@@ -216,6 +216,7 @@ describe('BMessage node renderer', () => {
     const tableScroller = wrapper.find('.b-message__table-scroller');
 
     expect(tableScroller.exists()).toBe(true);
+    expect(tableScroller.find('.b-message__table-toolbar > button[aria-label="复制表格"]').exists()).toBe(true);
     expect(tableScroller.find('table').exists()).toBe(true);
     expect(wrapper.find('.b-message__markdown > table').exists()).toBe(false);
   });
@@ -235,6 +236,25 @@ describe('BMessage node renderer', () => {
     expect(cellContents).toHaveLength(4);
     expect(wrapper.find('td .b-message__table-cell-content').text()).toBe('one');
     expect(wrapper.find('th .b-message__table-cell-content').text()).toBe('Name');
+  });
+
+  it('copies markdown tables as TSV text', async (): Promise<void> => {
+    clipboardMock.mockResolvedValue(true);
+
+    const wrapper = mount(BMessage, {
+      props: {
+        type: 'markdown',
+        content: '| Name | Value |\n| --- | --- |\n| **Alpha** | `42` |\n| [Beta](https://example.com) | plain text |'
+      }
+    });
+
+    await waitMessageRender();
+    await wrapper.find('button[aria-label="复制表格"]').trigger('click');
+
+    expect(clipboardMock).toHaveBeenCalledWith('Name\tValue\nAlpha\t42\nBeta\tplain text', {
+      successMessage: '表格已复制',
+      trim: false
+    });
   });
 
   it('renders component placeholder nodes without recursive block components', (): void => {

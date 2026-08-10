@@ -291,6 +291,7 @@ onScopeDispose(() => {
 }
 
 .b-message__table-scroller {
+  position: relative;
   min-width: 0;
   max-width: 100%;
   margin: 0.6em 0;
@@ -303,6 +304,48 @@ onScopeDispose(() => {
   width: max-content;
   min-width: 100%;
   margin: 0;
+}
+
+.b-message__table-toolbar {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  height: 0;
+  pointer-events: none;
+}
+
+.b-message__table-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  margin: 4px 8px 0 0;
+  color: var(--text-secondary);
+  pointer-events: auto;
+  cursor: pointer;
+  background: var(--bg-primary);
+  border: var(--control-border-width) solid var(--border-secondary);
+  border-radius: var(--control-radius);
+  opacity: 0;
+  transition: opacity var(--motion-duration-fast) var(--motion-easing-standard), color var(--motion-duration-fast) var(--motion-easing-standard),
+    background var(--motion-duration-fast) var(--motion-easing-standard), border-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.b-message__table-copy:hover,
+.b-message__table-copy:focus-visible {
+  color: var(--color-primary);
+  background: var(--bg-secondary);
+  border-color: var(--border-primary);
+}
+
+.b-message__table-scroller:hover .b-message__table-copy,
+.b-message__table-scroller:focus-within .b-message__table-copy {
+  opacity: 1;
 }
 
 .b-message__table-cell-content {
