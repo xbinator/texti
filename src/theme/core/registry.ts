@@ -7,13 +7,21 @@ import type { ThemeTokens } from '../types/tokens';
 import { createThemeTokensFromBase } from './factory';
 
 /**
- * 主题预设——注册到注册表的基本单元。
+ * 主题预设公开信息。
  */
-export interface ThemePreset {
+export interface ThemePresetInfo {
   /** 预设 ID，如 'default'、'classic' */
   id: string;
   /** 显示名称，如 '默认「Graphite」'、'Classic' */
   label: string;
+  /** 面向用户和 AI 的主题氛围简述 */
+  description: string;
+}
+
+/**
+ * 主题预设——注册到注册表的基本单元。
+ */
+export interface ThemePreset extends ThemePresetInfo {
   /** 亮色 Token */
   light: ThemeTokens;
   /** 暗色 Token */
@@ -42,17 +50,17 @@ export function registerPreset(preset: ThemePreset): void {
  * default 始终排首位，其余按注册顺序排列。
  * @returns 预设元信息数组
  */
-export function getPresetList(): Array<{ id: string; label: string }> {
+export function getPresetList(): ThemePresetInfo[] {
   const defaultItem = presetMap.get('default');
   const rest = presetOrder
     .filter((id) => id !== 'default')
     .map((id) => {
       const p = presetMap.get(id);
-      return { id: p!.id, label: p!.label };
+      return { id: p!.id, label: p!.label, description: p!.description };
     });
 
   if (defaultItem) {
-    return [{ id: defaultItem.id, label: defaultItem.label }, ...rest];
+    return [{ id: defaultItem.id, label: defaultItem.label, description: defaultItem.description }, ...rest];
   }
 
   return rest;
@@ -93,6 +101,7 @@ export function registerCustomTheme(config: CustomThemeConfig): void {
   registerPreset({
     id: config.id,
     label: config.label,
+    description: config.description?.trim() || config.label,
     light: createThemeTokensFromBase(defaultLight, config.light),
     dark: createThemeTokensFromBase(defaultDark, config.dark)
   });

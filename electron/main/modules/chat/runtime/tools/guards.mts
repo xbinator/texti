@@ -10,9 +10,10 @@ import type {
   RuntimeSettingKey,
   RuntimeSettingsSnapshot,
   RuntimeSettingValue,
+  RuntimeThemePresetOption,
   RuntimeUpdateSettingsResult
 } from './types.mjs';
-import { SUPPORTED_SETTING_KEYS } from './constants.mjs';
+import { SUPPORTED_SETTING_KEYS } from '../../../../../../shared/settings/definitions.js';
 
 /**
  * 判断值是否为对象记录。
@@ -56,14 +57,34 @@ export function isRuntimeSettingValue(value: unknown): value is RuntimeSettingVa
 }
 
 /**
+ * 判断值是否为 Runtime 主题预设选项。
+ * @param value - 待判断值
+ * @returns 是否为主题预设选项
+ */
+function isRuntimeThemePresetOption(value: unknown): value is RuntimeThemePresetOption {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    Boolean(value.id.trim()) &&
+    typeof value.label === 'string' &&
+    Boolean(value.label.trim()) &&
+    typeof value.description === 'string' &&
+    Boolean(value.description.trim())
+  );
+}
+
+/**
  * 判断 bridge payload 是否为设置快照。
  * @param value - bridge payload
  * @returns 是否为设置快照
  */
 export function isRuntimeSettingsSnapshot(value: unknown): value is RuntimeSettingsSnapshot {
-  if (!isRecord(value) || !isRecord(value.settings)) return false;
+  if (!isRecord(value) || !isRecord(value.settings) || !Array.isArray(value.themePresetOptions)) return false;
 
-  return Object.entries(value.settings).every(([key, settingValue]) => isRuntimeSettingKey(key) && isRuntimeSettingValue(settingValue));
+  return (
+    Object.entries(value.settings).every(([key, settingValue]) => isRuntimeSettingKey(key) && isRuntimeSettingValue(settingValue)) &&
+    value.themePresetOptions.every(isRuntimeThemePresetOption)
+  );
 }
 
 /**

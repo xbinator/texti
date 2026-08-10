@@ -10,18 +10,19 @@ import type {
   RuntimeRemoveMcpServerInput,
   RuntimeSettingKey,
   RuntimeSettingValue,
+  RuntimeThemePresetOption,
   RuntimeUpdateMcpServerInput,
   RuntimeUpdateSettingsInput
 } from '../types.mjs';
 import type { AIToolExecutionResult, MCPServerConfig } from 'types/ai';
 import { nanoid } from 'nanoid';
+import { GET_SETTINGS_TOOL_NAME, SUPPORTED_SETTING_KEYS, UPDATE_SETTINGS_TOOL_NAME } from '../../../../../../../shared/settings/definitions.js';
 import { refreshMcpDiscovery } from '../../../../mcp/session.mjs';
 import {
   ADD_MCP_SERVER_TOOL_NAME,
   DEFAULT_MCP_CONNECT_TIMEOUT_MS,
   DEFAULT_MCP_TOOL_CALL_TIMEOUT_MS,
   GET_MCP_SETTINGS_TOOL_NAME,
-  GET_SETTINGS_TOOL_NAME,
   MAX_CONNECT_TIMEOUT_MS,
   MAX_TOOL_CALL_TIMEOUT_MS,
   MIN_CONNECT_TIMEOUT_MS,
@@ -29,8 +30,7 @@ import {
   REFRESH_MCP_DISCOVERY_TOOL_NAME,
   REMOVE_MCP_SERVER_TOOL_NAME,
   SETTINGS_TOOL_NAMES,
-  UPDATE_MCP_SERVER_TOOL_NAME,
-  UPDATE_SETTINGS_TOOL_NAME
+  UPDATE_MCP_SERVER_TOOL_NAME
 } from '../constants.mjs';
 import { isRecord, isRuntimeSettingKey, isRuntimeSettingsSnapshot, isRuntimeUpdateSettingsResult } from '../guards.mjs';
 import { createBridgeFailureResult, createMainDeniedResult, createMainToolFailureResult, createMainToolSuccessResult } from '../results.mjs';
@@ -72,7 +72,7 @@ function normalizeRuntimeGetSettingsInput(input: unknown): RuntimeGetSettingsInp
   const source = isRecord(input) ? input : {};
   const rawKeys = source.keys;
 
-  if (rawKeys === undefined) return { keys: ['theme', 'themePreset', 'sourceMode', 'editorPageWidth'] };
+  if (rawKeys === undefined) return { keys: [...SUPPORTED_SETTING_KEYS] };
   if (Array.isArray(rawKeys)) return { keys: rawKeys.filter(isRuntimeSettingKey) };
   if (isRuntimeSettingKey(rawKeys)) return { keys: [rawKeys] };
   return createMainToolFailureResult(GET_SETTINGS_TOOL_NAME, 'INVALID_INPUT', '不支持的设置键。');
@@ -251,7 +251,10 @@ async function executeGetSettingsTool(input: ChatRuntimeMainToolExecutionInput, 
       settings[key] = bridgeResult.data.settings[key];
     }
   }
-  return createMainToolSuccessResult(GET_SETTINGS_TOOL_NAME, { settings });
+  return createMainToolSuccessResult(GET_SETTINGS_TOOL_NAME, {
+    settings,
+    ...(normalizedInput.keys.includes('themePreset') ? { themePresetOptions: bridgeResult.data.themePresetOptions } : {})
+  });
 }
 
 /**
@@ -267,6 +270,13 @@ async function executeUpdateSettingsTool(input: ChatRuntimeMainToolExecutionInpu
   const snapshotResult = await deps.requestBridge({ runtimeId: input.runtime.runtimeId, toolCallId: input.toolCallId, kind: 'settings-snapshot' });
   if (snapshotResult.status === 'failure') return createBridgeFailureResult(input.toolName, snapshotResult.error);
   if (!isRuntimeSettingsSnapshot(snapshotResult.data)) return createMainToolFailureResult(input.toolName, 'INVALID_INPUT', '设置快照格式无效');
+
+  if (
+    normalizedInput.key === 'themePreset' &&
+    !snapshotResult.data.themePresetOptions.some((preset: RuntimeThemePresetOption): boolean => preset.id === normalizedInput.value)
+  ) {
+    return createMainToolFailureResult(input.toolName, 'INVALID_INPUT', '未知主题预设 ID，请先调用 get_settings 获取当前 themePresetOptions。');
+  }
 
   const previousValue = snapshotResult.data.settings[normalizedInput.key] ?? '';
   const decision = await deps.requestConfirmation({

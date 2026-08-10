@@ -2,7 +2,7 @@
  * @file types.mts
  * @description ChatRuntime 主进程工具共享类型。
  */
-import type { SUPPORTED_SETTING_KEYS } from './constants.mjs';
+import type { SUPPORTED_SETTING_KEYS } from '../../../../../../shared/settings/definitions.js';
 import type { LogLevel, LogScope } from '../../../logger/types.mjs';
 import type { ChatRuntimeMainToolExecutionInput } from '../types.mjs';
 import type { AIToolExecutionResult, MCPServerConfig, MCPToolSettings } from 'types/ai';
@@ -97,10 +97,22 @@ export type RuntimeSettingKey = (typeof SUPPORTED_SETTING_KEYS)[number];
 /** Runtime 设置值。 */
 export type RuntimeSettingValue = string | boolean | number;
 
+/** Runtime 可选主题预设。 */
+export interface RuntimeThemePresetOption {
+  /** 主题预设 ID。 */
+  id: string;
+  /** 主题预设显示名称。 */
+  label: string;
+  /** 主题预设氛围描述。 */
+  description: string;
+}
+
 /** Runtime 设置快照。 */
 export interface RuntimeSettingsSnapshot {
   /** 设置键值。 */
   settings: Partial<Record<RuntimeSettingKey, RuntimeSettingValue>>;
+  /** renderer theme registry 中当前可用的主题预设。 */
+  themePresetOptions: RuntimeThemePresetOption[];
 }
 
 /** Runtime 设置读取输入。 */

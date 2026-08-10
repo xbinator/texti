@@ -33,17 +33,19 @@ flowchart LR
 
 ## 目录职责
 
-| 路径                         | 职责                                                                |
-| ---------------------------- | ------------------------------------------------------------------- |
-| `src/theme/index.ts`         | 主题模块入口。先导入所有内置预设触发注册，再导出公开 API。          |
-| `src/theme/types/tokens.ts`  | `ThemeTokens` 完整结构。新增全局 token 必须从这里开始。             |
-| `src/theme/types/custom.ts`  | 持久化自定义主题配置结构。                                          |
-| `src/theme/core/registry.ts` | 主题注册、列表查询、fallback 和自定义主题注册。                     |
-| `src/theme/core/factory.ts`  | 从 `BasePalette` 派生完整 `ThemeTokens`，并提供覆盖能力。           |
-| `src/theme/core/derive.ts`   | 从 `ThemeTokens` 派生 CSS 变量、Ant Design token 和 Monaco colors。 |
-| `src/theme/core/apply.ts`    | 校验 token 格式，并把 CSS 变量注入到 `:root`。                      |
-| `src/theme/core/runtime.ts`  | 从 DOM 已注入变量读取运行时主题色。                                 |
-| `src/theme/presets/*.ts`     | 内置主题预设。每个文件负责注册自己。                                |
+| 路径                                    | 职责                                                                |
+| --------------------------------------- | ------------------------------------------------------------------- |
+| `src/theme/index.ts`                    | 主题模块入口。先导入所有内置预设触发注册，再导出公开 API。          |
+| `src/theme/types/tokens.ts`             | `ThemeTokens` 完整结构。新增全局 token 必须从这里开始。             |
+| `src/theme/types/custom.ts`             | 持久化自定义主题配置结构。                                          |
+| `src/theme/core/registry.ts`            | 主题信息、token 注册、列表查询、fallback 和自定义主题注册。         |
+| `src/theme/core/factory.ts`             | 从 `BasePalette` 派生完整 `ThemeTokens`，并提供覆盖能力。           |
+| `src/theme/core/derive.ts`              | 从 `ThemeTokens` 派生 CSS 变量、Ant Design token 和 Monaco colors。 |
+| `src/theme/core/apply.ts`               | 校验 token 格式，并把 CSS 变量注入到 `:root`。                      |
+| `src/theme/core/runtime.ts`             | 从 DOM 已注入变量读取运行时主题色。                                 |
+| `src/theme/presets/*.ts`                | 内置主题预设。每个文件声明信息、token 并负责注册自己。              |
+| `shared/settings/definitions.ts`        | ChatRuntime 设置键、工具名和不含具体主题的通用值域说明。            |
+| `shared/ai/tools/SettingsTool/index.ts` | 使用共享设置定义组装工具 schema，不维护主题预设清单。               |
 
 ## 新增主题预设
 
@@ -75,6 +77,7 @@ flowchart LR
 - 调用 `registerPreset` 注册。
 - `id` 使用稳定小写 kebab-case。
 - `label` 使用用户可见名称，保持与设置页主题选择器一致。
+- `description` 用短语描述主题氛围，供设置界面和 AI 运行时读取。
 
 基础色板预设示例：
 
@@ -158,10 +161,13 @@ const auroraDark: BasePalette = {
 registerPreset({
   id: 'aurora',
   label: '极光绿「Aurora」',
+  description: '冷绿色/柔和暗色/极光氛围',
   light: createThemeTokens(auroraLight, 'light'),
   dark: createThemeTokens(auroraDark, 'dark')
 });
 ```
+
+新增主题时只需维护自己的预设文件和入口导入。SettingsTool 不读取或维护具体主题清单，实际主题信息统一来自运行时 registry。
 
 ### 3. 在入口注册
 
@@ -273,6 +279,7 @@ registerCustomTheme({
   schemaVersion: 1,
   id: 'custom-square',
   label: 'Custom Square',
+  description: '直角控件与自定义蓝色强调色',
   light: {
     color: { primary: '#123456' }
   },
@@ -283,6 +290,8 @@ registerCustomTheme({
 ```
 
 自定义主题适合持久化用户少量覆盖，不适合承载内置主题完整实现。内置主题仍应放在 `src/theme/presets/`，并通过 `src/theme/index.ts` 注册。
+
+自定义主题调用 `registerCustomTheme()` 后会进入同一个运行时 registry。ChatRuntime 的 `get_settings` 在读取 `themePreset` 时返回包含 `id`、`label` 和 `description` 的实时 `themePresetOptions`，因此 AI 可以发现并选择用户主题；自定义主题不需要修改 SettingsTool。未提供 `description` 时会回退为 `label`。`update_settings` 会先按这份实时列表预检，renderer 再通过 registry 做最终校验。
 
 ## 常见问题排查
 
@@ -301,6 +310,8 @@ registerCustomTheme({
 新增或修改主题时按这张清单收尾：
 
 - 预设已注册到 `src/theme/index.ts`。
+- 预设的 `id`、`label`、`description` 与 token 在同一预设文件中维护。
+- SettingsTool 使用通用共享配置，没有手动维护主题 ID 清单。
 - light 和 dark 都能通过 `getResolvedTokens()` 解析。
 - 手写完整 token 的主题已补齐新增字段。
 - CSS 变量名符合现有命名和兼容前缀。

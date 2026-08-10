@@ -120,6 +120,15 @@ const REMOVED_THEME_PRESETS: RemovedThemePreset[] = [
 ];
 
 describe('theme preset registry', (): void => {
+  it('keeps descriptions beside every built-in runtime preset', (): void => {
+    expect(getPresetList()).toEqual([
+      { id: 'default', label: '默认「Graphite」', description: '白/浅灰/黑灰' },
+      { id: 'classic', label: '经典「Classic」', description: '暖米白/棕色' },
+      { id: 'shonen', label: '热血红黑「Shonen」', description: '暖白/朱红/金黄/红黑' },
+      { id: 'overworld', label: '复古冒险「Overworld」', description: '纸面/钴蓝天空/墨线像素边/苔藓绿' }
+    ]);
+  });
+
   it('omits removed color theme presets from the public preset list', (): void => {
     const presets = getPresetList();
 
@@ -131,7 +140,7 @@ describe('theme preset registry', (): void => {
   it('registers Graphite as the default theme preset', (): void => {
     const presets = getPresetList();
 
-    expect(presets[0]).toEqual({ id: 'default', label: '默认「Graphite」' });
+    expect(presets[0]).toEqual({ id: 'default', label: '默认「Graphite」', description: '白/浅灰/黑灰' });
     expect(presets).not.toContainEqual({ id: 'graphite', label: '柔和黑白「Graphite」' });
   });
 
@@ -164,7 +173,7 @@ describe('theme preset registry', (): void => {
     const presets = getPresetList();
     const lightTokens = getResolvedTokens('classic', 'light');
 
-    expect(presets).toContainEqual({ id: 'classic', label: '经典「Classic」' });
+    expect(presets).toContainEqual({ id: 'classic', label: '经典「Classic」', description: '暖米白/棕色' });
     expect(lightTokens.bg.primary).toBe('#faf9f6');
     expect(lightTokens.color.primary).toBe('#8a6f5a');
   });
@@ -172,7 +181,7 @@ describe('theme preset registry', (): void => {
   it('registers the high-contrast Shonen theme preset', (): void => {
     const presets = getPresetList();
 
-    expect(presets).toContainEqual({ id: 'shonen', label: '热血红黑「Shonen」' });
+    expect(presets).toContainEqual({ id: 'shonen', label: '热血红黑「Shonen」', description: '暖白/朱红/金黄/红黑' });
   });
 
   it('resolves Shonen light and dark tokens for manga paper and red-black modes', (): void => {
@@ -192,7 +201,11 @@ describe('theme preset registry', (): void => {
   it('registers the retro adventure Overworld theme preset', (): void => {
     const presets = getPresetList();
 
-    expect(presets).toContainEqual({ id: 'overworld', label: '复古冒险「Overworld」' });
+    expect(presets).toContainEqual({
+      id: 'overworld',
+      label: '复古冒险「Overworld」',
+      description: '纸面/钴蓝天空/墨线像素边/苔藓绿'
+    });
   });
 
   it('resolves Overworld as a design-token theme with pixel adventure semantics', (): void => {

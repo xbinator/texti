@@ -79,6 +79,7 @@ const shonenDark: BasePalette = {
 registerPreset({
   id: 'shonen',
   label: '热血红黑「Shonen」',
+  description: '暖白/朱红/金黄/红黑',
   light: createThemeTokens(shonenLight, 'light'),
   dark: createThemeTokens(shonenDark, 'dark')
 });

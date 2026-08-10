@@ -4,6 +4,8 @@
  */
 import type { AIToolExecutionError } from 'types/ai';
 import type { ChatRuntimeBridgeRequestEvent } from 'types/chat-runtime';
+import type { SupportedSettingKey } from '@@/shared/settings/definitions';
+import { SUPPORTED_SETTING_KEYS } from '@@/shared/settings/definitions';
 import type { OpenDraftInput, OpenDraftResult } from '@/ai/tools/shared/types';
 import type { ChatBridgeDispatchResult } from '@/hooks/useChat/useContextRegistry';
 import { isDocumentRecord } from '@/shared/storage';
@@ -13,12 +15,24 @@ import { isUnsavedPath, parseUnsavedPath } from '@/utils/file/unsaved';
 
 /** Bridge settings domain types. */
 /** 可通过 ChatRuntime 暴露给模型的设置键。 */
-export type BChatRuntimeSettingKey = 'theme' | 'themePreset' | 'sourceMode' | 'editorPageWidth';
+export type BChatRuntimeSettingKey = SupportedSettingKey;
+
+/** ChatRuntime 可选主题预设。 */
+export interface BChatRuntimeThemePresetOption {
+  /** 主题预设 ID。 */
+  id: string;
+  /** 主题预设显示名称。 */
+  label: string;
+  /** 主题预设氛围描述。 */
+  description: string;
+}
 
 /** ChatRuntime 设置快照。 */
 export interface BChatRuntimeSettingsSnapshot {
   /** 当前设置键值。 */
   settings: Partial<Record<BChatRuntimeSettingKey, string | boolean | number>>;
+  /** 当前 theme registry 中可用的主题预设。 */
+  themePresetOptions: BChatRuntimeThemePresetOption[];
 }
 
 /** ChatRuntime 设置修改输入。 */
@@ -271,7 +285,7 @@ function readSettingsSnapshot(dependencies: BChatRuntimeBridgeDependencies): BCh
  * @returns 是否为设置键
  */
 function isSettingKey(value: unknown): value is BChatRuntimeSettingKey {
-  return value === 'theme' || value === 'themePreset' || value === 'sourceMode' || value === 'editorPageWidth';
+  return typeof value === 'string' && SUPPORTED_SETTING_KEYS.includes(value as BChatRuntimeSettingKey);
 }
 
 /**

@@ -11,6 +11,7 @@ describe('custom theme config', (): void => {
       schemaVersion: 1,
       id: 'custom-square',
       label: 'Custom Square',
+      description: 'Square controls with a custom blue accent',
       light: {
         color: { primary: '#123456' },
         control: { radius: '0px', borderWidth: '2px' }
@@ -21,8 +22,28 @@ describe('custom theme config', (): void => {
       }
     });
 
-    expect(getPresetList()).toContainEqual({ id: 'custom-square', label: 'Custom Square' });
+    expect(getPresetList()).toContainEqual({
+      id: 'custom-square',
+      label: 'Custom Square',
+      description: 'Square controls with a custom blue accent'
+    });
     expect(getResolvedTokens('custom-square', 'light').color.primary).toBe('#123456');
     expect(getResolvedTokens('custom-square', 'light').control.borderWidth).toBe('2px');
+  });
+
+  it('falls back to the custom theme label when description is omitted', (): void => {
+    registerCustomTheme({
+      schemaVersion: 1,
+      id: 'custom-label-fallback',
+      label: 'Label Fallback',
+      light: {},
+      dark: {}
+    });
+
+    expect(getPresetList()).toContainEqual({
+      id: 'custom-label-fallback',
+      label: 'Label Fallback',
+      description: 'Label Fallback'
+    });
   });
 });

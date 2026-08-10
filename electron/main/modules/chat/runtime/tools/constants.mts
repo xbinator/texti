@@ -70,6 +70,3 @@ export const MAX_TOOL_CALL_TIMEOUT_MS = 120_000;
 
 /** URL 协议正则。 */
 export const RUNTIME_URL_PROTOCOL_RE = /^(https?|mailto|ftp):\/\//i;
-
-/** Runtime 可读取的设置键。 */
-export const SUPPORTED_SETTING_KEYS = ['theme', 'themePreset', 'sourceMode', 'editorPageWidth'] as const;

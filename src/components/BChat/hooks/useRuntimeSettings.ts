@@ -86,7 +86,8 @@ export function useRuntimeSettings(): UseRuntimeSettingsReturn {
         themePreset: settingStore.themePreset,
         sourceMode: editorPreferencesStore.viewMode === 'source',
         editorPageWidth: editorPreferencesStore.pageWidth
-      }
+      },
+      themePresetOptions: getPresetList()
     };
   }
 

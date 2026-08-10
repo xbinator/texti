@@ -14,6 +14,8 @@ export interface CustomThemeConfig {
   id: string;
   /** Theme preset display label. */
   label: string;
+  /** Theme atmosphere description shown to users and AI tools. */
+  description?: string;
   /** Light mode token overrides. */
   light: ThemeTokenOverrides;
   /** Dark mode token overrides. */

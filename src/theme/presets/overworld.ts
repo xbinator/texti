@@ -154,6 +154,7 @@ const overworldDark: BasePalette = {
 registerPreset({
   id: 'overworld',
   label: '复古冒险「Overworld」',
+  description: '纸面/钴蓝天空/墨线像素边/苔藓绿',
   light: createThemeTokens(overworldLight, 'light', {
     ...overworldDesignOverrides,
     color: {

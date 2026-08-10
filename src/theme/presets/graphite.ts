@@ -521,6 +521,7 @@ const graphiteDark: ThemeTokens = {
 registerPreset({
   id: 'default',
   label: '默认「Graphite」',
+  description: '白/浅灰/黑灰',
   light: graphiteLight,
   dark: graphiteDark
 });

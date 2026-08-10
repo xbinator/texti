@@ -2,7 +2,6 @@
  * @file tool-registry.test.ts
  * @description 工具定义单一 registry 测试。
  */
-import { readFileSync } from 'node:fs';
 import type { AIToolExecutor } from 'types/ai';
 import { describe, expect, it } from 'vitest';
 import * as runtimeTools from '@/ai/tools/catalog/runtimeTools';
@@ -38,9 +37,13 @@ import {
 } from '../../../shared/ai/tools/MCPSettingsTool/index.js';
 import { openResourceToolRegistryEntry } from '../../../shared/ai/tools/OpenResourceTool/index.js';
 import { getSettingsToolRegistryEntry, updateSettingsToolRegistryEntry } from '../../../shared/ai/tools/SettingsTool/index.js';
-
-/** SettingsTool 源码，用于约束说明片段复用结构。 */
-const settingsToolSource = readFileSync(new URL('../../../shared/ai/tools/SettingsTool/index.ts', import.meta.url), 'utf8');
+import {
+  GET_SETTINGS_TOOL_NAME,
+  SUPPORTED_SETTING_KEYS,
+  UPDATE_SETTINGS_TOOL_NAME,
+  formatSettingSummaryDescription,
+  formatSettingValueDescription
+} from '../../../shared/settings/definitions.js';
 
 /** runtimeTools 模块带工厂映射的测试视图。 */
 type RuntimeToolsWithFactoryMap = typeof runtimeTools & {
@@ -219,9 +222,11 @@ describe('toolRegistry', (): void => {
     expect(settingsDescriptions).not.toContain('等');
     expect(getDescription).toContain('主题预设');
     expect(updateDescription).toContain('色彩氛围');
-    expect(valueDescription).toContain('整套界面色彩预设');
-    expect(valueDescription).toContain('default=白/浅灰/黑灰');
-    expect(valueDescription).toContain('classic=暖米白/棕色');
+    expect(valueDescription).toContain('主题预设 ID');
+    expect(valueDescription).toContain('themePresetOptions');
+    for (const builtInThemeDetail of ['default=白/浅灰/黑灰', 'classic=暖米白/棕色', 'shonen=', 'overworld=']) {
+      expect(valueDescription).not.toContain(builtInThemeDetail);
+    }
     expect(valueDescription).not.toContain('graphite=');
     expect(valueDescription).toContain('dark=深色');
     expect(valueDescription).toContain('light=浅色');
@@ -236,11 +241,15 @@ describe('toolRegistry', (): void => {
     expect(valueDescription).not.toContain('布尔设置');
   });
 
-  it('composes settings descriptions from shared setting detail fragments', (): void => {
-    expect(settingsToolSource).toContain('SETTING_DETAIL_DESCRIPTIONS');
-    expect(settingsToolSource).toContain('SETTING_SUMMARY_DESCRIPTION');
-    expect(settingsToolSource).toContain('SETTING_VALUE_DESCRIPTION');
-    expect(settingsToolSource).toContain('SUPPORTED_SETTING_KEYS.map');
+  it('composes settings schemas and descriptions from shared definitions', (): void => {
+    expect(getSettingsToolRegistryEntry.definition.name).toBe(GET_SETTINGS_TOOL_NAME);
+    expect(updateSettingsToolRegistryEntry.definition.name).toBe(UPDATE_SETTINGS_TOOL_NAME);
+    expect(String(getSettingsToolRegistryEntry.definition.description)).toContain(formatSettingSummaryDescription());
+    expect(String(updateSettingsToolRegistryEntry.definition.parameters.properties.value.description)).toContain(formatSettingValueDescription());
+    expect(getSettingsToolRegistryEntry.definition.parameters.properties.keys).toMatchObject({
+      oneOf: [{ enum: SUPPORTED_SETTING_KEYS }, { items: { enum: SUPPORTED_SETTING_KEYS } }]
+    });
+    expect(updateSettingsToolRegistryEntry.definition.parameters.properties.key).toMatchObject({ enum: SUPPORTED_SETTING_KEYS });
   });
 
   it('requires paths for direct file and directory reads', (): void => {

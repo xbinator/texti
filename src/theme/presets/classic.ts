@@ -503,6 +503,7 @@ const classicDark: ThemeTokens = {
 registerPreset({
   id: 'classic',
   label: '经典「Classic」',
+  description: '暖米白/棕色',
   light: classicLight,
   dark: classicDark
 });

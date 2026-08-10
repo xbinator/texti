@@ -2,6 +2,7 @@
  * @file builtin-main-process-tool.test.ts
  * @description 验证已主进程化内置工具在 renderer 侧只保留 schema。
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   EDIT_MEMORY_TOOL_NAME,
@@ -22,6 +23,9 @@ import {
   SETTINGS_TOOL_NAMES
 } from '../../../electron/main/modules/chat/runtime/tools/constants.mjs';
 import { getToolNamesByRuntimeGroup } from '../../../shared/ai/tools/index.js';
+
+/** Electron 主进程工具常量源码。 */
+const mainToolConstantsSource = readFileSync(new URL('../../../electron/main/modules/chat/runtime/tools/constants.mts', import.meta.url), 'utf8');
 
 describe('builtin main-process tools', (): void => {
   it('exposes migrated tool schemas from the catalog namespace', (): void => {
@@ -59,6 +63,10 @@ describe('builtin main-process tools', (): void => {
     expect([...FILE_TOOL_NAMES].sort()).toEqual(getToolNamesByRuntimeGroup('main', 'file').sort());
     expect([...SETTINGS_TOOL_NAMES].sort()).toEqual(getToolNamesByRuntimeGroup('main', 'settings').sort());
     expect([...RESOURCE_TOOL_NAMES].sort()).toEqual(getToolNamesByRuntimeGroup('main', 'resource').sort());
+  });
+
+  it('does not relay supported setting keys through main-process constants', (): void => {
+    expect(mainToolConstantsSource).not.toContain('SUPPORTED_SETTING_KEYS');
   });
 
   it('fails clearly if a migrated tool is accidentally executed in renderer', async (): Promise<void> => {

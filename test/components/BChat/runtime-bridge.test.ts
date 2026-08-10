@@ -201,7 +201,11 @@ describe('handleBChatRuntimeBridgeRequest', (): void => {
           themePreset: 'default',
           sourceMode: true,
           editorPageWidth: 'wide'
-        }
+        },
+        themePresetOptions: [
+          { id: 'default', label: '默认「Graphite」', description: '白/浅灰/黑灰' },
+          { id: 'custom-solarized', label: 'Solarized', description: 'Solarized custom palette' }
+        ]
       })
     });
 
@@ -211,7 +215,11 @@ describe('handleBChatRuntimeBridgeRequest', (): void => {
         themePreset: 'default',
         sourceMode: true,
         editorPageWidth: 'wide'
-      }
+      },
+      themePresetOptions: [
+        { id: 'default', label: '默认「Graphite」', description: '白/浅灰/黑灰' },
+        { id: 'custom-solarized', label: 'Solarized', description: 'Solarized custom palette' }
+      ]
     });
   });
 

@@ -17,4 +17,4 @@ export { createThemeTokens } from './core/factory';
 export { resolveRuntimeThemeColors } from './core/runtime';
 export type { BasePalette, ThemeTokenOverrides } from './core/factory';
 export type { RuntimeThemeColors } from './core/runtime';
-export type { ThemePreset } from './core/registry';
+export type { ThemePreset, ThemePresetInfo } from './core/registry';
