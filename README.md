@@ -4,7 +4,7 @@ Tibis 是一款**Markdown 桌面编辑器**，数据保存在你的电脑上，�
 
 适合写作、知识整理、技术文档草稿和 AI 辅助内容生产。
 
-![Tibis 界面截图](https://github.com/user-attachments/assets/dad8c18f-5974-474c-938a-606cd74586d2)
+![Tibis 界面截图](https://github.com/user-attachments/assets/de65140e-7d7d-40e6-b5da-d81876e71987)
 
 ## 核心亮点
 
@@ -93,7 +93,13 @@ pnpm exec tsc --noEmit  # TypeScript 类型检查
 - Windows：`.exe`
 - Linux：`.AppImage` / `.deb`
 
-> macOS 首次打开可能提示无法验证开发者，请在系统设置中允许打开。Windows 可能触发 SmartScreen，确认来源后继续运行即可。
+> macOS 首次打开可能提示无法验证开发者，请在系统设置中允许打开。若安装后仍提示无法打开，可在终端执行：
+>
+> ```bash
+> xattr -dr com.apple.quarantine /Applications/Tibis.app
+> ```
+>
+> Windows 可能触发 SmartScreen，确认来源后继续运行即可。
 
 ## 项目结构
 
