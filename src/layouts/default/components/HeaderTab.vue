@@ -200,13 +200,31 @@ const statusVisual = computed<StatusVisual | undefined>(() => (props.status ? ST
     opacity: 0.55;
   }
 
-  &.is-missing .header-tab__title {
-    color: var(--error-color, #ff4d4f);
+  /* 缺失态：标题置红并加删除线 */
+  &.is-missing {
+    .header-tab__title {
+      color: var(--error-color, #ff4d4f);
+    }
+
+    .header-tab__title-text {
+      text-decoration-line: line-through;
+      text-decoration-thickness: 1px;
+    }
   }
 
-  &.is-missing .header-tab__title-text {
-    text-decoration-line: line-through;
-    text-decoration-thickness: 1px;
+  /* 关闭按钮的显隐与状态联动 */
+  &:hover .header-tab__close,
+  &:focus-within .header-tab__close {
+    pointer-events: auto;
+    opacity: 1;
+  }
+
+  &.is-active .header-tab__close {
+    background: linear-gradient(var(--bg-active, transparent), var(--bg-active, transparent)), var(--bg-secondary);
+  }
+
+  .header-tab__close:hover {
+    color: var(--text-primary);
   }
 }
 
@@ -233,10 +251,10 @@ const statusVisual = computed<StatusVisual | undefined>(() => (props.status ? ST
   flex-shrink: 0;
   align-items: center;
   margin-right: 4px;
-}
 
-.header-tab__status.is-spinning {
-  animation: header-tab-status-spin 1s linear infinite;
+  &.is-spinning {
+    animation: header-tab-status-spin 1s linear infinite;
+  }
 }
 
 .header-tab__status--attention {
@@ -287,20 +305,6 @@ const statusVisual = computed<StatusVisual | undefined>(() => (props.status ? ST
   opacity: 0;
   transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard),
     opacity var(--motion-duration-base) var(--motion-easing-standard);
-}
-
-.header-tab:hover .header-tab__close,
-.header-tab:focus-within .header-tab__close {
-  pointer-events: auto;
-  opacity: 1;
-}
-
-.header-tab.is-active .header-tab__close {
-  background: linear-gradient(var(--bg-active, transparent), var(--bg-active, transparent)), var(--bg-secondary);
-}
-
-.header-tab .header-tab__close:hover {
-  color: var(--text-primary);
 }
 
 @keyframes header-tab-status-spin {
