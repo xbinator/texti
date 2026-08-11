@@ -4,7 +4,7 @@
 -->
 <template>
   <div ref="rootRef" class="header-tab" :class="tabClass" @click="emit('click')" @contextmenu.prevent="emit('contextmenu', $event)">
-    <div class="header-tab__title">
+    <div ref="titleRef" class="header-tab__title">
       <!-- 运行状态与最近记录图标互斥展示 -->
       <span v-if="statusVisual" :class="['header-tab__status', statusVisual.className]">
         <Icon v-if="statusVisual.icon" :icon="statusVisual.icon" width="13" height="13" />
@@ -14,7 +14,7 @@
       <span v-if="isDirty" class="header-tab__dirty-mark">*</span>
     </div>
 
-    <button class="header-tab__close" @pointerdown.stop @click.stop="emit('close')">
+    <button ref="closeRef" class="header-tab__close" @pointerdown.stop @click.stop="emit('close')">
       <Icon icon="ic:round-close" width="16" height="16" />
     </button>
   </div>
@@ -25,7 +25,7 @@
  * @file HeaderTab.vue
  * @description 单标签页渲染逻辑：class 状态、图标绑定与通用状态指示。
  */
-import { computed, nextTick, ref, toRef, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, toRef, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { useHeaderTabIcon } from '@/layouts/default/hooks/useHeaderTabIcon';
@@ -49,6 +49,12 @@ const STATUS_VISUALS: Record<TabStatus, StatusVisual> = {
   error: { icon: 'lucide:circle-x', className: 'header-tab__status--error' },
   completed: { className: 'header-tab__status--completed' }
 };
+
+/** 关闭按钮开始悬浮的紧凑标签宽度阈值。 */
+const CLOSE_FLOATING_WIDTH_THRESHOLD = 100;
+
+/** 普通布局下标签根节点左右 padding 总和。 */
+const COMPACT_TAB_HORIZONTAL_PADDING = 10;
 
 /**
  * 组件 Props 定义。
@@ -80,6 +86,18 @@ const tabIconProps = useHeaderTabIcon(toRef(props, 'tab'));
 /** 组件根元素引用。 */
 const rootRef = ref<HTMLElement | null>(null);
 
+/** 标签标题容器引用。 */
+const titleRef = ref<HTMLElement | null>(null);
+
+/** 标签关闭按钮引用。 */
+const closeRef = ref<HTMLButtonElement | null>(null);
+
+/** 关闭按钮是否需要悬浮覆盖标题末尾。 */
+const isCloseFloating = ref(false);
+
+/** 监听标签尺寸变化，用于同步关闭按钮布局。 */
+let closeLayoutObserver: ResizeObserver | undefined;
+
 /** 当前标签页是否为激活状态。 */
 const isActive = computed<boolean>(() => props.tab.path === route.fullPath);
 
@@ -89,9 +107,62 @@ const isDirty = computed<boolean>(() => tabsStore.isDirty(props.tab.id));
 /** 标签页样式状态映射。 */
 const tabClass = computed<Record<string, boolean>>(() => ({
   'is-active': isActive.value,
+  'is-close-floating': isCloseFloating.value,
   'is-missing': tabsStore.isMissing(props.tab.id),
   'is-dragging': props.dragging ?? false
 }));
+
+/**
+ * 计算关闭按钮参与普通布局时的标签宽度。
+ * @returns 普通布局下的标签宽度
+ */
+function getCompactTabWidth(): number {
+  const title = titleRef.value;
+  const close = closeRef.value;
+  if (!title || !close) {
+    return 0;
+  }
+
+  const titleWidth = title.scrollWidth || title.getBoundingClientRect().width;
+  const closeWidth = close.offsetWidth || close.getBoundingClientRect().width;
+  return titleWidth + closeWidth + COMPACT_TAB_HORIZONTAL_PADDING;
+}
+
+/**
+ * 根据普通布局宽度是否超过阈值，同步关闭按钮是否悬浮。
+ */
+function updateCloseLayout(): void {
+  isCloseFloating.value = getCompactTabWidth() > CLOSE_FLOATING_WIDTH_THRESHOLD;
+}
+
+/**
+ * 在 DOM 更新后同步关闭按钮布局。
+ */
+function scheduleCloseSync(): void {
+  nextTick(updateCloseLayout);
+}
+
+/**
+ * 监听根元素、标题和关闭按钮尺寸变化，确保标题变化或窗口缩放后布局状态准确。
+ */
+function observeCloseLayout(): void {
+  if (typeof ResizeObserver === 'undefined') {
+    return;
+  }
+
+  const root = rootRef.value;
+  const title = titleRef.value;
+  const close = closeRef.value;
+  if (!root || !title || !close) {
+    return;
+  }
+
+  closeLayoutObserver?.disconnect();
+  closeLayoutObserver = new ResizeObserver(updateCloseLayout);
+  closeLayoutObserver.observe(root);
+  closeLayoutObserver.observe(title);
+  closeLayoutObserver.observe(close);
+}
 
 /**
  * 查找最近的横向可滚动祖先容器（标签栏）。
@@ -160,6 +231,33 @@ watch(
 
 /** 运行状态对应的视觉配置。 */
 const statusVisual = computed<StatusVisual | undefined>(() => (props.status ? STATUS_VISUALS[props.status] : undefined));
+
+/**
+ * 标题、脏状态或运行状态变化可能影响紧凑宽度，需要重新判定关闭按钮布局。
+ */
+watch(
+  () => [props.tab.title, props.status, isDirty.value] as const,
+  (): void => {
+    scheduleCloseSync();
+  },
+  { immediate: true }
+);
+
+/**
+ * 挂载后绑定尺寸监听，处理窗口缩放和字体渲染后的宽度变化。
+ */
+onMounted((): void => {
+  scheduleCloseSync();
+  nextTick(observeCloseLayout);
+});
+
+/**
+ * 组件卸载时释放尺寸监听器。
+ */
+onUnmounted((): void => {
+  closeLayoutObserver?.disconnect();
+  closeLayoutObserver = undefined;
+});
 </script>
 
 <style lang="less" scoped>
@@ -169,7 +267,7 @@ const statusVisual = computed<StatusVisual | undefined>(() => (props.status ? ST
   flex-shrink: 0;
   align-items: center;
   height: 28px;
-  padding: 0 10px;
+  padding: 0 0 0 10px;
   color: var(--text-primary);
   cursor: pointer;
   background: var(--bg-secondary);
@@ -219,13 +317,25 @@ const statusVisual = computed<StatusVisual | undefined>(() => (props.status ? ST
     opacity: 1;
   }
 
-  &.is-active .header-tab__close {
-    background: linear-gradient(var(--bg-active, transparent), var(--bg-active, transparent)), var(--bg-secondary);
-  }
-
   .header-tab__close:hover {
     color: var(--text-primary);
   }
+}
+
+.header-tab.is-close-floating {
+  padding: 0 10px;
+}
+
+.header-tab.is-close-floating .header-tab__close {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg-secondary);
+  border-radius: 0 var(--control-radius) var(--control-radius) 0;
+}
+
+.header-tab.is-close-floating.is-active .header-tab__close {
+  background: linear-gradient(var(--bg-active, transparent), var(--bg-active, transparent)), var(--bg-secondary);
 }
 
 .header-tab__title {
@@ -288,10 +398,8 @@ const statusVisual = computed<StatusVisual | undefined>(() => (props.status ? ST
 }
 
 .header-tab__close {
-  position: absolute;
-  top: 0;
-  right: 0;
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
   width: 28px;
@@ -299,9 +407,9 @@ const statusVisual = computed<StatusVisual | undefined>(() => (props.status ? ST
   color: var(--text-secondary);
   pointer-events: none;
   cursor: pointer;
-  background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg-secondary);
+  background: transparent;
   border: none;
-  border-radius: 0 var(--control-radius) var(--control-radius) 0;
+  border-radius: var(--control-radius);
   opacity: 0;
   transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard),
     opacity var(--motion-duration-base) var(--motion-easing-standard);

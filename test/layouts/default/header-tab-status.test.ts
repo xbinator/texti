@@ -4,6 +4,7 @@
  * @vitest-environment jsdom
  */
 import { readFileSync } from 'node:fs';
+import { nextTick } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -198,30 +199,67 @@ describe('HeaderTab generic status', (): void => {
     expect(headerTabSource).not.toContain('resolveTabRecentRecord');
   });
 
-  it('renders close button as a right-side title cover until hover', (): void => {
+  it('floats close button only after the tab grows beyond compact layout', (): void => {
     const tabRule = getStyleRule('.header-tab');
     const closeRule = getStyleRule('.header-tab__close');
+    const floatingTabRule = getStyleRule('.header-tab.is-close-floating');
+    const floatingCloseRule = getStyleRule('.header-tab.is-close-floating .header-tab__close');
     const revealRule = getStyleRule('&:hover .header-tab__close,\n&:focus-within .header-tab__close');
-    const activeCloseRule = getStyleRule('&.is-active .header-tab__close');
+    const activeCloseRule = getStyleRule('.header-tab.is-close-floating.is-active .header-tab__close');
+    const rootRuleDeclarations = tabRule.slice(0, tabRule.indexOf('/* Ensure tabs'));
 
-    expect(tabRule).toContain('padding: 0 10px;');
-    expect(tabRule).not.toContain('padding: 0 4px 0 10px;');
-    expect(closeRule).toContain('position: absolute;');
-    expect(closeRule).toContain('top: 0;');
-    expect(closeRule).toContain('right: 0;');
+    expect(rootRuleDeclarations).not.toContain('min-width: 88px;');
+    expect(rootRuleDeclarations).toContain('padding: 0 0 0 10px;');
+    expect(rootRuleDeclarations).not.toContain('padding: 0 4px 0 10px;');
+    expect(closeRule).toContain('flex-shrink: 0;');
     expect(closeRule).toContain('width: 28px;');
     expect(closeRule).toContain('height: 100%;');
     expect(closeRule).toContain('pointer-events: none;');
-    expect(closeRule).toContain('background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg-secondary);');
-    expect(closeRule).toContain('border-radius: 0 var(--control-radius) var(--control-radius) 0;');
-    expect(closeRule).not.toContain('background: transparent;');
-    expect(closeRule).not.toContain('margin-left: 4px;');
-    expect(closeRule).not.toContain('transform: translateY(-50%);');
+    expect(closeRule).toContain('background: transparent;');
+    expect(closeRule).toContain('border-radius: var(--control-radius);');
+    expect(closeRule).not.toContain('position: absolute;');
+    expect(closeRule).not.toContain('top: 0;');
+    expect(closeRule).not.toContain('right: 0;');
+    expect(closeRule).not.toContain('background: linear-gradient');
+    expect(floatingTabRule).toContain('padding: 0 10px;');
+    expect(floatingCloseRule).toContain('position: absolute;');
+    expect(floatingCloseRule).toContain('top: 0;');
+    expect(floatingCloseRule).toContain('right: 0;');
+    expect(floatingCloseRule).toContain('background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg-secondary);');
+    expect(floatingCloseRule).toContain('border-radius: 0 var(--control-radius) var(--control-radius) 0;');
     expect(revealRule).toContain('opacity: 1;');
     expect(revealRule).toContain('pointer-events: auto;');
     expect(activeCloseRule).toContain('background: linear-gradient(var(--bg-active, transparent), var(--bg-active, transparent)), var(--bg-secondary);');
-    expect(activeCloseRule).not.toContain('background: var(--bg-active, var(--bg-hover));');
+    expect(headerTabSource).toContain("'is-close-floating': isCloseFloating.value");
+    expect(headerTabSource).toContain('ref="titleRef"');
+    expect(headerTabSource).toContain('ref="closeRef"');
+    expect(headerTabSource).toContain('const titleRef = ref<HTMLElement | null>(null);');
+    expect(headerTabSource).toContain('const closeRef = ref<HTMLButtonElement | null>(null);');
+    expect(headerTabSource).not.toContain('querySelector');
+    expect(headerTabSource).toContain('CLOSE_FLOATING_WIDTH_THRESHOLD = 100;');
+    expect(headerTabSource).toContain('getCompactTabWidth() > CLOSE_FLOATING_WIDTH_THRESHOLD');
     expect(headerTabSource).toContain('<Icon icon="ic:round-close" width="16" height="16" />');
     expect(headerTabSource).toContain('.header-tab__close:hover');
+  });
+
+  it('toggles floating close layout when compact tab width crosses 100px', async (): Promise<void> => {
+    const wrapper = mountHeaderTab();
+    const title = wrapper.get('.header-tab__title').element;
+    const close = wrapper.get('.header-tab__close').element;
+
+    Object.defineProperty(title, 'scrollWidth', { configurable: true, value: 70 });
+    Object.defineProperty(close, 'offsetWidth', { configurable: true, value: 28 });
+    await wrapper.setProps({ tab: { ...tab, title: '较长标题' } });
+    await nextTick();
+    await nextTick();
+
+    expect(wrapper.get('.header-tab').classes()).toContain('is-close-floating');
+
+    Object.defineProperty(title, 'scrollWidth', { configurable: true, value: 50 });
+    await wrapper.setProps({ tab: { ...tab, title: '短' } });
+    await nextTick();
+    await nextTick();
+
+    expect(wrapper.get('.header-tab').classes()).not.toContain('is-close-floating');
   });
 });
