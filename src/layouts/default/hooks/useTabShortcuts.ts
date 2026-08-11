@@ -8,6 +8,7 @@ import { EditorShortcuts } from '@/constants/shortcuts';
 import { useShortcuts } from '@/hooks/useShortcuts';
 import { useTabCloseGuard } from '@/layouts/default/hooks/useTabCloseGuard';
 import { isBlockingNavigationFailure } from '@/router/navigation';
+import { createChatPath } from '@/router/routes/helpers/chatRouteTab';
 import type { Tab } from '@/stores/workspace/tabs';
 import { useTabsStore } from '@/stores/workspace/tabs';
 import { asyncTo } from '@/utils/asyncTo';
@@ -100,6 +101,13 @@ export function useTabShortcuts(): void {
   }
 
   /**
+   * 打开独立聊天页草稿入口。
+   */
+  async function openDraftChat(): Promise<void> {
+    await asyncTo(router.push(createChatPath()));
+  }
+
+  /**
    * 安全执行异步标签快捷键动作。
    * @param action - 异步标签动作
    * @param warning - 失败时输出的调试提示
@@ -126,7 +134,19 @@ export function useTabShortcuts(): void {
     runShortcutAction(switchNextTab(), 'Switch next tab shortcut failed');
   }
 
+  /**
+   * 处理新建聊天快捷键。
+   */
+  function handleChatShortcut(): void {
+    runShortcutAction(openDraftChat(), 'Open draft chat shortcut failed');
+  }
+
   const unregisterShortcuts = registerShortcuts([
+    {
+      key: EditorShortcuts.CHAT_NEW,
+      handler: handleChatShortcut,
+      guard: shouldHandleTabShortcut
+    },
     {
       key: EditorShortcuts.TAB_CLOSE,
       handler: handleCloseShortcut,

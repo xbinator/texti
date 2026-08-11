@@ -147,4 +147,17 @@ describe('useTabShortcuts', (): void => {
     expect(routerPushMock).toHaveBeenCalledWith('/settings/provider');
     wrapper.unmount();
   });
+
+  it('opens the draft chat tab with Ctrl Shift N', async (): Promise<void> => {
+    const wrapper = mountTabShortcuts();
+
+    dispatchWindowKeyboardEvent('keydown', { key: 'Control', ctrlKey: true });
+    dispatchWindowKeyboardEvent('keydown', { key: 'Shift', ctrlKey: true, shiftKey: true });
+    dispatchWindowKeyboardEvent('keydown', { key: 'n', ctrlKey: true, shiftKey: true });
+    await flushPromises();
+    await nextTick();
+
+    expect(routerPushMock).toHaveBeenCalledWith('/chat');
+    wrapper.unmount();
+  });
 });
