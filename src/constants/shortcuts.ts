@@ -14,6 +14,10 @@ export const EditorShortcuts = {
   // 全局操作
   COMMAND_PANEL: 'Ctrl+P',
 
+  // 对话操作
+  CHAT_NEW: 'Ctrl+Shift+N',
+  CHAT_SIDER_TOGGLE: 'Ctrl+U',
+
   // 编辑操作
   EDIT_UNDO: 'Ctrl+Z',
   EDIT_REDO: 'Ctrl+Shift+Z',

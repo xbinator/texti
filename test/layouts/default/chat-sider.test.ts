@@ -175,6 +175,21 @@ function mountChatSider(props: ChatSiderMountProps = {}): ReturnType<typeof moun
   });
 }
 
+/**
+ * 触发窗口级键盘事件。
+ * @param type - 键盘事件类型
+ * @param options - 键盘事件初始化选项
+ */
+function dispatchWindowKeyboardEvent(type: 'keydown' | 'keyup', options: KeyboardEventInit): void {
+  window.dispatchEvent(
+    new KeyboardEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      ...options
+    })
+  );
+}
+
 /** 当前测试使用的真实响应式聊天会话 Store。 */
 let chatStore: ReturnType<typeof useChatSessionStore>;
 
@@ -320,6 +335,38 @@ describe('ChatSider', (): void => {
 
     expect(settingStore.sidebarVisible).toBe(false);
     expect(wrapper.find('.b-panel-splitter').classes()).not.toContain('chat-sider--motion');
+  });
+
+  it('opens the hidden sidebar with Ctrl+U and restores the default width', async (): Promise<void> => {
+    const settingStore = useSettingStore();
+    settingStore.setSidebarVisible(false);
+    settingStore.setSidebarWidth(0);
+    const wrapper = mountChatSider();
+    await flushPromises();
+    await nextTick();
+
+    dispatchWindowKeyboardEvent('keydown', { key: 'Control', ctrlKey: true });
+    dispatchWindowKeyboardEvent('keydown', { key: 'u', ctrlKey: true });
+    await nextTick();
+
+    expect(settingStore.sidebarVisible).toBe(true);
+    expect(settingStore.sidebarWidth).toBe(340);
+    expect(wrapper.find('.b-panel-splitter').classes()).toContain('chat-sider--motion');
+  });
+
+  it('closes the visible sidebar with Ctrl+U using motion', async (): Promise<void> => {
+    const settingStore = useSettingStore();
+    settingStore.setSidebarVisible(true);
+    const wrapper = mountChatSider();
+    await flushPromises();
+    await nextTick();
+
+    dispatchWindowKeyboardEvent('keydown', { key: 'Control', ctrlKey: true });
+    dispatchWindowKeyboardEvent('keydown', { key: 'u', ctrlKey: true });
+    await nextTick();
+
+    expect(settingStore.sidebarVisible).toBe(false);
+    expect(wrapper.find('.b-panel-splitter').classes()).toContain('chat-sider--motion');
   });
 
   it('loads the next shared session page when history requests more data', async (): Promise<void> => {

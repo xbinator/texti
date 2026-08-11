@@ -62,15 +62,17 @@
 <script setup lang="ts">
 import type { ChatSession } from 'types/chat';
 import type { CSSProperties } from 'vue';
-import { computed, defineAsyncComponent, onMounted, reactive, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { Input as AInput, message } from 'ant-design-vue';
 import BButton from '@/components/BButton/index.vue';
 import SessionHistory from '@/components/BChat/components/SessionHistory.vue';
 import { expireSessionConfirmations } from '@/components/BChat/utils/confirmationController';
 import type { BChatRuntimeSourceStatus, BChatRuntimeStatusChange } from '@/components/BChat/utils/types';
+import { EditorShortcuts } from '@/constants/shortcuts';
 import { vFocus } from '@/directives/focus';
 import { useActorSystem } from '@/hooks/useChat/useActorSystem';
 import { useIntentMotion } from '@/hooks/useIntentMotion';
+import { useShortcuts } from '@/hooks/useShortcuts';
 import { createChatTabId } from '@/router/routes/helpers/chatRouteTab';
 import { useChatSessionStore } from '@/stores/chat/session';
 import type { ChatTabRuntimeRecord } from '@/stores/chat/tab';
@@ -84,6 +86,9 @@ import { useChatSession } from '../hooks/useChatSession';
 const BChat = defineAsyncComponent(() => import('@/components/BChat/index.vue'));
 
 const [, bem] = createNamespace('chat-sider', '');
+
+/** 侧栏通过快捷键从零宽度重新打开时使用的默认宽度。 */
+const SIDEBAR_DEFAULT_WIDTH = 340;
 
 /**
  * ChatSider 根元素内联样式。
@@ -106,6 +111,8 @@ const sideRuntimeStatus = ref<BChatRuntimeSourceStatus>('idle');
 
 /** ChatSider 只在按钮动作与真实状态目标一致时保留显隐动画。 */
 const { motionEnabled, startMotion, syncState, cancelMotion } = useIntentMotion<boolean>();
+/** ChatSider 组件级快捷键注册器。 */
+const { registerShortcut } = useShortcuts();
 
 /** 监听侧栏显隐状态，当外部状态与动画目标冲突时取消动画。 */
 watch((): boolean => settingStore.sidebarVisible, syncState);
@@ -152,6 +159,28 @@ async function loadMoreSessions(): Promise<void> {
 
 onMounted((): void => {
   asyncTo(ensureSessions());
+});
+
+/**
+ * 通过快捷键切换聊天侧栏显隐。
+ */
+function handleToggleShortcut(): void {
+  const nextVisible = !settingStore.sidebarVisible;
+
+  startMotion(nextVisible);
+  if (nextVisible && settingStore.sidebarWidth === 0) {
+    settingStore.setSidebarWidth(SIDEBAR_DEFAULT_WIDTH);
+  }
+  settingStore.setSidebarVisible(nextVisible);
+}
+
+const unregisterToggleShortcut = registerShortcut({
+  key: EditorShortcuts.CHAT_SIDER_TOGGLE,
+  handler: handleToggleShortcut
+});
+
+onUnmounted((): void => {
+  unregisterToggleShortcut();
 });
 
 /**

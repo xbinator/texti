@@ -84,6 +84,15 @@ const shortcutGroups: ShortcutGroup[] = [
     ]
   },
   {
+    title: '对话操作',
+    description: '打开侧栏与独立对话',
+    icon: 'lucide:message-circle',
+    items: [
+      { label: '切换聊天侧栏', shortcut: EditorShortcuts.CHAT_SIDER_TOGGLE },
+      { label: '新对话', shortcut: EditorShortcuts.CHAT_NEW }
+    ]
+  },
+  {
     title: '编辑操作',
     description: '撤销与重做',
     icon: 'lucide:pencil-line',
