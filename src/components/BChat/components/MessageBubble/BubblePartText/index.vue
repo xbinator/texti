@@ -1,6 +1,6 @@
 <template>
   <div :class="bem({ error: isErrorMessage })">
-    <BMessage :content="'text' in part ? part.text : ''" type="markdown" />
+    <BMessage :content="'text' in part ? part.text : ''" :loading="streaming" :message-id="part.id" type="markdown" />
   </div>
 </template>
 
@@ -19,9 +19,11 @@ defineOptions({ name: 'BubblePartText' });
 interface Props {
   /** 要渲染的文本片段 */
   part: ChatMessageTextPart | ChatMessageErrorPart;
+  /** 是否为当前 Assistant 正在增长的尾片段。 */
+  streaming?: boolean;
 }
 
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), { streaming: false });
 
 const [, bem] = createNamespace('', 'message-bubble-text');
 

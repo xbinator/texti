@@ -79,6 +79,8 @@ export interface RuntimeStreamExecutorDependencies {
   resolver: ChatModelResolver;
   /** 模型流式调用函数。 */
   streamText: RuntimeStreamText;
+  /** 立即中止 AIService 中对应 requestId 的 Provider 流。 */
+  abortStream?: (requestId: string) => void;
   /** Renderer 本地工具执行函数。 */
   executeRendererTool?: ChatRuntimeRendererToolExecutor;
   /** 主进程工具执行函数。 */

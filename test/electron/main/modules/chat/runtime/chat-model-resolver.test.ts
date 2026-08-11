@@ -16,7 +16,7 @@ describe('createChatModelResolver', (): void => {
       isEnabled: true,
       apiKey: 'sk-test',
       baseUrl: 'https://api.openai.com/v1',
-      models: [{ id: 'gpt-test', name: 'GPT Test', type: 'chat', isEnabled: true }]
+      models: [{ id: 'gpt-test', name: 'GPT Test', type: 'chat', isEnabled: true, maxOutputTokens: 8_192 }]
     };
     const resolver = createChatModelResolver({
       getChatModelConfig: vi.fn().mockResolvedValue({ providerId: 'openai', modelId: 'gpt-test' }),
@@ -31,7 +31,8 @@ describe('createChatModelResolver', (): void => {
         baseUrl: 'https://api.openai.com/v1',
         providerType: 'openai'
       },
-      modelId: 'gpt-test'
+      modelId: 'gpt-test',
+      maxOutputTokens: 8_192
     });
   });
 

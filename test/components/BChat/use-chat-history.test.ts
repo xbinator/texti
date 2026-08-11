@@ -3,6 +3,7 @@
  * @description BChat 历史快照与 Runtime 实时增量合并测试。
  */
 import type { ChatMessageToolPart } from 'types/chat';
+import type { ChatRuntimeMessageDelta } from 'types/chat-runtime';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatHistory } from '@/components/BChat/hooks/useChatHistory';
@@ -105,6 +106,139 @@ describe('useChatHistory', (): void => {
     expect(part?.type === 'tool' ? part.shellRunState : undefined).toBeUndefined();
     expect(part?.type === 'tool' ? part.shellOutput : undefined).toBeUndefined();
     expect(part?.type === 'tool' ? part.result : undefined).toMatchObject({ status: 'success', data: { terminalOutput: 'final output' } });
+  });
+
+  it('applies continuous text and reasoning deltas without replacing the full message', (): void => {
+    const history = useChatHistory();
+    const message = createMessage('assistant-live', 'hello');
+    message.finished = false;
+    message.parts.push({ id: 'thinking-live', type: 'thinking', thinking: '' });
+    history.upsertLiveMessage(message, 0);
+    const delta: ChatRuntimeMessageDelta = {
+      messageId: message.id,
+      baseRevision: 0,
+      revision: 2,
+      mutations: [
+        { kind: 'append-text', partId: `${message.id}-part`, text: ' world' },
+        { kind: 'append-reasoning', partId: 'thinking-live', text: 'reason' }
+      ]
+    };
+
+    expect(history.applyLiveDelta(delta)).toBe(true);
+    expect(history.messages.value[0]).toMatchObject({ content: 'hello world', thinking: 'reason' });
+    expect(history.messages.value[0]?.parts).toEqual([
+      expect.objectContaining({ id: 'assistant-live-part', type: 'text', text: 'hello world' }),
+      expect.objectContaining({ id: 'thinking-live', type: 'thinking', thinking: 'reason' })
+    ]);
+  });
+
+  it('creates a missing append-only part from a continuous delta', (): void => {
+    const history = useChatHistory();
+    const message = createMessage('assistant-new-part', '');
+    message.parts = [];
+    message.finished = false;
+    history.upsertLiveMessage(message, 0);
+
+    expect(
+      history.applyLiveDelta({
+        messageId: message.id,
+        baseRevision: 0,
+        revision: 1,
+        mutations: [{ kind: 'append-text', partId: 'new-text-part', text: 'first chunk' }]
+      })
+    ).toBe(true);
+    expect(history.messages.value[0]).toMatchObject({ content: 'first chunk', parts: [{ id: 'new-text-part', type: 'text', text: 'first chunk' }] });
+  });
+
+  it('appends tool input text only when the runtime revision is continuous', (): void => {
+    const history = useChatHistory();
+    const message = createMessage('assistant-tool-input', '');
+    message.parts = [
+      {
+        id: 'tool-part-live',
+        type: 'tool',
+        toolCallId: 'tool-call-live',
+        toolName: 'search_files',
+        status: 'inputting',
+        input: null,
+        inputText: '{'
+      }
+    ];
+    history.upsertLiveMessage(message, 3);
+
+    expect(
+      history.applyLiveDelta({
+        messageId: message.id,
+        baseRevision: 3,
+        revision: 4,
+        mutations: [{ kind: 'append-tool-input', toolCallId: 'tool-call-live', text: '"query":"x"}' }]
+      })
+    ).toBe(true);
+    expect(history.messages.value[0]?.parts[0]).toMatchObject({ inputText: '{"query":"x"}' });
+  });
+
+  it('rejects stale and gapped deltas until a full checkpoint restores the revision', (): void => {
+    const history = useChatHistory();
+    history.upsertLiveMessage(createMessage('assistant-recovery', 'revision two'), 2);
+
+    expect(
+      history.applyLiveDelta({
+        messageId: 'assistant-recovery',
+        baseRevision: 1,
+        revision: 2,
+        mutations: [{ kind: 'append-text', partId: 'assistant-recovery-part', text: ' stale' }]
+      })
+    ).toBe(false);
+    expect(
+      history.applyLiveDelta({
+        messageId: 'assistant-recovery',
+        baseRevision: 4,
+        revision: 5,
+        mutations: [{ kind: 'append-text', partId: 'assistant-recovery-part', text: ' gap' }]
+      })
+    ).toBe(false);
+
+    history.upsertLiveMessage(createMessage('assistant-recovery', 'checkpoint five'), 5);
+    expect(
+      history.applyLiveDelta({
+        messageId: 'assistant-recovery',
+        baseRevision: 5,
+        revision: 6,
+        mutations: [{ kind: 'append-text', partId: 'assistant-recovery-part', text: ' continued' }]
+      })
+    ).toBe(true);
+    expect(history.messages.value[0]?.content).toBe('checkpoint five continued');
+  });
+
+  it('resets the revision when a continuation Runtime reuses the assistant message', (): void => {
+    const history = useChatHistory();
+    const firstRuntimeMessage = createMessage('assistant-continuation', 'runtime A');
+    firstRuntimeMessage.runtimeId = 'runtime-a';
+    history.upsertLiveMessage(firstRuntimeMessage, 8);
+
+    const continuedMessage = createMessage('assistant-continuation', 'runtime B checkpoint');
+    continuedMessage.runtimeId = 'runtime-b';
+    history.upsertLiveMessage(continuedMessage, 0);
+
+    expect(
+      history.applyLiveDelta({
+        messageId: continuedMessage.id,
+        baseRevision: 0,
+        revision: 1,
+        mutations: [{ kind: 'append-text', partId: 'assistant-continuation-part', text: ' continued' }],
+        runtimeId: 'runtime-b'
+      })
+    ).toBe(true);
+    expect(
+      history.applyLiveDelta({
+        messageId: continuedMessage.id,
+        baseRevision: 8,
+        revision: 9,
+        mutations: [{ kind: 'append-text', partId: 'assistant-continuation-part', text: ' stale' }],
+        runtimeId: 'runtime-a'
+      })
+    ).toBe(false);
+    expect(history.messages.value[0]?.content).toBe('runtime B checkpoint continued');
   });
 
   it('discards an older-page response after the active session changes', async (): Promise<void> => {

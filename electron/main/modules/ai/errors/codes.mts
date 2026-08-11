@@ -24,7 +24,11 @@ export const AI_ERROR_CODE = {
   /** 服务不可用 */
   SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
   /** 请求失败 */
-  REQUEST_FAILED: 'REQUEST_FAILED'
+  REQUEST_FAILED: 'REQUEST_FAILED',
+  /** 单次模型步骤输出文本超过内存安全边界 */
+  OUTPUT_TOO_LARGE: 'OUTPUT_TOO_LARGE',
+  /** Provider 单次模型步骤产生异常数量的流事件 */
+  STREAM_EVENT_LIMIT: 'STREAM_EVENT_LIMIT'
 } as const;
 
 /** AI 错误代码类型，从 AI_ERROR_CODE 常量中提取所有值的联合类型 */

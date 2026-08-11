@@ -31,6 +31,7 @@ import type {
 export type ChatRuntimeEventName =
   | 'chat:runtime:message-created'
   | 'chat:runtime:message-updated'
+  | 'chat:runtime:message-delta'
   | 'chat:runtime:message-deleted'
   | 'chat:runtime:context-usage-updated'
   | 'chat:runtime:tool-request'
@@ -540,7 +541,51 @@ export interface ChatRuntimeEventBase extends ChatRuntimeAddress {
 export interface ChatRuntimeMessageEvent extends ChatRuntimeEventBase {
   /** Message payload. */
   message: ChatMessageRecord;
+  /** 当前 Assistant 完整检查点的 Runtime 修订号。 */
+  revision?: number;
 }
+
+/** Assistant 高频追加型消息变更。 */
+export type ChatRuntimeMessageMutation =
+  | {
+      /** 追加 Assistant 文本。 */
+      kind: 'append-text';
+      /** 目标文本 Part ID。 */
+      partId: string;
+      /** 文本增量。 */
+      text: string;
+    }
+  | {
+      /** 追加 Assistant 思考文本。 */
+      kind: 'append-reasoning';
+      /** 目标思考 Part ID。 */
+      partId: string;
+      /** 思考增量。 */
+      text: string;
+    }
+  | {
+      /** 追加流式工具输入文本。 */
+      kind: 'append-tool-input';
+      /** 目标工具调用 ID。 */
+      toolCallId: string;
+      /** 工具输入文本增量。 */
+      text: string;
+    };
+
+/** 不含 Runtime 地址的 Assistant 实时增量。 */
+export interface ChatRuntimeMessageDelta {
+  /** Assistant 消息 ID。 */
+  messageId: string;
+  /** 当前批次之前的修订号。 */
+  baseRevision: number;
+  /** 当前批次之后的修订号。 */
+  revision: number;
+  /** 有序追加变更。 */
+  mutations: ChatRuntimeMessageMutation[];
+}
+
+/** 带完整 Runtime 地址的 Assistant 实时增量事件。 */
+export interface ChatRuntimeMessageDeltaEvent extends ChatRuntimeEventBase, ChatRuntimeMessageDelta {}
 
 /** Message event emitted when a runtime-owned message is deleted. */
 export interface ChatRuntimeMessageDeletedEvent extends ChatRuntimeEventBase {
@@ -664,6 +709,7 @@ export type ChatRuntimeCompleteEvent = ChatRuntimeEventBase &
 export interface ChatRuntimeEventMap {
   'chat:runtime:message-created': ChatRuntimeMessageEvent;
   'chat:runtime:message-updated': ChatRuntimeMessageEvent;
+  'chat:runtime:message-delta': ChatRuntimeMessageDeltaEvent;
   'chat:runtime:message-deleted': ChatRuntimeMessageDeletedEvent;
   'chat:runtime:context-usage-updated': ChatRuntimeContextUsageEvent;
   'chat:runtime:tool-request': ChatRuntimeToolRequestEvent;

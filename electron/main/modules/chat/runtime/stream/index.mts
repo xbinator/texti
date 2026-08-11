@@ -2,488 +2,238 @@
  * @file stream/index.mts
  * @description ChatRuntime 主进程模型流式执行器主循环与公共入口。
  */
-import type { ChatRuntimeDeferredToolCall, ChatRuntimeStreamExecutor, ChatRuntimeStreamExecutorResult } from '../types.mjs';
-import type { RuntimeStreamExecutorDependencies, RuntimeStreamText, RuntimeToolCallChunk, RuntimeToolGuardSource, RuntimeToolResultChunk } from './types.mjs';
-import type { ToolWatchdogLease } from '../controllers/tool-watchdog.mjs';
-import type { AIUsage, AIToolExecutionResult, ChatToolActivitySnapshot } from 'types/ai';
-import type { ChatMessageRecord, ChatMessageToolPart } from 'types/chat';
+import type {
+  ChatRuntimeAssistantDeltaEmitter,
+  ChatRuntimeAssistantUpdater,
+  ChatRuntimeStreamExecutor,
+  ChatRuntimeStreamExecutorInput,
+  ChatRuntimeStreamExecutorResult
+} from '../types.mjs';
+import type { RuntimeStreamExecutorDependencies, RuntimeStreamText } from './types.mjs';
+import type { ToolWatchdogLease, ToolWatchdogs } from '../controllers/tool-watchdog.mjs';
+import type { ChatToolActivitySnapshot } from 'types/ai';
+import type { ChatMessageRecord } from 'types/chat';
 import { AI_ERROR_CODE, createAIServiceError } from '../../../ai/errors/codes.mjs';
 import { createToolWatchdogs } from '../controllers/tool-watchdog.mjs';
-import { toRuntimeStreamChunk } from './chunks.mjs';
-import {
-  createPersistableAssistant,
-  createProtocolToolResult,
-  getDeferredToolNames,
-  hasExecutableMcp,
-  hasExecutableTavily,
-  isDeferredToolName,
-  parseDeferredToolCall,
-  scrubDeferredParts,
-  type DeferredToolCallParseResult
-} from './deferred-tools.mjs';
-import { sanitizeFinalText } from './final-text.mjs';
-import {
-  appendReasoningDelta,
-  appendTextDelta,
-  appendToolCall,
-  appendToolInputDelta,
-  appendToolInputEnd,
-  appendToolInputStart,
-  appendToolResult,
-  applyToolActivity,
-  findRendererHistory,
-  finishAssistantMessage
-} from './message-parts.mjs';
+import { createPersistableAssistant, getDeferredToolNames, hasExecutableMcp, hasExecutableTavily } from './deferred-tools.mjs';
+import { applyToolActivity, finishAssistantMessage } from './message-parts.mjs';
+import { observeRuntimeStream, type RuntimeStreamObservation } from './observer.mjs';
+import { createAssistantProjection, type AssistantProjection } from './projection.mjs';
 import { createRuntimeStreamRequest } from './request.mjs';
-import {
-  createToolFailureResultFromError,
-  createUnknownToolFailureResult,
-  executeMainToolSafely,
-  executeRendererToolSafely,
-  isMainProcessTool,
-  isRendererManagedTool,
-  normalizeRuntimeError,
-  shouldContinueAfterToolResult,
-  shouldStopStreamAfterToolResult
-} from './tools.mjs';
+import { classifyToolStep, executeToolStep, type RuntimeToolStepResult } from './tool-step.mjs';
 
 export type { RuntimeStreamText, RuntimeStreamExecutorDependencies };
 
-/** 同一 toolCallId 在 Provider 流中的全部定义观察。 */
-interface ObservedToolDefinition {
-  /** 工具调用 ID。 */
-  toolCallId: string;
-  /** tool-input-start 阶段观察到的工具名称。 */
-  startNames: string[];
-  /** 完整 tool-call 定义。 */
-  calls: RuntimeToolCallChunk[];
-  /** tool-result 阶段观察到的工具名称。 */
-  resultNames: string[];
-  /** 分类完成前缓存的 Provider 工具结果。 */
-  results: RuntimeToolResultChunk[];
+/** 单次 Runtime 模型流的投影与 Watchdog 上下文。 */
+interface StreamExecutionContext {
+  /** 当前步骤延迟调用 ID。 */
+  deferredToolCallIds: Set<string>;
+  /** Assistant 实时与耐久投影器。 */
+  projection: AssistantProjection;
+  /** 将结构变化投影为完整检查点。 */
+  persistAssistant: () => Promise<void>;
+  /** 启动工具 Watchdog 租约。 */
+  startToolLease: (toolCallId: string, toolName: string) => ToolWatchdogLease;
+  /** 在工具 Part 出现后应用早到活动快照。 */
+  applyPendingActivity: (toolCallId: string) => void;
+}
+
+/** Runtime 终态收口输入。 */
+interface StreamFinalizationInput {
+  /** 当前工作 Assistant。 */
+  assistantMessage: ChatMessageRecord;
+  /** Provider 流观察事实。 */
+  observation: RuntimeStreamObservation;
+  /** 工具步骤执行结果。 */
+  toolStepResult: RuntimeToolStepResult;
+  /** Assistant 投影器。 */
+  projection: AssistantProjection;
+  /** 完整检查点投影函数。 */
+  persistAssistant: () => Promise<void>;
 }
 
 /**
- * 读取或创建一个工具调用的定义观察记录。
- * @param definitions - 当前步骤全部观察记录
- * @param toolCallId - 工具调用 ID
- * @returns 可追加观察事实的记录
+ * 创建当前模型步骤的投影与 Watchdog 上下文。
+ * @param input - Runtime 流执行输入
+ * @param updateAssistant - 完整 Assistant 持久化函数
+ * @param emitDelta - 小型实时增量发送函数
+ * @param toolWatchdogs - Runtime 共享 Watchdog 注册表
+ * @returns 流观察和工具执行依赖
  */
-function getObservedTool(definitions: Map<string, ObservedToolDefinition>, toolCallId: string): ObservedToolDefinition {
-  const existing = definitions.get(toolCallId);
-  if (existing) return existing;
+function createStreamContext(
+  input: ChatRuntimeStreamExecutorInput,
+  updateAssistant: ChatRuntimeAssistantUpdater,
+  emitDelta: ChatRuntimeAssistantDeltaEmitter | undefined,
+  toolWatchdogs: ToolWatchdogs
+): StreamExecutionContext {
+  const { runtime, assistantMessage } = input;
+  const deferredToolCallIds = new Set<string>();
+  const pendingActivities = new Map<string, ChatToolActivitySnapshot>();
+  const projection = createAssistantProjection({
+    messageId: assistantMessage.id,
+    createSnapshot: (): ChatMessageRecord => createPersistableAssistant(assistantMessage, deferredToolCallIds),
+    emitDelta: (delta): void => emitDelta?.(delta),
+    persist: updateAssistant,
+    initialRevision: emitDelta ? runtime.messageRevision ?? 0 : 0,
+    onRevision: emitDelta
+      ? (revision: number): void => {
+          runtime.messageRevision = revision;
+        }
+      : undefined
+  });
 
-  const created: ObservedToolDefinition = {
-    toolCallId,
-    startNames: [],
-    calls: [],
-    resultNames: [],
-    results: []
+  /** 把结构变化作为完整检查点立即投影。 */
+  const persistAssistant = async (): Promise<void> => {
+    projection.mark();
+    await projection.checkpoint();
   };
-  definitions.set(toolCallId, created);
-  return created;
+  /** 投影 Watchdog 活动或缓存早到快照。 */
+  const projectToolActivity = (toolCallId: string, snapshot: ChatToolActivitySnapshot): void => {
+    if (!applyToolActivity(assistantMessage, toolCallId, snapshot)) {
+      pendingActivities.set(toolCallId, structuredClone(snapshot));
+      return;
+    }
+    projection.mark();
+  };
+  /** 为当前 Runtime 的工具调用创建唯一租约。 */
+  const startToolLease = (toolCallId: string, toolName: string): ToolWatchdogLease => {
+    return toolWatchdogs.start({
+      runtimeId: runtime.runtimeId,
+      toolCallId,
+      toolName,
+      onChange: (snapshot): void => projectToolActivity(toolCallId, snapshot)
+    });
+  };
+  /** 在工具 Part 创建后应用更早到达的活动快照。 */
+  const applyPendingActivity = (toolCallId: string): void => {
+    const pending = pendingActivities.get(toolCallId);
+    if (!pending || !applyToolActivity(assistantMessage, toolCallId, pending)) return;
+    pendingActivities.delete(toolCallId);
+  };
+
+  return { deferredToolCallIds, projection, persistAssistant, startToolLease, applyPendingActivity };
 }
 
 /**
- * 当完整 tool-call 未重复携带元数据时，继承 input-start 已写入工作消息的值。
- * @param message - 当前 working assistant
- * @param chunk - 完整工具调用 chunk
- * @returns 含最终 Provider 元数据的调用定义
+ * 将 Provider usage、工具步骤结果与 Assistant 终态收口。
+ * @param input - 流观察、工具结果与投影依赖
+ * @returns ChatRuntime 流执行结果
  */
-function inheritToolMetadata(message: ChatMessageRecord, chunk: RuntimeToolCallChunk): RuntimeToolCallChunk {
-  if (chunk.providerMetadata !== undefined) return chunk;
-
-  const toolPart = message.parts.find((part): part is ChatMessageToolPart => part.type === 'tool' && part.toolCallId === chunk.toolCallId);
-  if (toolPart?.providerMetadata === undefined) return chunk;
-
-  return {
-    ...chunk,
-    providerMetadata: toolPart.providerMetadata
+async function finalizeStreamStep(input: StreamFinalizationInput): Promise<ChatRuntimeStreamExecutorResult> {
+  let { stepUsage, totalUsage, finishReason } = input.observation;
+  const { toolStepResult } = input;
+  if (toolStepResult.discardUsage) {
+    stepUsage = undefined;
+    totalUsage = undefined;
+    finishReason = undefined;
+  } else if (toolStepResult.discardFinishReason) {
+    finishReason = undefined;
+  }
+  const usageResult = {
+    ...(stepUsage ? { stepUsage } : {}),
+    ...(totalUsage ? { totalUsage } : {})
   };
+  if (toolStepResult.suspensionToolCalls) {
+    await input.projection.flush();
+    return { ...usageResult, shouldContinue: false, suspension: { toolCalls: toolStepResult.suspensionToolCalls } };
+  }
+
+  const shouldContinue = toolStepResult.executedToolCount > 0 && toolStepResult.allToolsContinueable && finishReason === 'tool-calls';
+  if (shouldContinue || toolStepResult.isWaitingForUserInput) {
+    await input.projection.flush();
+    return shouldContinue ? { ...usageResult, shouldContinue } : usageResult;
+  }
+  if (input.assistantMessage.finished !== true) {
+    finishAssistantMessage(input.assistantMessage, totalUsage);
+    await input.persistAssistant();
+  }
+  await input.projection.flush();
+  return usageResult;
+}
+
+/**
+ * 执行一次 ChatRuntime Provider 流。
+ * @param dependencies - 执行器依赖
+ * @param toolWatchdogs - Runtime 共享 Watchdog 注册表
+ * @param input - Runtime、源消息与工作 Assistant
+ * @param updateAssistant - 完整 Assistant 更新函数
+ * @param emitDelta - 小型实时增量发送函数
+ * @returns 用量、续轮或 suspension 结果
+ */
+async function executeRuntimeStream(
+  dependencies: RuntimeStreamExecutorDependencies,
+  toolWatchdogs: ToolWatchdogs,
+  input: ChatRuntimeStreamExecutorInput,
+  updateAssistant: ChatRuntimeAssistantUpdater,
+  emitDelta?: ChatRuntimeAssistantDeltaEmitter
+): Promise<ChatRuntimeStreamExecutorResult> {
+  const { runtime, sourceMessages, userMessage, assistantMessage, forceFinal = false } = input;
+  runtime.currentToolStep = { toolCalls: [] };
+  const exposedDeferredToolNames = getDeferredToolNames(runtime.tools);
+  if (exposedDeferredToolNames.size > 0 && (hasExecutableTavily(runtime.tavily) || hasExecutableMcp(runtime.mcp))) {
+    throw createAIServiceError(AI_ERROR_CODE.INVALID_REQUEST, '延迟协调工具不能与 AI SDK 可执行的 Tavily 或 MCP 工具同时暴露');
+  }
+  const resolution = runtime.resolvedModel ?? (await dependencies.resolver.resolve(runtime.model));
+  if (!resolution) throw createAIServiceError(AI_ERROR_CODE.MODEL_NOT_FOUND, '没有可用的聊天模型');
+  runtime.resolvedModel = resolution;
+  delete runtime.failedAssistantProjection;
+  const context = createStreamContext(input, updateAssistant, emitDelta, toolWatchdogs);
+
+  try {
+    const [error, result] = await dependencies.streamText(
+      resolution.createOptions,
+      createRuntimeStreamRequest(resolution.modelId, runtime, userMessage, sourceMessages, resolution.maxOutputTokens),
+      { runtimeToolLoop: true, forceFinal, toolActivity: { start: context.startToolLease } }
+    );
+    if (error) throw error;
+    if (!result) throw createAIServiceError(AI_ERROR_CODE.REQUEST_FAILED, 'ChatRuntime 流式调用未返回结果');
+
+    const observation = await observeRuntimeStream({
+      runtime,
+      stream: result.stream,
+      assistantMessage,
+      projection: context.projection,
+      forceFinal,
+      deferredToolCallIds: context.deferredToolCallIds,
+      persistAssistant: context.persistAssistant,
+      applyPendingActivity: context.applyPendingActivity,
+      abortStream: dependencies.abortStream
+    });
+    const classification = classifyToolStep({ observedTools: observation.observedTools, exposedDeferredToolNames });
+    const toolStepResult = await executeToolStep({
+      runtime,
+      assistantMessage,
+      classification,
+      deferredToolCallIds: context.deferredToolCallIds,
+      stoppedToolCallId: observation.stoppedToolCallId,
+      dependencies,
+      startToolLease: context.startToolLease,
+      persistAssistant: context.persistAssistant
+    });
+    const finalResult = await finalizeStreamStep({
+      assistantMessage,
+      observation,
+      toolStepResult,
+      projection: context.projection,
+      persistAssistant: context.persistAssistant
+    });
+    return finalResult;
+  } catch (error) {
+    // 任意异常都保留最新安全内存投影，避免耐久窗口把 Renderer 已见正文回滚到旧快照。
+    runtime.failedAssistantProjection = createPersistableAssistant(assistantMessage, context.deferredToolCallIds);
+    throw error;
+  } finally {
+    await context.projection.cancel();
+  }
 }
 
 /**
  * 创建 ChatRuntime 模型流式执行器。
  * @param dependencies - 执行器依赖
- * @returns runtime 流式执行器
+ * @returns Runtime 流式执行器
  */
 export function createRuntimeStreamExecutor(dependencies: RuntimeStreamExecutorDependencies): ChatRuntimeStreamExecutor {
   const toolWatchdogs = dependencies.toolWatchdogs ?? createToolWatchdogs();
-  return async ({ runtime, sourceMessages, userMessage, assistantMessage, forceFinal = false }, updateAssistant): Promise<ChatRuntimeStreamExecutorResult> => {
-    runtime.currentToolStep = { toolCalls: [] };
-    const exposedDeferredToolNames = getDeferredToolNames(runtime.tools);
-    if (exposedDeferredToolNames.size > 0 && (hasExecutableTavily(runtime.tavily) || hasExecutableMcp(runtime.mcp))) {
-      throw createAIServiceError(AI_ERROR_CODE.INVALID_REQUEST, '延迟协调工具不能与 AI SDK 可执行的 Tavily 或 MCP 工具同时暴露');
-    }
-    const resolution = runtime.resolvedModel ?? (await dependencies.resolver.resolve(runtime.model));
-    if (!resolution) {
-      throw createAIServiceError(AI_ERROR_CODE.MODEL_NOT_FOUND, '没有可用的聊天模型');
-    }
-    // 冻结本次 Provider 实际使用的默认或显式模型，供 suspension prepare 构造不可变快照。
-    runtime.resolvedModel = resolution;
-    const deferredToolCallIds = new Set<string>();
-    const pendingActivities = new Map<string, ChatToolActivitySnapshot>();
-    let persistQueue = Promise.resolve();
-    let persistError: unknown;
-
-    /**
-     * 仅持久化尚未提交的延迟工具片段之外的 assistant 快照。
-     * @returns 持久化操作完成
-     */
-    async function persistAssistant(): Promise<void> {
-      const snapshot = createPersistableAssistant(assistantMessage, deferredToolCallIds);
-      const write = persistQueue.then(async (): Promise<void> => {
-        if (persistError !== undefined) throw persistError;
-        await updateAssistant(snapshot);
-      });
-      persistQueue = write.catch((persistFailure: unknown): void => {
-        persistError ??= persistFailure;
-      });
-      await write;
-    }
-
-    /**
-     * 投影 Watchdog 活动并把后台写入串到现有 assistant 写链。
-     * @param toolCallId - 工具调用 ID
-     * @param snapshot - Watchdog 安全快照
-     */
-    function projectToolActivity(toolCallId: string, snapshot: ChatToolActivitySnapshot): void {
-      if (!applyToolActivity(assistantMessage, toolCallId, snapshot)) {
-        pendingActivities.set(toolCallId, structuredClone(snapshot));
-        return;
-      }
-      persistAssistant().catch((): void => {
-        // 错误已保存在 persistError，下一处受等待的持久化边界会按原错误失败。
-      });
-    }
-
-    /**
-     * 为当前 Runtime 的工具调用创建唯一租约。
-     * @param toolCallId - 工具调用 ID
-     * @param toolName - 工具名称
-     * @returns Watchdog 租约
-     */
-    function startToolLease(toolCallId: string, toolName: string): ToolWatchdogLease {
-      return toolWatchdogs.start({
-        runtimeId: runtime.runtimeId,
-        toolCallId,
-        toolName,
-        onChange: (snapshot): void => projectToolActivity(toolCallId, snapshot)
-      });
-    }
-
-    /**
-     * 在工具 Part 创建后应用更早到达的活动快照。
-     * @param toolCallId - 工具调用 ID
-     */
-    function applyPendingActivity(toolCallId: string): void {
-      const pending = pendingActivities.get(toolCallId);
-      if (!pending || !applyToolActivity(assistantMessage, toolCallId, pending)) return;
-      pendingActivities.delete(toolCallId);
-    }
-
-    const [error, result] = await dependencies.streamText(
-      resolution.createOptions,
-      createRuntimeStreamRequest(resolution.modelId, runtime, userMessage, sourceMessages),
-      {
-        runtimeToolLoop: true,
-        forceFinal,
-        toolActivity: { start: startToolLease }
-      }
-    );
-    if (error) {
-      throw error;
-    }
-    if (!result) {
-      throw createAIServiceError(AI_ERROR_CODE.REQUEST_FAILED, 'ChatRuntime 流式调用未返回结果');
-    }
-
-    let stepUsage: AIUsage | undefined;
-    let totalUsage: AIUsage | undefined;
-    let finishReason: import('types/ai').AIStreamFinishReason | undefined;
-    let executedToolCount = 0;
-    let allToolsContinueable = true;
-    let anyToolStopped = false;
-    let isWaitingForUserInput = false;
-    let finalTextBuffer = '';
-    const observedTools = new Map<string, ObservedToolDefinition>();
-    let stoppedToolCallId: string | undefined;
-
-    /**
-     * 将一个工具结果投影到工作消息和当前步骤统计。
-     * @param toolCallId - 工具调用 ID
-     * @param toolName - 工具名称
-     * @param toolResult - 规范化工具结果
-     */
-    function applyToolResult(toolCallId: string, toolName: string, toolResult: AIToolExecutionResult): void {
-      appendToolResult(
-        assistantMessage,
-        {
-          type: 'tool-result',
-          toolCallId,
-          toolName,
-          result: toolResult
-        },
-        findRendererHistory(runtime.capabilities, toolName)
-      );
-      executedToolCount += 1;
-      allToolsContinueable = allToolsContinueable && shouldContinueAfterToolResult(toolResult);
-      anyToolStopped = anyToolStopped || shouldStopStreamAfterToolResult(toolResult);
-      isWaitingForUserInput = isWaitingForUserInput || toolResult.status === 'awaiting_user_input';
-      assistantMessage.loading = toolResult.status === 'awaiting_user_input';
-      assistantMessage.finished = false;
-    }
-
-    for await (const rawChunk of result.stream) {
-      const chunk = toRuntimeStreamChunk(rawChunk);
-      if (
-        stoppedToolCallId !== undefined &&
-        (chunk.type === 'text-delta' || chunk.type === 'reasoning-delta' || chunk.type === 'error' || chunk.type === 'abort')
-      ) {
-        // Provider 已给出权威停止结果后只继续审计工具定义事实，晚到内容与终止噪声不能覆盖停止语义。
-        continue;
-      }
-
-      if (chunk.type === 'text-delta') {
-        if (forceFinal) {
-          // 收口调用先完整缓冲，避免跨 chunk 的协议标记在流式 UI 中短暂泄漏。
-          finalTextBuffer += chunk.text;
-          continue;
-        }
-        appendTextDelta(assistantMessage, chunk.text);
-        await persistAssistant();
-      } else if (chunk.type === 'reasoning-delta') {
-        appendReasoningDelta(assistantMessage, chunk.text);
-        await persistAssistant();
-      } else if (chunk.type === 'finish-step') {
-        stepUsage = chunk.stepUsage;
-      } else if (chunk.type === 'finish') {
-        finishReason = chunk.finishReason;
-        totalUsage = chunk.totalUsage;
-      } else if (chunk.type === 'error') {
-        throw normalizeRuntimeError(chunk.error);
-      } else if (chunk.type === 'abort') {
-        throw createAIServiceError(AI_ERROR_CODE.REQUEST_FAILED, chunk.reason?.trim() || '模型流已中止');
-      } else if (chunk.type === 'tool-input-start') {
-        getObservedTool(observedTools, chunk.toolCallId).startNames.push(chunk.toolName);
-        if (isDeferredToolName(chunk.toolName)) {
-          deferredToolCallIds.add(chunk.toolCallId);
-        }
-        appendToolInputStart(assistantMessage, chunk, findRendererHistory(runtime.capabilities, chunk.toolName));
-        await persistAssistant();
-      } else if (chunk.type === 'tool-input-delta') {
-        appendToolInputDelta(assistantMessage, chunk);
-        await persistAssistant();
-      } else if (chunk.type === 'tool-input-end') {
-        appendToolInputEnd(assistantMessage, chunk);
-        await persistAssistant();
-      } else if (chunk.type === 'tool-call') {
-        appendToolCall(assistantMessage, chunk, findRendererHistory(runtime.capabilities, chunk.toolName));
-        applyPendingActivity(chunk.toolCallId);
-        const completedCall = inheritToolMetadata(assistantMessage, chunk);
-        getObservedTool(observedTools, chunk.toolCallId).calls.push(completedCall);
-        runtime.currentToolStep.toolCalls.push({ toolName: chunk.toolName, input: chunk.input });
-        if (isDeferredToolName(chunk.toolName)) {
-          deferredToolCallIds.add(chunk.toolCallId);
-        }
-        await persistAssistant();
-      } else if (chunk.type === 'tool-result') {
-        const definition = getObservedTool(observedTools, chunk.toolCallId);
-        definition.resultNames.push(chunk.toolName);
-        definition.results.push(chunk);
-        if (isDeferredToolName(chunk.toolName)) {
-          deferredToolCallIds.add(chunk.toolCallId);
-        }
-        if (shouldStopStreamAfterToolResult(chunk.result) && stoppedToolCallId === undefined) {
-          stoppedToolCallId = chunk.toolCallId;
-        }
-      }
-    }
-
-    if (forceFinal && finalTextBuffer) {
-      appendTextDelta(assistantMessage, sanitizeFinalText(finalTextBuffer));
-      await persistAssistant();
-    }
-
-    const observedDefinitions = [...observedTools.values()];
-    const observedNames = observedDefinitions.flatMap((definition): string[] => [
-      ...definition.startNames,
-      ...definition.calls.map((call): string => call.toolName)
-    ]);
-    const completedToolCalls = observedDefinitions.flatMap((definition): RuntimeToolCallChunk[] => definition.calls);
-    const hasUnexposedDeferredCalls = observedNames.some((toolName): boolean => isDeferredToolName(toolName) && !exposedDeferredToolNames.has(toolName));
-    const hasDeferredCalls = observedNames.some((toolName): boolean => exposedDeferredToolNames.has(toolName));
-    const hasDirectCalls = observedNames.some((toolName): boolean => !isDeferredToolName(toolName));
-    const deferredResultDefinition = observedDefinitions.find(
-      (definition): boolean =>
-        definition.results.length > 0 &&
-        [...definition.startNames, ...definition.calls.map((call): string => call.toolName), ...definition.resultNames].some((toolName): boolean =>
-          exposedDeferredToolNames.has(toolName)
-        )
-    );
-    let deferredToolCalls: ChatRuntimeDeferredToolCall[] = [];
-    let delegationProtocolReason: string | undefined;
-    const duplicatedDefinition = observedDefinitions.find(
-      (definition): boolean => definition.startNames.length > 1 || definition.calls.length > 1 || definition.results.length > 1
-    );
-    const conflictingDefinition = observedDefinitions.find((definition): boolean => {
-      const names = [...definition.startNames, ...definition.calls.map((call): string => call.toolName), ...definition.resultNames];
-      return new Set(names).size > 1;
-    });
-    const incompleteDefinition = observedDefinitions.find((definition): boolean => definition.calls.length !== 1);
-    if (duplicatedDefinition) {
-      delegationProtocolReason = 'duplicate_tool_call_id';
-    } else if (conflictingDefinition) {
-      delegationProtocolReason = 'tool_definition_conflict';
-    } else if (hasUnexposedDeferredCalls) {
-      delegationProtocolReason = 'deferred_tool_not_exposed';
-    } else if (hasDeferredCalls && hasDirectCalls) {
-      delegationProtocolReason = 'mixed_execution_classes';
-    } else if (incompleteDefinition) {
-      delegationProtocolReason = 'incomplete_tool_definition';
-    } else if (deferredResultDefinition) {
-      delegationProtocolReason = 'deferred_provider_result_forbidden';
-    } else if (hasDeferredCalls) {
-      const parsedCalls = completedToolCalls.map((call): DeferredToolCallParseResult => parseDeferredToolCall(call, exposedDeferredToolNames));
-      const invalidCall = parsedCalls.find((call): boolean => !call.ok);
-      if (invalidCall && !invalidCall.ok) {
-        delegationProtocolReason = invalidCall.error.details?.reason?.toString() ?? 'delegation_contract_invalid';
-      } else {
-        deferredToolCalls = parsedCalls.flatMap((call): ChatRuntimeDeferredToolCall[] => (call.ok ? [call.toolCall] : []));
-      }
-    }
-
-    if (delegationProtocolReason) {
-      // 只有完成整个步骤分类后才暴露协议错误，保证此前不会发生 main/renderer 副作用。
-      for (const definition of observedDefinitions) {
-        const toolName = definition.calls.at(-1)?.toolName ?? definition.startNames.at(-1) ?? definition.resultNames.at(-1) ?? 'unknown_tool';
-        applyToolResult(definition.toolCallId, toolName, createProtocolToolResult(toolName, delegationProtocolReason));
-      }
-      scrubDeferredParts(assistantMessage, deferredToolCallIds);
-      if (!deferredResultDefinition) {
-        deferredToolCallIds.clear();
-      }
-      if (deferredResultDefinition) {
-        // 含 deferred Provider result 的非法步骤不进入续轮，工作消息仅保留诊断，持久化仍走过滤快照。
-        finishReason = undefined;
-      }
-      await persistAssistant();
-    } else if (deferredToolCalls.length > 0) {
-      const usageResult = {
-        ...(stepUsage ? { stepUsage } : {}),
-        ...(totalUsage ? { totalUsage } : {})
-      };
-      return {
-        ...usageResult,
-        shouldContinue: false,
-        suspension: { toolCalls: deferredToolCalls }
-      };
-    } else {
-      const providerStopIndex = stoppedToolCallId ? completedToolCalls.findIndex((call): boolean => call.toolCallId === stoppedToolCallId) : -1;
-      const directCallLimit = providerStopIndex >= 0 ? providerStopIndex : completedToolCalls.length - 1;
-      for (let index = 0; index <= directCallLimit; index += 1) {
-        const call = completedToolCalls[index];
-        const currentPart = assistantMessage.parts.find((part): boolean => part.type === 'tool' && part.toolCallId === call.toolCallId);
-        if (currentPart?.type === 'tool' && currentPart.status === 'done') continue;
-
-        const toolExecutionInput = {
-          runtime,
-          toolCallId: call.toolCallId,
-          toolName: call.toolName,
-          input: call.input
-        };
-        const providerResult = observedTools.get(call.toolCallId)?.results[0];
-        let source: RuntimeToolGuardSource = 'unknown';
-        if (providerResult) {
-          source = 'provider';
-        } else if (dependencies.executeMainTool && isMainProcessTool(call.toolName)) {
-          source = 'main';
-        } else if (dependencies.executeRendererTool && isRendererManagedTool(runtime, call.toolName)) {
-          source = 'renderer';
-        }
-        let toolResult: AIToolExecutionResult | undefined;
-        if (dependencies.guardToolCall) {
-          // Guard rejection and异常都必须在读取 Provider 结果或调用任何 executor 前收敛。
-          // eslint-disable-next-line no-await-in-loop
-          const [guardResult] = await Promise.allSettled([dependencies.guardToolCall({ ...toolExecutionInput, source })]);
-          toolResult =
-            guardResult.status === 'fulfilled' ? guardResult.value ?? undefined : createToolFailureResultFromError(call.toolName, guardResult.reason);
-        }
-        if (!toolResult && providerResult) {
-          toolResult = providerResult.result;
-        } else if (!toolResult && dependencies.executeMainTool && isMainProcessTool(call.toolName)) {
-          const lease = startToolLease(call.toolCallId, call.toolName);
-          // eslint-disable-next-line no-await-in-loop
-          toolResult = await executeMainToolSafely(dependencies.executeMainTool, toolExecutionInput, lease);
-          // Child 审计必须观察超时与异常均已归一化的唯一最终结果。
-          // eslint-disable-next-line no-await-in-loop
-          await dependencies.observeMainTool?.({
-            runtime,
-            toolCallId: call.toolCallId,
-            toolName: call.toolName,
-            result: toolResult
-          });
-        } else if (!toolResult && dependencies.executeRendererTool && isRendererManagedTool(runtime, call.toolName)) {
-          const lease = startToolLease(call.toolCallId, call.toolName);
-          // eslint-disable-next-line no-await-in-loop
-          toolResult = await executeRendererToolSafely(dependencies.executeRendererTool, toolExecutionInput, lease);
-        }
-        if (!toolResult) continue;
-
-        applyToolResult(call.toolCallId, providerResult?.toolName ?? call.toolName, toolResult);
-        // eslint-disable-next-line no-await-in-loop
-        await persistAssistant();
-        if (!anyToolStopped) continue;
-
-        // 保持既有“停止后不消费后续调用”投影，虽然 Provider 定义已被完整读取以完成安全分类。
-        const skippedIds = new Set(completedToolCalls.slice(index + 1).map((pendingCall): string => pendingCall.toolCallId));
-        assistantMessage.parts = assistantMessage.parts.filter((part): boolean => part.type !== 'tool' || !skippedIds.has(part.toolCallId));
-        runtime.currentToolStep.toolCalls = runtime.currentToolStep.toolCalls.slice(0, index + 1);
-        stepUsage = undefined;
-        totalUsage = undefined;
-        finishReason = undefined;
-        // eslint-disable-next-line no-await-in-loop
-        await persistAssistant();
-        break;
-      }
-      if (providerStopIndex >= 0) {
-        // Provider 已给出停止结果时，后续定义只参与安全分类，不进入 Runtime 执行。
-        const skippedIds = new Set(completedToolCalls.slice(providerStopIndex + 1).map((pendingCall): string => pendingCall.toolCallId));
-        assistantMessage.parts = assistantMessage.parts.filter((part): boolean => part.type !== 'tool' || !skippedIds.has(part.toolCallId));
-        runtime.currentToolStep.toolCalls = runtime.currentToolStep.toolCalls.slice(0, providerStopIndex + 1);
-        stepUsage = undefined;
-        totalUsage = undefined;
-        finishReason = undefined;
-        await persistAssistant();
-      }
-    }
-
-    // 流结束时仍未收到 tool-result 的 tool-call，按未注册工具兜底失败，
-    // 避免 UI 长期处于 executing 状态。
-    let finalizedUnknownTool = false;
-    for (const part of assistantMessage.parts) {
-      if (part.type !== 'tool' || part.status !== 'executing' || deferredToolCallIds.has(part.toolCallId)) continue;
-
-      applyToolResult(part.toolCallId, part.toolName, createUnknownToolFailureResult(part.toolName));
-      finalizedUnknownTool = true;
-    }
-    if (finalizedUnknownTool) {
-      await persistAssistant();
-    }
-
-    const shouldContinue = executedToolCount > 0 && allToolsContinueable && finishReason === 'tool-calls';
-    const usageResult = {
-      ...(stepUsage ? { stepUsage } : {}),
-      ...(totalUsage ? { totalUsage } : {})
-    };
-    if (shouldContinue) return { ...usageResult, shouldContinue };
-    if (isWaitingForUserInput) return usageResult;
-
-    if (assistantMessage.finished !== true) {
-      finishAssistantMessage(assistantMessage, totalUsage);
-      await persistAssistant();
-    }
-
-    return usageResult;
-  };
+  return (input, updateAssistant, emitDelta): Promise<ChatRuntimeStreamExecutorResult> =>
+    executeRuntimeStream(dependencies, toolWatchdogs, input, updateAssistant, emitDelta);
 }

@@ -12,6 +12,7 @@ import type {
   ChatRuntimeErrorEvent,
   ChatRuntimeEventBase,
   ChatRuntimeMessageDeletedEvent,
+  ChatRuntimeMessageDeltaEvent,
   ChatRuntimeMessageEvent,
   ChatRuntimeSubmitToolActivityInput,
   ChatRuntimeToolActivity,
@@ -35,6 +36,7 @@ import type { Tab } from '@/stores/workspace/tabs';
 import { useTabsStore } from '@/stores/workspace/tabs';
 import { asyncTo } from '@/utils/asyncTo';
 import { assertRuntimeResult, createBridgeFailure, createToolFailure, createWorkflowError, isManagedRuntime } from './error';
+import { createShellOutputCoalescer, type ShellOutputCoalescer } from './shellOutputCoalescer';
 
 /** 工具 Promise 完成后等待已排队 finished 事件的最大时间。 */
 const SHELL_ROUTE_GRACE_MS = 5_000;
@@ -75,6 +77,8 @@ interface ShellEventRoute extends Pick<ChatRuntimeToolRequestEvent, 'runtimeId' 
   lastTerminalContent: string;
   /** 普通管道模式已经接收的累计输出字符数。 */
   outputChars: number;
+  /** 普通管道输出的有界合并器。 */
+  outputCoalescer: ShellOutputCoalescer;
 }
 
 /**
@@ -242,6 +246,7 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
     toolActivityFlights.delete(abortKey);
     const route = shellRoutes.get(shellCommandId);
     if (!route) return;
+    route.outputCoalescer.flush();
     route.cleanupTimer = setTimeout((): void => {
       if (shellRoutes.get(shellCommandId) === route) shellRoutes.delete(shellCommandId);
     }, SHELL_ROUTE_GRACE_MS);
@@ -320,6 +325,12 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
   function handleMessageUpdated(event: ChatRuntimeMessageEvent): void {
     if (!shouldHandle(event) && !isContinuationUpdate(event)) return;
     actorSystem.emitSessionEvent(event.sessionId, { type: 'messageUpdated', event });
+  }
+
+  /** 发布 Runtime Assistant 实时增量事件。 */
+  function handleMessageDelta(event: ChatRuntimeMessageDeltaEvent): void {
+    if (!shouldHandle(event)) return;
+    actorSystem.emitSessionEvent(event.sessionId, { type: 'messageDelta', event });
   }
 
   /** 发布 Runtime 消息删除事件。 */
@@ -416,15 +427,27 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
     toolActivityFlights.set(abortKey, activityFlight);
     const activityReporter = createActivityReporter(activityFlight);
     if (isShellRequest(event)) {
-      shellRoutes.set(shellCommandId, {
+      let route: ShellEventRoute;
+      const outputCoalescer = createShellOutputCoalescer((chunks: ElectronShellCommandOutputChunk[]): void => {
+        if (shellRoutes.get(shellCommandId) !== route || !isManagedRuntime(actorSystem, route.runtimeId)) return;
+        chunks.forEach((chunk: ElectronShellCommandOutputChunk): void => {
+          actorSystem.emitSessionEvent(route.sessionId, {
+            type: 'shellCommandOutput',
+            chunk: { ...chunk, commandId: route.toolCallId }
+          });
+        });
+      });
+      route = {
         runtimeId: event.runtimeId,
         sessionId: event.sessionId,
         toolCallId: event.toolCallId,
         cleanupTimer: null,
         reportProgress: activityReporter.progress,
         lastTerminalContent: '',
-        outputChars: 0
-      });
+        outputChars: 0,
+        outputCoalescer
+      };
+      shellRoutes.set(shellCommandId, route);
     }
 
     // started 必须先被 Main 接受，Renderer controller 才会撤销启动保护定时器。
@@ -466,6 +489,7 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
   function handleShellRunEvent(event: ElectronShellRunEventEnvelope): void {
     const route = shellRoutes.get(event.commandId);
     if (!route || !isManagedRuntime(actorSystem, route.runtimeId)) return;
+    if (event.event.type === 'finished') route.outputCoalescer.flush();
     let translatedRunEvent = event.event;
     if (event.event.type === 'finished') {
       translatedRunEvent = { ...event.event, result: { ...event.event.result, commandId: route.toolCallId } };
@@ -506,10 +530,7 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
     const route = shellRoutes.get(chunk.commandId);
     if (!route || !isManagedRuntime(actorSystem, route.runtimeId)) return;
     route.outputChars += chunk.text.length;
-    actorSystem.emitSessionEvent(route.sessionId, {
-      type: 'shellCommandOutput',
-      chunk: { ...chunk, commandId: route.toolCallId }
-    });
+    route.outputCoalescer.push(chunk);
     route.reportProgress({
       phase: 'shell_output',
       completed: route.outputChars,
@@ -531,6 +552,7 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
       activityFlight.accepting = false;
       activityFlight.pendingActivities.length = 0;
     }
+    shellRoutes.get(createShellCommandId(event.runtimeId, event.toolCallId))?.outputCoalescer.flush();
     expireRuntimeConfirmations(event.runtimeId, event.toolCallId);
     actorSystem.clearRuntimeInteractions(event.sessionId, event.runtimeId, event.toolCallId);
   }
@@ -599,6 +621,7 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
   const disposers = [
     electronAPI.chatRuntimeOnMessageCreated(handleMessageCreated),
     electronAPI.chatRuntimeOnMessageUpdated(handleMessageUpdated),
+    electronAPI.chatRuntimeOnMessageDelta(handleMessageDelta),
     electronAPI.chatRuntimeOnMessageDeleted(handleMessageDeleted),
     electronAPI.chatRuntimeOnContextUsageUpdated(handleContextUsage),
     electronAPI.chatRuntimeOnToolRequest((event) => {
@@ -628,6 +651,7 @@ export function useRuntimeEvents(actorSystem: ChatActorSystem): void {
     toolActivityFlights.clear();
     for (const route of shellRoutes.values()) {
       if (route.cleanupTimer) clearTimeout(route.cleanupTimer);
+      route.outputCoalescer.cancel();
     }
     shellRoutes.clear();
     for (const dispose of disposers) dispose();

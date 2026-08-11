@@ -21,6 +21,7 @@ import type {
   ChatRuntimeEventMap,
   ChatRuntimeHandlerResult,
   ChatRuntimeMessageDeletedEvent,
+  ChatRuntimeMessageDeltaEvent,
   ChatRuntimeMessageEvent,
   ChatRuntimeRecoverySnapshot,
   ChatRuntimeToolCancelledEvent,
@@ -563,6 +564,20 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.on('chat:runtime:message-updated', handler);
     return () => {
       ipcRenderer.removeListener('chat:runtime:message-updated', handler);
+    };
+  },
+
+  /**
+   * 监听 ChatRuntime Assistant 实时增量事件。
+   * @param callback - 事件回调
+   * @returns 取消监听函数
+   */
+  chatRuntimeOnMessageDelta: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: ChatRuntimeMessageDeltaEvent) => callback(payload);
+
+    ipcRenderer.on('chat:runtime:message-delta', handler);
+    return () => {
+      ipcRenderer.removeListener('chat:runtime:message-delta', handler);
     };
   },
 

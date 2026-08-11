@@ -29,9 +29,9 @@
 
         <template v-else>
           <template v-for="item in renderItems" :key="item.key">
-            <BubblePartText v-if="item.kind === 'text'" :part="item.part" />
+            <BubblePartText v-if="item.kind === 'text'" :part="item.part" :streaming="item.streaming" />
 
-            <BubblePartThinking v-else-if="item.kind === 'thinking'" :part="item.part" />
+            <BubblePartThinking v-else-if="item.kind === 'thinking'" :part="item.part" :streaming="item.streaming" />
 
             <BubblePartAgent v-else-if="item.kind === 'agent-task'" :session-id="sessionId" :assistant-message-id="message.id" :part="item.part" />
 
@@ -136,8 +136,8 @@ const emit = defineEmits<{
 
 /** 正文渲染条目。 */
 type MessageBubbleRenderItem =
-  | { key: string; kind: 'text'; part: ChatMessageTextPart | ChatMessageErrorPart }
-  | { key: string; kind: 'thinking'; part: ChatMessageThinkingPart }
+  | { key: string; kind: 'text'; part: ChatMessageTextPart | ChatMessageErrorPart; streaming: boolean }
+  | { key: string; kind: 'thinking'; part: ChatMessageThinkingPart; streaming: boolean }
   | { key: string; kind: 'agent-task'; part: ChatMessageToolPart }
   | { key: string; kind: 'question'; question: AIAwaitingUserChoiceQuestion }
   | { key: string; kind: 'tool'; part: ChatMessageToolPart }
@@ -203,9 +203,10 @@ const imagePreviewItems = computed<ImagePreviewItem[]>(() =>
 const renderItems = computed<MessageBubbleRenderItem[]>(() =>
   props.message.parts.flatMap((part, index): MessageBubbleRenderItem[] => {
     const key = part.id ?? `${part.type}-${index}`;
+    const streaming = isAssistantMessage.value && props.message.finished !== true && index === props.message.parts.length - 1;
     if (part.type === 'confirmation') return [];
-    if (isTextLikePart(part)) return [{ key, kind: 'text', part }];
-    if (part.type === 'thinking') return [{ key, kind: 'thinking', part }];
+    if (isTextLikePart(part)) return [{ key, kind: 'text', part, streaming }];
+    if (part.type === 'thinking') return [{ key, kind: 'thinking', part, streaming }];
     if (part.type === 'compaction') return [{ key, kind: 'status', part }];
     if (part.type === 'tool' && part.toolName === 'delegate_task') return [{ key, kind: 'agent-task', part }];
     if (!props.disabled && isAwaitingUserChoiceResult(part)) return [{ key, kind: 'question', question: part.result.data }];

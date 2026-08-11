@@ -63,6 +63,8 @@ export interface ChatModelResolution {
   createOptions: AICreateOptions;
   /** 模型 ID。 */
   modelId: string;
+  /** Provider 模型配置的单次最大输出 Token 数。 */
+  maxOutputTokens?: number;
 }
 
 /** chat 模型解析依赖。 */
@@ -138,6 +140,17 @@ function hasEnabledModel(provider: AIProvider, modelId: string): boolean {
 }
 
 /**
+ * 读取已启用模型配置中的有效输出 Token 上限。
+ * @param provider - provider 配置
+ * @param modelId - 模型 ID
+ * @returns 正整数上限；未配置或无效时返回 undefined
+ */
+function getMaxOutputTokens(provider: AIProvider, modelId: string): number | undefined {
+  const value = provider.models?.find((model) => model.id === modelId && model.isEnabled && !model.isDelete)?.maxOutputTokens;
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
+}
+
+/**
  * 读取主进程 provider 配置。
  * @param providerId - provider id
  * @returns provider 配置
@@ -164,6 +177,7 @@ export function createChatModelResolver(dependencies: ChatModelResolverDependenc
       const provider = await dependencies.getProvider(config.providerId);
       if (!provider?.isEnabled || !hasEnabledModel(provider, config.modelId)) return null;
 
+      const maxOutputTokens = getMaxOutputTokens(provider, config.modelId);
       return {
         createOptions: {
           providerId: provider.id,
@@ -172,7 +186,8 @@ export function createChatModelResolver(dependencies: ChatModelResolverDependenc
           baseUrl: provider.baseUrl ?? '',
           providerType: provider.type
         },
-        modelId: config.modelId
+        modelId: config.modelId,
+        ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {})
       };
     }
   };

@@ -30,6 +30,7 @@ import type {
   ChatRuntimeContext,
   ChatRuntimeEventBase,
   ChatRuntimeEventMap,
+  ChatRuntimeMessageDelta,
   ChatRuntimeModelSelection
 } from 'types/chat-runtime';
 
@@ -75,6 +76,10 @@ export interface ActiveChatRuntime extends ChatRuntimeAddress {
   resolvedModel?: ChatModelResolution;
   /** 当前模型步骤产生的工具调用快照，仅用于进程内循环策略。 */
   currentToolStep?: ToolStepSnapshot;
+  /** 当前 Assistant 工作消息在本 Runtime 内的单调修订号。 */
+  messageRevision?: number;
+  /** 流异常时仍需向 Renderer 投影的最新安全内存消息。 */
+  failedAssistantProjection?: ChatMessageRecord;
   /** 当前执行阶段。 */
   phase: ChatRuntimePhase;
   /** 当前压缩阶段的触发来源，仅保留在活跃 Runtime 内存中。 */
@@ -275,12 +280,16 @@ export interface ChatRuntimeMainToolExecutionInput {
 export type ChatRuntimeMainToolExecutor = (input: ChatRuntimeMainToolExecutionInput) => Promise<AIToolExecutionResult>;
 
 /** Runtime assistant 草稿更新函数。 */
-export type ChatRuntimeAssistantUpdater = (message: ChatMessageRecord) => Promise<void>;
+export type ChatRuntimeAssistantUpdater = (message: ChatMessageRecord, revision?: number) => Promise<void>;
+
+/** Runtime Assistant 实时增量发送函数。 */
+export type ChatRuntimeAssistantDeltaEmitter = (delta: ChatRuntimeMessageDelta) => void;
 
 /** Runtime 流式执行器。 */
 export type ChatRuntimeStreamExecutor = (
   input: ChatRuntimeStreamExecutorInput,
-  updateAssistant: ChatRuntimeAssistantUpdater
+  updateAssistant: ChatRuntimeAssistantUpdater,
+  emitDelta?: ChatRuntimeAssistantDeltaEmitter
 ) => Promise<ChatRuntimeStreamExecutorResult>;
 
 /** Runtime 流式中止函数。 */

@@ -29,6 +29,7 @@ import type {
 import { describe, expect, it, vi } from 'vitest';
 import { hashAgentPayload } from '../../../../../../electron/main/modules/chat/agents/contracts.mjs';
 import { createRuntimeLockRegistry } from '../../../../../../electron/main/modules/chat/runtime/infrastructure/locks.mjs';
+import { appendRoundBudgetPrompt } from '../../../../../../electron/main/modules/chat/runtime/messages/round-budget.mjs';
 import { createChatRuntimeService } from '../../../../../../electron/main/modules/chat/runtime/service.mjs';
 import { chatSessionManager } from '../../../../../../electron/main/modules/chat/service.mjs';
 
@@ -1263,6 +1264,7 @@ describe('chat runtime service shell', (): void => {
       expect.objectContaining({
         runtime: expect.objectContaining({ workspaceRoot: '/workspace' })
       }),
+      expect.any(Function),
       expect.any(Function)
     );
   });
@@ -2387,6 +2389,54 @@ describe('chat runtime service shell', (): void => {
       loading: false,
       finished: true
     });
+  });
+
+  it('pauses for user confirmation after thirty-two distinct model steps', async (): Promise<void> => {
+    const collector = createEventCollector();
+    const updatedMessages: ChatMessageRecord[] = [];
+    const streamExecutor = vi.fn<ChatRuntimeStreamExecutor>(async ({ assistantMessage, runtime }, updateAssistant) => {
+      const callNumber = streamExecutor.mock.calls.length;
+      runtime.currentToolStep = { toolCalls: [{ toolName: 'read_file', input: { path: `src/file-${callNumber}.ts` } }] };
+      assistantMessage.loading = false;
+      assistantMessage.finished = false;
+      await updateAssistant(assistantMessage);
+      return { shouldContinue: true };
+    });
+    const service = createChatRuntimeService({
+      emit: collector.emit,
+      createMessageId: (role) => `${role}-round-${streamExecutor.mock.calls.length}`,
+      now: () => '2026-08-10T00:00:00.000Z',
+      messageReader: createNoopMessageReader(),
+      messageWriter: {
+        addMessage: (): void => undefined,
+        updateMessage: (message): void => {
+          updatedMessages.push(structuredClone(message));
+        }
+      },
+      streamExecutor
+    });
+
+    const result = await service.send(createInput({ content: '执行很长的任务' }));
+    await flushRuntimeTasks();
+
+    expect(streamExecutor).toHaveBeenCalledTimes(32);
+    expect(updatedMessages.at(-1)).toMatchObject({
+      loading: true,
+      finished: false,
+      parts: [
+        expect.objectContaining({
+          toolName: 'question',
+          toolCallId: expect.stringMatching(/^runtime-round-budget-/),
+          result: expect.objectContaining({ status: 'awaiting_user_input' })
+        })
+      ]
+    });
+    expect(collector.events).toContainEqual(
+      expect.objectContaining({
+        name: 'chat:runtime:complete',
+        payload: expect.objectContaining({ runtimeId: result.runtimeId, reason: 'awaiting_user_input' })
+      })
+    );
   });
 
   it('forces a final answer after two equivalent cross-round tool calls', async (): Promise<void> => {
@@ -3583,12 +3633,19 @@ describe('chat runtime service shell', (): void => {
     await flushRuntimeTasks();
 
     expect(result.runtimeId).toMatch(/^runtime-/);
+    expect(collector.events).toContainEqual(
+      expect.objectContaining({
+        name: 'chat:runtime:message-updated',
+        payload: expect.objectContaining({ runtimeId: result.runtimeId, revision: 0, message: expect.objectContaining({ id: 'assistant-1' }) })
+      })
+    );
     expect(streamExecutor).toHaveBeenCalledWith(
       expect.objectContaining({
         userMessage,
         assistantMessage: expect.objectContaining({ id: 'assistant-1', runtimeId: result.runtimeId }),
         sourceMessages: [userMessage, expect.objectContaining({ id: 'assistant-1', runtimeId: result.runtimeId })]
       }),
+      expect.any(Function),
       expect.any(Function)
     );
     expect(updatedMessages.at(-1)).toMatchObject({
@@ -3663,6 +3720,7 @@ describe('chat runtime service shell', (): void => {
         name: 'chat:runtime:message-created',
         payload: expect.objectContaining({
           runtimeId: result.runtimeId,
+          revision: 0,
           message: expect.objectContaining({ id: 'assistant-message-1', role: 'assistant' })
         })
       })
@@ -3673,6 +3731,7 @@ describe('chat runtime service shell', (): void => {
         assistantMessage: expect.objectContaining({ id: 'assistant-message-1', runtimeId: result.runtimeId }),
         sourceMessages: [userMessage]
       }),
+      expect.any(Function),
       expect.any(Function)
     );
     expect(updatedMessages.at(-1)).toMatchObject({
@@ -3802,6 +3861,7 @@ describe('chat runtime service shell', (): void => {
         assistantMessage: expect.objectContaining({ id: 'assistant-message-1', runtimeId: result.runtimeId }),
         sourceMessages: [previousUserMessage, previousAssistantMessage, currentUserMessage]
       }),
+      expect.any(Function),
       expect.any(Function)
     );
   });
@@ -3924,6 +3984,57 @@ describe('chat runtime service shell', (): void => {
       expect.objectContaining({
         name: 'chat:runtime:complete',
         payload: expect.objectContaining({ runtimeId: result.runtimeId })
+      })
+    );
+  });
+
+  it('stops synchronously when the user declines the synthetic round budget prompt', async (): Promise<void> => {
+    const collector = createEventCollector();
+    const updatedMessages: ChatMessageRecord[] = [];
+    const userMessage = createMessageRecord('user-round-budget', 'user', '长任务', '2026-08-10T00:00:00.000Z');
+    const assistantMessage = createMessageRecord('assistant-round-budget', 'assistant', '', '2026-08-10T00:00:01.000Z');
+    let sequence = 0;
+    appendRoundBudgetPrompt(assistantMessage, (): string => `budget-${sequence++}`);
+    const promptPart = assistantMessage.parts[0];
+    if (promptPart?.type !== 'tool' || promptPart.result?.status !== 'awaiting_user_input') throw new Error('Missing round budget prompt');
+    const streamExecutor = vi.fn<ChatRuntimeStreamExecutor>(async (): Promise<{}> => ({}));
+    const service = createChatRuntimeService({
+      emit: collector.emit,
+      messageReader: { getMessages: (): ChatMessageRecord[] => [userMessage, assistantMessage] },
+      messageWriter: {
+        addMessage: (): void => undefined,
+        updateMessage: (message): void => {
+          updatedMessages.push(structuredClone(message));
+        }
+      },
+      streamExecutor
+    });
+
+    const result = await service.submitUserChoice({
+      runtimeId: 'runtime-round-stop',
+      sessionId: 'session-1',
+      turnId: 'turn-round-stop',
+      clientId: 'client-1',
+      agentId: 'primary',
+      rootRuntimeId: 'runtime-round-stop',
+      answer: {
+        questionId: promptPart.result.data.questionId,
+        toolCallId: promptPart.toolCallId,
+        answers: ['stop']
+      }
+    });
+
+    expect(result).toMatchObject({ runtimeId: 'runtime-round-stop', completed: true });
+    expect(streamExecutor).not.toHaveBeenCalled();
+    expect(updatedMessages.at(-1)).toMatchObject({
+      loading: false,
+      finished: true,
+      parts: [expect.objectContaining({ result: expect.objectContaining({ status: 'cancelled' }) })]
+    });
+    expect(collector.events).toContainEqual(
+      expect.objectContaining({
+        name: 'chat:runtime:complete',
+        payload: expect.objectContaining({ runtimeId: 'runtime-round-stop', reason: 'completed' })
       })
     );
   });

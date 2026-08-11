@@ -8,6 +8,7 @@ import type {
   ChatRuntimeErrorEvent,
   ChatRuntimeCompleteEvent,
   ChatRuntimeMessageDeletedEvent,
+  ChatRuntimeMessageDeltaEvent,
   ChatRuntimeMessageEvent
 } from 'types/chat-runtime';
 import type { ElectronShellCommandOutputChunk, ElectronShellRunEventEnvelope } from 'types/electron-api';
@@ -18,6 +19,7 @@ import type { ElectronShellCommandOutputChunk, ElectronShellRunEventEnvelope } f
 export type ChatSessionUIEvent =
   | { type: 'messageCreated'; event: ChatRuntimeMessageEvent }
   | { type: 'messageUpdated'; event: ChatRuntimeMessageEvent }
+  | { type: 'messageDelta'; event: ChatRuntimeMessageDeltaEvent }
   | { type: 'messageDeleted'; event: ChatRuntimeMessageDeletedEvent }
   | { type: 'contextUsageUpdated'; event: ChatRuntimeContextUsageEvent }
   | { type: 'confirmationRequested'; event: ChatRuntimeConfirmationRequestEvent }

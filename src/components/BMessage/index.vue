@@ -17,12 +17,15 @@ import type { BMessageProps as Props, MessageNodeRenderContext, MessageNodeRende
 import { computed, onMounted, onScopeDispose, provide, ref, shallowRef, watch } from 'vue';
 import { useImagePreview } from '@/hooks/useImagePreview';
 import { useNavigate } from '@/hooks/useNavigate';
+import { asyncTo } from '@/utils/asyncTo';
 import { addCssUnit } from '@/utils/css';
 import { createNamespace } from '@/utils/namespace';
 import MessageNodes from './components/MessageNodes';
 import { MESSAGE_NODE_RENDER_CONTEXT_KEY } from './types';
 import { parseMessageNodes } from './utils/messageParser';
+import { getMessageByteLength, inspectMessageSafety, MESSAGE_WORKER_THRESHOLD_BYTES } from './utils/messageSafety';
 import { messageRenderScheduler } from './utils/messageScheduler';
+import { cancelMessageParse, parseMessageInWorker } from './utils/messageWorker';
 
 defineOptions({ name: 'BMessage' });
 
@@ -81,6 +84,102 @@ const renderToken = Symbol('b-message-render');
 let latestSnapshot: MessageParseSnapshot | null = null;
 let committedSnapshot: MessageParseSnapshot | null = null;
 let visibilityObserver: IntersectionObserver | null = null;
+let activeWorkerRequestId: number | null = null;
+
+/**
+ * 创建不依赖 Markdown 解析器的最终纯文本兜底节点。
+ * @param snapshot - 当前消息快照
+ * @returns 始终展示当前完整正文的节点
+ */
+function createTextFallback(snapshot: MessageParseSnapshot): ParseMessageNodesResult {
+  if (!snapshot.content) {
+    return snapshot.loading ? { blocks: [{ type: 'cursor', id: 'block-tail-0', raw: '' }], images: [] } : { blocks: [], images: [] };
+  }
+  return {
+    blocks: [
+      {
+        type: 'paragraph',
+        id: snapshot.loading ? 'block-tail-0' : 'block-fallback-0',
+        raw: snapshot.content,
+        children: [{ type: 'text', text: snapshot.content }, ...(snapshot.loading ? [{ type: 'cursor' as const }] : [])]
+      }
+    ],
+    images: []
+  };
+}
+
+/**
+ * 从 asyncTo 包装错误中读取原始错误类型，不访问错误正文。
+ * @param error - 归一化或原始异常
+ * @returns 稳定错误类型
+ */
+function getParseErrorType(error: unknown): string {
+  if (!(error instanceof Error)) return 'UnknownError';
+  try {
+    return error.cause instanceof Error ? error.cause.name : error.name;
+  } catch {
+    return error.name;
+  }
+}
+
+/**
+ * 记录不含正文的解析失败诊断。
+ * @param snapshot - 失败解析快照
+ * @param path - 主线程或 Worker 路径
+ * @param error - 原始错误
+ */
+function logParseFailure(snapshot: MessageParseSnapshot, path: 'main' | 'worker', error: unknown): void {
+  console.error('[BMessage] message parse failed', {
+    messageId: props.messageId ?? 'unknown',
+    length: snapshot.content.length,
+    mode: snapshot.mode,
+    path,
+    errorType: getParseErrorType(error)
+  });
+}
+
+/**
+ * 使用当前正文替换旧结果，确保异常不会表现为内容停止更新。
+ * @param snapshot - 当前消息快照
+ * @param path - 失败解析路径
+ * @param error - 原始错误
+ */
+function commitTextFallback(snapshot: MessageParseSnapshot, path: 'main' | 'worker', error: unknown): void {
+  if (snapshot !== latestSnapshot) return;
+  logParseFailure(snapshot, path, error);
+  try {
+    parsedResult.value = parseMessageNodes({ content: snapshot.content, mode: 'text', loading: snapshot.loading });
+  } catch {
+    parsedResult.value = createTextFallback(snapshot);
+  }
+  committedSnapshot = snapshot;
+}
+
+/** 取消当前组件仍在等待的 Worker 结果。 */
+function cancelActiveParse(): void {
+  if (activeWorkerRequestId === null) return;
+  cancelMessageParse(activeWorkerRequestId);
+  activeWorkerRequestId = null;
+}
+
+/**
+ * 等待大消息 Worker 解析，并只提交仍为最新的快照。
+ * @param snapshot - Worker 解析快照
+ * @param mode - 安全扫描后的实际模式
+ */
+async function parseWorkerSnapshot(snapshot: MessageParseSnapshot, mode: MessageNodeRenderMode): Promise<void> {
+  const request = parseMessageInWorker({ content: snapshot.content, mode, loading: snapshot.loading });
+  activeWorkerRequestId = request.requestId;
+  const [error, result] = await asyncTo(request.result);
+  if (activeWorkerRequestId === request.requestId) activeWorkerRequestId = null;
+  if (snapshot !== latestSnapshot) return;
+  if (error !== undefined || !result) {
+    commitTextFallback(snapshot, 'worker', error);
+    return;
+  }
+  parsedResult.value = result;
+  committedSnapshot = snapshot;
+}
 
 /**
  * 查找最近的垂直滚动容器。
@@ -136,24 +235,24 @@ function isNearViewport(): boolean {
 function parseSnapshot(snapshot: MessageParseSnapshot): void {
   if (snapshot !== latestSnapshot) return;
 
+  const safety = snapshot.mode === 'markdown' ? inspectMessageSafety(snapshot.content) : { mode: snapshot.mode };
+  if (safety.mode === 'markdown' && getMessageByteLength(snapshot.content) >= MESSAGE_WORKER_THRESHOLD_BYTES) {
+    // Worker 完成前先提交当前纯文本，保证大消息持续增长时不会停留在旧渲染结果。
+    parsedResult.value = createTextFallback(snapshot);
+    committedSnapshot = snapshot;
+    parseWorkerSnapshot(snapshot, safety.mode);
+    return;
+  }
+
   try {
     parsedResult.value = parseMessageNodes({
       content: snapshot.content,
-      mode: snapshot.mode,
+      mode: safety.mode,
       loading: snapshot.loading
     });
-  } catch {
-    if (parsedResult.value.blocks.length > 0) return;
-
-    try {
-      parsedResult.value = parseMessageNodes({
-        content: snapshot.content,
-        mode: 'text',
-        loading: snapshot.loading
-      });
-    } catch {
-      parsedResult.value = { blocks: [], images: [] };
-    }
+  } catch (error) {
+    commitTextFallback(snapshot, 'main', error);
+    return;
   }
 
   committedSnapshot = snapshot;
@@ -198,6 +297,7 @@ function setupVisibilityObserver(): void {
  * 为当前 Props 创建或替换调度任务。
  */
 function scheduleRender(): void {
+  cancelActiveParse();
   const snapshot: MessageParseSnapshot = {
     content: props.content,
     mode: props.type,
@@ -246,6 +346,7 @@ onMounted((): void => {
 });
 
 onScopeDispose(() => {
+  cancelActiveParse();
   latestSnapshot = null;
   committedSnapshot = null;
   visibilityObserver?.disconnect();

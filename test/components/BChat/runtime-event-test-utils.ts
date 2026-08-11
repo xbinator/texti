@@ -8,6 +8,7 @@ import type {
   ChatRuntimeContextUsageEvent,
   ChatRuntimeEventMap,
   ChatRuntimeMessageDeletedEvent,
+  ChatRuntimeMessageDeltaEvent,
   ChatRuntimeMessageEvent,
   ChatRuntimeToolRequestEvent
 } from 'types/chat-runtime';
@@ -18,6 +19,8 @@ export interface RuntimeEventListeners {
   messageCreated?: (event: ChatRuntimeMessageEvent) => void;
   /** 消息更新监听器。 */
   messageUpdated?: (event: ChatRuntimeMessageEvent) => void;
+  /** Assistant 实时增量监听器。 */
+  messageDelta?: (event: ChatRuntimeMessageDeltaEvent) => void;
   /** 消息删除监听器。 */
   messageDeleted?: (event: ChatRuntimeMessageDeletedEvent) => void;
   /** 上下文用量监听器。 */
@@ -55,6 +58,7 @@ export function createRuntimeEventListeners(): RuntimeEventListeners {
 export function resetRuntimeEventListeners(listeners: RuntimeEventListeners): void {
   listeners.messageCreated = undefined;
   listeners.messageUpdated = undefined;
+  listeners.messageDelta = undefined;
   listeners.messageDeleted = undefined;
   listeners.contextUsage = undefined;
   listeners.complete = undefined;

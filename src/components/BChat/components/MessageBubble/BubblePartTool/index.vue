@@ -47,6 +47,15 @@
       :failure="summary?.variant === 'failure'"
     />
 
+    <!-- 文件变更工具只展示净化后的文件名与路径，原始输入和结果不会进入通用预览。 -->
+    <ToolFileTarget
+      v-else-if="isFileMutationTool"
+      :file-name="fileTarget.fileName"
+      :file-path="fileTarget.filePath"
+      :openable="fileTarget.openable"
+      @open="handleFileOpen"
+    />
+
     <!-- todowrite 成功结果使用单层任务卡片，避免通用工具气泡和任务面板重复嵌套 -->
     <TodoList v-else-if="todoWriteTodos" :todos="todoWriteTodos" />
 
@@ -71,8 +80,9 @@ import { isPlainObject, isString } from 'lodash-es';
 import type { QuestionItemInput, QuestionToolInput } from '@/ai/tools/builtin/QuestionTool';
 import type { SubmitAction } from '@/components/BChat/utils/submitAction';
 import { createToolControl } from '@/components/BChat/utils/submitAction';
-import { useActiveChatContext } from '@/hooks/useChat/useContextRegistry';
 import type { ToolContextPresentation } from '@/hooks/useChat/useContextRegistry';
+import { useActiveChatContext } from '@/hooks/useChat/useContextRegistry';
+import { useNavigate } from '@/hooks/useNavigate';
 import type { TodoItem } from '@/stores/chat/todo';
 import { asyncTo } from '@/utils/asyncTo';
 import { createNamespace } from '@/utils/namespace';
@@ -82,6 +92,7 @@ import { getToolResultSummary } from '../../../utils/toolResultSummary';
 import TodoList from '../../TodoList.vue';
 import BubblePart from '../BubblePart/index.vue';
 import ToolCode from './ToolCode.vue';
+import ToolFileTarget from './ToolFileTarget.vue';
 import ToolQuestionResult from './ToolQuestionResult.vue';
 import ToolShellDisplay from './ToolShellDisplay.vue';
 import ToolSummary from './ToolSummary.vue';
@@ -106,6 +117,16 @@ interface QaItem {
   selectedLabels: string[];
 }
 
+/** 文件变更工具的净化展示目标。 */
+interface FileTarget {
+  /** 文件名。 */
+  fileName: string;
+  /** 完整路径或未知路径占位。 */
+  filePath: string;
+  /** 完成后是否允许打开文件。 */
+  openable: boolean;
+}
+
 const props = withDefaults(defineProps<Props>(), {
   runtimeId: undefined,
   submitAction: undefined
@@ -114,6 +135,8 @@ const props = withDefaults(defineProps<Props>(), {
 const [, bem] = createNamespace('', 'bubble-part-tool');
 /** 当前页面注册的通用工具展示能力。 */
 const activeChatTools = useActiveChatContext();
+/** 文件导航能力。 */
+const { openFile } = useNavigate();
 /** 当前卡片正在提交的单工具控制动作。 */
 const controlPending = ref<ChatRuntimeControlToolInput['action'] | null>(null);
 
@@ -126,6 +149,9 @@ const ICON_MAP = {
 
 /** 提问类工具名称集合，用于判断是否展示问答结果视图。 */
 const QUESTION_TOOL_NAMES = new Set(['ask_user_choice', 'ask_user_question', 'question']);
+
+/** 任何状态都必须隐藏正文的文件变更工具。 */
+const FILE_MUTATION_TOOLS = new Set<string>(['write_file', 'edit_file']);
 
 /** 活动状态的人可读文案。 */
 const ACTIVITY_LABELS: Record<ChatToolActivityState, string> = {
@@ -179,6 +205,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * 从跨平台文件路径读取最后一个有效路径段。
+ * @param filePath - 文件完整路径
+ * @returns 文件名，路径无有效片段时返回未知文件占位
+ */
+function getFileName(filePath: string): string {
+  return filePath.replace(/\\/gu, '/').split('/').filter(Boolean).at(-1) ?? '未知文件';
+}
+
+/**
+ * 从结构化对象安全读取文件路径。
+ * @param value - 工具输入或结果对象
+ * @returns 有效文件路径，不存在时返回空字符串
+ */
+function readFilePath(value: unknown): string {
+  if (!isRecord(value)) return '';
+  return typeof value.path === 'string' && value.path.trim().length > 0 ? value.path : '';
+}
+
+/**
  * 判断未知值是否为可展示的任务项。
  * @param value - 待校验值
  * @returns 值满足任务项结构时返回 true
@@ -202,7 +247,6 @@ function isTodoItem(value: unknown): value is TodoItem {
  */
 function getInputtingValue(part: ChatMessageToolPart): unknown {
   if (!part.input) return part.inputText ?? '';
-  if (part.toolName === 'write_file' && isRecord(part.input) && part.input.content !== undefined) return part.input.content;
   return part.input ?? part.inputText;
 }
 
@@ -246,16 +290,31 @@ const defaultCollapsed = computed<boolean>(() => props.part.status !== 'inputtin
 /** 当前活动状态文案。 */
 const activityLabel = computed<string>(() => (props.part.activity ? ACTIVITY_LABELS[props.part.activity.state] : ''));
 
+/** 当前工具是否属于必须隐藏正文的文件变更工具。 */
+const isFileMutationTool = computed<boolean>(() => FILE_MUTATION_TOOLS.has(props.part.toolName));
+
+/** 文件变更工具的净化目标，不携带输入或结果正文。 */
+const fileTarget = computed<FileTarget>(() => {
+  const { part } = props;
+  const inputPath = readFilePath(part.input);
+  let resultPath = '';
+  if (part.result?.status === 'success') resultPath = readFilePath(part.result.data);
+  else if (part.result?.status === 'failure') resultPath = readFilePath(part.result.error.details);
+  const path = inputPath || resultPath;
+  return {
+    fileName: path ? getFileName(path) : '未知文件',
+    filePath: path || '未知路径',
+    openable: part.status === 'done' && path.length > 0
+  };
+});
+
 /** 工具基础标题：文件操作显示文件路径，skill 显示技能名称，其余显示工具别名。 */
 const toolTitle = computed<string>(() => {
   const { part } = props;
   const presentation = resolvePresentation(part.toolName);
   const alias = presentation?.label ?? getActionLabel(part.toolName).alias;
 
-  if ((part.toolName === 'write_file' || part.toolName === 'edit_file') && isRecord(part.input)) {
-    const { path } = part.input;
-    if (typeof path === 'string') return path;
-  }
+  if (isFileMutationTool.value) return fileTarget.value.filePath;
 
   if (part.toolName === 'skill' && isRecord(part.input)) {
     const skillName = part.input.name;
@@ -271,6 +330,7 @@ const title = computed<string>(() => activityLabel.value || toolTitle.value);
 /** 根据工具状态计算预览内容：inputting 取输入值、executing 取输入、done 取结果。 */
 const previewValue = computed<unknown>(() => {
   const { part } = props;
+  if (isFileMutationTool.value) return null;
   if (part.status === 'inputting') return getInputtingValue(part);
   if (part.status === 'executing') return part.input;
   return part.result;
@@ -278,6 +338,7 @@ const previewValue = computed<unknown>(() => {
 
 /** 判断是否有可展示的内容，done 状态始终有内容，其余状态需检查结构化值。 */
 const hasContent = computed<boolean>(() => {
+  if (isFileMutationTool.value) return true;
   if (props.part.status === 'done') return true;
   return hasStructuredValueContent(previewValue.value);
 });
@@ -310,6 +371,7 @@ const todoWriteCompletedCount = computed<number | null>(() => {
 
 /** 工具执行完成时的人可读摘要，支持成功/失败/取消状态。 */
 const summary = computed<ToolResultSummary | null>(() => {
+  if (isFileMutationTool.value) return null;
   if (props.part.status !== 'done' || !props.part.result) return null;
   const presentation = resolvePresentation(props.part.toolName);
   if (props.part.result.status === 'success' && presentation?.summarize) {
@@ -419,6 +481,15 @@ async function handleToolControl(action: ChatRuntimeControlToolInput['action']):
   controlPending.value = action;
   await asyncTo(Promise.resolve(props.submitAction(createToolControl({ runtimeId: props.runtimeId, toolCallId: props.part.toolCallId, action }))));
   controlPending.value = null;
+}
+
+/**
+ * 打开文件变更工具已完成的目标文件。
+ */
+async function handleFileOpen(): Promise<void> {
+  const target = fileTarget.value;
+  if (!target.openable) return;
+  await asyncTo(openFile({ filePath: target.filePath }));
 }
 </script>
 

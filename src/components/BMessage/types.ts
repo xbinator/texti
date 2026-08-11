@@ -10,6 +10,8 @@ import type { ImagePreviewItem } from '@/hooks/useImagePreview';
  * BMessage 组件属性。
  */
 export interface BMessageProps {
+  /** 用于无正文诊断的消息或 Part 稳定标识。 */
+  messageId?: string;
   /** 累积的文本内容（父组件负责拼接 chunk） */
   content?: string;
   /** 流式状态 */

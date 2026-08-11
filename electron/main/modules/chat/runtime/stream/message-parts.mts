@@ -28,36 +28,46 @@ export function findRendererHistory(capabilities: ChatRuntimeCapabilityDescripto
  * 将文本增量写入 assistant 消息。
  * @param message - assistant 消息
  * @param text - 文本增量
+ * @returns 实际承载增量的文本 Part ID
  */
-export function appendTextDelta(message: ChatMessageRecord, text: string): void {
+export function appendTextDelta(message: ChatMessageRecord, text: string): string {
   const lastPart = message.parts[message.parts.length - 1];
+  let partId: string;
   if (lastPart?.type === 'text') {
     lastPart.text += text;
+    partId = lastPart.id;
   } else {
-    message.parts.push({ id: nanoid(), type: 'text', text });
+    partId = nanoid();
+    message.parts.push({ id: partId, type: 'text', text });
   }
 
   message.content = `${message.content}${text}`;
   message.loading = false;
   message.finished = false;
+  return partId;
 }
 
 /**
  * 将 reasoning 增量写入 assistant 消息。
  * @param message - assistant 消息
  * @param thinking - reasoning 增量
+ * @returns 实际承载增量的思考 Part ID
  */
-export function appendReasoningDelta(message: ChatMessageRecord, thinking: string): void {
+export function appendReasoningDelta(message: ChatMessageRecord, thinking: string): string {
   const lastPart = message.parts[message.parts.length - 1];
+  let partId: string;
   if (lastPart?.type === 'thinking') {
     lastPart.thinking += thinking;
+    partId = lastPart.id;
   } else {
-    message.parts.push({ id: nanoid(), type: 'thinking', thinking });
+    partId = nanoid();
+    message.parts.push({ id: partId, type: 'thinking', thinking });
   }
 
   message.thinking = `${message.thinking ?? ''}${thinking}`;
   message.loading = false;
   message.finished = false;
+  return partId;
 }
 
 /**
@@ -119,12 +129,6 @@ export function appendToolInputDelta(message: ChatMessageRecord, chunk: RuntimeT
   if (!existingPart) return;
 
   existingPart.inputText = `${existingPart.inputText ?? ''}${chunk.inputTextDelta}`;
-  try {
-    existingPart.input = JSON.parse(existingPart.inputText) as unknown;
-  } catch {
-    // 流式 JSON 在未闭合前 parse 失败是正常状态，保留上一次成功解析的值，
-    // 避免 UI 在增量之间出现“突然清空又恢复”的闪烁。
-  }
   message.loading = false;
   message.finished = false;
 }
@@ -138,6 +142,16 @@ export function appendToolInputEnd(message: ChatMessageRecord, chunk: RuntimeToo
   const existingPart = message.parts.find((part): part is ChatMessageToolPart => part.type === 'tool' && part.toolCallId === chunk.toolCallId);
   if (!existingPart) return;
 
+  const completeInputText = existingPart.inputText?.trim() ?? '';
+  existingPart.input = null;
+  if (completeInputText) {
+    try {
+      // 工具输入只在 Provider 宣告结束后解析一次，避免对增长中的 JSON 重复做全量工作。
+      existingPart.input = JSON.parse(completeInputText) as unknown;
+    } catch {
+      // 无效完整 JSON 保留在 inputText 供普通工具诊断，权威 tool-call 到达后仍可覆盖 input。
+    }
+  }
   existingPart.status = 'executing';
   message.loading = false;
   message.finished = false;

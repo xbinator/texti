@@ -147,9 +147,13 @@ const BMessageStub = defineComponent({
     content: {
       type: String,
       default: ''
+    },
+    loading: {
+      type: Boolean,
+      default: false
     }
   },
-  template: '<div class="b-message-stub">{{ content }}</div>'
+  template: '<div class="b-message-stub" :data-loading="loading">{{ content }}</div>'
 });
 
 /** 顺序测试用文本片段替身。 */
@@ -517,6 +521,37 @@ describe('MessageBubble', (): void => {
       return 1;
     });
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
+  });
+
+  it('marks only the unfinished assistant tail text or thinking part as streaming', (): void => {
+    const wrapper = mountMessageBubble(
+      createAssistantMessage({
+        content: 'old text',
+        finished: false,
+        loading: false,
+        parts: [
+          { id: 'old-text-part', type: 'text', text: 'old text' },
+          {
+            id: 'completed-tool-part',
+            type: 'tool',
+            toolCallId: 'completed-tool-call',
+            toolName: 'read_file',
+            status: 'done',
+            input: { path: 'src/index.ts' },
+            result: { toolName: 'read_file', status: 'success', data: { path: 'src/index.ts' } }
+          },
+          { id: 'growing-thinking-part', type: 'thinking', thinking: 'growing' }
+        ]
+      })
+    );
+
+    expect(wrapper.findAll('.b-message-stub').map((node): string | undefined => node.attributes('data-loading'))).toEqual(['false', 'true']);
+  });
+
+  it('does not mark a completed assistant tail as streaming', (): void => {
+    const wrapper = mountMessageBubble(createAssistantMessage());
+
+    expect(wrapper.find('.b-message-stub').attributes('data-loading')).toBe('false');
   });
 
   afterEach((): void => {

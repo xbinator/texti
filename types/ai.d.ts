@@ -704,6 +704,8 @@ export interface AIProviderModel {
   isDelete?: boolean;
   /** 上下文窗口大小。 */
   contextWindow?: number;
+  /** 单次生成允许的最大输出 Token 数。 */
+  maxOutputTokens?: number;
   /** 是否支持工具使用。 */
   supportsTools?: boolean;
   /** 是否支持视觉。 */

@@ -104,6 +104,10 @@ const electronAPIMock = vi.hoisted(() => ({
     runtimeListeners.messageUpdated = callback;
     return vi.fn();
   }),
+  chatRuntimeOnMessageDelta: vi.fn((callback: NonNullable<typeof runtimeListeners.messageDelta>) => {
+    runtimeListeners.messageDelta = callback;
+    return vi.fn();
+  }),
   chatRuntimeOnMessageDeleted: vi.fn((callback: NonNullable<typeof runtimeListeners.messageDeleted>) => {
     runtimeListeners.messageDeleted = callback;
     return vi.fn();

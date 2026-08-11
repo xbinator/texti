@@ -3,9 +3,11 @@
  * @description Shell 普通管道实时输出的消息状态顺序、隔离和容量边界测试。
  */
 import type { ChatMessageShellOutputChunk } from 'types/chat';
-import { describe, expect, it } from 'vitest';
+import type { ElectronShellCommandOutputChunk } from 'types/electron-api';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { append } from '@/components/BChat/utils/messageHelper';
 import type { Message } from '@/components/BChat/utils/types';
+import { createShellOutputCoalescer } from '@/hooks/useChat/shellOutputCoalescer';
 
 /**
  * 创建包含执行中 Shell tool part 的消息。
@@ -49,6 +51,73 @@ function readShellOutput(message: Message): ChatMessageShellOutputChunk[] | unde
 }
 
 describe('Shell pipe output message state', (): void => {
+  afterEach((): void => {
+    vi.useRealTimers();
+  });
+
+  it('coalesces adjacent streams after 16ms while preserving cross-stream order', async (): Promise<void> => {
+    vi.useFakeTimers();
+    const emit = vi.fn<(chunks: ElectronShellCommandOutputChunk[]) => void>();
+    const coalescer = createShellOutputCoalescer(emit);
+    coalescer.push(createChunk({ text: 'a', sequence: 1 }) as ElectronShellCommandOutputChunk);
+    coalescer.push(createChunk({ text: 'b', sequence: 2 }) as ElectronShellCommandOutputChunk);
+    coalescer.push(createChunk({ stream: 'stderr', text: 'c', sequence: 3 }) as ElectronShellCommandOutputChunk);
+
+    await vi.advanceTimersByTimeAsync(15);
+    expect(emit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(emit).toHaveBeenCalledWith([
+      expect.objectContaining({ stream: 'stdout', text: 'ab', sequence: 2 }),
+      expect.objectContaining({ stream: 'stderr', text: 'c', sequence: 3 })
+    ]);
+  });
+
+  it('flushes a continuously growing output batch no later than 50ms', async (): Promise<void> => {
+    vi.useFakeTimers();
+    const emit = vi.fn();
+    const coalescer = createShellOutputCoalescer(emit);
+
+    for (let sequence = 1; sequence <= 6; sequence += 1) {
+      coalescer.push(createChunk({ text: String(sequence), sequence }) as ElectronShellCommandOutputChunk);
+      // 按真实时间顺序推进连续输入，验证 maxWait 而不是并行定时器。
+      // eslint-disable-next-line no-await-in-loop
+      await vi.advanceTimersByTimeAsync(10);
+    }
+
+    expect(emit).toHaveBeenCalled();
+  });
+
+  it('bounds a synchronous batch when stdout and stderr keep alternating', (): void => {
+    vi.useFakeTimers();
+    const emit = vi.fn<(chunks: ElectronShellCommandOutputChunk[]) => void>();
+    const coalescer = createShellOutputCoalescer(emit);
+
+    for (let sequence = 1; sequence <= 1_000; sequence += 1) {
+      coalescer.push(createChunk({ stream: sequence % 2 === 0 ? 'stderr' : 'stdout', text: 'x', sequence }) as ElectronShellCommandOutputChunk);
+    }
+    coalescer.flush();
+
+    expect(emit.mock.calls.length).toBeGreaterThan(1);
+    expect(emit.mock.calls.every(([chunks]): boolean => chunks.length <= 512)).toBe(true);
+    expect(emit.mock.calls.flatMap(([chunks]): number[] => chunks.map((chunk: ElectronShellCommandOutputChunk): number => chunk.sequence))).toEqual(
+      Array.from({ length: 1_000 }, (_, index: number): number => index + 1)
+    );
+  });
+
+  it('flushes explicitly and cancels without leaving timers', (): void => {
+    vi.useFakeTimers();
+    const emit = vi.fn();
+    const coalescer = createShellOutputCoalescer(emit);
+    coalescer.push(createChunk({ text: 'flush' }) as ElectronShellCommandOutputChunk);
+    coalescer.flush();
+    coalescer.push(createChunk({ text: 'cancelled', sequence: 2 }) as ElectronShellCommandOutputChunk);
+    coalescer.cancel();
+
+    expect(emit).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('appends stdout and stderr chunks in receive order', (): void => {
     const message = createMessage();
     const stdout = createChunk({ text: 'stdout', sequence: 1 });

@@ -57,6 +57,7 @@ import type {
   ChatRuntimeEventMap,
   ChatRuntimeHandlerResult,
   ChatRuntimeMessageDeletedEvent,
+  ChatRuntimeMessageDeltaEvent,
   ChatRuntimeMessageEvent,
   ChatRuntimeRecoverySnapshot,
   ChatRuntimeSendInput,
@@ -636,6 +637,7 @@ export interface ElectronAPI {
   chatRuntimeSubmitMessagePart: (input: ChatRuntimeSubmitMessagePartInput) => Promise<ChatRuntimeHandlerResult<void>>;
   chatRuntimeOnMessageCreated: (callback: (event: ChatRuntimeMessageEvent) => void) => () => void;
   chatRuntimeOnMessageUpdated: (callback: (event: ChatRuntimeMessageEvent) => void) => () => void;
+  chatRuntimeOnMessageDelta: (callback: (event: ChatRuntimeMessageDeltaEvent) => void) => () => void;
   chatRuntimeOnMessageDeleted: (callback: (event: ChatRuntimeMessageDeletedEvent) => void) => () => void;
   chatRuntimeOnContextUsageUpdated: (callback: (event: ChatRuntimeContextUsageEvent) => void) => () => void;
   chatRuntimeOnToolRequest: (callback: (event: ChatRuntimeToolRequestEvent) => void) => () => void;

@@ -11,6 +11,7 @@ import type {
   ChatRuntimeContextUsageEvent,
   ChatRuntimeErrorEvent,
   ChatRuntimeMessageDeletedEvent,
+  ChatRuntimeMessageDeltaEvent,
   ChatRuntimeMessageEvent,
   ChatRuntimeToolCancelledEvent,
   ChatRuntimeToolRequestEvent
@@ -31,6 +32,7 @@ import { useTabsStore } from '@/stores/workspace/tabs';
 const runtimeListeners = vi.hoisted(() => ({
   messageCreated: undefined as ((event: ChatRuntimeMessageEvent) => void) | undefined,
   messageUpdated: undefined as ((event: ChatRuntimeMessageEvent) => void) | undefined,
+  messageDelta: undefined as ((event: ChatRuntimeMessageDeltaEvent) => void) | undefined,
   messageDeleted: undefined as ((event: ChatRuntimeMessageDeletedEvent) => void) | undefined,
   contextUsage: undefined as ((event: ChatRuntimeContextUsageEvent) => void) | undefined,
   confirmation: undefined as ((event: ChatRuntimeConfirmationRequestEvent) => void) | undefined,
@@ -62,6 +64,10 @@ vi.mock('@/shared/platform/electron-api', () => ({
     }),
     chatRuntimeOnMessageUpdated: vi.fn((listener: (event: ChatRuntimeMessageEvent) => void): (() => void) => {
       runtimeListeners.messageUpdated = listener;
+      return vi.fn();
+    }),
+    chatRuntimeOnMessageDelta: vi.fn((listener: (event: ChatRuntimeMessageDeltaEvent) => void): (() => void) => {
+      runtimeListeners.messageDelta = listener;
       return vi.fn();
     }),
     chatRuntimeOnMessageDeleted: vi.fn((listener: (event: ChatRuntimeMessageDeletedEvent) => void): (() => void) => {
@@ -247,6 +253,11 @@ describe('useRuntimeEvents', (): void => {
     await Promise.resolve();
     await Promise.resolve();
 
+    await vi.waitFor((): void => {
+      expect(visibleA).toHaveBeenCalled();
+      expect(visibleB).toHaveBeenCalled();
+    });
+
     expect(visibleA).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'shellCommandOutput',
@@ -322,6 +333,39 @@ describe('useRuntimeEvents', (): void => {
     }).not.toThrow();
 
     expect(runtimeListeners.shellOutput).toBeUndefined();
+    scope.stop();
+    system.stop();
+  });
+
+  it('routes message deltas only to the addressed managed Runtime session', (): void => {
+    const system = createChatActorSystem();
+    system.start();
+    const session = system.ensureSession('session-1');
+    session.send({ type: 'session.submit', input: { messageId: 'user-1', createdAt: 'now', content: 'hello', parts: [] } });
+    session.send({ type: 'session.prepared' });
+    const turnId = session.getSnapshot().context.turnRef?.getSnapshot().context.turnId as string;
+    system.registerRuntime(
+      { sessionId: 'session-1', turnId, agentId: 'primary', runtimeId: 'runtime-1', rootRuntimeId: 'runtime-1' },
+      { tools: [], getToolContext: () => undefined, handleBridgeRequest: async (): Promise<unknown> => undefined }
+    );
+    system.send({ type: 'runtime.event', runtimeId: 'runtime-1', event: { type: 'runtime.started', runtimeId: 'runtime-1' } });
+    const visibleEvents = vi.fn();
+    system.subscribeSessionEvents('session-1', visibleEvents);
+    const scope = effectScope();
+    scope.run((): void => useRuntimeEvents(system));
+    const delta: ChatRuntimeMessageDeltaEvent = {
+      ...createEventBase(),
+      messageId: 'assistant-1',
+      baseRevision: 0,
+      revision: 1,
+      mutations: [{ kind: 'append-text', partId: 'text-1', text: 'delta' }]
+    };
+
+    runtimeListeners.messageDelta?.(delta);
+    runtimeListeners.messageDelta?.({ ...delta, runtimeId: 'unknown-runtime', rootRuntimeId: 'unknown-runtime' });
+
+    expect(visibleEvents).toHaveBeenCalledOnce();
+    expect(visibleEvents).toHaveBeenCalledWith({ type: 'messageDelta', event: delta });
     scope.stop();
     system.stop();
   });

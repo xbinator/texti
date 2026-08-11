@@ -82,6 +82,7 @@ import {
   hasAssistantResponseContent,
   markAssistantMessageFailed
 } from './messages/finalizer.mjs';
+import { appendRoundBudgetPrompt, isRoundBudgetStop } from './messages/round-budget.mjs';
 import { applyRuntimeContext } from './messages/runtime-context.mjs';
 import { applyUserChoiceAnswer, cloneRuntimeMessage } from './messages/user-choice.mjs';
 import { createAutoNamePrompt, normalizeAutoNameTitle } from './model/auto-name.mjs';
@@ -102,6 +103,8 @@ import { createRuntimeEventBase } from './types.mjs';
 
 /** Renderer 请求默认超时时间。 */
 const RUNTIME_RENDERER_REQUEST_TIMEOUT_MS = 30_000;
+/** 单次无人值守用户任务允许的连续模型步骤数。 */
+const RUNTIME_MODEL_STEP_LIMIT = 32;
 
 /** 默认关闭且不可由 Renderer 覆盖的 Primary 委派策略。 */
 const DEFAULT_PRIMARY_DELEGATION_FEATURE: Readonly<PrimaryDelegationFeatureConfig> = Object.freeze({
@@ -190,6 +193,7 @@ function createDefaultStreamExecutor(
   return createRuntimeStreamExecutor({
     resolver,
     streamText: streamText ?? ((createOptions, request, callOptions) => aiService.streamText(createOptions, request, callOptions)),
+    abortStream: (requestId: string): void => aiService.abortStream(requestId),
     executeRendererTool,
     executeMainTool,
     toolWatchdogs
@@ -717,7 +721,7 @@ export function createChatRuntimeService(
    * @param runtime - runtime 状态
    * @param message - assistant 草稿消息
    */
-  async function updateAssistantMessage(runtime: ActiveChatRuntime, message: ChatMessageRecord): Promise<void> {
+  async function updateAssistantMessage(runtime: ActiveChatRuntime, message: ChatMessageRecord, revision?: number): Promise<void> {
     if (!activeRuntimes.has(runtime.runtimeId)) return;
 
     const safeCandidate = structuredClone(message);
@@ -729,7 +733,8 @@ export function createChatRuntimeService(
     if (safeCandidate.loading === true && safeCandidate.finished === false && isAssistantAwaitingUserInput(safeCandidate)) return;
     emit('chat:runtime:message-updated', {
       ...createRuntimeEventBase(runtime),
-      message: safeCandidate
+      message: safeCandidate,
+      ...(revision !== undefined ? { revision } : {})
     });
   }
 
@@ -1008,8 +1013,13 @@ export function createChatRuntimeService(
       runtime.currentToolStep = { toolCalls: [] };
       // Runtime 是主聊天唯一续轮控制者；最终步骤通过内部参数关闭工具。
       // eslint-disable-next-line no-await-in-loop
-      const streamResult = await streamExecutor({ runtime, sourceMessages: projectedMessages, userMessage, assistantMessage, forceFinal }, (message) =>
-        updateAssistantMessage(runtime, message)
+      const streamResult = await streamExecutor(
+        { runtime, sourceMessages: projectedMessages, userMessage, assistantMessage, forceFinal },
+        (message, revision) => updateAssistantMessage(runtime, message, revision),
+        (delta): void => {
+          if (!activeRuntimes.has(runtime.runtimeId)) return;
+          emit('chat:runtime:message-delta', { ...createRuntimeEventBase(runtime), ...delta });
+        }
       );
       completedSteps += 1;
       toolSteps.push(runtime.currentToolStep ?? { toolCalls: [] });
@@ -1029,6 +1039,16 @@ export function createChatRuntimeService(
       if (!streamResult.shouldContinue || forceFinal) {
         shouldRun = false;
         continue;
+      }
+
+      if (completedSteps >= RUNTIME_MODEL_STEP_LIMIT) {
+        appendRoundBudgetPrompt(assistantMessage, (): string => nanoid());
+        if (accumulatedUsage) assistantMessage.usage = accumulatedUsage;
+        runtime.messageRevision = (runtime.messageRevision ?? 0) + 1;
+        // 轮次预算提示必须在退出循环前完成耐久写入，避免 Renderer 收到不可恢复的悬空状态。
+        // eslint-disable-next-line no-await-in-loop
+        await updateAssistantMessage(runtime, assistantMessage, runtime.messageRevision);
+        return { usage: accumulatedUsage };
       }
 
       const stopReason = getLoopStopReason(toolSteps);
@@ -1084,7 +1104,8 @@ export function createChatRuntimeService(
       if (!activeRuntimes.has(runtime.runtimeId)) throw error;
 
       const runtimeError = normalizeRuntimeStreamError(error);
-      const safeMessage = structuredClone(safeAssistantMessages.get(runtime.runtimeId) ?? assistantMessage);
+      const safeMessage = structuredClone(runtime.failedAssistantProjection ?? safeAssistantMessages.get(runtime.runtimeId) ?? assistantMessage);
+      delete runtime.failedAssistantProjection;
       markAssistantMessageFailed(safeMessage, runtimeError);
       activeAssistantMessages.set(runtime.runtimeId, safeMessage);
       let persistenceError: unknown;
@@ -1335,7 +1356,8 @@ export function createChatRuntimeService(
       safeAssistantMessages.set(runtimeId, structuredClone(assistantMessage));
       emit('chat:runtime:message-created', {
         ...createRuntimeEventBase(runtime),
-        message: assistantMessage
+        message: assistantMessage,
+        revision: 0
       });
 
       if (!dependencies.keepRuntimeOpenForTest) {
@@ -1423,7 +1445,8 @@ export function createChatRuntimeService(
         safeAssistantMessages.set(runtime.runtimeId, structuredClone(assistantMessage));
         emit('chat:runtime:message-updated', {
           ...createRuntimeEventBase(runtime),
-          message: structuredClone(assistantMessage)
+          message: structuredClone(assistantMessage),
+          revision: 0
         });
         return await runRuntimeStream(runtime, userMessage, assistantMessage, sourceMessageSnapshot);
       } catch (error) {
@@ -1528,13 +1551,15 @@ export function createChatRuntimeService(
           await messageWriter.updateMessage(assistantMessage);
           emit('chat:runtime:message-updated', {
             ...createRuntimeEventBase(runtime),
-            message: assistantMessage
+            message: assistantMessage,
+            revision: 0
           });
         } else {
           await messageWriter.addMessage(assistantMessage);
           emit('chat:runtime:message-created', {
             ...createRuntimeEventBase(runtime),
-            message: assistantMessage
+            message: assistantMessage,
+            revision: 0
           });
         }
         safeAssistantMessages.set(runtimeId, structuredClone(assistantMessage));
@@ -1614,6 +1639,7 @@ export function createChatRuntimeService(
         if (!activeRuntimes.has(runtimeId)) {
           throw new ChatRuntimeError('RUNTIME_NOT_ACTIVE', `Runtime ${runtimeId} was aborted before continuation started`);
         }
+        const shouldStopRoundBudget = continuationMessages.some((message: ChatMessageRecord): boolean => isRoundBudgetStop(message, input.answer));
         const assistantMessage = applyUserChoiceAnswer(continuationMessages, input.answer);
         const userMessage = findLastRuntimeUserMessage(continuationMessages);
         if (!userMessage || !assistantMessage) {
@@ -1624,6 +1650,28 @@ export function createChatRuntimeService(
         assistantMessage.runtimeId = runtimeId;
         assistantMessage.agentId = runtime.agentId;
         assistantMessage.parentRuntimeId = runtime.parentRuntimeId;
+        if (shouldStopRoundBudget) {
+          const budgetPart = assistantMessage.parts.find((part): boolean => part.type === 'tool' && part.toolCallId === input.answer.toolCallId);
+          if (budgetPart?.type === 'tool') {
+            budgetPart.result = {
+              toolName: budgetPart.toolName,
+              status: 'cancelled',
+              error: { code: 'USER_CANCELLED', message: '用户选择停止继续执行' }
+            };
+          }
+          assistantMessage.loading = false;
+          assistantMessage.finished = true;
+          activeAssistantMessages.set(runtimeId, assistantMessage);
+          await messageWriter.updateMessage(assistantMessage);
+          safeAssistantMessages.set(runtimeId, structuredClone(assistantMessage));
+          emit('chat:runtime:message-updated', {
+            ...createRuntimeEventBase(runtime),
+            message: assistantMessage,
+            revision: 0
+          });
+          completeRuntime(runtime);
+          return { runtimeId, sessionId: runtime.sessionId, completed: true };
+        }
         assistantMessage.loading = true;
         assistantMessage.finished = false;
         activeAssistantMessages.set(runtimeId, assistantMessage);
@@ -1632,7 +1680,8 @@ export function createChatRuntimeService(
         safeAssistantMessages.set(runtimeId, structuredClone(assistantMessage));
         emit('chat:runtime:message-updated', {
           ...createRuntimeEventBase(runtime),
-          message: assistantMessage
+          message: assistantMessage,
+          revision: 0
         });
 
         if (!dependencies.keepRuntimeOpenForTest) {

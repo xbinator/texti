@@ -12,6 +12,7 @@ import type {
   ChatRuntimeAbortResult,
   ChatRuntimeBridgeRequestEvent,
   ChatRuntimeContextUsageSnapshot,
+  ChatRuntimeMessageDelta,
   ChatRuntimeModelSelection,
   ChatRuntimeUserInputPart
 } from 'types/chat-runtime';
@@ -81,7 +82,9 @@ interface UseChatWorkflowOptions {
   /** 替换 renderer 当前消息 */
   setLoadedMessages: (messages: Message[]) => void;
   /** 合并 Runtime 实时消息并推进历史 revision */
-  upsertLiveMessage: (message: Message) => void;
+  upsertLiveMessage: (message: Message, revision?: number) => void;
+  /** 连续应用 Runtime Assistant 实时增量。 */
+  applyLiveDelta: (delta: ChatRuntimeMessageDelta) => boolean;
   /** 删除 Runtime 实时消息并推进历史 revision */
   removeLiveMessage: (messageId: string) => void;
   /** 恢复输入草稿 */
@@ -777,7 +780,11 @@ export function useChatWorkflow(options: UseChatWorkflowOptions): UseChatWorkflo
       return;
     }
     if (event.type === 'messageCreated' || event.type === 'messageUpdated') {
-      options.upsertLiveMessage(event.event.message);
+      options.upsertLiveMessage(event.event.message, event.event.revision);
+      return;
+    }
+    if (event.type === 'messageDelta') {
+      options.applyLiveDelta(event.event);
       return;
     }
     if (event.type === 'messageDeleted') {

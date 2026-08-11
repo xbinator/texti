@@ -6,6 +6,9 @@ import type { ChatMessageRecord } from 'types/chat';
 import { describe, expect, it } from 'vitest';
 import { createDefaultWidgetData } from '@/components/BWidget/utils/widgetData';
 import {
+  appendToolInputDelta,
+  appendToolInputEnd,
+  appendToolInputStart,
   appendToolCall,
   appendToolResult,
   applyToolActivity,
@@ -30,6 +33,26 @@ function createAssistantMessage(): ChatMessageRecord {
 }
 
 describe('runtime stream message parts', (): void => {
+  it('parses streamed tool input only after the input-end boundary', (): void => {
+    const message = createAssistantMessage();
+    appendToolInputStart(message, { type: 'tool-input-start', toolCallId: 'tool-input-1', toolName: 'read_file' });
+    appendToolInputDelta(message, { type: 'tool-input-delta', toolCallId: 'tool-input-1', inputTextDelta: '{"path":"src/index.ts"}' });
+
+    expect(message.parts[0]).toMatchObject({ type: 'tool', status: 'inputting', input: null, inputText: '{"path":"src/index.ts"}' });
+
+    appendToolInputEnd(message, { type: 'tool-input-end', toolCallId: 'tool-input-1' });
+    expect(message.parts[0]).toMatchObject({ type: 'tool', status: 'executing', input: { path: 'src/index.ts' } });
+  });
+
+  it('keeps invalid completed tool input as raw text without a stale parsed value', (): void => {
+    const message = createAssistantMessage();
+    appendToolInputStart(message, { type: 'tool-input-start', toolCallId: 'tool-input-invalid', toolName: 'read_file' });
+    appendToolInputDelta(message, { type: 'tool-input-delta', toolCallId: 'tool-input-invalid', inputTextDelta: '{"path":"src/index.ts"},' });
+    appendToolInputEnd(message, { type: 'tool-input-end', toolCallId: 'tool-input-invalid' });
+
+    expect(message.parts[0]).toMatchObject({ type: 'tool', status: 'executing', input: null, inputText: '{"path":"src/index.ts"},' });
+  });
+
   it('finds history metadata only for the exact runtime renderer tool name', (): void => {
     const capabilities = {
       rendererTools: [

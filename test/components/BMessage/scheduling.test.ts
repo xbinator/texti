@@ -4,7 +4,7 @@
  * @vitest-environment jsdom
  */
 import type { VueWrapper } from '@vue/test-utils';
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import BMessage from '@/components/BMessage/index.vue';
 import type { ParseMessageNodesOptions, ParseMessageNodesResult } from '@/components/BMessage/types';
@@ -58,12 +58,71 @@ const parseMessageNodesMock = vi.hoisted(() =>
   )
 );
 
+/** 可手动完成的 Worker 解析请求。 */
+interface WorkerParseFixture {
+  /** 请求 ID。 */
+  requestId: number;
+  /** 解析快照。 */
+  options: ParseMessageNodesOptions;
+  /** 请求结果。 */
+  result: Promise<ParseMessageNodesResult>;
+  /** 完成请求。 */
+  resolve: (result: ParseMessageNodesResult) => void;
+  /** 拒绝请求。 */
+  reject: (error: Error) => void;
+}
+
+/** Worker manager mock。 */
+interface WorkerManagerMock {
+  /** 已创建请求。 */
+  requests: WorkerParseFixture[];
+  /** 创建请求。 */
+  parse: ReturnType<typeof vi.fn>;
+  /** 取消请求。 */
+  cancel: ReturnType<typeof vi.fn>;
+  /** 重置 mock。 */
+  reset: () => void;
+}
+
+const workerManagerMock = vi.hoisted((): WorkerManagerMock => {
+  let requestSequence = 0;
+  const requests: WorkerParseFixture[] = [];
+  const parse = vi.fn((options: ParseMessageNodesOptions): { requestId: number; result: Promise<ParseMessageNodesResult> } => {
+    requestSequence += 1;
+    let resolveRequest: (result: ParseMessageNodesResult) => void = (): void => undefined;
+    let rejectRequest: (error: Error) => void = (): void => undefined;
+    const result = new Promise<ParseMessageNodesResult>((resolve, reject): void => {
+      resolveRequest = resolve;
+      rejectRequest = reject;
+    });
+    requests.push({ requestId: requestSequence, options, result, resolve: resolveRequest, reject: rejectRequest });
+    return { requestId: requestSequence, result };
+  });
+  const cancel = vi.fn();
+  return {
+    requests,
+    parse,
+    cancel,
+    reset: (): void => {
+      requestSequence = 0;
+      requests.splice(0);
+      parse.mockClear();
+      cancel.mockClear();
+    }
+  };
+});
+
 vi.mock('@/components/BMessage/utils/messageScheduler', () => ({
   messageRenderScheduler: schedulerMock
 }));
 
 vi.mock('@/components/BMessage/utils/messageParser', () => ({
   parseMessageNodes: parseMessageNodesMock
+}));
+
+vi.mock('@/components/BMessage/utils/messageWorker', () => ({
+  parseMessageInWorker: workerManagerMock.parse,
+  cancelMessageParse: workerManagerMock.cancel
 }));
 
 vi.mock('@/hooks/useNavigate', () => ({
@@ -144,12 +203,25 @@ function getOnlyTask(): MessageRenderTask {
   return task as MessageRenderTask;
 }
 
+/**
+ * 创建 Worker 返回的最小节点结果。
+ * @param text - 可观察文本
+ * @returns 解析结果
+ */
+function createWorkerResult(text: string): ParseMessageNodesResult {
+  return {
+    blocks: [{ type: 'paragraph', id: text, raw: text, children: [{ type: 'text', text }] }],
+    images: []
+  };
+}
+
 describe('BMessage scheduling', (): void => {
   beforeEach((): void => {
     schedulerMock.tasks.clear();
     schedulerMock.enqueue.mockClear();
     schedulerMock.cancel.mockClear();
     parseMessageNodesMock.mockClear();
+    workerManagerMock.reset();
     intersectionCallback = null;
     intersectionRoot = null;
     observeMock.mockClear();
@@ -244,5 +316,72 @@ describe('BMessage scheduling', (): void => {
     expect(parseMessageNodesMock).toHaveBeenNthCalledWith(1, { content: '**raw**', mode: 'markdown', loading: false });
     expect(parseMessageNodesMock).toHaveBeenNthCalledWith(2, { content: '**raw**', mode: 'text', loading: false });
     expect(wrapper.text()).toContain('**raw**');
+  });
+
+  it('replaces an older render with current text when a later main-thread parse fails', async (): Promise<void> => {
+    const wrapper = mount(BMessage, { props: { content: 'old content', type: 'markdown' } });
+    getOnlyTask().run();
+    await wrapper.vm.$nextTick();
+    parseMessageNodesMock.mockImplementationOnce((): never => {
+      throw new RangeError('nested markdown');
+    });
+
+    await wrapper.setProps({ content: '**current raw**' } as Partial<BMessagePublicProps>);
+    getOnlyTask().run();
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.text()).toContain('**current raw**');
+    expect(wrapper.text()).not.toContain('old content');
+  });
+
+  it('uses the Worker for large Markdown and ignores a stale late result', async (): Promise<void> => {
+    const firstContent = 'first '.repeat(6_000);
+    const latestContent = 'latest '.repeat(6_000);
+    const wrapper = mount(BMessage, { props: { content: firstContent, type: 'markdown', loading: true } });
+    getOnlyTask().run();
+    const firstRequest = workerManagerMock.requests[0];
+
+    await wrapper.setProps({ content: latestContent } as Partial<BMessagePublicProps>);
+    getOnlyTask().run();
+    const latestRequest = workerManagerMock.requests[1];
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.text()).toContain(latestContent.slice(0, 100));
+    firstRequest.resolve(createWorkerResult('stale worker result'));
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain('stale worker result');
+    latestRequest.resolve(createWorkerResult('latest worker result'));
+    await flushPromises();
+
+    expect(workerManagerMock.cancel).toHaveBeenCalledWith(firstRequest.requestId);
+    expect(wrapper.text()).toContain('latest worker result');
+  });
+
+  it('shows current raw text when Worker parsing fails', async (): Promise<void> => {
+    const content = '**worker raw** '.repeat(3_000);
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation((): void => undefined);
+    const wrapper = mount(BMessage, { props: { content, type: 'markdown' } });
+    getOnlyTask().run();
+
+    workerManagerMock.requests[0].reject(new RangeError('worker stack'));
+    await flushPromises();
+
+    expect(parseMessageNodesMock).toHaveBeenCalledWith({ content, mode: 'text', loading: false });
+    expect(wrapper.text()).toContain('**worker raw**');
+    expect(consoleSpy).toHaveBeenCalledWith(
+      '[BMessage] message parse failed',
+      expect.objectContaining({ errorType: 'RangeError', length: content.length, path: 'worker' })
+    );
+  });
+
+  it('cancels an active Worker subscription when unmounted', (): void => {
+    const wrapper = mount(BMessage, { props: { content: 'large '.repeat(6_000), type: 'markdown' } });
+    getOnlyTask().run();
+    const [{ requestId }] = workerManagerMock.requests;
+
+    wrapper.unmount();
+
+    expect(workerManagerMock.cancel).toHaveBeenCalledWith(requestId);
   });
 });

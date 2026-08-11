@@ -9,6 +9,7 @@ import type { ChatMessageToolPart } from 'types/chat';
 import { mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import BubblePartTool from '@/components/BChat/components/MessageBubble/BubblePartTool/index.vue';
+import ToolCode from '@/components/BChat/components/MessageBubble/BubblePartTool/ToolCode.vue';
 import { toolContextRegistry } from '@/hooks/useChat/context/registry';
 
 const openFileMock = vi.hoisted(() => vi.fn<(_options: { filePath?: string | null }) => Promise<void>>().mockResolvedValue(undefined));
@@ -43,6 +44,57 @@ function createToolPart(toolName: string, data: Record<string, unknown>): ChatMe
   };
 }
 
+/** 文件变更工具的执行阶段。 */
+type FileMutationStatus = 'inputting' | 'executing' | 'success' | 'failure';
+
+/**
+ * 创建包含敏感正文的文件变更工具片段。
+ * @param toolName - 文件变更工具名称
+ * @param status - 工具执行阶段
+ * @returns 带唯一敏感字符串的工具片段
+ */
+function createFileMutationPart(toolName: 'write_file' | 'edit_file', status: FileMutationStatus): ChatMessageToolPart {
+  const input = {
+    path: '/workspace/docs/report.md',
+    content: 'secret-content',
+    oldString: 'secret-old',
+    newString: 'secret-new'
+  };
+  if (status === 'inputting' || status === 'executing') {
+    return {
+      id: `tool-part-${status}`,
+      type: 'tool',
+      toolCallId: `tool-call-${status}`,
+      toolName,
+      status,
+      input,
+      inputText: 'secret-input-text'
+    };
+  }
+
+  return {
+    id: `tool-part-${status}`,
+    type: 'tool',
+    toolCallId: `tool-call-${status}`,
+    toolName,
+    status: 'done',
+    input,
+    inputText: 'secret-input-text',
+    result:
+      status === 'success'
+        ? {
+            toolName,
+            status: 'success',
+            data: { path: '/workspace/docs/report.md', content: 'secret-result', created: true }
+          }
+        : {
+            toolName,
+            status: 'failure',
+            error: { code: 'EXECUTION_FAILED', message: '写入失败', details: { path: '/workspace/docs/report.md', content: 'secret-result' } }
+          }
+  };
+}
+
 /**
  * 挂载工具气泡组件。
  * @param part - 工具消息片段
@@ -73,10 +125,27 @@ describe('BubblePartTool open file summary tag', (): void => {
     toolContextRegistry.clear();
   });
 
-  it('opens the file when the write_file summary file tag is clicked', async (): Promise<void> => {
+  it.each(['write_file', 'edit_file'] as const)(
+    '%s only renders the file name and path in every state',
+    async (toolName: 'write_file' | 'edit_file'): Promise<void> => {
+      for (const status of ['inputting', 'executing', 'success', 'failure'] as const) {
+        const wrapper = mountTool(createFileMutationPart(toolName, status));
+
+        expect(wrapper.text()).toContain('report.md');
+        expect(wrapper.text()).toContain('/workspace/docs/report.md');
+        expect(wrapper.html()).not.toMatch(/secret-content|secret-old|secret-new|secret-input-text|secret-result/u);
+        expect(wrapper.text()).not.toContain('查看原始数据');
+        expect(wrapper.findComponent(ToolCode).exists()).toBe(false);
+
+        wrapper.unmount();
+      }
+    }
+  );
+
+  it('opens the file when the completed write_file target is clicked', async (): Promise<void> => {
     const wrapper = mountTool(createToolPart('write_file', { path: '/workspace/docs/report.md', content: '# Report', created: true }));
 
-    await wrapper.find('.bubble-part-tool__summary-tag--clickable').trigger('click');
+    await wrapper.find('.bubble-part-tool__file-target--openable').trigger('click');
 
     expect(openFileMock).toHaveBeenCalledWith({ filePath: '/workspace/docs/report.md' });
     wrapper.unmount();

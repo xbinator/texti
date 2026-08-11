@@ -1586,6 +1586,152 @@ describe('runtime stream executor', (): void => {
     });
   });
 
+  it('coalesces one thousand text chunks into bounded persistence and live delta calls', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    async function* createBurstStream(): AsyncGenerator<unknown> {
+      for (let index = 0; index < 1_000; index += 1) yield { type: 'text-delta', text: 'x' };
+      yield { type: 'finish', finishReason: 'stop', totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
+    }
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createBurstStream() }]);
+    const updateAssistant = vi.fn<(message: ChatMessageRecord, revision?: number) => Promise<void>>(async (): Promise<void> => undefined);
+    const emitDelta = vi.fn();
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText });
+
+    await executor({ runtime: { ...runtime }, userMessage, assistantMessage }, updateAssistant, emitDelta);
+
+    expect(updateAssistant.mock.calls.length).toBeLessThan(20);
+    expect(emitDelta.mock.calls.length).toBeLessThan(20);
+    expect(emitDelta).toHaveBeenCalled();
+    expect(assistantMessage.content).toBe('x'.repeat(1_000));
+    expect(updateAssistant.mock.calls.at(-1)?.[0]).toMatchObject({ content: 'x'.repeat(1_000), finished: true });
+  });
+
+  it('retains the newest safe in-memory projection when durable persistence fails', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const activeRuntime: ActiveChatRuntime = { ...runtime, abortController: new AbortController() };
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createTextStream() }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText });
+
+    await expect(
+      executor({ runtime: activeRuntime, userMessage, assistantMessage }, async (): Promise<void> => Promise.reject(new Error('disk full')))
+    ).rejects.toMatchObject({ message: 'disk full' });
+
+    expect(activeRuntime.failedAssistantProjection).toMatchObject({ content: 'Hello runtime', finished: true });
+  });
+
+  it('retains the newest safe in-memory projection when the Provider fails before the debounce checkpoint', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const activeRuntime: ActiveChatRuntime = { ...runtime, abortController: new AbortController() };
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    async function* createFailingStream(): AsyncGenerator<unknown> {
+      yield { type: 'text-delta', text: 'visible before failure' };
+      yield { type: 'error', error: new Error('provider failed') };
+    }
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createFailingStream() }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText });
+
+    await expect(executor({ runtime: activeRuntime, userMessage, assistantMessage }, async (): Promise<void> => undefined)).rejects.toMatchObject({
+      message: 'provider failed'
+    });
+
+    expect(activeRuntime.failedAssistantProjection).toMatchObject({ content: 'visible before failure', finished: false });
+  });
+
+  it('aborts a model step after more than two MiB of streamed text', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const abortController = new AbortController();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    async function* createOversizedStream(): AsyncGenerator<unknown> {
+      yield { type: 'text-delta', text: 'x'.repeat(2 * 1024 * 1024 + 1) };
+    }
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createOversizedStream() }]);
+    const abortStream = vi.fn();
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, abortStream });
+
+    await expect(
+      executor({ runtime: { ...runtime, abortController }, userMessage, assistantMessage }, async (): Promise<void> => undefined)
+    ).rejects.toMatchObject({ code: 'OUTPUT_TOO_LARGE', message: expect.stringContaining('2097153') });
+    expect(abortController.signal.aborted).toBe(true);
+    expect(abortStream).toHaveBeenCalledWith(runtime.runtimeId);
+    expect(assistantMessage.content).toBe('');
+  });
+
+  it('aborts an abnormal Provider stream after one hundred thousand events', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const abortController = new AbortController();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    async function* createEventFlood(): AsyncGenerator<unknown> {
+      for (let index = 0; index <= 100_000; index += 1) yield { type: 'start' };
+    }
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createEventFlood() }]);
+    const abortStream = vi.fn();
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, abortStream });
+
+    await expect(
+      executor({ runtime: { ...runtime, abortController }, userMessage, assistantMessage }, async (): Promise<void> => undefined)
+    ).rejects.toMatchObject({ code: 'STREAM_EVENT_LIMIT', message: expect.stringContaining('100001') });
+    expect(abortController.signal.aborted).toBe(true);
+    expect(abortStream).toHaveBeenCalledWith(runtime.runtimeId);
+  });
+
+  it('counts an authoritative tool-call input when the Provider omits input delta events', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const abortController = new AbortController();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test'
+    });
+    async function* createOversizedToolCall(): AsyncGenerator<unknown> {
+      yield {
+        type: 'tool-call',
+        toolCallId: 'tool-call-oversized',
+        toolName: 'write_file',
+        input: { path: 'large.txt', content: 'x'.repeat(2 * 1024 * 1024) }
+      };
+    }
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createOversizedToolCall() }]);
+    const abortStream = vi.fn();
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText, abortStream });
+
+    await expect(
+      executor({ runtime: { ...runtime, abortController }, userMessage, assistantMessage }, async (): Promise<void> => undefined)
+    ).rejects.toMatchObject({ code: 'OUTPUT_TOO_LARGE' });
+    expect(abortController.signal.aborted).toBe(true);
+    expect(abortStream).toHaveBeenCalledWith(runtime.runtimeId);
+  });
+
+  it('passes the configured model output token limit to the Provider request', async (): Promise<void> => {
+    const assistantMessage = createAssistantMessage();
+    const resolve = vi.fn().mockResolvedValue({
+      createOptions: { providerId: 'openai', providerName: 'OpenAI', providerType: 'openai' },
+      modelId: 'gpt-test',
+      maxOutputTokens: 4_096
+    });
+    const streamText = vi.fn().mockResolvedValue([undefined, { stream: createTextStream() }]);
+    const executor = createRuntimeStreamExecutor({ resolver: { resolve }, streamText });
+
+    await executor({ runtime: { ...runtime }, userMessage, assistantMessage }, async (): Promise<void> => undefined);
+
+    expect(streamText).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ maxOutputTokens: 4_096 }), RUNTIME_CALL_OPTIONS);
+  });
+
   it('uses provided source messages as the model context', async (): Promise<void> => {
     const assistantMessage = createAssistantMessage();
     const resolve = vi.fn().mockResolvedValue({
@@ -3703,7 +3849,7 @@ describe('runtime stream executor', (): void => {
     expect(updates.at(-1)?.parts).toHaveLength(1);
   });
 
-  it('does not reset parsed tool input to null on invalid JSON delta', async (): Promise<void> => {
+  it('keeps invalid streaming JSON unparsed until the authoritative tool call arrives', async (): Promise<void> => {
     const assistantMessage = createAssistantMessage();
     const updates: ChatMessageRecord[] = [];
 
@@ -3739,6 +3885,10 @@ describe('runtime stream executor', (): void => {
     });
     expect(afterInvalidDelta).toBeDefined();
     expect(afterInvalidDelta?.parts[0]).toMatchObject({
+      type: 'tool',
+      input: null
+    });
+    expect(updates.at(-1)?.parts[0]).toMatchObject({
       type: 'tool',
       input: { path: 'src/index.ts' }
     });

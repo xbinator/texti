@@ -55,4 +55,24 @@ describe('BubblePartThinking', (): void => {
     expect(wrapper.find('.b-message__code-block').exists()).toBe(true);
     expect(wrapper.find('.hljs-keyword').exists()).toBe(true);
   });
+
+  it('forwards the precise streaming state to BMessage', (): void => {
+    const wrapper = mount(BubblePartThinking, {
+      props: {
+        part: { id: 'thinking-streaming', type: 'thinking', thinking: 'still growing' },
+        streaming: true
+      },
+      global: {
+        stubs: {
+          BIcon: true,
+          BMessage: {
+            props: ['content', 'loading'],
+            template: '<div class="thinking-message-stub" :data-loading="loading">{{ content }}</div>'
+          }
+        }
+      }
+    });
+
+    expect(wrapper.find('.thinking-message-stub').attributes('data-loading')).toBe('true');
+  });
 });
