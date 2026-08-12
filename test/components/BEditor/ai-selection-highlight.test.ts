@@ -4,12 +4,19 @@
  * @vitest-environment jsdom
  */
 import type { Node as PMNode } from '@tiptap/pm/model';
+import { Editor } from '@tiptap/core';
 import { Schema } from '@tiptap/pm/model';
 import { EditorState, Plugin } from '@tiptap/pm/state';
 import { tableNodes } from '@tiptap/pm/tables';
 import { EditorView } from '@tiptap/pm/view';
-import { describe, expect, it, afterEach } from 'vitest';
-import { createAISelectionDecorationSet, ensureTableInlineCSSHighlightStyle } from '@/components/BEditor/extensions/aiRangeHighlight';
+import StarterKit from '@tiptap/starter-kit';
+import { describe, expect, it, afterEach, vi } from 'vitest';
+import {
+  AISelectionHighlight,
+  createAISelectionDecorationSet,
+  ensureAIInlineCSSHighlightStyle,
+  setAISelectionHighlight
+} from '@/components/BEditor/extensions/aiRangeHighlight';
 
 const tableInlineHighlightStyleId = 'b-markdown-ai-selection-highlight-style';
 
@@ -24,6 +31,53 @@ interface RuntimeDecorationInfo {
     /** Decoration attrs。 */
     attrs: Record<string, string>;
   };
+}
+
+/**
+ * 测试用 CSS Custom Highlight 注册表。
+ */
+interface TestHighlightRegistry {
+  /** 注册 highlight */
+  set: ReturnType<typeof vi.fn<(name: string, highlight: object) => void>>;
+  /** 删除 highlight */
+  delete: ReturnType<typeof vi.fn<(name: string) => boolean>>;
+}
+
+/**
+ * 安装测试用 CSS Custom Highlight runtime。
+ * @returns 测试注册表
+ */
+function installCSSHighlightRuntime(): TestHighlightRegistry {
+  const registry: TestHighlightRegistry = {
+    set: vi.fn<(name: string, highlight: object) => void>(),
+    delete: vi.fn<(name: string) => boolean>(() => true)
+  };
+
+  class TestHighlight {
+    /** 注册的 DOM Range 列表 */
+    ranges: Range[];
+
+    /**
+     * 创建测试 Highlight。
+     * @param ranges - DOM Range 列表
+     */
+    constructor(...ranges: Range[]) {
+      this.ranges = ranges;
+    }
+  }
+
+  Object.defineProperty(globalThis, 'CSS', {
+    configurable: true,
+    value: {
+      highlights: registry
+    }
+  });
+  Object.defineProperty(globalThis, 'Highlight', {
+    configurable: true,
+    value: TestHighlight
+  });
+
+  return registry;
 }
 
 /**
@@ -141,11 +195,25 @@ function createTableDoc(): PMNode {
 
 describe('createAISelectionDecorationSet', (): void => {
   let editorView: EditorView | null = null;
+  const originalCSSDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'CSS');
+  const originalHighlightDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'Highlight');
 
   afterEach((): void => {
     editorView?.destroy();
     editorView = null;
     document.getElementById(tableInlineHighlightStyleId)?.remove();
+
+    if (originalCSSDescriptor) {
+      Object.defineProperty(globalThis, 'CSS', originalCSSDescriptor);
+    } else {
+      Reflect.deleteProperty(globalThis, 'CSS');
+    }
+
+    if (originalHighlightDescriptor) {
+      Object.defineProperty(globalThis, 'Highlight', originalHighlightDescriptor);
+    } else {
+      Reflect.deleteProperty(globalThis, 'Highlight');
+    }
   });
 
   it('uses inline decorations for normal rich text selections', (): void => {
@@ -156,6 +224,36 @@ describe('createAISelectionDecorationSet', (): void => {
 
     expect(decorationInfo.type.constructor.name).toBe('InlineType');
     expect(decorationInfo.type.attrs).toEqual({ class: 'ai-selection-highlight' });
+  });
+
+  it('keeps normal rich text selections out of inline decoration spans when CSS Custom Highlight is available', (): void => {
+    installCSSHighlightRuntime();
+    const doc = createDoc();
+    const decorations = createAISelectionDecorationSet(doc, { from: 1, to: 4 });
+
+    expect(decorations.find()).toHaveLength(0);
+  });
+
+  it('registers normal rich text ranges with CSS Custom Highlight runtime', (): void => {
+    const registry = installCSSHighlightRuntime();
+    const element = document.createElement('div');
+    document.body.appendChild(element);
+    const editor = new Editor({
+      element,
+      extensions: [StarterKit, AISelectionHighlight],
+      content: '<p>hello</p>'
+    });
+
+    setAISelectionHighlight(editor, { from: 1, to: 4 });
+
+    expect(registry.set).toHaveBeenCalledWith(
+      'b-markdown-ai-selection-highlight',
+      expect.objectContaining({
+        ranges: [expect.any(Range)]
+      })
+    );
+    editor.destroy();
+    element.remove();
   });
 
   it('marks inline code selection when it starts at the code mark boundary', (): void => {
@@ -249,9 +347,9 @@ describe('createAISelectionDecorationSet', (): void => {
     expect(paragraph?.innerHTML).toBe('A1');
   });
 
-  it('injects table inline custom highlight styles once at runtime', (): void => {
-    const style = ensureTableInlineCSSHighlightStyle();
-    const duplicateStyle = ensureTableInlineCSSHighlightStyle();
+  it('injects rich inline custom highlight styles once at runtime', (): void => {
+    const style = ensureAIInlineCSSHighlightStyle();
+    const duplicateStyle = ensureAIInlineCSSHighlightStyle();
     const injectedStyles = document.head.querySelectorAll(`#${tableInlineHighlightStyleId}`);
 
     expect(style).toBeInstanceOf(HTMLStyleElement);

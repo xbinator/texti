@@ -27,6 +27,15 @@ function extractStyleRuleBody(source: string, selector: string): string {
 }
 
 describe('BEditor rich selection styles', (): void => {
+  it('keeps fallback inline selection highlight free of shadow-based overlap risk', (): void => {
+    const source = readPaneRichEditorSource();
+    const selectionRuleBody = extractStyleRuleBody(source, '.ai-selection-highlight');
+
+    expect(source).toContain('line-height: var(--editor-rich-line-height);');
+    expect(selectionRuleBody).toContain('background: var(--selection-bg);');
+    expect(selectionRuleBody).toContain('box-shadow: none;');
+  });
+
   it('keeps inline code base padding so AI selection highlight has visual breathing room', (): void => {
     const source = readPaneRichEditorSource();
     // 行内 code 的视觉边距由基础 `code { padding: 0.125em 0.25em; }` 兜底；

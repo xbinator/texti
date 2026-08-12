@@ -3,10 +3,12 @@
  * @description Rich 编辑器逐级全选快捷键逻辑。
  */
 
+import type { SourceLineRange } from '../adapters/sourceLineMapping';
 import type { Node as PMNode, ResolvedPos } from '@tiptap/pm/model';
 import type { EditorState, Selection, Transaction } from '@tiptap/pm/state';
 import { AllSelection, TextSelection } from '@tiptap/pm/state';
 import { CellSelection, findTable, TableMap } from '@tiptap/pm/tables';
+import { getSelectionSourceLineRange } from '../adapters/sourceLineMapping';
 
 /**
  * 执行 Rich 全选快捷键所需的最小编辑器能力。
@@ -49,6 +51,35 @@ interface TableSelectionContext {
  */
 function isSameRange(selection: Selection, range: SelectableRange): boolean {
   return selection.from === range.from && selection.to === range.to;
+}
+
+/**
+ * 判断当前文本选区是否跨越了多行内容。
+ * @param state - 当前编辑器状态
+ * @param selection - 当前 ProseMirror 选区
+ * @returns 选区文本包含块分隔或换行节点时返回 true
+ */
+function hasTextLineBreak(state: EditorState, selection: Selection): boolean {
+  if (selection.empty || !(selection instanceof TextSelection)) {
+    return false;
+  }
+
+  const selectedText = state.doc.textBetween(selection.from, selection.to, '\n', '\n');
+  return selectedText.includes('\n');
+}
+
+/**
+ * 获取当前文本选区覆盖的 Markdown 源码行号范围。
+ * @param state - 当前编辑器状态
+ * @param selection - 当前 ProseMirror 选区
+ * @returns 源码行号范围；无法解析或非文本选区时返回 null
+ */
+function getSelectedLineRange(state: EditorState, selection: Selection): SourceLineRange | null {
+  if (selection.empty || !(selection instanceof TextSelection)) {
+    return null;
+  }
+
+  return getSelectionSourceLineRange(state.doc, selection.from, selection.to);
 }
 
 /**
@@ -176,6 +207,12 @@ export function createRichSelectAllTransaction(state: EditorState): Transaction 
     return null;
   }
 
+  const sourceLineRange = getSelectedLineRange(state, selection);
+  const isMultiLineSelection = (sourceLineRange ? sourceLineRange.endLine > sourceLineRange.startLine : false) || hasTextLineBreak(state, selection);
+  if (isMultiLineSelection) {
+    return createWholeDocumentSelectionTransaction(state);
+  }
+
   const table = getTableSelectionContext(selection);
   if (table && selection instanceof CellSelection) {
     return isWholeTableSelection(selection, table)
@@ -190,6 +227,10 @@ export function createRichSelectAllTransaction(state: EditorState): Transaction 
 
   if (table) {
     return isSameRange(selection, textBlockRange) ? createCurrentCellSelectionTransaction(state) : createTextBlockSelectionTransaction(state, textBlockRange);
+  }
+
+  if (sourceLineRange && sourceLineRange.startLine === sourceLineRange.endLine && !isSameRange(selection, textBlockRange)) {
+    return createTextBlockSelectionTransaction(state, textBlockRange);
   }
 
   return isSameRange(selection, textBlockRange) ? createWholeDocumentSelectionTransaction(state) : createTextBlockSelectionTransaction(state, textBlockRange);

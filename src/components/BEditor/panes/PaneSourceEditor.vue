@@ -48,6 +48,7 @@ import {
 } from '../adapters/sourceEditorSearch';
 import { createSourceSelectionAssistantAdapter, createSourceSelectionHighlightExtension } from '../adapters/sourceSelectionAssistant';
 import { createSourceInlineCompletionAdapter, createSourceInlineCompletionExtension } from '../extensions/sourceInlineCompletion';
+import { createSourceSelectAllKeymap } from '../extensions/sourceSelectAll';
 import { useFrontMatter } from '../hooks/useFrontMatter';
 import { useInlineCompletion } from '../hooks/useInlineCompletion';
 
@@ -128,7 +129,7 @@ function createEditorExtensions(): Extension[] {
     createSourceEditorMarkdownHighlightExtension(),
     createSourceCodeBlockHighlightExtension(),
     createSourceEditorSearchExtension(),
-    keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
+    keymap.of([indentWithTab, ...createSourceSelectAllKeymap(), ...defaultKeymap, ...historyKeymap]),
     createSourceEditorLayoutTheme(),
     headingAnchorCompartment.of(createSourceHeadingAnchorExtension(props.editorId)),
     placeholder('请输入内容'),

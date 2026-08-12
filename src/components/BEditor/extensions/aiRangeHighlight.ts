@@ -27,10 +27,10 @@ const aiSelectionHighlightPluginKey = new PluginKey<AISelectionHighlightState>('
 const baseHighlightClassName = 'ai-selection-highlight';
 const codeStartHighlightClassName = 'ai-selection-highlight--code-start';
 const codeEndHighlightClassName = 'ai-selection-highlight--code-end';
-const tableInlineHighlightName = 'b-markdown-ai-selection-highlight';
-const tableInlineHighlightStyleId = 'b-markdown-ai-selection-highlight-style';
-const tableInlineHighlightStyleContent = [
-  `.b-markdown-rich__content .ProseMirror::highlight(${tableInlineHighlightName}) {`,
+const aiInlineHighlightName = 'b-markdown-ai-selection-highlight';
+const aiInlineHighlightStyleId = 'b-markdown-ai-selection-highlight-style';
+const aiInlineHighlightStyleContent = [
+  `.b-markdown-rich__content .ProseMirror::highlight(${aiInlineHighlightName}) {`,
   '  background: var(--selection-bg);',
   '}'
 ].join('\n');
@@ -302,19 +302,19 @@ function getCSSHighlightRuntime(): { HighlightConstructor: CSSHighlightConstruct
 }
 
 /**
- * 注入表格内联 CSS Custom Highlight 样式。
+ * 注入 Rich 内联 CSS Custom Highlight 样式。
  * 该选择器需要保持 `::highlight()` 原始语义，因此放在运行时 style 中避开构建期 CSS minifier 校验。
  * @returns 已注入的 style 元素，非 DOM 环境返回 null
  */
-export function ensureTableInlineCSSHighlightStyle(): HTMLStyleElement | null {
+export function ensureAIInlineCSSHighlightStyle(): HTMLStyleElement | null {
   if (typeof document === 'undefined') {
     return null;
   }
 
-  const existingElement = document.getElementById(tableInlineHighlightStyleId);
+  const existingElement = document.getElementById(aiInlineHighlightStyleId);
   if (existingElement instanceof HTMLStyleElement) {
-    if (existingElement.textContent !== tableInlineHighlightStyleContent) {
-      existingElement.textContent = tableInlineHighlightStyleContent;
+    if (existingElement.textContent !== aiInlineHighlightStyleContent) {
+      existingElement.textContent = aiInlineHighlightStyleContent;
     }
 
     return existingElement;
@@ -323,17 +323,17 @@ export function ensureTableInlineCSSHighlightStyle(): HTMLStyleElement | null {
   existingElement?.remove();
 
   const style = document.createElement('style');
-  style.id = tableInlineHighlightStyleId;
-  style.textContent = tableInlineHighlightStyleContent;
+  style.id = aiInlineHighlightStyleId;
+  style.textContent = aiInlineHighlightStyleContent;
   document.head.appendChild(style);
   return style;
 }
 
 /**
- * 清理表格内联 CSS Custom Highlight。
+ * 清理 Rich 内联 CSS Custom Highlight。
  */
-function clearTableInlineCSSHighlight(): void {
-  getCSSHighlightRuntime()?.registry.delete(tableInlineHighlightName);
+function clearAIInlineCSSHighlight(): void {
+  getCSSHighlightRuntime()?.registry.delete(aiInlineHighlightName);
 }
 
 /**
@@ -358,10 +358,40 @@ function createDOMRangeFromEditorRange(view: PMEditorView, range: DecorationRang
 }
 
 /**
- * 同步表格内联选区到 CSS Custom Highlight，避免插入额外 inline DOM。
+ * 创建用于 CSS Custom Highlight 的内联范围。
+ * 完整覆盖的表格由 node decoration 负责，因此从内联高亮范围中跳过。
+ * @param doc - 当前 ProseMirror 文档
+ * @param range - 当前高亮范围
+ * @returns CSS Custom Highlight 范围列表
+ */
+function createAIInlineCSSHighlightRanges(doc: PMNode, range: AISelectionRange): DecorationRange[] {
+  if (range.highlightKind === 'node') {
+    return [];
+  }
+
+  const skippedRanges = createTableContainerDecorations(doc, range).map((decoration) => ({ from: decoration.from, to: decoration.to }));
+  const ranges: DecorationRange[] = [];
+  let cursor = range.from;
+
+  mergeDecorationRanges(skippedRanges).forEach((skippedRange) => {
+    if (cursor < skippedRange.from) {
+      ranges.push({ from: cursor, to: skippedRange.from });
+    }
+    cursor = Math.max(cursor, skippedRange.to);
+  });
+
+  if (cursor < range.to) {
+    ranges.push({ from: cursor, to: range.to });
+  }
+
+  return ranges;
+}
+
+/**
+ * 同步 Rich 内联选区到 CSS Custom Highlight，避免插入额外 inline DOM。
  * @param view - ProseMirror 编辑器视图
  */
-function syncTableInlineCSSHighlight(view: PMEditorView): void {
+function syncAIInlineCSSHighlight(view: PMEditorView): void {
   const runtime = getCSSHighlightRuntime();
   if (!runtime) {
     return;
@@ -369,21 +399,21 @@ function syncTableInlineCSSHighlight(view: PMEditorView): void {
 
   const pluginState = aiSelectionHighlightPluginKey.getState(view.state);
   if (!pluginState?.range) {
-    clearTableInlineCSSHighlight();
+    clearAIInlineCSSHighlight();
     return;
   }
 
-  const domRanges = collectPartialTableRanges(view.state.doc, pluginState.range)
+  const domRanges = createAIInlineCSSHighlightRanges(view.state.doc, pluginState.range)
     .map((range) => createDOMRangeFromEditorRange(view, range))
     .filter((range): range is Range => range !== null);
 
   if (domRanges.length === 0) {
-    clearTableInlineCSSHighlight();
+    clearAIInlineCSSHighlight();
     return;
   }
 
-  ensureTableInlineCSSHighlightStyle();
-  runtime.registry.set(tableInlineHighlightName, new runtime.HighlightConstructor(...domRanges));
+  ensureAIInlineCSSHighlightStyle();
+  runtime.registry.set(aiInlineHighlightName, new runtime.HighlightConstructor(...domRanges));
 }
 
 /**
@@ -414,6 +444,11 @@ export function createAISelectionDecorationSet(doc: PMNode, range: AISelectionRa
 
   const tableDecorations = createTableContainerDecorations(doc, range);
   const tableInlineRanges = collectPartialTableRanges(doc, range);
+
+  if (getCSSHighlightRuntime()) {
+    return DecorationSet.create(doc, tableDecorations);
+  }
+
   const inlineDecorations = createInlineDecorationsOutsideTables(doc, range, createSkippedTableRanges(tableDecorations, tableInlineRanges));
 
   return DecorationSet.create(doc, [...inlineDecorations, ...tableDecorations]);
@@ -494,14 +529,14 @@ export const AISelectionHighlight = Extension.create({
           }
         },
         view(view) {
-          syncTableInlineCSSHighlight(view);
+          syncAIInlineCSSHighlight(view);
 
           return {
             update(nextView: PMEditorView): void {
-              syncTableInlineCSSHighlight(nextView);
+              syncAIInlineCSSHighlight(nextView);
             },
             destroy(): void {
-              clearTableInlineCSSHighlight();
+              clearAIInlineCSSHighlight();
             }
           };
         }

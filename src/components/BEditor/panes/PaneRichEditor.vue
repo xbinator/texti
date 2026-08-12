@@ -601,13 +601,14 @@ defineExpose({
     .ProseMirror {
       --native-selection-color: var(--selection-color);
       --native-selection-bg: var(--selection-bg);
+      --editor-rich-line-height: 1.74;
       --editor-table-selection-header-bg: color-mix(in srgb, var(--color-primary-bg-hover) 88%, var(--editor-table-header-bg));
       --editor-table-selection-cell-bg: color-mix(in srgb, var(--color-primary-bg-hover) 74%, var(--bg-primary));
 
       min-height: calc(100vh - 44px);
       padding: 20px 40px 90px;
       margin: 0;
-      line-height: 1.74;
+      line-height: var(--editor-rich-line-height);
       color: var(--editor-text);
       caret-color: var(--editor-caret);
       outline: none;
@@ -631,7 +632,7 @@ defineExpose({
         font-style: inherit;
         text-decoration: inherit;
         background: var(--selection-bg);
-        box-shadow: 0 0.2em 0 0 var(--selection-bg), 0 -0.2em 0 0 var(--selection-bg);
+        box-shadow: none;
         -webkit-box-decoration-break: clone;
         box-decoration-break: clone;
       }
@@ -684,7 +685,7 @@ defineExpose({
       }
 
       pre code .ai-selection-highlight {
-        box-shadow: 0 0.18em 0 0 var(--selection-bg), 0 -0.18em 0 0 var(--selection-bg);
+        box-shadow: none;
       }
 
       .b-markdown-table.ai-selection-highlight {
