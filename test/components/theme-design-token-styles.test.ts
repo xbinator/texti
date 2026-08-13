@@ -36,11 +36,16 @@ describe('theme design token styles', (): void => {
 
   it('uses control radius and motion tokens in select custom chrome', (): void => {
     const selectSource = readSource('src/components/BSelect/index.vue');
+    const settingsSource = readSource('src/views/settings/basic/index.vue');
 
     expect(selectSource).toContain('transition: border-color var(--motion-duration-base) var(--motion-easing-standard)');
     expect(selectSource).toContain('box-shadow var(--motion-duration-base) var(--motion-easing-standard)');
     expect(selectSource).toContain('background var(--motion-duration-base) var(--motion-easing-standard)');
     expect(selectSource).toContain('border-radius: 0 0 var(--control-radius) var(--control-radius);');
+    expect(selectSource).toContain('padding: 8px 12px;');
+    expect(settingsSource).toContain('basic-settings__theme-footer');
+    expect(settingsSource).toContain('padding: 0 12px;');
+    expect(settingsSource).toContain('height: 32px;');
   });
 
   it('uses design tokens in segmented controls and toolbar menus', (): void => {

@@ -1,10 +1,10 @@
 /**
  * @file index.test.ts
- * @description 基础设置页 AI 工具权限管理测试。
+ * @description 基础设置页主题入口和 AI 工具权限管理测试。
  * @vitest-environment jsdom
  */
 /* eslint-disable vue/one-component-per-file */
-import { defineComponent, type PropType } from 'vue';
+import { computed, defineComponent, type PropType } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -50,6 +50,8 @@ const BSelectStub = defineComponent({
   },
   emits: ['change'],
   setup(_props, { emit }) {
+    const selectedOption = computed<SelectOption | undefined>(() => _props.options.find((option): boolean => option.value === _props.value));
+
     /**
      * 转发 select change 事件。
      * @param event - DOM change 事件
@@ -58,14 +60,54 @@ const BSelectStub = defineComponent({
       emit('change', (event.target as HTMLSelectElement).value);
     }
 
-    return { handleChange };
+    /**
+     * 关闭下拉菜单的测试替身。
+     */
+    function closeDropdown(): number {
+      return 0;
+    }
+
+    return {
+      closeDropdown,
+      handleChange,
+      selectedOption
+    };
   },
   template: `
-    <select v-bind="$attrs" class="b-select-stub" :value="value" @change="handleChange">
-      <option v-for="option in options" :key="String(option.value)" :value="option.value">
-        {{ option.label }}
-      </option>
-    </select>
+    <div v-bind="$attrs" class="b-select-stub" :data-value="String(value)">
+      <select class="b-select-stub__select" :value="value" @change="handleChange">
+        <option v-for="option in options" :key="String(option.value)" :value="option.value">
+          {{ option.label }}
+        </option>
+      </select>
+      <div v-if="$slots.dropdownFooter" class="b-select-stub__footer">
+        <slot
+          name="dropdownFooter"
+          :closeDropdown="closeDropdown"
+          :selected="value"
+          :selectedOption="selectedOption"
+        ></slot>
+      </div>
+    </div>
+  `
+});
+
+/**
+ * BModal 测试替身，保留 open 与 footer 插槽渲染。
+ */
+const BModalStub = defineComponent({
+  name: 'BModal',
+  props: {
+    open: { type: Boolean, default: false },
+    title: { type: String, default: '' }
+  },
+  emits: ['update:open'],
+  template: `
+    <section v-if="open" class="b-modal-stub" :data-title="title">
+      <header class="b-modal-stub__header">{{ title }}</header>
+      <div class="b-modal-stub__body"><slot /></div>
+      <footer class="b-modal-stub__footer"><slot name="footer" /></footer>
+    </section>
   `
 });
 
@@ -103,6 +145,7 @@ function mountBasicSettingsPage(): VueWrapper {
         SettingsPage: SettingsPageStub,
         SettingsSection: SettingsSectionStub,
         BSelect: BSelectStub,
+        BModal: BModalStub,
         BButton: BButtonStub,
         BInputNumber: BInputNumberStub
       }
@@ -172,6 +215,21 @@ describe('BasicSettingsPage tool permissions', (): void => {
     expect(wrapper.text()).toContain('字体设置');
     expect(wrapper.text()).toContain('样式');
     expect(wrapper.text()).toContain('默认');
+  });
+
+  it('renders the custom theme entry in the theme preset dropdown footer', (): void => {
+    const wrapper = mountBasicSettingsPage();
+
+    expect(wrapper.text()).toContain('自定义主题');
+  });
+
+  it('opens the custom theme entry modal when the footer button is clicked', async (): Promise<void> => {
+    const wrapper = mountBasicSettingsPage();
+
+    await findButtonByText(wrapper, '自定义主题').trigger('click');
+
+    expect(wrapper.find('.b-modal-stub').exists()).toBe(true);
+    expect(wrapper.text()).toContain('后续将在这里接入自定义主题编辑器');
   });
 
   it('revokes one persisted tool permission grant', async (): Promise<void> => {

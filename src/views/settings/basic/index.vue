@@ -9,7 +9,11 @@
         <BSelect :value="settingStore.theme" :options="themeOptions" :width="280" @change="handleThemeChange" />
       </SettingsItem>
       <SettingsItem label="主题">
-        <BSelect :value="settingStore.themePreset" :options="presetOptions" :width="280" @change="handlePresetChange" />
+        <BSelect :value="settingStore.themePreset" :options="presetOptions" :width="280" @change="handlePresetChange">
+          <template #dropdownFooter="{ closeDropdown }">
+            <button class="basic-settings__theme-footer" type="button" @click="handleCustomizeTheme(closeDropdown)">自定义主题</button>
+          </template>
+        </BSelect>
       </SettingsItem>
     </SettingsSection>
 
@@ -49,10 +53,18 @@
       <ToolPermissionGrants />
     </SettingsSection>
   </SettingsPage>
+
+  <BModal v-model:open="customThemeVisible" :width="560" title="自定义主题">
+    <p class="basic-settings__theme-placeholder">后续将在这里接入自定义主题编辑器。</p>
+
+    <template #footer>
+      <BButton type="secondary" @click="handleCloseCustomizeTheme">关闭</BButton>
+    </template>
+  </BModal>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { SelectOption } from '@/components/BSelect/types';
 import type { EditorViewMode, EditorPageWidth, EditorSaveStrategy } from '@/stores/editor/preferences';
 import { useEditorPreferencesStore } from '@/stores/editor/preferences';
@@ -68,6 +80,8 @@ import { getCurrentFontPlatform, getDefaultFontStyleOptions } from './fontOption
 
 const editorStore = useEditorPreferencesStore();
 const settingStore = useSettingStore();
+/** 自定义主题入口弹窗是否打开。 */
+const customThemeVisible = ref<boolean>(false);
 
 /**
  * 配色方案选项。
@@ -174,4 +188,54 @@ function handlePageWidthChange(value: string | number): void {
 function handleSaveStrategyChange(value: string | number): void {
   editorStore.setSaveStrategy(value as EditorSaveStrategy);
 }
+
+/**
+ * 打开自定义主题入口。
+ * @param closeDropdown - 关闭主题下拉菜单的回调
+ */
+function handleCustomizeTheme(closeDropdown: () => void): void {
+  closeDropdown();
+  customThemeVisible.value = true;
+}
+
+/**
+ * 关闭自定义主题入口。
+ */
+function handleCloseCustomizeTheme(): void {
+  customThemeVisible.value = false;
+}
 </script>
+
+<style lang="less" scoped>
+.basic-settings__theme-footer {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 32px;
+  padding: 0 12px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  text-align: left;
+  appearance: none;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard), color var(--motion-duration-fast) var(--motion-easing-standard);
+
+  &:hover {
+    background: var(--bg-hover);
+  }
+
+  &:active {
+    background: var(--bg-active);
+  }
+}
+
+.basic-settings__theme-placeholder {
+  margin: 0;
+  color: var(--text-secondary);
+}
+</style>
