@@ -4,13 +4,14 @@
  * @vitest-environment jsdom
  */
 /* eslint-disable vue/one-component-per-file */
-import { readFileSync } from 'node:fs';
 import type { VueWrapper } from '@vue/test-utils';
 import type { WidgetRenderContext } from 'types/widget';
 import type { Component, ComputedRef, VNode } from 'vue';
 import { defineComponent, h, ref } from 'vue';
 import { mount } from '@vue/test-utils';
 import { describe, expect, expectTypeOf, it } from 'vitest';
+import type { BSmartValue } from '@/components/BSmart/types';
+import { createLiteralValue, createVariableValue } from '@/components/BSmart/utils/value';
 import type { WidgetButtonElementMetadata } from '@/components/BWidget/elements/Button/schema';
 import type { WidgetImageElementMetadata } from '@/components/BWidget/elements/Image/schema';
 import type { WidgetTextElementMetadata } from '@/components/BWidget/elements/Text/schema';
@@ -20,9 +21,6 @@ import { provideRenderContext, type WidgetRenderContextOptions } from '@/compone
 import type { WidgetMetadata, WidgetShapeElement } from '@/components/BWidget/types';
 import { createDefaultWidgetElementLoopConfig } from '@/components/BWidget/utils/widgetLoop';
 import type { MethodAction } from '@/components/BWidget/utils/widgetMethods';
-
-/** 元素值 hook 源码。 */
-const USE_ELEMENT_VALUE_SOURCE = readFileSync('src/components/BWidget/hooks/useElementValue.ts', 'utf-8');
 
 /**
  * 测试用展示元素元数据。
@@ -36,6 +34,10 @@ interface DisplayElementMetadata extends WidgetMetadata {
   actions?: unknown;
   /** 副标题内容 */
   subtitle: string;
+  /** Smart 布尔值 */
+  smartBoolean: BSmartValue<boolean>;
+  /** Smart 文本值 */
+  smartText: BSmartValue<string>;
 }
 
 /**
@@ -51,6 +53,8 @@ type UseElementValueReturn<
  * 测试用元素值选项。
  */
 interface DisplayValueOptions {
+  /** 是否严格按 Smart 值协议解析字段 */
+  smart?: boolean;
   /** 值转换方式 */
   transform?: 'boolean' | 'method' | 'text' | ((value: DisplayElementMetadata[keyof DisplayElementMetadata] | undefined) => unknown);
 }
@@ -86,6 +90,8 @@ function createDisplayElement(content?: string): WidgetShapeElement<DisplayEleme
     loop: createDefaultWidgetElementLoopConfig(),
     metadata: {
       content,
+      smartBoolean: createLiteralValue(true),
+      smartText: createVariableValue('$input.city'),
       subtitle: '副标题：{{ $input.city }}'
     }
   };
@@ -127,10 +133,49 @@ function mountDisplayValue<TField extends keyof DisplayElementMetadata & string>
 }
 
 describe('useElementValue', (): void => {
-  it('uses neutral method action helpers instead of depending on BSmart', (): void => {
-    expect(USE_ELEMENT_VALUE_SOURCE).toContain("from '../utils/widgetMethods'");
-    expect(USE_ELEMENT_VALUE_SOURCE).not.toContain('@/components/BSmart');
-    expect(USE_ELEMENT_VALUE_SOURCE).not.toContain('methodActions');
+  it('unwraps structured Smart values before applying transforms', (): void => {
+    const context: WidgetRenderContext = {
+      input: { city: '上海' },
+      output: undefined,
+      data: {}
+    };
+    const textWrapper = mountDisplayValue(createDisplayElement(), 'smartText', {
+      renderContext: context,
+      renderOptions: { mode: 'runtime' },
+      valueOptions: { smart: true, transform: 'text' }
+    });
+    const booleanWrapper = mountDisplayValue(createDisplayElement(), 'smartBoolean', {
+      valueOptions: { smart: true, transform: 'boolean' }
+    });
+
+    expect(textWrapper.text()).toBe('上海');
+    expect(booleanWrapper.text()).toBe('true');
+    textWrapper.unmount();
+    booleanWrapper.unmount();
+  });
+
+  it('rejects primitive and template values when strict Smart parsing is enabled', (): void => {
+    const element = createDisplayElement();
+
+    element.metadata.smartBoolean = true as unknown as BSmartValue<boolean>;
+    element.metadata.smartText = '{{ $input.city }}' as unknown as BSmartValue<string>;
+    const booleanWrapper = mountDisplayValue(element, 'smartBoolean', {
+      valueOptions: { smart: true, transform: 'boolean' }
+    });
+    const textWrapper = mountDisplayValue(element, 'smartText', {
+      renderContext: {
+        input: { city: '上海' },
+        output: undefined,
+        data: {}
+      },
+      renderOptions: { mode: 'runtime' },
+      valueOptions: { smart: true, transform: 'text' }
+    });
+
+    expect(booleanWrapper.text()).toBe('false');
+    expect(textWrapper.text()).toBe('');
+    booleanWrapper.unmount();
+    textWrapper.unmount();
   });
 
   it('infers value type from metadata field name', (): void => {
@@ -240,7 +285,7 @@ describe('useElementValue', (): void => {
 
     element.metadata.actions = [
       {
-        args: ['{{ $input.orderId }}', '城市：{{ $input.city }}', 1],
+        args: [createVariableValue('$input.orderId'), createLiteralValue('城市'), 1],
         method: ' submitOrder '
       },
       {
@@ -254,7 +299,7 @@ describe('useElementValue', (): void => {
       valueOptions: { transform: 'method' }
     });
 
-    expect(wrapper.text()).toBe('[{"args":["{{ $input.orderId }}","城市：{{ $input.city }}"],"method":"submitOrder"}]');
+    expect(wrapper.text()).toBe('[{"args":[{"type":"variable","value":"$input.orderId"},{"type":"literal","value":"城市"}],"method":"submitOrder"}]');
     wrapper.unmount();
   });
 

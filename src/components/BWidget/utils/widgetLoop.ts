@@ -5,7 +5,9 @@
 import type { WidgetElement, WidgetElementLoopConfig, WidgetPoint, WidgetSchemaObject, WidgetSchemaProperty, WidgetSize } from '../types';
 import type { WidgetRenderContext } from 'types/widget';
 import { cloneDeep } from 'lodash-es';
-import { formatWidgetBindingPath, isWidgetBindingPathSegmentAllowed, parseWidgetBindingPath, type WidgetBindingPath } from './widgetBindings';
+import type { BSmartValue } from '@/components/BSmart/types';
+import { createLiteralValue, createVariableValue, isLiteralValue, isVariableValue } from '@/components/BSmart/utils/value';
+import { formatWidgetBindingPath, isWidgetBindingPathSegmentAllowed, resolveWidgetSmartValue } from './widgetBindings';
 import { createWidgetRuntimeLayoutFromRenderElements } from './widgetRuntime/layout';
 import { readWidgetElementChildren } from './widgetTree';
 
@@ -113,7 +115,7 @@ interface WidgetLoopIterationTarget {
 export function createDefaultWidgetElementLoopConfig(): WidgetElementLoopConfig {
   return {
     enabled: false,
-    source: '',
+    source: createLiteralValue(''),
     autoColumns: false,
     columns: DEFAULT_WIDGET_LOOP_COLUMNS,
     columnGap: DEFAULT_WIDGET_LOOP_COLUMN_GAP,
@@ -163,6 +165,23 @@ function normalizeLoopVariableName(value: unknown, fallback: string): string {
 }
 
 /**
+ * 规整循环数据源，历史字符串值不再兼容。
+ * @param value - 原始循环数据源
+ * @returns 合法的结构化数据源
+ */
+function normalizeLoopSource(value: unknown): BSmartValue<string> {
+  if (isVariableValue(value)) {
+    return createVariableValue(value.value);
+  }
+
+  if (isLiteralValue(value) && typeof value.value === 'string') {
+    return createLiteralValue(value.value);
+  }
+
+  return createLiteralValue('');
+}
+
+/**
  * 读取循环配置实际参与绑定解析的变量名。
  * @param config - 循环配置
  * @returns 有效变量名
@@ -190,7 +209,7 @@ export function normalizeWidgetElementLoopConfig(config: Partial<WidgetElementLo
 
   return {
     enabled: config.enabled === true,
-    source: typeof config.source === 'string' ? config.source : defaultConfig.source,
+    source: normalizeLoopSource(config.source),
     autoColumns: config.autoColumns === true || rawColumns === 'auto',
     columns: normalizePositiveInteger(rawColumns, defaultConfig.columns),
     columnGap: normalizeNonNegativeNumber(config.columnGap, defaultConfig.columnGap),
@@ -252,46 +271,27 @@ function readLoopRenderContextLocals(renderContext: WidgetRenderContext): Record
 }
 
 /**
- * 读取绑定路径对应的上下文值。
+ * 按结构化数据源读取渲染上下文中的数组。
  * @param renderContext - 渲染上下文
- * @param path - 绑定路径
- * @returns 上下文值
+ * @param source - 结构化数据源
+ * @returns 数组数据
  */
-function readBindingPathContextValue(renderContext: WidgetRenderContext, path: WidgetBindingPath): unknown {
-  let currentValue: unknown;
+function readLoopSourceItems(renderContext: WidgetRenderContext, source: BSmartValue<string>): unknown[] {
+  const currentValue = resolveWidgetSmartValue(source, {
+    renderContext,
+    renderOptions: { mode: 'runtime' }
+  });
 
-  if (path.root === 'local') {
-    currentValue = readLoopRenderContextLocals(renderContext)?.[path.localRoot ?? ''];
-  } else {
-    currentValue = renderContext[path.root];
-  }
-
-  for (const segment of path.segments) {
-    if (!isRecord(currentValue)) {
-      return undefined;
-    }
-
-    currentValue = currentValue[segment];
-  }
-
-  return currentValue;
+  return Array.isArray(currentValue) ? currentValue : [];
 }
 
 /**
- * 按路径读取渲染上下文中的数组。
- * @param renderContext - 渲染上下文
- * @param source - 数据源路径
- * @returns 数组数据
+ * 判断循环配置是否引用了有效变量路径。
+ * @param source - 结构化循环数据源
+ * @returns 是否应进入循环展开逻辑
  */
-function readLoopSourceItems(renderContext: WidgetRenderContext, source: string): unknown[] {
-  const path = parseWidgetBindingPath(source, { locals: readLoopRenderContextLocals(renderContext) });
-  if (!path) {
-    return [];
-  }
-
-  const currentValue = readBindingPathContextValue(renderContext, path);
-
-  return Array.isArray(currentValue) ? currentValue : [];
+function hasLoopSource(source: BSmartValue<string>): boolean {
+  return isVariableValue(source) && Boolean(source.value.trim());
 }
 
 /**
@@ -525,7 +525,7 @@ function createElementLoopRenderElements(
   const loopConfig = element.loop;
 
   // 循环启用且配置了数据源才走展开逻辑，否则按普通元素渲染一次，避免空 source 导致元素整体消失。
-  if (loopConfig.enabled && loopConfig.source) {
+  if (loopConfig.enabled && hasLoopSource(loopConfig.source)) {
     return expandLoopTemplateTarget({ config: loopConfig, element, absolutePosition, autoColumnsRightX }, renderContext);
   }
 

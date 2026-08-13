@@ -1,21 +1,26 @@
 /**
  * @file select.component.test.ts
- * @description 验证 BSmartSelect 支持静态选择和切换到变量输入。
+ * @description 验证 BSmartSelect 直接支持静态选择与可编辑变量路径。
  * @vitest-environment jsdom
  */
+import { readFileSync } from 'node:fs';
 import type { PropType, Ref } from 'vue';
 import { defineComponent, nextTick, ref } from 'vue';
-import { mount, type VueWrapper } from '@vue/test-utils';
-import { describe, expect, it } from 'vitest';
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { afterEach, describe, expect, it } from 'vitest';
 import BSmartSelect from '@/components/BSmart/Select.vue';
-import type { VariableOptionGroup } from '@/components/BSmart/types';
+import type { BSmartSelectOption, BSmartSelectValue, VariableOptionGroup } from '@/components/BSmart/types';
+import { createLiteralValue, createVariableValue } from '@/components/BSmart/utils/value';
+
+/** BSmartSelect 源码，用于锁定组件边界。 */
+const selectSource = readFileSync('src/components/BSmart/Select.vue', 'utf8');
 
 /**
  * 测试宿主组件实例。
  */
 interface TextSelectHostVm {
   /** 当前选择值 */
-  value: boolean | string;
+  value: BSmartSelectValue<boolean>;
 }
 
 /**
@@ -24,8 +29,6 @@ interface TextSelectHostVm {
 interface TextSelectStubProps {
   /** 当前选中内部值 */
   value?: string | number;
-  /** 静态选项列表 */
-  options?: Array<{ label: string; value: string | number }>;
 }
 
 /**
@@ -36,45 +39,31 @@ function createVariableOptions(): VariableOptionGroup[] {
   return [
     {
       type: 'variable',
-      options: [
-        {
-          label: '加载中',
-          value: 'loading'
-        }
-      ]
+      options: [{ label: '加载中', value: 'loading' }]
     }
   ];
 }
 
 /**
  * 挂载 BSmartSelect。
- * @param initialValue - 初始值
+ * @param initialValue - 初始结构化值
  * @returns 组件包装器
  */
-function mountTextSelect(initialValue: boolean | string): VueWrapper {
+function mountTextSelect(initialValue: BSmartSelectValue<boolean>): VueWrapper {
   const Host = defineComponent({
     name: 'TextSelectHost',
-    components: {
-      BSmartSelect
-    },
-    setup(): { value: Ref<boolean | string>; variables: VariableOptionGroup[] } {
-      const value = ref<boolean | string>(initialValue);
-
+    components: { BSmartSelect },
+    setup(): { options: BSmartSelectOption<boolean>[]; value: Ref<BSmartSelectValue<boolean>>; variables: VariableOptionGroup[] } {
       return {
-        value,
+        options: [
+          { label: '启用', value: false },
+          { label: '禁用', value: true }
+        ],
+        value: ref<BSmartSelectValue<boolean>>(initialValue),
         variables: createVariableOptions()
       };
     },
-    template: `
-      <BSmartSelect
-        v-model:value="value"
-        :options="[
-          { label: '启用', value: false },
-          { label: '禁用', value: true }
-        ]"
-        :variables="variables"
-      />
-    `
+    template: '<BSmartSelect v-model:value="value" :options="options" :variables="variables" />'
   });
 
   return mount(Host, {
@@ -82,18 +71,22 @@ function mountTextSelect(initialValue: boolean | string): VueWrapper {
       components: {
         BButton: defineComponent({
           name: 'BButtonStub',
+          inheritAttrs: false,
+          props: {
+            icon: { type: String, default: '' }
+          },
           emits: {
-            /**
-             * 触发按钮点击。
-             * @returns 是否允许触发事件
-             */
+            /** 透传点击事件。 */
             click: (): boolean => true
           },
-          template: '<button v-bind="$attrs" type="button" @click="$emit(\'click\')"><slot></slot></button>'
+          template: '<button v-bind="$attrs" type="button" :data-icon="icon" @click="$emit(\'click\')"></button>'
         }),
         BIcon: defineComponent({
           name: 'BIconStub',
-          template: '<i></i>'
+          props: {
+            icon: { type: String, required: true }
+          },
+          template: '<span class="b-icon-stub" :data-icon="icon"></span>'
         }),
         BSelect: defineComponent({
           name: 'BSelectStub',
@@ -105,11 +98,7 @@ function mountTextSelect(initialValue: boolean | string): VueWrapper {
             }
           },
           emits: {
-            /**
-             * 更新选项值。
-             * @param value - 内部选项值
-             * @returns 是否允许触发事件
-             */
+            /** 透传静态选项值。 */
             'update:value': (value: string | number): boolean => typeof value === 'string' || typeof value === 'number'
           },
           template: `
@@ -125,144 +114,130 @@ function mountTextSelect(initialValue: boolean | string): VueWrapper {
               </button>
             </div>
           `
-        }),
-        BSmartInput: defineComponent({
-          name: 'BSmartInputStub',
-          props: {
-            value: { type: String, default: '' },
-            options: {
-              type: Array as PropType<VariableOptionGroup[]>,
-              default: (): VariableOptionGroup[] => []
-            },
-            replaceEntireValue: { type: Boolean, default: false },
-            placeholder: { type: String, default: '' },
-            disabled: { type: Boolean, default: false }
-          },
-          emits: {
-            /**
-             * 更新输入值。
-             * @param value - 输入值
-             * @returns 是否允许触发事件
-             */
-            'update:value': (value: string): boolean => typeof value === 'string'
-          },
-          template: `
-            <div class="b-smart-select-test-input">
-              <input
-                class="b-smart-select-test-input-control"
-                :value="value"
-                @input="$emit('update:value', $event.target.value)"
-              />
-              <button
-                class="b-smart-select-test-input-variable"
-                type="button"
-                @click="$emit('update:value', '{{ loading }}')"
-              >
-                变量
-              </button>
-            </div>
-          `
         })
       }
-    }
+    },
+    attachTo: document.body
   });
-}
-
-/**
- * 查找 BSmartInput stub。
- * @param wrapper - 组件包装器
- * @returns BSmartInput 包装器
- */
-function findTextInput(wrapper: VueWrapper): VueWrapper {
-  return wrapper.findComponent({ name: 'BSmartInputStub' });
 }
 
 describe('BSmartSelect', (): void => {
-  it('overwrites the model with a static option value', async (): Promise<void> => {
-    const wrapper = mountTextSelect(false);
+  afterEach((): void => {
+    document.body.innerHTML = '';
+  });
+
+  it('does not depend on BSmartInput', (): void => {
+    expect(selectSource).not.toContain('BSmartInput');
+    expect(selectSource).toContain('icon="lucide:list"');
+  });
+
+  it('wraps a static option in a literal value', async (): Promise<void> => {
+    const wrapper = mountTextSelect(createLiteralValue(false));
 
     await wrapper.findAll('.b-smart-select-test-option')[1].trigger('click');
 
-    expect((wrapper.vm as unknown as TextSelectHostVm).value).toBe(true);
+    expect((wrapper.vm as unknown as TextSelectHostVm).value).toEqual(createLiteralValue(true));
     wrapper.unmount();
   });
 
-  it('switches to BSmartInput when the variable button is clicked', async (): Promise<void> => {
-    const wrapper = mountTextSelect(false);
+  it('shows a closed shared variable input without mutating the model', async (): Promise<void> => {
+    const wrapper = mountTextSelect(createLiteralValue(false));
 
     await wrapper.find('.b-smart-select__variable-button').trigger('click');
+    await nextTick();
 
-    const input = findTextInput(wrapper);
-    const inputProps = input.props() as { options?: VariableOptionGroup[]; replaceEntireValue?: boolean };
+    expect(wrapper.find('.b-smart-variable-input').exists()).toBe(true);
+    expect(wrapper.find('.select-dropdown').exists()).toBe(false);
+    expect((wrapper.vm as unknown as TextSelectHostVm).value).toEqual(createLiteralValue(false));
 
-    expect(input.exists()).toBe(true);
-    expect(inputProps.replaceEntireValue).toBe(true);
-    expect(inputProps.options).toEqual(createVariableOptions());
+    await wrapper.find('.b-smart-variable-input__dropdown-button').trigger('click');
+    expect(wrapper.find('.select-dropdown').exists()).toBe(true);
     wrapper.unmount();
   });
 
-  it('overwrites the model with the value emitted by BSmartInput', async (): Promise<void> => {
-    const wrapper = mountTextSelect(false);
+  it('preserves an unfinished variable mode across an equivalent model refresh', async (): Promise<void> => {
+    const wrapper = mountTextSelect(createLiteralValue(false));
 
     await wrapper.find('.b-smart-select__variable-button').trigger('click');
-    await wrapper.find('.b-smart-select-test-input-variable').trigger('click');
+    (wrapper.vm as unknown as TextSelectHostVm).value = createLiteralValue(false);
+    await nextTick();
 
-    expect((wrapper.vm as unknown as TextSelectHostVm).value).toBe('{{ loading }}');
+    expect(wrapper.find('.b-smart-variable-input').exists()).toBe(true);
+    expect((wrapper.vm as unknown as TextSelectHostVm).value).toEqual(createLiteralValue(false));
     wrapper.unmount();
   });
 
-  it('renders BSmartInput immediately when the current value is a variable template', (): void => {
-    const wrapper = mountTextSelect('{{ $input.field }}');
-    const input = findTextInput(wrapper);
-    const inputProps = input.props() as { value?: string };
+  it('writes the selected variable reference', async (): Promise<void> => {
+    const wrapper = mountTextSelect(createLiteralValue(false));
 
-    expect(input.exists()).toBe(true);
-    expect(inputProps.value).toBe('$input.field');
-    expect(wrapper.findComponent({ name: 'BSelectStub' }).exists()).toBe(false);
+    await wrapper.find('.b-smart-select__variable-button').trigger('click');
+    await nextTick();
+    await wrapper.find('.b-smart-variable-input__dropdown-button').trigger('click');
+    await wrapper.find('[data-variable-value="loading"]').trigger('click');
+
+    expect((wrapper.vm as unknown as TextSelectHostVm).value).toEqual(createVariableValue('loading'));
     wrapper.unmount();
   });
 
-  it('wraps raw BSmartInput values as variable templates in the model', async (): Promise<void> => {
-    const wrapper = mountTextSelect('{{ loading }}');
+  it('renders and edits an existing variable reference', async (): Promise<void> => {
+    const wrapper = mountTextSelect(createVariableValue('loading'));
+    const input = wrapper.find<HTMLInputElement>('.b-smart-variable-input__control input');
 
-    await wrapper.find('.b-smart-select-test-input-control').setValue('$input.nextField');
+    expect(input.element.value).toBe('loading');
+    await input.setValue('$input.nextField');
 
-    expect((wrapper.vm as unknown as TextSelectHostVm).value).toBe('{{ $input.nextField }}');
+    expect((wrapper.vm as unknown as TextSelectHostVm).value).toEqual(createVariableValue('$input.nextField'));
     wrapper.unmount();
   });
 
-  it('switches back to static select mode from variable input mode', async (): Promise<void> => {
-    const wrapper = mountTextSelect('{{ loading }}');
+  it('clearing a committed variable path returns to no static selection', async (): Promise<void> => {
+    const wrapper = mountTextSelect(createVariableValue('loading'));
+
+    await wrapper.find<HTMLInputElement>('.b-smart-variable-input__control input').setValue('');
+    await nextTick();
+    await flushPromises();
+
+    expect((wrapper.vm as unknown as TextSelectHostVm).value).toEqual(createVariableValue('loading'));
+    expect(wrapper.find('.b-smart-variable-input').exists()).toBe(true);
+
+    await wrapper.find('.b-smart-select__select-button').trigger('click');
+
+    expect((wrapper.vm as unknown as TextSelectHostVm).value).toBeUndefined();
+    expect(wrapper.find('.b-smart-variable-input').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('switches back to the static UI without mutating the variable model', async (): Promise<void> => {
+    const wrapper = mountTextSelect(createVariableValue('loading'));
 
     await wrapper.find('.b-smart-select__select-button').trigger('click');
 
     const select = wrapper.findComponent({ name: 'BSelectStub' });
     const selectProps = select.props() as TextSelectStubProps;
-
-    expect(findTextInput(wrapper).exists()).toBe(false);
     expect(select.exists()).toBe(true);
     expect(selectProps.value).toBeUndefined();
-    expect(selectProps.options).not.toContainEqual({
-      label: '{{ loading }}',
-      value: '{{ loading }}'
-    });
+    expect((wrapper.vm as unknown as TextSelectHostVm).value).toEqual(createVariableValue('loading'));
     wrapper.unmount();
   });
 
-  it('switches back to static select mode when the external model value becomes static', async (): Promise<void> => {
-    const wrapper = mountTextSelect('{{ loading }}');
+  it('follows an external static model update', async (): Promise<void> => {
+    const wrapper = mountTextSelect(createVariableValue('loading'));
 
-    expect(findTextInput(wrapper).exists()).toBe(true);
-
-    (wrapper.vm as unknown as TextSelectHostVm).value = false;
+    (wrapper.vm as unknown as TextSelectHostVm).value = createLiteralValue(false);
     await nextTick();
 
-    const select = wrapper.findComponent({ name: 'BSelectStub' });
-    const selectProps = select.props() as TextSelectStubProps;
-
-    expect(findTextInput(wrapper).exists()).toBe(false);
-    expect(select.exists()).toBe(true);
+    const selectProps = wrapper.findComponent({ name: 'BSelectStub' }).props() as TextSelectStubProps;
     expect(selectProps.value).toBe('static:0:boolean:false');
+    expect(wrapper.find('.b-smart-variable-input').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('renders an unselected static control for undefined', (): void => {
+    const wrapper = mountTextSelect(undefined);
+    const selectProps = wrapper.findComponent({ name: 'BSelectStub' }).props() as TextSelectStubProps;
+
+    expect(selectProps.value).toBeUndefined();
+    expect(wrapper.find('.b-smart-variable-input').exists()).toBe(false);
     wrapper.unmount();
   });
 });

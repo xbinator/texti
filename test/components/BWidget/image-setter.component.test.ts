@@ -7,8 +7,10 @@ import { defineComponent, ref } from 'vue';
 import type { PropType, Ref } from 'vue';
 import { mount, type VueWrapper } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
-import type { Variable, VariableOptionGroup } from '@/components/BSmart/types';
+import type { BSmartInputValue, Variable, VariableOptionGroup } from '@/components/BSmart/types';
+import { createLiteralValue, isSmartValue } from '@/components/BSmart/utils/value';
 import ImageSetter from '@/components/BWidget/elements/Image/Setter.vue';
+import { imageElementSchema } from '@/components/BWidget/elements/Image/schema';
 import { provideWidgetContext } from '@/components/BWidget/hooks/useWidgetContext';
 import type { WidgetData, WidgetElement } from '@/components/BWidget/types';
 import { createDefaultWidgetElementLoopConfig } from '@/components/BWidget/utils/widgetLoop';
@@ -30,7 +32,8 @@ function createImageElement(): WidgetElement {
     style: {},
     loop: createDefaultWidgetElementLoopConfig(),
     metadata: {
-      src: 'https://example.com/a.png',
+      alt: createLiteralValue(''),
+      src: createLiteralValue('https://example.com/a.png'),
       fit: 'cover'
     }
   };
@@ -134,7 +137,7 @@ function mountImageSetter(element: WidgetElement): VueWrapper {
         BSmartInput: defineComponent({
           name: 'BSmartInputStub',
           props: {
-            value: { type: String, default: undefined },
+            value: { type: Object as PropType<BSmartInputValue>, required: true },
             options: {
               type: Array as PropType<VariableOptionGroup[]>,
               default: (): VariableOptionGroup[] => []
@@ -145,12 +148,13 @@ function mountImageSetter(element: WidgetElement): VueWrapper {
           emits: {
             /**
              * 更新输入文本。
-             * @param value - 新输入值
+             * @param value - 新结构化输入值
              * @returns 是否允许触发事件
              */
-            'update:value': (value: string): boolean => typeof value === 'string'
+            'update:value': (value: BSmartInputValue): boolean => isSmartValue(value)
           },
-          template: '<input class="widget-image-setter-stub-smart-input" :value="value" @input="$emit(\'update:value\', $event.target.value)" />'
+          template:
+            '<input class="widget-image-setter-stub-smart-input" :value="value.value" @input="$emit(\'update:value\', { type: \'literal\', value: $event.target.value })" />'
         }),
         BSelect: defineComponent({
           name: 'BSelectStub',
@@ -191,6 +195,11 @@ function readVariables(options: VariableOptionGroup[]): VariableTreeNode[] {
 }
 
 describe('Image Setter', (): void => {
+  it('defines structured Smart defaults in the image schema', (): void => {
+    expect(imageElementSchema.metadata?.src).toEqual(createLiteralValue(''));
+    expect(imageElementSchema.metadata?.alt).toEqual(createLiteralValue(''));
+  });
+
   it('writes src to metadata when the address input changes', async (): Promise<void> => {
     const element = createImageElement();
     const wrapper = mountImageSetter(element);
@@ -198,7 +207,7 @@ describe('Image Setter', (): void => {
 
     await input.setValue('https://cdn.example.com/b.png');
 
-    expect(element.metadata.src).toBe('https://cdn.example.com/b.png');
+    expect(element.metadata.src).toEqual(createLiteralValue('https://cdn.example.com/b.png'));
     wrapper.unmount();
   });
 
@@ -220,7 +229,7 @@ describe('Image Setter', (): void => {
 
     await input.setValue('一张示意图');
 
-    expect(element.metadata.alt).toBe('一张示意图');
+    expect(element.metadata.alt).toEqual(createLiteralValue('一张示意图'));
     wrapper.unmount();
   });
 
@@ -237,9 +246,9 @@ describe('Image Setter', (): void => {
 
   it('initializes inputs with existing metadata values', (): void => {
     const element = createImageElement();
-    element.metadata.src = 'https://example.com/init.png';
+    element.metadata.src = createLiteralValue('https://example.com/init.png');
     element.metadata.fit = 'contain';
-    element.metadata.alt = '初始替代文本';
+    element.metadata.alt = createLiteralValue('初始替代文本');
     const wrapper = mountImageSetter(element);
     const srcInput = wrapper.find('.widget-image-setter-stub-smart-input');
     const altInput = wrapper.find('.widget-image-setter-stub-item[data-label="替代文本"] .widget-image-setter-stub-smart-input');
@@ -269,7 +278,7 @@ describe('Image Setter', (): void => {
 
     await input.setValue('https://example.com/new.png');
 
-    expect(element.metadata.src).toBe('https://example.com/new.png');
+    expect(element.metadata.src).toEqual(createLiteralValue('https://example.com/new.png'));
     expect(element.metadata.fit).toBe('cover');
     expect(element.metadata.helperText).toBe('辅助信息');
     wrapper.unmount();

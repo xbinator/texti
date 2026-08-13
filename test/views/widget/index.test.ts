@@ -10,6 +10,7 @@ import type { ComponentPublicInstance, PropType } from 'vue';
 import { shallowMount, type VueWrapper } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WidgetData, WidgetElement, WidgetElementLoopConfig, WidgetSelectTarget, WidgetViewportInset } from '@/components/BWidget/types';
+import { createVariableValue } from '@/components/BSmart/utils/value';
 import { createDefaultWidgetData } from '@/components/BWidget/utils/widgetData';
 import { createDefaultWidgetElementLoopConfig } from '@/components/BWidget/utils/widgetLoop';
 import WidgetPage from '@/views/widget/index.vue';
@@ -162,7 +163,7 @@ function createGroupElement(id: string, title: string, children: WidgetElement[]
 function createLoopConfig(): WidgetElementLoopConfig {
   return {
     enabled: true,
-    source: '$input.items',
+    source: createVariableValue('$input.items'),
     autoColumns: false,
     columns: 3,
     columnGap: 16,

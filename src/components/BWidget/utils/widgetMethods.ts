@@ -2,16 +2,11 @@
  * @file widgetMethods.ts
  * @description BWidget 方法配置规整工具。
  */
+import type { BSmartMethodAction, BSmartValue } from '@/components/BSmart/types';
+import { createLiteralValue, createVariableValue, isLiteralValue, isVariableValue } from '@/components/BSmart/utils/value';
 
-/**
- * 方法动作配置。
- */
-export interface MethodAction {
-  /** 需要调用的方法名 */
-  method: string;
-  /** 方法参数，支持 {{ }} 变量模板 */
-  args: string[];
-}
+/** 方法动作配置。 */
+export type MethodAction = BSmartMethodAction;
 
 /**
  * 判断值是否为普通对象。
@@ -20,6 +15,23 @@ export interface MethodAction {
  */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * 规整单个方法参数。
+ * @param value - 原始方法参数
+ * @returns 合法的结构化参数，非法值返回 null
+ */
+function normalizeMethodArgument(value: unknown): BSmartValue<string> | null {
+  if (isVariableValue(value)) {
+    return createVariableValue(value.value);
+  }
+
+  if (isLiteralValue(value) && typeof value.value === 'string') {
+    return createLiteralValue(value.value);
+  }
+
+  return null;
 }
 
 /**
@@ -39,7 +51,13 @@ export function normalizeMethodAction(value: unknown): MethodAction | null {
   }
 
   return {
-    args: Array.isArray(value.args) ? value.args.filter((item: unknown): item is string => typeof item === 'string') : [],
+    args: Array.isArray(value.args)
+      ? value.args.flatMap((item: unknown): BSmartValue<string>[] => {
+          const normalizedArgument = normalizeMethodArgument(item);
+
+          return normalizedArgument ? [normalizedArgument] : [];
+        })
+      : [],
     method
   };
 }

@@ -416,6 +416,34 @@ describe('VariableSelect layout', (): void => {
     wrapper.unmount();
   });
 
+  it('renders only the active variable highlight', (): void => {
+    const wrapper = mount(VariableSelect, {
+      props: {
+        visible: true,
+        variables: [
+          { label: '城市', value: '$input.city' },
+          { label: '图片', value: '$input.image' }
+        ],
+        activeIndex: 1,
+        position: {
+          top: 0,
+          left: 0,
+          bottom: 0
+        }
+      },
+      global: {
+        components: {
+          BButton: BButtonStub
+        }
+      }
+    });
+    expect(document.body.querySelectorAll('.select-dropdown__item.active')).toHaveLength(1);
+    expect(document.body.querySelectorAll('.variable-item.is-selected')).toHaveLength(0);
+    expect(variableSelectSource).not.toContain('selectedValue');
+    expect(variableSelectSource).not.toContain('is-selected');
+    wrapper.unmount();
+  });
+
   it('keeps leaf items without toggle slots visually nested under their parent', (): void => {
     expect(variableSelectSource).toContain('padding-left: calc(var(--variable-depth, 0) * 24px);');
     expect(variableSelectSource).toContain('padding-left: calc(var(--variable-depth, 0) * 24px + var(--variable-leaf-offset, 0px));');

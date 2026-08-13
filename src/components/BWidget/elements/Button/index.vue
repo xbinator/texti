@@ -38,11 +38,11 @@ const props = defineProps<Props>();
 /** 当前按钮元素响应式引用。 */
 const elementRef = toRef(props, 'element');
 /** 按钮展示文字（渲染态，已解析变量）。 */
-const buttonText = useElementValue(elementRef, 'text', { transform: 'text' });
+const buttonText = useElementValue(elementRef, 'text', { smart: true, transform: 'text' });
 /** 是否禁用按钮交互。 */
-const buttonDisabled = useElementValue(elementRef, 'disabled', { transform: 'boolean' });
+const buttonDisabled = useElementValue(elementRef, 'disabled', { smart: true, transform: 'boolean' });
 /** 是否展示加载态并阻止重复点击。 */
-const buttonLoading = useElementValue(elementRef, 'loading', { transform: 'boolean' });
+const buttonLoading = useElementValue(elementRef, 'loading', { smart: true, transform: 'boolean' });
 /** 点击动作执行器。 */
 const actionRunner = useElementAction(elementRef, 'actions');
 

@@ -8,7 +8,8 @@ import { defineComponent, ref } from 'vue';
 import type { PropType, Ref } from 'vue';
 import { mount, type VueWrapper } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
-import type { Variable, VariableOptionGroup } from '@/components/BSmart/types';
+import type { BSmartValue, Variable, VariableOptionGroup } from '@/components/BSmart/types';
+import { createLiteralValue } from '@/components/BSmart/utils/value';
 import TextSetter from '@/components/BWidget/elements/Text/Setter.vue';
 import { provideWidgetContext } from '@/components/BWidget/hooks/useWidgetContext';
 import type { WidgetData, WidgetElement } from '@/components/BWidget/types';
@@ -129,7 +130,7 @@ function createWidgetData(): WidgetData {
  * @param source - 循环数据源路径
  * @returns 循环配置
  */
-function createLoopConfig(source = ''): WidgetElement['loop'] {
+function createLoopConfig(source: BSmartValue<string> = createLiteralValue('')): WidgetElement['loop'] {
   return {
     enabled: true,
     source,

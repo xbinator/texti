@@ -2,6 +2,7 @@
  * @file types.ts
  * @description BWidget 独立Widget工具的类型定义。
  */
+import type { BSmartValue } from '@/components/BSmart/types';
 
 /**
  * Widget坐标点。
@@ -138,8 +139,8 @@ export type WidgetElementStyleChange = Partial<WidgetElementStyle>;
 export interface WidgetElementLoopConfig {
   /** 是否启用循环渲染 */
   enabled: boolean;
-  /** 数组数据源路径 */
-  source: string;
+  /** 数组数据源静态值或变量路径 */
+  source: BSmartValue<string>;
   /** 是否根据可用宽度自适应每行列数 */
   autoColumns: boolean;
   /** 每行渲染数量 */

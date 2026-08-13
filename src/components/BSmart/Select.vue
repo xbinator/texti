@@ -1,11 +1,11 @@
 <!--
   @file Select.vue
-  @description 支持变量模板覆盖的单值选择组件。
+  @description 在静态选项和可编辑变量路径之间显式切换的单值 Smart 选择组件。
 -->
 <template>
   <div :class="name">
-    <template v-if="inputMode">
-      <BSmartInput v-model:value="inputValue" :options="variables" :placeholder="placeholder" :disabled="disabled" replace-entire-value />
+    <template v-if="variableMode">
+      <VariableInput :value="variableDraft" :options="variables" :placeholder="placeholder" :disabled="disabled" @update:value="handleVariableInput" />
       <button :class="bem('select-button')" type="button" :disabled="disabled" @click="switchToSelectMode">
         <BIcon icon="lucide:list" />
       </button>
@@ -19,35 +19,37 @@
         :width="width"
         @update:value="handleSelectValueUpdate"
       />
-      <button :class="bem('variable-button')" type="button" :disabled="disabled || !hasVariables" @click="switchToInputMode">
+      <button :class="bem('variable-button')" type="button" :disabled="disabled || !hasVariables" @click="switchToVariableMode">
         <BIcon icon="lucide:braces" />
       </button>
     </template>
   </div>
 </template>
 
-<script setup lang="ts">
+<script setup lang="ts" generic="T extends BSmartSelectStaticValue = BSmartSelectStaticValue">
 import type { BSmartSelectOption, BSmartSelectStaticValue, BSmartSelectValue, Variable, VariableOptionGroup } from './types';
 import { computed, ref, watch } from 'vue';
 import { createNamespace } from '@/utils/namespace';
+import VariableInput from './components/VariableInput.vue';
+import { createLiteralValue, createVariableValue, isLiteralValue, isVariableValue } from './utils/value';
 import { flattenVariables } from './utils/variables';
 
 /**
  * 内部静态选项映射。
  */
-interface TextSelectOptionEntry {
+interface TextSelectOptionEntry<TValue extends BSmartSelectStaticValue> {
   /** BSelect 使用的字符串值 */
   key: string;
   /** 原始选项 */
-  option: BSmartSelectOption;
+  option: BSmartSelectOption<TValue>;
 }
 
 /**
  * BSmartSelect 组件属性。
  */
-interface Props {
+interface Props<TValue extends BSmartSelectStaticValue> {
   /** 静态选项 */
-  options?: BSmartSelectOption[];
+  options?: BSmartSelectOption<TValue>[];
   /** 变量候选 */
   variables?: VariableOptionGroup[];
   /** 占位符 */
@@ -58,19 +60,25 @@ interface Props {
   width?: number | string;
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  options: (): BSmartSelectOption[] => [],
+const props = withDefaults(defineProps<Props<T>>(), {
+  options: (): BSmartSelectOption<T>[] => [],
   variables: (): VariableOptionGroup[] => [],
   placeholder: '请选择',
   disabled: false,
   width: '100%'
 });
 
-const modelValue = defineModel<BSmartSelectValue>('value', { default: undefined });
+const modelValue = defineModel<BSmartSelectValue<T>>('value', { default: undefined });
 const [name, bem] = createNamespace('smart-select');
 
-/** 整体变量模板匹配表达式。 */
-const WHOLE_TEMPLATE_PATTERN = /^\s*\{\{[\s\S]+?\}\}\s*$/;
+/** 当前是否展示变量输入模式。 */
+const variableMode = ref(isVariableValue(modelValue.value));
+/** 当前变量路径草稿。 */
+const variableDraft = ref(isVariableValue(modelValue.value) ? modelValue.value.value : '');
+/** 变量树根节点。 */
+const variableTrees = computed<Variable[]>((): Variable[] => props.variables.flatMap((group: VariableOptionGroup): Variable[] => group.options));
+/** 是否存在可选变量。 */
+const hasVariables = computed<boolean>((): boolean => flattenVariables(variableTrees.value).length > 0);
 
 /**
  * 创建静态选项内部 key。
@@ -78,72 +86,14 @@ const WHOLE_TEMPLATE_PATTERN = /^\s*\{\{[\s\S]+?\}\}\s*$/;
  * @param index - 选项下标
  * @returns 内部 key
  */
-function createOptionKey(value: BSmartSelectStaticValue, index: number): string {
+function createOptionKey(value: T, index: number): string {
   return `static:${index}:${typeof value}:${JSON.stringify(value)}`;
 }
 
-/**
- * 判断值是否为完整变量模板。
- * @param value - 待判断值
- * @returns 是否为完整变量模板
- */
-function isTemplateValue(value: unknown): value is string {
-  return typeof value === 'string' && WHOLE_TEMPLATE_PATTERN.test(value);
-}
-
-/**
- * 读取完整变量模板内部表达式。
- * @param value - 模板值
- * @returns 去掉外层 {{ }} 的表达式
- */
-function readTemplateExpression(value: string): string {
-  const matched = value.match(WHOLE_TEMPLATE_PATTERN);
-
-  return matched ? value.replace(/^\s*\{\{\s*/, '').replace(/\s*\}\}\s*$/, '') : value;
-}
-
-/**
- * 将输入表达式格式化为完整变量模板。
- * @param value - 输入表达式或完整模板
- * @returns 完整变量模板
- */
-function formatTemplateValue(value: string): string {
-  if (WHOLE_TEMPLATE_PATTERN.test(value)) {
-    return value;
-  }
-
-  const expression = value.trim();
-
-  return expression ? `{{ ${expression} }}` : '';
-}
-
-/**
- * 判断两个静态选项值是否相同。
- * @param left - 左侧值
- * @param right - 右侧值
- * @returns 是否相同
- */
-function isSameStaticValue(left: BSmartSelectStaticValue, right: BSmartSelectValue): boolean {
-  return left === right;
-}
-
-/** 当前是否使用变量输入模式。 */
-const inputMode = ref(isTemplateValue(modelValue.value));
-/** 变量树根节点。 */
-const variableTrees = computed<Variable[]>((): Variable[] => props.variables.flatMap((group: VariableOptionGroup): Variable[] => group.options));
-/** 是否存在可选变量。 */
-const hasVariables = computed<boolean>((): boolean => flattenVariables(variableTrees.value).length > 0);
-/** 变量输入框值。 */
-const inputValue = computed<string>({
-  get: (): string => (typeof modelValue.value === 'string' ? readTemplateExpression(modelValue.value) : ''),
-  set: (value: string): void => {
-    modelValue.value = formatTemplateValue(value);
-  }
-});
 /** 静态选项映射。 */
-const optionEntries = computed<TextSelectOptionEntry[]>((): TextSelectOptionEntry[] =>
+const optionEntries = computed<TextSelectOptionEntry<T>[]>((): TextSelectOptionEntry<T>[] =>
   props.options.map(
-    (option: BSmartSelectOption, index: number): TextSelectOptionEntry => ({
+    (option: BSmartSelectOption<T>, index: number): TextSelectOptionEntry<T> => ({
       key: createOptionKey(option.value, index),
       option
     })
@@ -152,18 +102,19 @@ const optionEntries = computed<TextSelectOptionEntry[]>((): TextSelectOptionEntr
 /** BSelect 选项。 */
 const selectOptions = computed<Array<{ label: string; value: string }>>(
   (): Array<{ label: string; value: string }> =>
-    optionEntries.value.map((entry: TextSelectOptionEntry): { label: string; value: string } => ({
+    optionEntries.value.map((entry: TextSelectOptionEntry<T>): { label: string; value: string } => ({
       label: entry.option.label,
       value: entry.key
     }))
 );
-/** 当前 BSelect 选中值。 */
+/** 当前静态选项内部 key。 */
 const selectedKey = computed<string | undefined>((): string | undefined => {
-  if (isTemplateValue(modelValue.value)) {
+  if (!isLiteralValue(modelValue.value)) {
     return undefined;
   }
 
-  return optionEntries.value.find((entry: TextSelectOptionEntry): boolean => isSameStaticValue(entry.option.value, modelValue.value))?.key;
+  const literalValue = modelValue.value.value as T;
+  return optionEntries.value.find((entry: TextSelectOptionEntry<T>): boolean => entry.option.value === literalValue)?.key;
 });
 
 /**
@@ -171,34 +122,65 @@ const selectedKey = computed<string | undefined>((): string | undefined => {
  * @param value - 内部选项值
  */
 function handleSelectValueUpdate(value: string | number | undefined): void {
-  const entry = optionEntries.value.find((item: TextSelectOptionEntry): boolean => item.key === value);
-
+  const entry = optionEntries.value.find((item: TextSelectOptionEntry<T>): boolean => item.key === value);
   if (entry) {
-    modelValue.value = entry.option.value;
-    inputMode.value = false;
+    modelValue.value = createLiteralValue(entry.option.value);
+    variableMode.value = false;
   }
+}
+
+/**
+ * 处理变量路径输入或选择。
+ * @param path - 新变量路径
+ */
+function handleVariableInput(path: string): void {
+  variableDraft.value = path;
+
+  if (!path.trim()) {
+    // 空路径只保留为未提交草稿，避免写入非法变量值或在输入事件期间卸载控件。
+    return;
+  }
+
+  modelValue.value = createVariableValue(path);
 }
 
 /**
  * 切换到变量输入模式。
  */
-function switchToInputMode(): void {
-  if (props.disabled || !hasVariables.value) return;
+function switchToVariableMode(): void {
+  if (props.disabled || !hasVariables.value) {
+    return;
+  }
 
-  inputMode.value = true;
+  variableDraft.value = isVariableValue(modelValue.value) ? modelValue.value.value : '';
+  variableMode.value = true;
 }
 
 /**
- * 切换到静态选择模式。
+ * 返回静态选择界面但不改写当前模型。
  */
 function switchToSelectMode(): void {
-  if (props.disabled) return;
+  if (props.disabled) {
+    return;
+  }
 
-  inputMode.value = false;
+  if (!variableDraft.value.trim() && isVariableValue(modelValue.value)) {
+    modelValue.value = undefined;
+  }
+
+  variableMode.value = false;
 }
 
-watch(modelValue, (value: BSmartSelectValue): void => {
-  inputMode.value = isTemplateValue(value);
+watch([() => modelValue.value?.type, () => modelValue.value?.value], (): void => {
+  const { value } = modelValue;
+  if (isVariableValue(value)) {
+    variableDraft.value = value.value;
+    variableMode.value = true;
+    return;
+  }
+
+  variableDraft.value = '';
+  variableMode.value = false;
 });
 </script>
 
@@ -228,17 +210,15 @@ watch(modelValue, (value: BSmartSelectValue): void => {
   border-radius: var(--control-radius);
   transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard),
     border-color var(--motion-duration-base) var(--motion-easing-standard);
-}
 
-.b-smart-select__variable-button:hover,
-.b-smart-select__select-button:hover {
-  color: var(--color-primary);
-  border-color: var(--color-primary-border);
-}
+  &:hover {
+    color: var(--color-primary);
+    border-color: var(--color-primary-border);
+  }
 
-.b-smart-select__variable-button:disabled,
-.b-smart-select__select-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
 }
 </style>

@@ -50,8 +50,10 @@ import { pathToFileURL } from 'node:url';
  * @property {string} expression - Expression body without template delimiters.
  */
 
-const SUPPORTED_ELEMENT_NAMES = new Set(['rect', 'text', 'image', 'button', 'group']);
+const SUPPORTED_ELEMENT_NAMES = new Set(['rect', 'text', 'image', 'button', 'group', 'swiper']);
 const SCHEMA_PROPERTY_TYPES = new Set(['string', 'number', 'boolean', 'object', 'array']);
+const IMAGE_FIT_VALUES = new Set(['cover', 'contain', 'fill', 'none', 'scale-down']);
+const SWIPER_INDICATOR_SHAPES = new Set(['dot', 'line', 'active-line']);
 const MAX_PACKAGE_FILES = 50;
 const MAX_RESOURCE_BYTES = 5 * 1024 * 1024;
 const LOCAL_RESOURCE_SKIP_PATTERN = /^(?:https?:\/\/|data:|blob:|\{\{)/i;
@@ -135,6 +137,79 @@ function validateBooleanField(record, key, path, result) {
   }
 
   return true;
+}
+
+/**
+ * Validate one structured Smart value and its literal payload type.
+ * @param {unknown} value - Smart value candidate.
+ * @param {string} path - Diagnostic path.
+ * @param {ValidationResult} result - Aggregated validation result.
+ * @param {'string' | 'boolean'} literalType - Required literal payload type.
+ * @param {{ literalNonEmpty?: boolean }} [options] - Literal payload constraints.
+ * @returns {boolean} True when the Smart value is valid.
+ */
+function validateSmartValue(value, path, result, literalType, options = {}) {
+  if (isRecord(value) === false) {
+    addDiagnostic(result, 'error', path, 'must be a structured Smart value');
+    return false;
+  }
+
+  if (value.type !== 'literal' && value.type !== 'variable') {
+    addDiagnostic(result, 'error', `${path}.type`, 'must be "literal" or "variable"');
+    return false;
+  }
+
+  if (value.type === 'literal') {
+    const hasExpectedType = literalType === 'string' ? typeof value.value === 'string' : typeof value.value === 'boolean';
+    if (hasExpectedType === false) {
+      addDiagnostic(result, 'error', `${path}.value`, `must be a ${literalType} literal`);
+      return false;
+    }
+
+    if (options.literalNonEmpty === true && typeof value.value === 'string' && value.value.trim().length === 0) {
+      addDiagnostic(result, 'error', `${path}.value`, 'must be non-empty');
+      return false;
+    }
+
+    return true;
+  }
+
+  if (typeof value.value !== 'string') {
+    addDiagnostic(result, 'error', `${path}.value`, 'must be a variable path string');
+    return false;
+  }
+
+  if (value.value.trim().length === 0) {
+    addDiagnostic(result, 'error', `${path}.value`, 'must be a non-empty variable path');
+    return false;
+  }
+
+  if (value.value.includes('{{') || value.value.includes('}}')) {
+    addDiagnostic(result, 'error', `${path}.value`, 'must store a raw variable path without moustache delimiters');
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Read a valid raw variable path from a Smart value.
+ * @param {unknown} value - Smart value candidate.
+ * @returns {string | null} Variable path, or null when the candidate is not valid.
+ */
+function readVariablePath(value) {
+  if (
+    isRecord(value) === false ||
+    value.type !== 'variable' ||
+    typeof value.value !== 'string' ||
+    value.value.trim().length === 0 ||
+    value.value.includes('{{') ||
+    value.value.includes('}}')
+  ) {
+    return null;
+  }
+
+  return value.value;
 }
 
 /**
@@ -299,7 +374,7 @@ function validateLoop(value, path, result) {
   }
 
   validateBooleanField(value, 'enabled', `${path}.enabled`, result);
-  validateStringField(value, 'source', `${path}.source`, result);
+  validateSmartValue(value.source, `${path}.source`, result, 'string', { literalNonEmpty: value.enabled === true });
 
   if (value.autoColumns !== undefined && typeof value.autoColumns !== 'boolean') {
     addDiagnostic(result, 'error', `${path}.autoColumns`, 'must be a boolean when present');
@@ -315,10 +390,6 @@ function validateLoop(value, path, result) {
   validateFiniteNumber(value.rowGap, `${path}.rowGap`, result, { nonNegative: true });
   validateStringField(value, 'itemName', `${path}.itemName`, result);
   validateStringField(value, 'indexName', `${path}.indexName`, result);
-
-  if (value.enabled === true && isNonEmptyString(value.source) === false) {
-    addDiagnostic(result, 'error', `${path}.source`, 'must be non-empty when loop is enabled');
-  }
 }
 
 /**
@@ -526,6 +597,26 @@ function validateBindingExpression(expression, path, context) {
 }
 
 /**
+ * Validate a Smart value and check its variable path against declared schemas.
+ * @param {unknown} value - Smart value candidate.
+ * @param {string} path - Diagnostic path.
+ * @param {ElementContext} context - Current element validation context.
+ * @param {'string' | 'boolean'} literalType - Required literal payload type.
+ * @param {{ literalNonEmpty?: boolean }} [options] - Literal payload constraints.
+ * @returns {boolean} True when the Smart value shape is valid.
+ */
+function validateSmartBinding(value, path, context, literalType, options = {}) {
+  const isValid = validateSmartValue(value, path, context.result, literalType, options);
+  const variablePath = readVariablePath(value);
+
+  if (isValid && variablePath !== null) {
+    validateBindingExpression(variablePath, path, context);
+  }
+
+  return isValid;
+}
+
+/**
  * Validate all template bindings contained in a metadata object.
  * @param {unknown} value - Metadata value to scan.
  * @param {string} path - Base diagnostic path.
@@ -653,6 +744,13 @@ function validateButtonAction(action, path, context) {
 
   if (action.args !== undefined && Array.isArray(action.args) === false) {
     addDiagnostic(context.result, 'error', `${path}.args`, 'must be an array when present');
+    return;
+  }
+
+  if (Array.isArray(action.args)) {
+    action.args.forEach((argument, index) => {
+      validateSmartBinding(argument, `${path}.args[${index}]`, context, 'string');
+    });
   }
 }
 
@@ -664,15 +762,9 @@ function validateButtonAction(action, path, context) {
  * @returns {void}
  */
 function validateButtonMetadata(metadata, path, context) {
-  validateStringField(metadata, 'text', `${path}.text`, context.result);
-
-  if (metadata.disabled !== undefined && typeof metadata.disabled !== 'boolean' && typeof metadata.disabled !== 'string') {
-    addDiagnostic(context.result, 'error', `${path}.disabled`, 'must be a boolean or binding string when present');
-  }
-
-  if (metadata.loading !== undefined && typeof metadata.loading !== 'boolean' && typeof metadata.loading !== 'string') {
-    addDiagnostic(context.result, 'error', `${path}.loading`, 'must be a boolean or binding string when present');
-  }
+  validateSmartBinding(metadata.text, `${path}.text`, context, 'string');
+  validateSmartBinding(metadata.disabled, `${path}.disabled`, context, 'boolean');
+  validateSmartBinding(metadata.loading, `${path}.loading`, context, 'boolean');
 
   if (metadata.actions !== undefined && Array.isArray(metadata.actions) === false) {
     addDiagnostic(context.result, 'error', `${path}.actions`, 'must be an array when present');
@@ -681,6 +773,75 @@ function validateButtonMetadata(metadata, path, context) {
 
   if (Array.isArray(metadata.actions)) {
     metadata.actions.forEach((action, index) => validateButtonAction(action, `${path}.actions[${index}]`, context));
+  }
+}
+
+/**
+ * Validate image metadata Smart values and fit option.
+ * @param {Record<string, unknown>} metadata - Image metadata object.
+ * @param {string} path - Diagnostic path.
+ * @param {ElementContext} context - Current element validation context.
+ * @returns {void}
+ */
+function validateImageMetadata(metadata, path, context) {
+  validateSmartBinding(metadata.src, `${path}.src`, context, 'string');
+  validateSmartBinding(metadata.alt, `${path}.alt`, context, 'string');
+
+  if (metadata.fit !== undefined && (typeof metadata.fit !== 'string' || IMAGE_FIT_VALUES.has(metadata.fit) === false)) {
+    addDiagnostic(context.result, 'error', `${path}.fit`, 'must be cover, contain, fill, none, or scale-down when present');
+  }
+}
+
+/**
+ * Validate one Swiper image item.
+ * @param {unknown} image - Swiper image item candidate.
+ * @param {string} path - Diagnostic path.
+ * @param {ElementContext} context - Current element validation context.
+ * @returns {void}
+ */
+function validateSwiperImage(image, path, context) {
+  if (isRecord(image) === false) {
+    addDiagnostic(context.result, 'error', path, 'must be an object');
+    return;
+  }
+
+  if (image.title !== undefined && typeof image.title !== 'string') {
+    addDiagnostic(context.result, 'error', `${path}.title`, 'must be a string when present');
+  }
+
+  validateSmartBinding(image.src, `${path}.src`, context, 'string');
+  validateSmartBinding(image.alt, `${path}.alt`, context, 'string');
+}
+
+/**
+ * Validate Swiper metadata and its structured Smart fields.
+ * @param {Record<string, unknown>} metadata - Swiper metadata object.
+ * @param {string} path - Diagnostic path.
+ * @param {ElementContext} context - Current element validation context.
+ * @returns {void}
+ */
+function validateSwiperMetadata(metadata, path, context) {
+  if (Array.isArray(metadata.images) === false || metadata.images.length === 0) {
+    addDiagnostic(context.result, 'error', `${path}.images`, 'must be a non-empty array');
+  } else {
+    metadata.images.forEach((image, index) => validateSwiperImage(image, `${path}.images[${index}]`, context));
+  }
+
+  if (metadata.fit !== undefined && (typeof metadata.fit !== 'string' || IMAGE_FIT_VALUES.has(metadata.fit) === false)) {
+    addDiagnostic(context.result, 'error', `${path}.fit`, 'must be cover, contain, fill, none, or scale-down when present');
+  }
+
+  validateSmartBinding(metadata.autoplay, `${path}.autoplay`, context, 'boolean');
+  validateSmartBinding(metadata.loop, `${path}.loop`, context, 'boolean');
+  validateSmartBinding(metadata.showIndicator, `${path}.showIndicator`, context, 'boolean');
+  validateSmartBinding(metadata.vertical, `${path}.vertical`, context, 'boolean');
+  validateFiniteNumber(metadata.autoplayInterval, `${path}.autoplayInterval`, context.result, { positive: true });
+  validateFiniteNumber(metadata.animationDuration, `${path}.animationDuration`, context.result, { nonNegative: true });
+  validateFiniteNumber(metadata.initialIndex, `${path}.initialIndex`, context.result, { integer: true, nonNegative: true });
+  validateStringField(metadata, 'indicatorColor', `${path}.indicatorColor`, context.result);
+
+  if (typeof metadata.indicatorShape !== 'string' || SWIPER_INDICATOR_SHAPES.has(metadata.indicatorShape) === false) {
+    addDiagnostic(context.result, 'error', `${path}.indicatorShape`, 'must be dot, line, or active-line');
   }
 }
 
@@ -697,14 +858,20 @@ function validateElementMetadata(element, path, context) {
     return;
   }
 
-  validateTemplateBindings(element.metadata, `${path}.metadata`, context);
+  if (element.name === 'text') {
+    validateTemplateBindings(element.metadata, `${path}.metadata`, context);
+  }
 
-  if (element.name === 'image' && typeof element.metadata.src !== 'string') {
-    addDiagnostic(context.result, 'error', `${path}.metadata.src`, 'must be a string');
+  if (element.name === 'image') {
+    validateImageMetadata(element.metadata, `${path}.metadata`, context);
   }
 
   if (element.name === 'button') {
     validateButtonMetadata(element.metadata, `${path}.metadata`, context);
+  }
+
+  if (element.name === 'swiper') {
+    validateSwiperMetadata(element.metadata, `${path}.metadata`, context);
   }
 }
 
@@ -778,11 +945,18 @@ function validateElement(element, path, context) {
   validateStyle(element.style, `${path}.style`, context.result);
   validateLoop(element.loop, `${path}.loop`, context.result);
 
-  if (isRecord(element.loop) && isNonEmptyString(element.loop.source)) {
-    validateBindingExpression(element.loop.source, `${path}.loop.source`, context);
+  if (isRecord(element.loop)) {
+    const loopVariablePath = readVariablePath(element.loop.source);
+    if (loopVariablePath !== null) {
+      validateBindingExpression(loopVariablePath, `${path}.loop.source`, context);
+    }
   }
 
-  validateElementMetadata(element, path, context);
+  const metadataContext = {
+    ...context,
+    loopScope: createChildLoopScope(context.loopScope, element.loop)
+  };
+  validateElementMetadata(element, path, metadataContext);
   validateGroupChildren(element, path, context, geometry);
 }
 
@@ -984,7 +1158,20 @@ async function scanPackageFiles(widgetDirectory, result) {
 }
 
 /**
- * Collect image element sources from an element tree.
+ * Read a literal string payload from a Smart value.
+ * @param {unknown} value - Smart value candidate.
+ * @returns {string | null} Literal string, or null for variables and invalid values.
+ */
+function readLiteralString(value) {
+  if (isRecord(value) && value.type === 'literal' && typeof value.value === 'string') {
+    return value.value;
+  }
+
+  return null;
+}
+
+/**
+ * Collect literal image sources from image and Swiper elements.
  * @param {unknown[]} elements - Element array.
  * @returns {Array<{ path: string, src: string }>} Image source paths and values.
  */
@@ -1002,8 +1189,22 @@ function collectImageSources(elements) {
       return;
     }
 
-    if (element.name === 'image' && isRecord(element.metadata) && typeof element.metadata.src === 'string') {
-      sources.push({ path: `${path}.metadata.src`, src: element.metadata.src });
+    if (element.name === 'image' && isRecord(element.metadata)) {
+      const literalSource = readLiteralString(element.metadata.src);
+      if (literalSource !== null) {
+        sources.push({ path: `${path}.metadata.src`, src: literalSource });
+      }
+    }
+
+    if (element.name === 'swiper' && isRecord(element.metadata) && Array.isArray(element.metadata.images)) {
+      element.metadata.images.forEach((image, index) => {
+        if (isRecord(image)) {
+          const literalSource = readLiteralString(image.src);
+          if (literalSource !== null) {
+            sources.push({ path: `${path}.metadata.images[${index}].src`, src: literalSource });
+          }
+        }
+      });
     }
 
     if (Array.isArray(element.children)) {

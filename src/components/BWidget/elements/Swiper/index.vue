@@ -47,8 +47,11 @@ import type { WidgetShapeElement } from '../../types';
 import type { WidgetImageFit } from '../Image/schema';
 import type { CSSProperties } from 'vue';
 import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue';
+import type { BSmartValue } from '@/components/BSmart/types';
+import { createLiteralValue, isLiteralValue, isVariableValue } from '@/components/BSmart/utils/value';
+import { useElementValue } from '../../hooks/useElementValue';
 import { useRenderContext } from '../../hooks/useRenderContext';
-import { formatWidgetDisplayTextValue, resolveWidgetDisplayValue } from '../../utils/widgetBindings';
+import { formatWidgetDisplayTextValue, resolveWidgetSmartValue } from '../../utils/widgetBindings';
 import { WIDGET_IMAGE_DEFAULT_FIT } from '../Image/schema';
 import {
   WIDGET_SWIPER_DEFAULT_ANIMATION_DURATION,
@@ -88,6 +91,23 @@ const reducedMotion = ref(false);
 let autoplayTimer: ReturnType<typeof setInterval> | null = null;
 
 /**
+ * 规整图片文本 Smart 值，不转换旧字符串数据。
+ * @param value - 原始字段值
+ * @returns 合法文本 Smart 值
+ */
+function normalizeImageValue(value: unknown): BSmartValue<string> {
+  if (isVariableValue(value)) {
+    return { ...value };
+  }
+
+  if (isLiteralValue(value) && typeof value.value === 'string') {
+    return createLiteralValue(value.value);
+  }
+
+  return createLiteralValue('');
+}
+
+/**
  * 将未知图片列表规整为轮播图图片项列表。
  * @param value - 原始图片列表
  * @returns 规整后的图片项列表
@@ -105,8 +125,8 @@ function normalizeImageItems(value: unknown): WidgetSwiperImageItem[] {
 
       const image = item as Partial<WidgetSwiperImageItem>;
       const normalizedImage: WidgetSwiperImageItem = {
-        alt: typeof image.alt === 'string' ? image.alt : '',
-        src: typeof image.src === 'string' ? image.src : ''
+        alt: normalizeImageValue(image.alt),
+        src: normalizeImageValue(image.src)
       };
 
       if (typeof image.title === 'string') {
@@ -158,11 +178,11 @@ function normalizeIndicatorShape(value: unknown): WidgetSwiperIndicatorShape {
 
 /**
  * 解析单个图片字段为展示文本。
- * @param value - 原始模板文本
+ * @param value - 原始结构化图片字段
  * @returns 解析后的展示文本
  */
-function resolveImageField(value: string | undefined): string {
-  const resolvedValue = resolveWidgetDisplayValue(value ?? '', {
+function resolveImageField(value: BSmartValue<string> | undefined): string {
+  const resolvedValue = resolveWidgetSmartValue(value, {
     renderContext: renderState.renderContext.value,
     renderOptions: renderState.options.value
   });
@@ -186,7 +206,7 @@ const hasImages = computed<boolean>((): boolean => resolvedImages.value.length >
 /** 图片填充模式。 */
 const imageFit = computed<WidgetImageFit>((): WidgetImageFit => elementRef.value?.metadata.fit || WIDGET_IMAGE_DEFAULT_FIT);
 /** 是否开启自动轮播。 */
-const autoplayEnabled = computed<boolean>((): boolean => elementRef.value?.metadata.autoplay === true);
+const autoplayEnabled = useElementValue(elementRef, 'autoplay', { smart: true, transform: 'boolean' });
 /** 自动轮播间隔，单位 ms。 */
 const autoplayInterval = computed<number>((): number =>
   normalizeNumber(elementRef.value?.metadata.autoplayInterval, WIDGET_SWIPER_DEFAULT_AUTOPLAY_INTERVAL, 100)
@@ -196,11 +216,13 @@ const animationDuration = computed<number>((): number =>
   reducedMotion.value ? 0 : normalizeNumber(elementRef.value?.metadata.animationDuration, WIDGET_SWIPER_DEFAULT_ANIMATION_DURATION, 0)
 );
 /** 是否开启循环播放。 */
-const loopEnabled = computed<boolean>((): boolean => elementRef.value?.metadata.loop !== false);
+const loopEnabled = useElementValue(elementRef, 'loop', { smart: true, transform: 'boolean' });
 /** 是否纵向滚动。 */
-const verticalEnabled = computed<boolean>((): boolean => elementRef.value?.metadata.vertical === true);
+const verticalEnabled = useElementValue(elementRef, 'vertical', { smart: true, transform: 'boolean' });
+/** 指示器显示配置。 */
+const indicatorVisible = useElementValue(elementRef, 'showIndicator', { smart: true, transform: 'boolean' });
 /** 是否展示指示器。 */
-const showIndicator = computed<boolean>((): boolean => elementRef.value?.metadata.showIndicator === true && resolvedImages.value.length > 1);
+const showIndicator = computed<boolean>((): boolean => indicatorVisible.value && resolvedImages.value.length > 1);
 /** 指示器颜色。 */
 const indicatorColor = computed<string>((): string => elementRef.value?.metadata.indicatorColor || WIDGET_SWIPER_DEFAULT_INDICATOR_COLOR);
 /** 指示器形状。 */

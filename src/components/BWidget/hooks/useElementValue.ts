@@ -5,14 +5,20 @@
 import type { WidgetMetadata, WidgetShapeElement } from '../types';
 import type { ComputedRef, Ref } from 'vue';
 import { computed } from 'vue';
-import { formatWidgetDisplayTextValue, resolveWidgetDisplayValue } from '../utils/widgetBindings';
+import type { BSmartValue } from '@/components/BSmart/types';
+import { formatWidgetDisplayTextValue, resolveWidgetDisplayValue, resolveWidgetSmartValue } from '../utils/widgetBindings';
 import { normalizeMethodActions, type MethodAction } from '../utils/widgetMethods';
 import { useRenderContext } from './useRenderContext';
 
 /**
+ * Smart 字段解析后的底层值类型。
+ */
+type ResolvedMetadataValue<TValue> = NonNullable<TValue> extends BSmartValue<infer TLiteral> ? TLiteral | undefined : TValue | undefined;
+
+/**
  * 元素元数据字段解析后的值类型。
  */
-export type WidgetElementValue<TMetadata extends WidgetMetadata, TField extends keyof TMetadata> = TMetadata[TField] | undefined;
+export type WidgetElementValue<TMetadata extends WidgetMetadata, TField extends keyof TMetadata> = ResolvedMetadataValue<TMetadata[TField]>;
 
 /**
  * 元素元数据字段值转换方式。
@@ -33,6 +39,8 @@ export type UseElementValueTransform<TValue = unknown> = UseElementValueTransfor
  * 元素元数据字段值 hook 选项。
  */
 export interface UseElementValueOptions<TValue, TTransform extends UseElementValueTransform<TValue> | undefined = undefined> {
+  /** 是否只接受结构化 Smart 值，避免迁移字段进入旧模板解析路径 */
+  smart?: boolean;
   /** 解析后的值转换方式 */
   transform?: TTransform;
 }
@@ -130,15 +138,18 @@ export function useElementValue<
     const currentElement = element.value;
 
     if (!currentElement) {
-      return normalizeElementValueResult<TMetadata, TField, TTransform>(undefined, options);
+      return normalizeElementValueResult<TMetadata, TField, TTransform>(undefined as WidgetElementValue<TMetadata, TField>, options);
     }
 
-    return normalizeElementValueResult<TMetadata, TField, TTransform>(
-      resolveWidgetDisplayValue(currentElement.metadata[fieldName], {
-        renderContext: renderState.renderContext.value,
-        renderOptions: renderState.options.value
-      }) as WidgetElementValue<TMetadata, TField>,
-      options
-    );
+    const fieldValue = currentElement.metadata[fieldName];
+    const resolveOptions = {
+      renderContext: renderState.renderContext.value,
+      renderOptions: renderState.options.value
+    };
+    const resolvedValue = options.smart
+      ? resolveWidgetSmartValue(fieldValue as BSmartValue<unknown> | undefined, resolveOptions)
+      : resolveWidgetDisplayValue(fieldValue, resolveOptions);
+
+    return normalizeElementValueResult<TMetadata, TField, TTransform>(resolvedValue as WidgetElementValue<TMetadata, TField>, options);
   });
 }

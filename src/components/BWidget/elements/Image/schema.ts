@@ -4,6 +4,8 @@
  */
 import type { WidgetMetadata } from '../../types';
 import type { WidgetElementSchema } from '../types';
+import type { BSmartValue } from '@/components/BSmart/types';
+import { createLiteralValue } from '@/components/BSmart/utils/value';
 import { WIDGET_DEFAULT_ELEMENT_STYLE } from '../../constants/style';
 
 /**
@@ -15,12 +17,12 @@ export type WidgetImageFit = 'cover' | 'contain' | 'fill' | 'none' | 'scale-down
  * 图片元素自定义元数据。
  */
 export interface WidgetImageElementMetadata extends WidgetMetadata {
-  /** 图片地址，支持变量插值 {{ ... }} */
-  src: string;
+  /** 图片地址 */
+  src: BSmartValue<string>;
   /** 图片填充模式，未设置时使用 WIDGET_IMAGE_DEFAULT_FIT */
   fit?: WidgetImageFit;
-  /** 替代文本，用于无障碍；支持变量插值 */
-  alt?: string;
+  /** 替代文本，用于无障碍 */
+  alt: BSmartValue<string>;
 }
 
 /** 图片元素默认填充模式。 */
@@ -47,7 +49,8 @@ export const imageElementSchema: WidgetElementSchema<WidgetImageElementMetadata>
   label: '图片',
   icon: 'lucide:image',
   metadata: {
-    src: '',
+    alt: createLiteralValue(''),
+    src: createLiteralValue(''),
     fit: WIDGET_IMAGE_DEFAULT_FIT
   },
   style: WIDGET_DEFAULT_ELEMENT_STYLE,

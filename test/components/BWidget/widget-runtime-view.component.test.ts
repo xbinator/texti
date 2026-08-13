@@ -10,6 +10,7 @@ import { mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils';
 import { cloneDeep } from 'lodash-es';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useWidgetRuntime } from '@/components/BWidget/hooks/useWidgetRuntime';
+import { createVariableValue } from '@/components/BSmart/utils/value';
 import BWidgetRuntime from '@/components/BWidget/Runtime.vue';
 import { createDefaultWidgetData } from '@/components/BWidget/utils/widgetData';
 import { queryWidgetElementTarget } from '@/components/BWidget/utils/widgetGeometry';
@@ -179,7 +180,7 @@ function createRuntimeLoopTextWidgetData(): WidgetData {
             },
             loop: {
               enabled: true,
-              source: 'products',
+              source: createVariableValue('products'),
               autoColumns: false,
               columns: 2,
               columnGap: 12,
@@ -213,7 +214,7 @@ function createRuntimeLoopGroupWidgetData(): WidgetData {
         style: {},
         loop: {
           enabled: true,
-          source: 'products',
+          source: createVariableValue('products'),
           autoColumns: false,
           columns: 2,
           columnGap: 12,
@@ -350,7 +351,7 @@ function createRuntimeAsyncLoopWidgetData(code: string): WidgetData {
         style: {},
         loop: {
           enabled: true,
-          source: 'products',
+          source: createVariableValue('products'),
           autoColumns: false,
           columns: 1,
           columnGap: 0,

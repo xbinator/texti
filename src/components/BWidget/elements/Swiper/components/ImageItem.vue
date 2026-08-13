@@ -73,7 +73,7 @@
 <script setup lang="ts">
 import type { WidgetSwiperImageItem } from '../schema';
 import { computed, nextTick, ref } from 'vue';
-import type { VariableOptionGroup } from '@/components/BSmart/types';
+import type { BSmartValue, VariableOptionGroup } from '@/components/BSmart/types';
 
 defineOptions({ name: 'SwiperImageItem' });
 
@@ -112,7 +112,7 @@ const emit = defineEmits<{
 /** 图片项标题。 */
 const title = computed<string>((): string => props.image.title?.trim() || `图片 ${props.index + 1}`);
 /** 图片项摘要。 */
-const summary = computed<string>((): string => props.image.src.trim());
+const summary = computed<string>((): string => props.image.src.value.trim());
 /** 是否正在编辑标题。 */
 const editingTitle = ref(false);
 /** 标题输入框元素引用。 */
@@ -168,7 +168,7 @@ function cancelTitleEdit(): void {
  * 更新图片地址。
  * @param value - 新图片地址
  */
-function updateSrc(value: string): void {
+function updateSrc(value: BSmartValue<string>): void {
   emit('update', {
     ...props.image,
     src: value
@@ -179,7 +179,7 @@ function updateSrc(value: string): void {
  * 更新替代文本。
  * @param value - 新替代文本
  */
-function updateAlt(value: string): void {
+function updateAlt(value: BSmartValue<string>): void {
   emit('update', {
     ...props.image,
     alt: value

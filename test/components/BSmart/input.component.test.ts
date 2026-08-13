@@ -1,13 +1,14 @@
 /**
  * @file input.component.test.ts
- * @description 验证 BSmart 单行输入支持变量按钮插入与 {{ 触发补全。
+ * @description 验证 BSmartInput 的静态输入、变量路径编辑和显式类型切换。
  * @vitest-environment jsdom
  */
 import { defineComponent, nextTick } from 'vue';
-import { mount, type VueWrapper } from '@vue/test-utils';
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
 import BSmartInput from '@/components/BSmart/Input.vue';
-import type { VariableOptionGroup } from '@/components/BSmart/types';
+import type { BSmartInputValue, VariableOptionGroup } from '@/components/BSmart/types';
+import { createLiteralValue, createVariableValue } from '@/components/BSmart/utils/value';
 
 /**
  * 创建变量选项。
@@ -22,24 +23,8 @@ function createVariableOptions(): VariableOptionGroup[] {
           label: '入参',
           value: '$input',
           children: [
-            {
-              label: '城市名称',
-              value: '$input.city'
-            },
-            {
-              label: '图片地址',
-              value: '$input.imageUrl'
-            }
-          ]
-        },
-        {
-          label: '天气',
-          value: 'weather',
-          children: [
-            {
-              label: '图标地址',
-              value: 'weather.iconUrl'
-            }
+            { label: '城市名称', value: '$input.city' },
+            { label: '图片地址', value: '$input.imageUrl' }
           ]
         }
       ]
@@ -48,20 +33,18 @@ function createVariableOptions(): VariableOptionGroup[] {
 }
 
 /**
- * 挂载单行变量输入。
- * @param value - 初始输入值
+ * 挂载单行 Smart 输入。
+ * @param value - 初始结构化输入值
  * @param extraProps - 额外组件属性
- * @param attachTo - 挂载目标
  * @returns 输入组件包装器
  */
-function mountTextInput(value = 'https://cdn.example.com/', extraProps: Record<string, unknown> = {}, attachTo: Element = document.body): VueWrapper {
+function mountTextInput(value: BSmartInputValue = createLiteralValue(''), extraProps: Record<string, unknown> = {}): VueWrapper {
   const wrapper: VueWrapper = mount(BSmartInput, {
     props: {
       value,
       options: createVariableOptions(),
-      placeholder: '图片地址',
       ...extraProps,
-      'onUpdate:value': (nextValue: string): void => {
+      'onUpdate:value': (nextValue: BSmartInputValue): void => {
         wrapper.setProps({ value: nextValue }).catch((error: unknown): void => {
           throw error;
         });
@@ -73,16 +56,10 @@ function mountTextInput(value = 'https://cdn.example.com/', extraProps: Record<s
           name: 'BButtonStub',
           inheritAttrs: false,
           props: {
-            icon: {
-              type: String,
-              default: ''
-            }
+            icon: { type: String, default: '' }
           },
           emits: {
-            /**
-             * 透传点击事件。
-             * @returns 是否允许触发事件
-             */
+            /** 透传点击事件。 */
             click: (): boolean => true
           },
           template: '<button v-bind="$attrs" type="button" :data-icon="icon" @click="$emit(\'click\')"></button>'
@@ -90,16 +67,13 @@ function mountTextInput(value = 'https://cdn.example.com/', extraProps: Record<s
         BIcon: defineComponent({
           name: 'BIconStub',
           props: {
-            icon: {
-              type: String,
-              required: true
-            }
+            icon: { type: String, required: true }
           },
           template: '<span class="b-icon-stub" :data-icon="icon"></span>'
         })
       }
     },
-    attachTo
+    attachTo: document.body
   });
 
   return wrapper;
@@ -110,143 +84,145 @@ describe('BSmart Input', (): void => {
     document.body.innerHTML = '';
   });
 
-  it('inserts the selected variable at the current cursor from the variable button', async (): Promise<void> => {
-    const wrapper = mountTextInput('https://cdn.example.com/');
-    const input = wrapper.find<HTMLInputElement>('.b-smart-input__control input');
+  it('renders the literal variable button outside the input suffix', (): void => {
+    const wrapper = mountTextInput(createLiteralValue('hello'));
 
-    input.element.setSelectionRange(8, 8);
-    await input.trigger('focus');
-    await input.trigger('select');
-    await wrapper.find('.b-smart-input__variable').trigger('click');
-    await nextTick();
-    document.body.querySelectorAll<HTMLElement>('.select-dropdown__item')[2]?.click();
-    await nextTick();
-
-    expect(wrapper.emitted('update:value')?.at(-1)).toEqual(['https://{{ $input.imageUrl }}cdn.example.com/']);
+    expect(wrapper.find('.b-smart-input__variable-button').exists()).toBe(true);
+    expect(wrapper.find('.ant-input-suffix .b-smart-input__variable-button').exists()).toBe(false);
+    expect(wrapper.find<HTMLInputElement>('.b-smart-input__literal-control').element.value).toBe('hello');
     wrapper.unmount();
   });
 
-  it('opens filtered variables after typing an open template trigger', async (): Promise<void> => {
-    const wrapper = mountTextInput('');
-    const input = wrapper.find<HTMLInputElement>('.b-smart-input__control input');
+  it('emits a literal value when literal text changes', async (): Promise<void> => {
+    const wrapper = mountTextInput(createLiteralValue('old'));
 
-    await input.setValue('{{ci');
-    await nextTick();
+    await wrapper.find<HTMLInputElement>('.b-smart-input__literal-control').setValue('new');
 
-    const labels = Array.from(document.body.querySelectorAll('.variable-item-label')).map((item: Element): string => item.textContent ?? '');
-
-    expect(labels).toContain('$input');
-    expect(labels).toContain('city');
-    expect(labels).not.toContain('imageUrl');
+    expect(wrapper.emitted('update:value')?.at(-1)).toEqual([createLiteralValue('new')]);
+    expect(wrapper.emitted('change')?.at(-1)).toEqual([createLiteralValue('new')]);
     wrapper.unmount();
   });
 
-  it('renders the mouse-opened variable dropdown inside the input for stable alignment', async (): Promise<void> => {
-    const wrapper = mountTextInput('');
-    const root = wrapper.find('.b-smart-input').element as HTMLElement;
+  it('switches to a closed variable input without mutating the literal model', async (): Promise<void> => {
+    const wrapper = mountTextInput(createLiteralValue('unchanged'));
 
-    Object.defineProperty(window, 'innerWidth', {
-      configurable: true,
-      value: 500
-    });
-    Object.defineProperty(window, 'innerHeight', {
-      configurable: true,
-      value: 400
-    });
-    root.getBoundingClientRect = (): DOMRect =>
-      ({
-        bottom: 72,
-        height: 32,
-        left: 250,
-        right: 430,
-        top: 40,
-        width: 180,
-        x: 250,
-        y: 40,
-        toJSON: (): Record<string, number> => ({})
-      } as DOMRect);
+    await wrapper.find('.b-smart-input__variable-button').trigger('click');
+    await nextTick();
 
-    await wrapper.find('.b-smart-input__variable').trigger('click');
+    expect(wrapper.find('.b-smart-variable-input').exists()).toBe(true);
+    expect(wrapper.find('.select-dropdown').exists()).toBe(false);
+    expect(wrapper.emitted('update:value')).toBeUndefined();
 
-    const dropdown = document.body.querySelector<HTMLElement>('.select-dropdown');
-
-    expect(root.querySelector('.select-dropdown')).toBe(dropdown);
-    expect(dropdown?.style.width).toBe('100%');
-    expect(dropdown?.style.left).toBe('0px');
+    await wrapper.find('.b-smart-variable-input__dropdown-button').trigger('click');
+    expect(wrapper.find('.select-dropdown').exists()).toBe(true);
     wrapper.unmount();
   });
 
-  it('opens the variable dropdown above when the scroll container lacks space below', async (): Promise<void> => {
-    const scrollContainer = document.createElement('div');
-    scrollContainer.style.overflowY = 'auto';
-    document.body.appendChild(scrollContainer);
+  it('keeps the literal text as the variable draft when switching modes', async (): Promise<void> => {
+    const wrapper = mountTextInput(createLiteralValue('draft-text'));
 
-    const wrapper = mountTextInput('', {}, scrollContainer);
-    const root = wrapper.find('.b-smart-input').element as HTMLElement;
+    await wrapper.find('.b-smart-input__variable-button').trigger('click');
+    await nextTick();
 
-    scrollContainer.getBoundingClientRect = (): DOMRect =>
-      ({
-        bottom: 220,
-        height: 120,
-        left: 0,
-        right: 320,
-        top: 100,
-        width: 320,
-        x: 0,
-        y: 100,
-        toJSON: (): Record<string, number> => ({})
-      } as DOMRect);
-    root.getBoundingClientRect = (): DOMRect =>
-      ({
-        bottom: 216,
-        height: 32,
-        left: 12,
-        right: 292,
-        top: 184,
-        width: 280,
-        x: 12,
-        y: 184,
-        toJSON: (): Record<string, number> => ({})
-      } as DOMRect);
-
-    await wrapper.find('.b-smart-input__variable').trigger('click');
-
-    const dropdown = root.querySelector<HTMLElement>('.select-dropdown');
-
-    expect(dropdown?.style.bottom).toBe('calc(100% + 4px)');
-    expect(dropdown?.style.top).toBe('');
-    expect(dropdown?.style.maxHeight).toBe('80px');
+    expect(wrapper.find<HTMLInputElement>('.b-smart-variable-input__control input').element.value).toBe('draft-text');
+    expect(wrapper.emitted('update:value')).toBeUndefined();
     wrapper.unmount();
   });
 
-  it('inserts the variable as a plain path when useTemplateSyntax is false', async (): Promise<void> => {
-    const wrapper = mountTextInput('', { useTemplateSyntax: false });
-    const input = wrapper.find<HTMLInputElement>('.b-smart-input__control input');
+  it('returns from an uncommitted variable mode without overwriting the literal model', async (): Promise<void> => {
+    const wrapper = mountTextInput(createLiteralValue('unchanged'));
 
-    await input.trigger('focus');
-    await wrapper.find('.b-smart-input__variable').trigger('click');
-    await nextTick();
-    document.body.querySelectorAll<HTMLElement>('.select-dropdown__item')[2]?.click();
-    await nextTick();
+    await wrapper.find('.b-smart-input__variable-button').trigger('click');
+    await wrapper.find('.b-smart-input__type-button').trigger('click');
 
-    expect(wrapper.emitted('update:value')?.at(-1)).toEqual(['$input.imageUrl']);
+    expect(wrapper.find('.b-smart-input__literal-control').exists()).toBe(true);
+    expect(wrapper.emitted('update:value')).toBeUndefined();
     wrapper.unmount();
   });
 
-  it('replaces the whole value when replaceEntireValue is true', async (): Promise<void> => {
-    const wrapper = mountTextInput('prefix ');
-    const input = wrapper.find<HTMLInputElement>('.b-smart-input__control input');
+  it('preserves an unfinished variable mode across an equivalent model refresh', async (): Promise<void> => {
+    const wrapper = mountTextInput(createLiteralValue('unchanged'));
 
-    await wrapper.setProps({ replaceEntireValue: true });
-    input.element.setSelectionRange(3, 3);
-    await input.trigger('focus');
-    await input.trigger('select');
-    await wrapper.find('.b-smart-input__variable').trigger('click');
+    await wrapper.find('.b-smart-input__variable-button').trigger('click');
+    await wrapper.setProps({ value: createLiteralValue('unchanged') });
+
+    expect(wrapper.find('.b-smart-variable-input').exists()).toBe(true);
+    expect(wrapper.emitted('update:value')).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('keeps an edited variable path as a variable value', async (): Promise<void> => {
+    const wrapper = mountTextInput(createVariableValue('$input.city'));
+
+    await wrapper.find<HTMLInputElement>('.b-smart-variable-input__control input').setValue('$input.imageUrl');
+
+    expect(wrapper.emitted('update:value')?.at(-1)).toEqual([createVariableValue('$input.imageUrl')]);
+    expect(wrapper.emitted('change')?.at(-1)).toEqual([createVariableValue('$input.imageUrl')]);
+    wrapper.unmount();
+  });
+
+  it('clearing a committed variable path falls back to an empty literal', async (): Promise<void> => {
+    const wrapper = mountTextInput(createVariableValue('$input.city'));
+
+    await wrapper.find<HTMLInputElement>('.b-smart-variable-input__control input').setValue('');
     await nextTick();
-    document.body.querySelectorAll<HTMLElement>('.select-dropdown__item')[2]?.click();
+    await flushPromises();
+
+    expect(wrapper.find('.b-smart-variable-input').exists()).toBe(true);
+    expect(wrapper.emitted('update:value')).toBeUndefined();
+
+    await wrapper.find('.b-smart-input__type-button').trigger('click');
+
+    expect(wrapper.emitted('update:value')?.at(-1)).toEqual([createLiteralValue('')]);
+    wrapper.unmount();
+  });
+
+  it('converts the current variable path to a literal through the type button', async (): Promise<void> => {
+    const wrapper = mountTextInput(createVariableValue('$input.city'));
+
+    expect(wrapper.find('.b-smart-input__type-button [data-icon="lucide:type"]').exists()).toBe(true);
+    await wrapper.find('.b-smart-input__type-button').trigger('click');
+
+    expect(wrapper.emitted('update:value')?.at(-1)).toEqual([createLiteralValue('$input.city')]);
+    expect(wrapper.find('.b-smart-input__literal-control').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('stores only the selected variable path', async (): Promise<void> => {
+    const wrapper = mountTextInput(createLiteralValue(''));
+
+    await wrapper.find('.b-smart-input__variable-button').trigger('click');
+    await nextTick();
+    await wrapper.find('.b-smart-variable-input__dropdown-button').trigger('click');
+    await wrapper.find('[data-variable-value="$input.imageUrl"]').trigger('click');
+
+    expect(wrapper.emitted('update:value')?.at(-1)).toEqual([createVariableValue('$input.imageUrl')]);
+    wrapper.unmount();
+  });
+
+  it('does not open variables when template braces are typed', async (): Promise<void> => {
+    const wrapper = mountTextInput(createLiteralValue(''));
+
+    await wrapper.find<HTMLInputElement>('.b-smart-input__literal-control').setValue('{{city');
     await nextTick();
 
-    expect(wrapper.emitted('update:value')?.at(-1)).toEqual(['{{ $input.imageUrl }}']);
+    expect(wrapper.find('.select-dropdown').exists()).toBe(false);
+    expect(wrapper.emitted('update:value')?.at(-1)).toEqual([createLiteralValue('{{city')]);
+    wrapper.unmount();
+  });
+
+  it('keeps explicit readonly text locked while allowing variable selection', async (): Promise<void> => {
+    const wrapper = mountTextInput(createLiteralValue('locked'), { readonly: true });
+
+    await wrapper.find<HTMLInputElement>('.b-smart-input__literal-control').setValue('changed');
+    expect(wrapper.emitted('update:value')).toBeUndefined();
+
+    await wrapper.find('.b-smart-input__variable-button').trigger('click');
+    await nextTick();
+    await wrapper.find('.b-smart-variable-input__dropdown-button').trigger('click');
+    await wrapper.find('[data-variable-value="$input.city"]').trigger('click');
+
+    expect(wrapper.emitted('update:value')?.at(-1)).toEqual([createVariableValue('$input.city')]);
     wrapper.unmount();
   });
 });

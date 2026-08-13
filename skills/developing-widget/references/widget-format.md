@@ -95,7 +95,16 @@ schema 同时是绑定的契约：
 
 - `$input.foo` 必须在 `inputSchema.properties` 中声明。
 - `$output.foo` 必须在 `outputSchema.properties` 中声明。
-- 裸运行时数据绑定（如 `{{ temperature }}`）必须在 `dataSchema.properties` 中声明。
+- 裸运行时数据绑定必须在 `dataSchema.properties` 中声明。这同时适用于 Text 模板（如 `{{ temperature }}`）和 Smart variable 路径（如 `{ "type": "variable", "value": "temperature" }`）。
+
+Button、Image、Swiper、方法参数和 Loop 数据源使用结构化 Smart 值，不使用基本类型或 `{{ }}` 编码来源：
+
+```json
+{ "type": "literal", "value": false }
+{ "type": "variable", "value": "$input.disabled" }
+```
+
+Text 元素的 `metadata.content` 仍是普通模板字符串，可以包含静态文本和多个 moustache 表达式。完整字段规则与示例见 `references/elements-and-bindings.md`。
 
 ## Execute
 
@@ -123,4 +132,4 @@ export default class WeatherCard extends Widget {
 node ../scripts/validate-widget.js <widget-directory>
 ```
 
-校验器会检查：JSON 结构、schema、元素 ID、受支持的元素名称、几何、循环、包体限制、图片资源路径、按钮方法名、运行时类协议，以及常见的绑定错误。
+校验器会检查：JSON 结构、schema、元素 ID、受支持的元素名称、几何、循环、Smart 值类型、包体限制、literal 图片资源路径、按钮方法名、运行时类协议，以及常见的绑定错误。历史基本类型 Smart 字段和 moustache 形式的 variable 路径会被拒绝。

@@ -4,6 +4,8 @@
  */
 import type { WidgetRenderContext } from 'types/widget';
 import { describe, expect, it } from 'vitest';
+import type { BSmartValue } from '@/components/BSmart/types';
+import { createLiteralValue, createVariableValue } from '@/components/BSmart/utils/value';
 import type { WidgetElement, WidgetElementLoopConfig, WidgetSchemaObject } from '@/components/BWidget/types';
 import { getWidgetShapeRenderSize } from '@/components/BWidget/utils/widgetGeometry';
 import {
@@ -16,10 +18,10 @@ import {
 
 /**
  * 创建测试循环配置。
- * @param source - 数据源路径
+ * @param source - 结构化数据源
  * @returns 循环配置
  */
-function createLoopConfig(source = 'products'): WidgetElementLoopConfig {
+function createLoopConfig(source: BSmartValue<string> = createVariableValue('products')): WidgetElementLoopConfig {
   return {
     enabled: true,
     source,
@@ -196,6 +198,7 @@ describe('widgetLoop', (): void => {
 
     expect(config.itemName).toBe('');
     expect(config.indexName).toBe('');
+    expect(config.source).toEqual(createLiteralValue(''));
   });
 
   it('keeps auto loop columns switch during normalization', (): void => {
@@ -256,7 +259,7 @@ describe('widgetLoop', (): void => {
     const loopConfig = {
       ...createDefaultWidgetElementLoopConfig(),
       enabled: true,
-      source: 'products',
+      source: createVariableValue('products'),
       columns: 2
     };
     const loopElement = createElement('text-1', { x: 10, y: 20 }, { width: 100, height: 52 }, {}, loopConfig);
@@ -348,12 +351,12 @@ describe('widgetLoop', (): void => {
       products: [{ name: '蛋糕' }]
     };
     const outerLoopConfig: WidgetElementLoopConfig = {
-      ...createLoopConfig('$input.items'),
+      ...createLoopConfig(createVariableValue('$input.items')),
       itemName: 'category',
       indexName: 'categoryIndex'
     };
     const innerLoopConfig: WidgetElementLoopConfig = {
-      ...createLoopConfig('category.products'),
+      ...createLoopConfig(createVariableValue('category.products')),
       columns: 1,
       itemName: 'product',
       indexName: 'productIndex'
@@ -415,7 +418,7 @@ describe('widgetLoop', (): void => {
   });
 
   it('does not render loop templates when the source is missing or not an array', (): void => {
-    const loopElement = createElement('text-1', { x: 10, y: 20 }, { width: 100, height: 52 }, {}, createLoopConfig('missing.items'));
+    const loopElement = createElement('text-1', { x: 10, y: 20 }, { width: 100, height: 52 }, {}, createLoopConfig(createVariableValue('missing.items')));
 
     expect(createWidgetLoopRenderElements([loopElement], createRenderContext())).toEqual([]);
   });
@@ -424,7 +427,7 @@ describe('widgetLoop', (): void => {
     const loopConfig: WidgetElementLoopConfig = {
       ...createDefaultWidgetElementLoopConfig(),
       enabled: true,
-      source: ''
+      source: createLiteralValue('')
     };
     const loopElement = createElement('text-1', { x: 10, y: 20 }, { width: 100, height: 52 }, {}, loopConfig);
 
@@ -432,5 +435,23 @@ describe('widgetLoop', (): void => {
 
     expect(result.map((item) => item.element.id)).toEqual(['text-1']);
     expect(result[0].element.position).toEqual({ x: 10, y: 20 });
+  });
+
+  it('does not execute a literal string as a loop expression', (): void => {
+    const loopElement = createElement(
+      'text-1',
+      { x: 10, y: 20 },
+      { width: 100, height: 52 },
+      {},
+      createLoopConfig(createLiteralValue('products'))
+    );
+
+    expect(createWidgetLoopRenderElements([loopElement], createRenderContext()).map((item) => item.element.id)).toEqual(['text-1']);
+  });
+
+  it('does not normalize a historical primitive source into a variable reference', (): void => {
+    const config = normalizeWidgetElementLoopConfig({ source: 'products' as unknown as BSmartValue<string> });
+
+    expect(config.source).toEqual(createLiteralValue(''));
   });
 });

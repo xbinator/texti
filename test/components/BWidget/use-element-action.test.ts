@@ -11,6 +11,7 @@ import type { Component, VNode } from 'vue';
 import { defineComponent, h, ref } from 'vue';
 import { mount } from '@vue/test-utils';
 import { describe, expect, it, vi } from 'vitest';
+import { createLiteralValue, createVariableValue } from '@/components/BSmart/utils/value';
 import { useElementAction } from '@/components/BWidget/hooks/useElementAction';
 import { provideRenderContext } from '@/components/BWidget/hooks/useRenderContext';
 import { provideWidgetRuntime, type WidgetRuntimeController } from '@/components/BWidget/hooks/useWidgetRuntime';
@@ -102,7 +103,7 @@ describe('useElementAction', (): void => {
 
     element.metadata.actions = [
       {
-        args: ['{{ $input.orderId }}', '城市：{{ $input.city }}', 1],
+        args: [createVariableValue('$input.orderId'), createVariableValue('$input.city'), 1],
         method: ' submitOrder '
       },
       {
@@ -131,7 +132,7 @@ describe('useElementAction', (): void => {
 
     await wrapper.find('button').trigger('click');
 
-    expect(runtime.run).toHaveBeenNthCalledWith(1, 'submitOrder', 'A-1024', '城市：上海');
+    expect(runtime.run).toHaveBeenNthCalledWith(1, 'submitOrder', 'A-1024', '上海');
     expect(runtime.run).toHaveBeenNthCalledWith(2, 'refreshList');
     expect(runtime.runInteraction).not.toHaveBeenCalled();
     wrapper.unmount();
@@ -142,7 +143,7 @@ describe('useElementAction', (): void => {
 
     element.metadata.actions = [
       {
-        args: ['{{ $input.orderId }}'],
+        args: [createLiteralValue('fixed')],
         method: 'submitOrder'
       }
     ];

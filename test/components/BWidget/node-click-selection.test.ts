@@ -13,6 +13,7 @@ import type { WidgetData, WidgetElement, WidgetPoint, WidgetSelectTarget } from 
 import { createDefaultWidgetData } from '@/components/BWidget/utils/widgetData';
 import { queryWidgetElementTarget } from '@/components/BWidget/utils/widgetGeometry';
 import { createDefaultWidgetElementLoopConfig } from '@/components/BWidget/utils/widgetLoop';
+import { createVariableValue } from '@/components/BSmart/utils/value';
 
 /**
  * 带内部选区的测试Widget 数据。
@@ -312,7 +313,7 @@ function createLockedLoopGroupedWidgetData(): WidgetData {
     groupElement.loop = {
       ...groupElement.loop,
       enabled: true,
-      source: 'movies',
+      source: createVariableValue('movies'),
       columns: 1
     };
     groupElement.locked = true;

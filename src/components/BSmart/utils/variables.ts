@@ -42,6 +42,29 @@ export function flattenVariables(variables: readonly Variable[], depth = 0): Fla
 }
 
 /**
+ * 查找指定变量路径的所有祖先节点值。
+ * @param variables - 变量树节点列表
+ * @param targetValue - 目标变量完整路径
+ * @param ancestorValues - 当前递归层级的祖先值
+ * @returns 从根节点到直接父节点的变量值，不存在时返回空数组
+ */
+export function findVariableAncestorValues(variables: readonly Variable[], targetValue: string, ancestorValues: readonly string[] = []): string[] {
+  for (const variable of variables) {
+    if (variable.value === targetValue) {
+      return [...ancestorValues];
+    }
+
+    const children = variable.children ?? [];
+    const matchedValues = findVariableAncestorValues(children, targetValue, [...ancestorValues, variable.value]);
+    if (matchedValues.length > 0) {
+      return matchedValues;
+    }
+  }
+
+  return [];
+}
+
+/**
  * 判断变量是否匹配搜索词。
  * @param variable - 变量节点
  * @param query - 标准化后的搜索词

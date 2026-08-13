@@ -4,7 +4,9 @@
  */
 import type { WidgetRenderContext } from 'types/widget';
 import { describe, expect, it } from 'vitest';
-import { evaluateWidgetBindingExpression, resolveWidgetTemplateFieldText, resolveWidgetTemplateValue } from '@/components/BWidget/utils/widgetBindings';
+import type { BSmartValue } from '@/components/BSmart/types';
+import { createLiteralValue, createVariableValue } from '@/components/BSmart/utils/value';
+import { evaluateWidgetBindingExpression, resolveWidgetSmartValue, resolveWidgetTemplateFieldText, resolveWidgetTemplateValue } from '@/components/BWidget/utils/widgetBindings';
 
 /** 已移除的旧根变量名。 */
 const REMOVED_LEGACY_ROOT = ['last', 'Result'].join('');
@@ -30,6 +32,25 @@ function createRenderContext(): WidgetRenderContext {
 }
 
 describe('widgetBindings', (): void => {
+  it('resolves structured Smart values without template syntax', (): void => {
+    const context = createRenderContext();
+    const runtimeOptions = {
+      renderContext: context,
+      renderOptions: { mode: 'runtime' as const }
+    };
+
+    expect(resolveWidgetSmartValue(createLiteralValue(false), runtimeOptions)).toBe(false);
+    expect(resolveWidgetSmartValue(createVariableValue('$input.city'), runtimeOptions)).toBe('上海');
+    expect(
+      resolveWidgetSmartValue(createVariableValue('$input.city'), {
+        renderContext: context,
+        renderOptions: { mode: 'design' }
+      })
+    ).toBeUndefined();
+    expect(resolveWidgetSmartValue(createVariableValue('$input.missing'), runtimeOptions)).toBeUndefined();
+    expect(resolveWidgetSmartValue('{{ $input.city }}' as unknown as BSmartValue<string>, runtimeOptions)).toBeUndefined();
+  });
+
   it('resolves field text from the content visible in each render mode', (): void => {
     const context = createRenderContext();
     const metadata = {

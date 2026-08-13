@@ -9,6 +9,7 @@ import type { PropType } from 'vue';
 import { mount, type VueWrapper } from '@vue/test-utils';
 import { describe, expect, it, vi } from 'vitest';
 import { WIDGET_MIN_ELEMENT_SIZE } from '@/components/BWidget/constants/board';
+import { createLiteralValue } from '@/components/BSmart/utils/value';
 import type { WidgetElement, WidgetElementLoopConfig } from '@/components/BWidget/types';
 import DesignSetter from '@/views/widget/components/DesignSetter.vue';
 
@@ -74,7 +75,7 @@ vi.mock('ant-design-vue', () => ({
 function createLoopConfig(): WidgetElementLoopConfig {
   return {
     enabled: false,
-    source: '',
+    source: createLiteralValue(''),
     autoColumns: false,
     columns: 1,
     columnGap: 0,

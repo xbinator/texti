@@ -3,7 +3,6 @@
  * @description BSmartEditor 共享类型定义
  */
 import type { ChipResolver } from './extensions/variableChip';
-import type { MethodAction } from '@/components/BWidget/utils/widgetMethods';
 
 /**
  * 图片粘贴/拖拽接管上下文。
@@ -65,29 +64,66 @@ export interface VariableOptionGroup {
 }
 
 /**
+ * 静态 Smart 值。
+ */
+export interface BSmartLiteralValue<T> {
+  /** 值来源类型 */
+  type: 'literal';
+  /** 实际静态值 */
+  value: T;
+}
+
+/**
+ * Smart 变量引用。
+ */
+export interface BSmartVariableValue {
+  /** 值来源类型 */
+  type: 'variable';
+  /** 不带双花括号的变量路径 */
+  value: string;
+}
+
+/**
+ * 静态值或变量引用。
+ */
+export type BSmartValue<T> = BSmartLiteralValue<T> | BSmartVariableValue;
+
+/**
+ * 单行 Smart 输入值。
+ */
+export type BSmartInputValue = BSmartValue<string>;
+
+/**
  * BSmartSelect 支持的静态选项值。
  */
 export type BSmartSelectStaticValue = string | number | boolean | null;
 
 /**
- * BSmartSelect 模型值，字符串也可表示完整变量模板。
+ * BSmartSelect 模型值。
  */
-export type BSmartSelectValue = BSmartSelectStaticValue | undefined;
+export type BSmartSelectValue<T extends BSmartSelectStaticValue = BSmartSelectStaticValue> = BSmartValue<T> | undefined;
 
 /**
  * BSmartSelect 静态选项。
  */
-export interface BSmartSelectOption {
+export interface BSmartSelectOption<T extends BSmartSelectStaticValue = BSmartSelectStaticValue> {
   /** 展示文本 */
   label: string;
   /** 实际写入值 */
-  value: BSmartSelectStaticValue;
+  value: T;
   /** 选项说明 */
   description?: string;
 }
 
-/** 方法动作配置。 */
-export type BSmartMethodAction = MethodAction;
+/**
+ * Smart 方法动作配置。
+ */
+export interface BSmartMethodAction {
+  /** 需要调用的方法名 */
+  method: string;
+  /** 方法参数，可分别保存静态值或变量路径 */
+  args: BSmartValue<string>[];
+}
 
 /**
  * 可选方法。

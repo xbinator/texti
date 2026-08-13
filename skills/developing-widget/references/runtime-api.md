@@ -60,7 +60,7 @@ export default class WeatherCard extends Widget {
 }
 ```
 
-对于使用裸绑定（如 `{{ condition }}` 或 `{{ loading }}`）渲染的字段，需要在 `dataSchema.properties` 中声明同名字段。
+对于 Text 模板中的裸绑定（如 `{{ condition }}`）或 Smart variable 路径（如 `{ "type": "variable", "value": "loading" }`），需要在 `dataSchema.properties` 中声明同名字段。
 
 ## 生命周期
 
@@ -73,10 +73,20 @@ export default class WeatherCard extends Widget {
 按钮动作按名称调用方法：
 
 ```json
-{ "actions": [{ "method": "refresh", "args": [] }] }
+{
+  "actions": [
+    {
+      "method": "refresh",
+      "args": [
+        { "type": "literal", "value": "manual" },
+        { "type": "variable", "value": "$input.city" }
+      ]
+    }
+  ]
+}
 ```
 
-类必须声明 `refresh()` 或 `async refresh()`。不要依赖默认的占位方法。
+类必须声明 `refresh()` 或 `async refresh()`。不要依赖默认的占位方法。每个 `args[]` 都是 Smart 字符串：literal 直接作为方法参数，variable 在调用时按路径求值；变量值只写路径，不使用 `{{ }}`。
 
 ## HTTP、消息与日志
 

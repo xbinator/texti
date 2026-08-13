@@ -19,7 +19,7 @@
   "style": {},
   "loop": {
     "enabled": false,
-    "source": "",
+    "source": { "type": "literal", "value": "" },
     "autoColumns": false,
     "columns": 1,
     "columnGap": 12,
@@ -48,17 +48,29 @@
 `image` 的 metadata：
 
 ```json
-{ "src": "{{ iconUrl }}", "fit": "cover", "alt": "{{ condition }}" }
+{
+  "src": { "type": "variable", "value": "iconUrl" },
+  "fit": "cover",
+  "alt": { "type": "variable", "value": "condition" }
+}
 ```
 
 `button` 的 metadata：
 
 ```json
 {
-  "text": "刷新",
-  "disabled": false,
-  "loading": "{{ loading }}",
-  "actions": [{ "method": "refresh", "args": [] }]
+  "text": { "type": "literal", "value": "刷新" },
+  "disabled": { "type": "literal", "value": false },
+  "loading": { "type": "variable", "value": "loading" },
+  "actions": [
+    {
+      "method": "refresh",
+      "args": [
+        { "type": "literal", "value": "manual" },
+        { "type": "variable", "value": "$input.city" }
+      ]
+    }
+  ]
 }
 ```
 
@@ -71,24 +83,24 @@
   "images": [
     {
       "title": "首图",
-      "src": "{{ $input.heroImage }}",
-      "alt": "{{ $input.heroAlt }}"
+      "src": { "type": "variable", "value": "$input.heroImage" },
+      "alt": { "type": "variable", "value": "$input.heroAlt" }
     }
   ],
   "fit": "cover",
-  "autoplay": true,
+  "autoplay": { "type": "literal", "value": true },
   "autoplayInterval": 3000,
   "animationDuration": 300,
   "initialIndex": 0,
-  "loop": true,
-  "showIndicator": true,
-  "vertical": false,
+  "loop": { "type": "literal", "value": true },
+  "showIndicator": { "type": "literal", "value": true },
+  "vertical": { "type": "literal", "value": false },
   "indicatorColor": "#ffffff",
   "indicatorShape": "active-line"
 }
 ```
 
-`images` 至少保留一项。每项的 `src` 是图片地址，支持绑定；`alt` 是替代文本，支持绑定；`title` 只用于设置面板中区分图片项。`fit` 与 image 元素一致，支持 `cover`、`contain`、`fill`、`none`、`scale-down`。`autoplayInterval` 与 `animationDuration` 的单位均为 ms，`initialIndex` 从 0 开始。`indicatorShape` 支持 `dot`、`line`、`active-line`；其中 `dot` 是 3px 圆点，`line` 是短线，`active-line` 的未激活项是 3px 圆点、激活项是 10px 短线。
+`images` 至少保留一项。每项的 `src` 是 Smart 图片地址；`alt` 是 Smart 替代文本；`title` 只用于设置面板中区分图片项。`fit` 与 image 元素一致，支持 `cover`、`contain`、`fill`、`none`、`scale-down`。`autoplay`、`loop`、`showIndicator`、`vertical` 都是 Smart 布尔值。`autoplayInterval` 与 `animationDuration` 的单位均为 ms，`initialIndex` 从 0 开始。`indicatorShape` 支持 `dot`、`line`、`active-line`；其中 `dot` 是 3px 圆点，`line` 是短线，`active-line` 的未激活项是 3px 圆点、激活项是 10px 短线。
 
 ## 样式
 
@@ -102,12 +114,12 @@
 
 ## 循环
 
-循环的 `source` 是绑定路径，不是 moustache 文本。使用裸运行时数据字段（如 `items`），不要写成 `{{ items }}`。
+循环的 `source` 是 Smart 字符串。引用运行时数组时使用 `variable`，`value` 只保存裸路径，不是 moustache 文本。
 
 ```json
 {
   "enabled": true,
-  "source": "items",
+  "source": { "type": "variable", "value": "items" },
   "autoColumns": false,
   "columns": 2,
   "columnGap": 12,
@@ -125,9 +137,18 @@
 { "content": "{{ item.label }} #{{ index }}" }
 ```
 
-## 绑定
+## Smart 值与文本绑定
 
-绑定在 metadata 字符串中使用 moustache 语法：
+Button、Image、Swiper、方法参数与 Loop 数据源使用结构化 Smart 值，整个值只能二选一：
+
+```json
+{ "type": "literal", "value": "静态内容" }
+{ "type": "variable", "value": "$input.city" }
+```
+
+`literal.value` 保存字段要求的字符串或布尔值。`variable.value` 只保存非空变量路径，不保存 `{{ }}`、变量标签或变量对象。例如应写 `{ "type": "variable", "value": "items" }`，禁止写 `{ "type": "variable", "value": "{{ items }}" }` 或空路径。编辑器清空变量路径时会暂存草稿，返回静态界面才写入对应空值。
+
+Text 元素的 `metadata.content` 不属于 Smart 字段，仍可在同一个字符串中使用 moustache 混合模板：
 
 ```text
 {{ $input.city }}
@@ -136,15 +157,15 @@
 {{ forecast[0].temperature }}
 ```
 
-根名称规则：
+Text 模板和 Smart variable 路径使用相同的根名称规则：
 
 - `$input` 读取 `renderContext.input`。
 - `$output` 读取 `onExecute` 成功返回的值。
 - 裸名读取 `renderContext.data`。
 - 循环本地根来自 `loop.itemName` 与 `loop.indexName`。
 
-诸如 `{{ forecast[0].temperature }}` 和 `{{ user.profile.name }}` 这样的点号或下标路径会在运行时解析，但不会对 schema 做静态校验；只校验根名。请在对应 schema 中声明根名（裸根名用 `dataSchema`，`$input.x` 用 `inputSchema`，`$output.x` 用 `outputSchema`）。
+诸如 Text 模板 `{{ forecast[0].temperature }}` 或 Smart 路径 `user.profile.name` 会在运行时解析，但不会对完整对象层级做静态校验；只校验根名。请在对应 schema 中声明根名（裸根名用 `dataSchema`，`$input.x` 用 `inputSchema`，`$output.x` 用 `outputSchema`）。
 
 ## 图片资源
 
-包内可包含本地资源文件，校验器会检查本地图片路径是否存在以及是否越界。当前图片渲染会直接把 image 元素的 `metadata.src` 与 swiper 元素的 `metadata.images[].src` 传给 `<img>`，因此除非已知宿主集成会分发包内资源，否则优先使用 HTTPS URL、data URL 或宿主可解析的 URL。
+包内可包含本地资源文件。校验器只检查 `type: "literal"` 的 image `metadata.src.value` 与 swiper `metadata.images[].src.value` 是否存在以及是否越界；variable 路径不会被当作包内文件。除非已知宿主集成会分发包内资源，否则优先使用 HTTPS URL、data URL 或宿主可解析的 URL。

@@ -91,6 +91,19 @@ describe('SelectDropdown active item scrolling', (): void => {
     expect(scrollIntoViewMock).not.toHaveBeenCalled();
   });
 
+  it('stays safe when the host does not provide scrollIntoView', async (): Promise<void> => {
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: undefined
+    });
+    const wrapper = mountDropdown({
+      scrollActiveIntoView: true
+    });
+
+    await expect(wrapper.setProps({ activeIndex: 8 })).resolves.toBeUndefined();
+    await nextTick();
+  });
+
   it('renders the complete item list', (): void => {
     const wrapper = mountDropdown({
       items: createItems(100)

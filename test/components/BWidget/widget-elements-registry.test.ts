@@ -3,6 +3,7 @@
  * @description 验证 BWidget 元素注册表公开工具、视图和设置面板映射。
  */
 import { describe, expect, expectTypeOf, it } from 'vitest';
+import { createLiteralValue } from '@/components/BSmart/utils/value';
 import type { WidgetElementSchema } from '@/components/BWidget/elements';
 import { getWidgetElementSchema, getWidgetElementSetter, getWidgetElementView, WIDGET_ELEMENT_SCHEMAS } from '@/components/BWidget/elements';
 import type { WidgetElementRole } from '@/components/BWidget/elements/roles';
@@ -22,9 +23,9 @@ describe('BWidget element registry', (): void => {
       createCursor: 'pointer',
       metadata: {
         actions: [],
-        disabled: false,
-        loading: false,
-        text: '按钮'
+        disabled: createLiteralValue(false),
+        loading: createLiteralValue(false),
+        text: createLiteralValue('按钮')
       }
     });
   });
@@ -46,22 +47,22 @@ describe('BWidget element registry', (): void => {
       createAnchor: 'center',
       createCursor: 'grab',
       metadata: {
-        autoplay: false,
+        autoplay: createLiteralValue(false),
         autoplayInterval: 3000,
         animationDuration: 300,
         fit: 'cover',
         images: [
           {
-            alt: '',
-            src: ''
+            alt: createLiteralValue(''),
+            src: createLiteralValue('')
           }
         ],
         indicatorColor: '#ffffff',
         indicatorShape: 'dot',
         initialIndex: 0,
-        loop: true,
-        showIndicator: true,
-        vertical: false
+        loop: createLiteralValue(true),
+        showIndicator: createLiteralValue(true),
+        vertical: createLiteralValue(false)
       }
     });
   });

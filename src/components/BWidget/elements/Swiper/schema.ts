@@ -5,7 +5,8 @@
 import type { WidgetMetadata } from '../../types';
 import type { WidgetImageFit } from '../Image/schema';
 import type { WidgetElementSchema } from '../types';
-import type { BSmartSelectOption } from '@/components/BSmart/types';
+import type { BSmartSelectOption, BSmartValue } from '@/components/BSmart/types';
+import { createLiteralValue } from '@/components/BSmart/utils/value';
 import { WIDGET_DEFAULT_ELEMENT_STYLE } from '../../constants/style';
 import { WIDGET_IMAGE_DEFAULT_FIT, WIDGET_IMAGE_FIT_OPTIONS } from '../Image/schema';
 
@@ -15,10 +16,10 @@ import { WIDGET_IMAGE_DEFAULT_FIT, WIDGET_IMAGE_FIT_OPTIONS } from '../Image/sch
 export interface WidgetSwiperImageItem {
   /** 图片项标题，用于设置面板展示 */
   title?: string;
-  /** 图片地址，支持变量插值 {{ ... }} */
-  src: string;
-  /** 替代文本，用于无障碍；支持变量插值 */
-  alt?: string;
+  /** 图片地址 */
+  src: BSmartValue<string>;
+  /** 替代文本，用于无障碍 */
+  alt: BSmartValue<string>;
 }
 
 /**
@@ -35,7 +36,7 @@ export interface WidgetSwiperElementMetadata extends WidgetMetadata {
   /** 图片填充模式 */
   fit?: WidgetImageFit;
   /** 是否自动轮播 */
-  autoplay: boolean;
+  autoplay: BSmartValue<boolean>;
   /** 自动轮播间隔，单位 ms */
   autoplayInterval: number;
   /** 切换动画时长，单位 ms */
@@ -43,11 +44,11 @@ export interface WidgetSwiperElementMetadata extends WidgetMetadata {
   /** 初始位置索引值 */
   initialIndex: number;
   /** 是否开启循环播放 */
-  loop: boolean;
+  loop: BSmartValue<boolean>;
   /** 是否显示指示器 */
-  showIndicator: boolean;
+  showIndicator: BSmartValue<boolean>;
   /** 是否为纵向滚动 */
-  vertical: boolean;
+  vertical: BSmartValue<boolean>;
   /** 指示器颜色 */
   indicatorColor: string;
   /** 指示器形状 */
@@ -67,7 +68,7 @@ export const WIDGET_SWIPER_DEFAULT_INDICATOR_COLOR = '#ffffff';
 export const WIDGET_SWIPER_DEFAULT_INDICATOR_SHAPE: WidgetSwiperIndicatorShape = 'dot';
 
 /** 轮播图布尔配置选项。 */
-export const WIDGET_SWIPER_BOOLEAN_OPTIONS: BSmartSelectOption[] = [
+export const WIDGET_SWIPER_BOOLEAN_OPTIONS: BSmartSelectOption<boolean>[] = [
   { label: '关闭', value: false },
   { label: '开启', value: true }
 ];
@@ -91,22 +92,22 @@ export const swiperElementSchema: WidgetElementSchema<WidgetSwiperElementMetadat
   label: '轮播图',
   icon: 'lucide:gallery-horizontal-end',
   metadata: {
-    autoplay: false,
+    autoplay: createLiteralValue(false),
     autoplayInterval: WIDGET_SWIPER_DEFAULT_AUTOPLAY_INTERVAL,
     animationDuration: WIDGET_SWIPER_DEFAULT_ANIMATION_DURATION,
     fit: WIDGET_IMAGE_DEFAULT_FIT,
     images: [
       {
-        alt: '',
-        src: ''
+        alt: createLiteralValue(''),
+        src: createLiteralValue('')
       }
     ],
     indicatorColor: WIDGET_SWIPER_DEFAULT_INDICATOR_COLOR,
     indicatorShape: WIDGET_SWIPER_DEFAULT_INDICATOR_SHAPE,
     initialIndex: 0,
-    loop: true,
-    showIndicator: true,
-    vertical: false
+    loop: createLiteralValue(true),
+    showIndicator: createLiteralValue(true),
+    vertical: createLiteralValue(false)
   },
   style: WIDGET_DEFAULT_ELEMENT_STYLE,
   resize: {

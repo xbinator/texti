@@ -6,6 +6,7 @@ import type { Variable, VariableOptionGroup } from '../../BSmart/types';
 import type { WidgetData, WidgetElement, WidgetElementLoopConfig, WidgetSchemaObject, WidgetSchemaProperty } from '../types';
 import type { ComputedRef } from 'vue';
 import { computed } from 'vue';
+import { isVariableValue } from '@/components/BSmart/utils/value';
 import { formatWidgetBindingPath, isWidgetBindingPathSegmentAllowed, parseWidgetBindingPath, type WidgetBindingContextRoot } from '../utils/widgetBindings';
 import { buildWidgetDataSchema } from '../utils/widgetDataSchema';
 import { readWidgetExecuteMethod } from '../utils/widgetExecuteMethod';
@@ -197,7 +198,11 @@ function readSchemaPropertyAtPath(schema: WidgetSchemaObject, segments: string[]
  * @returns 数组数据源 schema
  */
 function readLoopArraySchema(widgetData: WidgetData, dataSchema: WidgetSchemaObject, config: WidgetElementLoopConfig): WidgetSchemaProperty | undefined {
-  const path = parseWidgetBindingPath(config.source);
+  if (!isVariableValue(config.source)) {
+    return undefined;
+  }
+
+  const path = parseWidgetBindingPath(config.source.value);
   if (!path || path.root === 'local') {
     return undefined;
   }

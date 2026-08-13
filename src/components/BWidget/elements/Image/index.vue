@@ -29,9 +29,9 @@ interface Props {
 
 const props = defineProps<Props>();
 /** 图片地址（渲染态，已解析变量）。 */
-const imageSrc = useElementValue(toRef(props, 'element'), 'src');
+const imageSrc = useElementValue(toRef(props, 'element'), 'src', { smart: true, transform: 'text' });
 /** 替代文本（渲染态，已解析变量）。 */
-const altText = useElementValue(toRef(props, 'element'), 'alt');
+const altText = useElementValue(toRef(props, 'element'), 'alt', { smart: true, transform: 'text' });
 /** 图片加载失败标记，src 变化时重置以重新尝试加载。 */
 const hasError = ref(false);
 

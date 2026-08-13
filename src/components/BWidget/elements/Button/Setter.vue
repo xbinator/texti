@@ -5,7 +5,7 @@
 <template>
   <BSectionBlock title="按钮" label-min-width="60">
     <BSectionItem label="文字">
-      <BSmartInput v-model:value="buttonText" :options="variableOptions" placeholder="按钮文字" />
+      <BSmartInput v-model:value="element.metadata.text" :options="variableOptions" placeholder="按钮文字" />
     </BSectionItem>
     <BSectionItem label="状态">
       <BSmartSelect v-model:value="element.metadata.disabled" :options="WIDGET_BUTTON_DISABLED_OPTIONS" :variables="variableOptions" />
@@ -24,15 +24,12 @@
 import type { WidgetButtonElementMetadata } from './schema';
 import type { WidgetElement } from '../../types';
 import { useElementMethods } from '../../hooks/useElementMethods';
-import { useElementTemplate } from '../../hooks/useElementTemplate';
 import { useElementVariables } from '../../hooks/useElementVariables';
 import { WIDGET_BUTTON_DISABLED_OPTIONS, WIDGET_BUTTON_LOADING_OPTIONS } from './schema';
 
 /** 当前编辑的按钮元素。 */
 const element = defineModel<WidgetElement<WidgetButtonElementMetadata>>('element', { required: true });
 
-/** 按钮文字模板（编辑态，保留 {{ }} 语法）。 */
-const buttonText = useElementTemplate(element, 'text');
 /** 当前可插入变量候选。 */
 const { variableOptions } = useElementVariables((): WidgetElement<WidgetButtonElementMetadata> => element.value);
 /** 当前 Widget 脚本里的公开方法候选。 */

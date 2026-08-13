@@ -10,7 +10,8 @@ import { defineComponent } from 'vue';
 import type { PropType } from 'vue';
 import { mount, type VueWrapper } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
-import type { VariableOptionGroup } from '@/components/BSmart/types';
+import type { BSmartInputValue, VariableOptionGroup } from '@/components/BSmart/types';
+import { createLiteralValue, isSmartValue } from '@/components/BSmart/utils/value';
 import SwiperImageItem from '@/components/BWidget/elements/Swiper/components/ImageItem.vue';
 import type { WidgetSwiperImageItem } from '@/components/BWidget/elements/Swiper/schema';
 
@@ -34,8 +35,8 @@ const variableOptions: VariableOptionGroup[] = [
  */
 function createImageItem(overrides: Partial<WidgetSwiperImageItem> = {}): WidgetSwiperImageItem {
   return {
-    alt: '首图',
-    src: 'https://example.com/a.png',
+    alt: createLiteralValue('首图'),
+    src: createLiteralValue('https://example.com/a.png'),
     ...overrides
   };
 }
@@ -88,7 +89,7 @@ function mountImageItem(props: { collapsed?: boolean; image?: WidgetSwiperImageI
         BSmartInput: defineComponent({
           name: 'BSmartInputStub',
           props: {
-            value: { type: String, default: '' },
+            value: { type: Object as PropType<BSmartInputValue>, required: true },
             options: {
               type: Array as PropType<VariableOptionGroup[]>,
               default: (): VariableOptionGroup[] => []
@@ -97,12 +98,12 @@ function mountImageItem(props: { collapsed?: boolean; image?: WidgetSwiperImageI
           emits: {
             /**
              * 更新输入文本。
-             * @param value - 新输入值
+             * @param value - 新结构化输入值
              * @returns 是否允许触发事件
              */
-            'update:value': (value: string): boolean => typeof value === 'string'
+            'update:value': (value: BSmartInputValue): boolean => isSmartValue(value)
           },
-          template: '<input v-bind="$attrs" :value="value" @input="$emit(\'update:value\', $event.target.value)" />'
+          template: '<input v-bind="$attrs" :value="value.value" @input="$emit(\'update:value\', { type: \'literal\', value: $event.target.value })" />'
         })
       }
     }
@@ -142,7 +143,7 @@ describe('SwiperImageItem', (): void => {
   });
 
   it('does not show an empty image address fallback summary', (): void => {
-    const wrapper = mountImageItem({ image: createImageItem({ src: '' }) });
+    const wrapper = mountImageItem({ image: createImageItem({ src: createLiteralValue('') }) });
 
     expect(wrapper.text()).not.toContain('未设置图片地址');
     expect(wrapper.find('.widget-swiper-image-item__summary').exists()).toBe(false);
@@ -161,8 +162,8 @@ describe('SwiperImageItem', (): void => {
     await titleInput.trigger('keydown.enter');
 
     expect(wrapper.emitted('update')?.[0]?.[0]).toEqual({
-      alt: '首图',
-      src: 'https://example.com/a.png',
+      alt: createLiteralValue('首图'),
+      src: createLiteralValue('https://example.com/a.png'),
       title: '首屏 Banner'
     });
     wrapper.unmount();
@@ -205,12 +206,12 @@ describe('SwiperImageItem', (): void => {
     await wrapper.find('.widget-swiper-image-item__remove').trigger('click');
 
     expect(wrapper.emitted('update')?.[0]?.[0]).toEqual({
-      alt: '首图',
-      src: 'https://cdn.example.com/b.png'
+      alt: createLiteralValue('首图'),
+      src: createLiteralValue('https://cdn.example.com/b.png')
     });
     expect(wrapper.emitted('update')?.[1]?.[0]).toEqual({
-      alt: '第二张',
-      src: 'https://example.com/a.png'
+      alt: createLiteralValue('第二张'),
+      src: createLiteralValue('https://example.com/a.png')
     });
     expect(wrapper.emitted('remove')).toHaveLength(1);
     wrapper.unmount();

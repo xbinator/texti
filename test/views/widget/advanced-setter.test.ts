@@ -8,7 +8,8 @@ import { defineComponent, nextTick, ref } from 'vue';
 import type { PropType, Ref } from 'vue';
 import { mount, type VueWrapper } from '@vue/test-utils';
 import { describe, expect, it, vi } from 'vitest';
-import type { Variable, VariableOptionGroup } from '@/components/BSmart/types';
+import type { BSmartInputValue, Variable, VariableOptionGroup } from '@/components/BSmart/types';
+import { createVariableValue } from '@/components/BSmart/utils/value';
 import { provideWidgetContext } from '@/components/BWidget/hooks/useWidgetContext';
 import type { WidgetData, WidgetElement, WidgetElementLoopConfig } from '@/components/BWidget/types';
 import { createDefaultWidgetData } from '@/components/BWidget/utils/widgetData';
@@ -108,7 +109,7 @@ vi.mock('ant-design-vue', () => ({
 function createLoopConfig(): WidgetElementLoopConfig {
   return {
     enabled: true,
-    source: '$input.items',
+    source: createVariableValue('$input.items'),
     autoColumns: false,
     columns: 2,
     columnGap: 12,
@@ -251,12 +252,8 @@ describe('AdvancedSetter', (): void => {
             name: 'BSmartInputStub',
             props: {
               value: {
-                type: String,
-                default: ''
-              },
-              useTemplateSyntax: {
-                type: Boolean,
-                default: true
+                type: Object as PropType<BSmartInputValue>,
+                required: true
               },
               options: {
                 type: Array as PropType<VariableOptionGroup[]>,
@@ -275,13 +272,13 @@ describe('AdvancedSetter', (): void => {
                */
               function handleInput(event: Event): void {
                 if (event.target instanceof HTMLInputElement) {
-                  emit('update:value', event.target.value);
+                  emit('update:value', { type: 'literal', value: event.target.value });
                 }
               }
 
               return { handleInput };
             },
-            template: '<input class="advanced-setter-source-input" :value="value" :placeholder="placeholder" @input="handleInput" />'
+            template: '<input class="advanced-setter-source-input" :value="value.value" :placeholder="placeholder" @input="handleInput" />'
           }),
           BInputNumber: defineComponent({
             name: 'BInputNumberStub',
@@ -327,7 +324,7 @@ describe('AdvancedSetter', (): void => {
     const options = input.props('options') as VariableOptionGroup[];
     const variables = readVariables(options).map((item: VariableTreeNode): string => item.value);
 
-    expect(input.props('useTemplateSyntax')).toBe(false);
+    expect(input.props('useTemplateSyntax')).toBeUndefined();
     expect(input.props('placeholder')).toBe('数组数据路径，如 $input.items');
     expect(variables).toContain('$input.items');
     wrapper.unmount();
@@ -346,11 +343,11 @@ describe('AdvancedSetter', (): void => {
       indexName: 'index'
     });
 
-    wrapper.findComponent({ name: 'BSmartInputStub' }).vm.$emit('update:value', '$input.items');
+    wrapper.findComponent({ name: 'BSmartInputStub' }).vm.$emit('update:value', createVariableValue('$input.items'));
     await nextTick();
 
     expect(element.loop).toMatchObject({
-      source: '$input.items'
+      source: createVariableValue('$input.items')
     });
     expect(wrapper.emitted('update:element')).toBeUndefined();
     wrapper.unmount();

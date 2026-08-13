@@ -11,6 +11,7 @@ import { nextTick, ref, defineComponent, h } from 'vue';
 import type { VNode } from 'vue';
 import { mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createLiteralValue, createVariableValue } from '@/components/BSmart/utils/value';
 import SwiperElementView from '@/components/BWidget/elements/Swiper/index.vue';
 import type { WidgetSwiperElementMetadata } from '@/components/BWidget/elements/Swiper/schema';
 import { provideRenderContext, type WidgetRenderContextOptions } from '@/components/BWidget/hooks/useRenderContext';
@@ -45,26 +46,26 @@ function createSwiperElement(overrides: Partial<WidgetSwiperElementMetadata> = {
     style: {},
     loop: createDefaultWidgetElementLoopConfig(),
     metadata: {
-      autoplay: false,
+      autoplay: createLiteralValue(false),
       autoplayInterval: 3000,
       animationDuration: 300,
       fit: 'cover',
       images: [
         {
-          alt: '第一张',
-          src: 'https://example.com/a.png'
+          alt: createLiteralValue('第一张'),
+          src: createLiteralValue('https://example.com/a.png')
         },
         {
-          alt: '第二张',
-          src: 'https://example.com/b.png'
+          alt: createLiteralValue('第二张'),
+          src: createLiteralValue('https://example.com/b.png')
         }
       ],
       indicatorColor: '#ffffff',
       indicatorShape: 'dot',
       initialIndex: 0,
-      loop: true,
-      showIndicator: true,
-      vertical: false,
+      loop: createLiteralValue(true),
+      showIndicator: createLiteralValue(true),
+      vertical: createLiteralValue(false),
       ...overrides
     }
   };
@@ -140,8 +141,8 @@ describe('SwiperElementView', (): void => {
     const element = createSwiperElement({
       images: [
         {
-          alt: '{{ label }}',
-          src: '{{ $input.hero }}'
+          alt: createVariableValue('label'),
+          src: createVariableValue('$input.hero')
         }
       ]
     });
@@ -168,8 +169,8 @@ describe('SwiperElementView', (): void => {
       createSwiperElement({
         images: [
           {
-            alt: '首图',
-            src: '{{ $input.hero }}'
+            alt: createLiteralValue('首图'),
+            src: createVariableValue('$input.hero')
           }
         ]
       }),
@@ -198,7 +199,7 @@ describe('SwiperElementView', (): void => {
   });
 
   it('uses vertical transform when vertical mode is enabled', (): void => {
-    const wrapper = mountSwiperElementView(createSwiperElement({ initialIndex: 1, vertical: true }));
+    const wrapper = mountSwiperElementView(createSwiperElement({ initialIndex: 1, vertical: createLiteralValue(true) }));
 
     expect(readTrackStyle(wrapper)).toContain('translateY(-100%)');
     wrapper.unmount();
@@ -212,7 +213,7 @@ describe('SwiperElementView', (): void => {
   });
 
   it('does not render side navigation buttons', (): void => {
-    const wrapper = mountSwiperElementView(createSwiperElement({ initialIndex: 1, loop: false }));
+    const wrapper = mountSwiperElementView(createSwiperElement({ initialIndex: 1, loop: createLiteralValue(false) }));
 
     expect(wrapper.find('.widget-swiper-element__nav').exists()).toBe(false);
     expect(wrapper.find('.widget-swiper-element__nav--next').exists()).toBe(false);
@@ -222,13 +223,40 @@ describe('SwiperElementView', (): void => {
 
   it('advances with autoplay using the configured interval', async (): Promise<void> => {
     vi.useFakeTimers();
-    const wrapper = mountSwiperElementView(createSwiperElement({ autoplay: true, autoplayInterval: 1000 }));
+    const wrapper = mountSwiperElementView(createSwiperElement({ autoplay: createLiteralValue(true), autoplayInterval: 1000 }));
 
     expect(readTrackStyle(wrapper)).toContain('translateX(0%)');
     vi.advanceTimersByTime(1000);
     await nextTick();
 
     expect(readTrackStyle(wrapper)).toContain('translateX(-100%)');
+    wrapper.unmount();
+  });
+
+  it('resolves a variable boolean before applying vertical layout', (): void => {
+    const wrapper = mountSwiperElementView(createSwiperElement({ initialIndex: 1, vertical: createVariableValue('vertical') }), {
+      renderContext: {
+        input: {},
+        output: undefined,
+        data: { vertical: true }
+      },
+      renderOptions: { mode: 'runtime' }
+    });
+
+    expect(readTrackStyle(wrapper)).toContain('translateY(-100%)');
+    wrapper.unmount();
+  });
+
+  it('rejects historical primitive values in migrated boolean fields', (): void => {
+    const wrapper = mountSwiperElementView(
+      createSwiperElement({
+        initialIndex: 1,
+        vertical: true as unknown as WidgetSwiperElementMetadata['vertical']
+      })
+    );
+
+    expect(readTrackStyle(wrapper)).toContain('translateX(-100%)');
+    expect(readTrackStyle(wrapper)).not.toContain('translateY(-100%)');
     wrapper.unmount();
   });
 

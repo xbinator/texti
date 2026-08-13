@@ -9,8 +9,9 @@ import type { PropType, Ref } from 'vue';
 import { mount, type VueWrapper } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
 import type { BDraggableMoveEvent } from '@/components/BDraggable/types';
-import type { Variable, VariableOptionGroup } from '@/components/BSmart/types';
-import type { WidgetSwiperElementMetadata } from '@/components/BWidget/elements/Swiper/schema';
+import type { BSmartInputValue, BSmartValue, Variable, VariableOptionGroup } from '@/components/BSmart/types';
+import { createLiteralValue, isSmartValue } from '@/components/BSmart/utils/value';
+import { swiperElementSchema, type WidgetSwiperElementMetadata } from '@/components/BWidget/elements/Swiper/schema';
 import SwiperSetter from '@/components/BWidget/elements/Swiper/Setter.vue';
 import { provideWidgetContext } from '@/components/BWidget/hooks/useWidgetContext';
 import type { WidgetData, WidgetElement } from '@/components/BWidget/types';
@@ -53,22 +54,22 @@ function createSwiperElement(): WidgetElement<WidgetSwiperElementMetadata> {
     style: {},
     loop: createDefaultWidgetElementLoopConfig(),
     metadata: {
-      autoplay: false,
+      autoplay: createLiteralValue(false),
       autoplayInterval: 3000,
       animationDuration: 300,
       fit: 'cover',
       images: [
         {
-          alt: '首图',
-          src: 'https://example.com/a.png'
+          alt: createLiteralValue('首图'),
+          src: createLiteralValue('https://example.com/a.png')
         }
       ],
       indicatorColor: '#ffffff',
       indicatorShape: 'dot',
       initialIndex: 0,
-      loop: true,
-      showIndicator: true,
-      vertical: false
+      loop: createLiteralValue(true),
+      showIndicator: createLiteralValue(true),
+      vertical: createLiteralValue(false)
     }
   };
 }
@@ -82,12 +83,12 @@ function createMultiImageElement(): WidgetElement<WidgetSwiperElementMetadata> {
 
   element.metadata.images = [
     {
-      alt: '第一张',
-      src: 'https://example.com/a.png'
+      alt: createLiteralValue('第一张'),
+      src: createLiteralValue('https://example.com/a.png')
     },
     {
-      alt: '第二张',
-      src: 'https://example.com/b.png'
+      alt: createLiteralValue('第二张'),
+      src: createLiteralValue('https://example.com/b.png')
     }
   ];
 
@@ -302,7 +303,7 @@ function mountSwiperSetter(element: WidgetElement<WidgetSwiperElementMetadata>):
         BSmartInput: defineComponent({
           name: 'BSmartInputStub',
           props: {
-            value: { type: String, default: '' },
+            value: { type: Object as PropType<BSmartInputValue>, required: true },
             options: {
               type: Array as PropType<VariableOptionGroup[]>,
               default: (): VariableOptionGroup[] => []
@@ -312,17 +313,21 @@ function mountSwiperSetter(element: WidgetElement<WidgetSwiperElementMetadata>):
           emits: {
             /**
              * 更新输入文本。
-             * @param value - 新输入值
+             * @param value - 新结构化输入值
              * @returns 是否允许触发事件
              */
-            'update:value': (value: string): boolean => typeof value === 'string'
+            'update:value': (value: BSmartInputValue): boolean => isSmartValue(value)
           },
-          template: '<input :value="value" @input="$emit(\'update:value\', $event.target.value)" />'
+          template: '<input :value="value.value" @input="$emit(\'update:value\', { type: \'literal\', value: $event.target.value })" />'
         }),
         BSmartSelect: defineComponent({
           name: 'BSmartSelectStub',
           props: {
-            value: { type: [String, Number, Boolean, null], default: undefined },
+            value: { type: Object as PropType<BSmartValue<string | number | boolean | null>>, default: undefined },
+            variables: {
+              type: Array as PropType<VariableOptionGroup[]>,
+              default: (): VariableOptionGroup[] => []
+            },
             options: {
               type: Array as PropType<Array<{ label: string; value: string | number | boolean | null }>>,
               default: (): Array<{ label: string; value: string | number | boolean | null }> => []
@@ -331,10 +336,10 @@ function mountSwiperSetter(element: WidgetElement<WidgetSwiperElementMetadata>):
           emits: {
             /**
              * 更新智能选择值。
-             * @param value - 新选择值
+             * @param value - 新结构化选择值
              * @returns 是否允许触发事件
              */
-            'update:value': (value: string | number | boolean | null): boolean => ['string', 'number', 'boolean'].includes(typeof value) || value === null
+            'update:value': (value: BSmartValue<string | number | boolean | null>): boolean => isSmartValue(value)
           },
           methods: {
             /**
@@ -345,12 +350,12 @@ function mountSwiperSetter(element: WidgetElement<WidgetSwiperElementMetadata>):
               const target = event.target as HTMLSelectElement;
               const option = this.options[Number(target.value)] as { value: string | number | boolean | null } | undefined;
               if (option) {
-                this.$emit('update:value', option.value);
+                this.$emit('update:value', { type: 'literal', value: option.value });
               }
             }
           },
           template: `
-            <select :value="options.findIndex((opt) => opt.value === value)" @change="handleChange">
+            <select :value="options.findIndex((opt) => opt.value === value?.value)" @change="handleChange">
               <option v-for="(opt, index) in options" :key="index" :value="index">{{ opt.label }}</option>
             </select>
           `
@@ -379,6 +384,17 @@ function readVariables(options: VariableOptionGroup[]): VariableTreeNode[] {
 }
 
 describe('Swiper Setter', (): void => {
+  it('defines structured Smart defaults in the swiper schema', (): void => {
+    expect(swiperElementSchema.metadata?.autoplay).toEqual(createLiteralValue(false));
+    expect(swiperElementSchema.metadata?.loop).toEqual(createLiteralValue(true));
+    expect(swiperElementSchema.metadata?.showIndicator).toEqual(createLiteralValue(true));
+    expect(swiperElementSchema.metadata?.vertical).toEqual(createLiteralValue(false));
+    expect(swiperElementSchema.metadata?.images[0]).toEqual({
+      alt: createLiteralValue(''),
+      src: createLiteralValue('')
+    });
+  });
+
   it('writes image src and alt to metadata when inputs change', async (): Promise<void> => {
     const element = createSwiperElement();
     const wrapper = mountSwiperSetter(element);
@@ -387,8 +403,8 @@ describe('Swiper Setter', (): void => {
     await wrapper.find('.widget-swiper-setter__alt-input').setValue('第二张');
 
     expect(element.metadata.images[0]).toEqual({
-      alt: '第二张',
-      src: 'https://cdn.example.com/b.png'
+      alt: createLiteralValue('第二张'),
+      src: createLiteralValue('https://cdn.example.com/b.png')
     });
     wrapper.unmount();
   });
@@ -401,6 +417,20 @@ describe('Swiper Setter', (): void => {
 
     expect(srcVariables).toContain('$input.imageUrl');
     expect(altVariables).toContain('$input.altText');
+    wrapper.unmount();
+  });
+
+  it('provides widget variables to every Smart boolean select', (): void => {
+    const wrapper = mountSwiperSetter(createSwiperElement());
+    const selects = wrapper.findAllComponents({ name: 'BSmartSelectStub' });
+
+    expect(selects).toHaveLength(4);
+    selects.forEach((select: VueWrapper): void => {
+      const selectProps = select.props() as { variables: VariableOptionGroup[] };
+      const values = readVariables(selectProps.variables).map((item: VariableTreeNode): string => item.value);
+
+      expect(values).toContain('$input.imageUrl');
+    });
     wrapper.unmount();
   });
 
@@ -453,9 +483,9 @@ describe('Swiper Setter', (): void => {
       targetKey: list[1].key
     } satisfies BDraggableMoveEvent<SwiperImageEntry>);
 
-    expect(element.metadata.images.map((image: WidgetSwiperElementMetadata['images'][number]): string => image.src)).toEqual([
-      'https://example.com/b.png',
-      'https://example.com/a.png'
+    expect(element.metadata.images.map((image: WidgetSwiperElementMetadata['images'][number]): BSmartValue<string> => image.src)).toEqual([
+      createLiteralValue('https://example.com/b.png'),
+      createLiteralValue('https://example.com/a.png')
     ]);
     wrapper.unmount();
   });
@@ -470,8 +500,8 @@ describe('Swiper Setter', (): void => {
 
     expect(wrapper.find('.widget-swiper-image-item__body').exists()).toBe(false);
     expect(element.metadata.images[0]).toEqual({
-      alt: '首图',
-      src: 'https://example.com/a.png'
+      alt: createLiteralValue('首图'),
+      src: createLiteralValue('https://example.com/a.png')
     });
     expect('collapsed' in element.metadata.images[0]).toBe(false);
     wrapper.unmount();
@@ -490,12 +520,12 @@ describe('Swiper Setter', (): void => {
     await wrapper.find('.widget-swiper-setter__vertical-select').setValue('1');
 
     expect(element.metadata.fit).toBe('contain');
-    expect(element.metadata.autoplay).toBe(true);
+    expect(element.metadata.autoplay).toEqual(createLiteralValue(true));
     expect(element.metadata.autoplayInterval).toBe(1200);
     expect(element.metadata.animationDuration).toBe(450);
     expect(element.metadata.initialIndex).toBe(2);
-    expect(element.metadata.loop).toBe(false);
-    expect(element.metadata.vertical).toBe(true);
+    expect(element.metadata.loop).toEqual(createLiteralValue(false));
+    expect(element.metadata.vertical).toEqual(createLiteralValue(true));
     wrapper.unmount();
   });
 
@@ -510,7 +540,7 @@ describe('Swiper Setter', (): void => {
 
     expect(shapeSelect.text()).toContain('激活短线');
     expect(shapeSelect.text()).not.toContain('胶囊');
-    expect(element.metadata.showIndicator).toBe(false);
+    expect(element.metadata.showIndicator).toEqual(createLiteralValue(false));
     expect(element.metadata.indicatorColor).toBe('#ff3366');
     expect(element.metadata.indicatorShape).toBe('active-line');
     wrapper.unmount();

@@ -10,6 +10,8 @@ import type { VNode } from 'vue';
 import { defineComponent, h, ref } from 'vue';
 import { mount } from '@vue/test-utils';
 import { describe, expect, it, vi } from 'vitest';
+import type { BSmartValue } from '@/components/BSmart/types';
+import { createLiteralValue, createVariableValue } from '@/components/BSmart/utils/value';
 import ButtonElementView from '@/components/BWidget/elements/Button/index.vue';
 import { provideRenderContext, type WidgetRenderContextOptions } from '@/components/BWidget/hooks/useRenderContext';
 import { provideWidgetRuntime, type WidgetRuntimeController } from '@/components/BWidget/hooks/useWidgetRuntime';
@@ -33,10 +35,10 @@ interface ButtonElementViewMountOptions {
 
 /**
  * 创建按钮视图测试元素。
- * @param text - 按钮文本模板
+ * @param text - 按钮结构化文本
  * @returns 按钮元素
  */
-function createButtonElement(text = '确认'): WidgetShapeElement {
+function createButtonElement(text: BSmartValue<string> = createLiteralValue('确认')): WidgetShapeElement {
   return {
     id: 'button-1',
     name: 'button',
@@ -50,8 +52,8 @@ function createButtonElement(text = '确认'): WidgetShapeElement {
     loop: createDefaultWidgetElementLoopConfig(),
     metadata: {
       actions: [],
-      disabled: false,
-      loading: false,
+      disabled: createLiteralValue(false),
+      loading: createLiteralValue(false),
       text
     }
   };
@@ -94,7 +96,7 @@ describe('ButtonElementView', (): void => {
   });
 
   it('renders a native button with text from element metadata', (): void => {
-    const wrapper = mountButtonElementView(createButtonElement('立即提交'));
+    const wrapper = mountButtonElementView(createButtonElement(createLiteralValue('立即提交')));
     const button = wrapper.find('button');
 
     expect(button.attributes('type')).toBe('button');
@@ -102,8 +104,8 @@ describe('ButtonElementView', (): void => {
     wrapper.unmount();
   });
 
-  it('resolves variable interpolation in button text from render context', (): void => {
-    const wrapper = mountButtonElementView(createButtonElement('确认 {{ $input.orderId }}'), {
+  it('resolves a variable button label from render context', (): void => {
+    const wrapper = mountButtonElementView(createButtonElement(createVariableValue('$input.orderId')), {
       renderContext: {
         input: {
           orderId: 'A-1024'
@@ -114,12 +116,12 @@ describe('ButtonElementView', (): void => {
       renderOptions: { mode: 'runtime' }
     });
 
-    expect(wrapper.find('button').text()).toBe('确认 A-1024');
+    expect(wrapper.find('button').text()).toBe('A-1024');
     wrapper.unmount();
   });
 
   it('hides variable placeholders in button text outside runtime mode', (): void => {
-    const wrapper = mountButtonElementView(createButtonElement('确认 {{ $input.orderId }}'), {
+    const wrapper = mountButtonElementView(createButtonElement(createVariableValue('$input.orderId')), {
       renderContext: {
         input: {
           orderId: 'A-1024'
@@ -129,7 +131,25 @@ describe('ButtonElementView', (): void => {
       }
     });
 
-    expect(wrapper.find('button').text()).toBe('确认');
+    expect(wrapper.find('button').text()).toBe('');
+    wrapper.unmount();
+  });
+
+  it('rejects historical primitive and template values in migrated button fields', (): void => {
+    const element = createButtonElement('{{ $input.orderId }}' as unknown as BSmartValue<string>);
+
+    element.metadata.disabled = true as unknown as BSmartValue<boolean>;
+    const wrapper = mountButtonElementView(element, {
+      renderContext: {
+        input: { orderId: 'A-1024' },
+        output: undefined,
+        data: {}
+      },
+      renderOptions: { mode: 'runtime' }
+    });
+
+    expect(wrapper.find('button').text()).toBe('');
+    expect(wrapper.find('button').classes()).not.toContain('disabled');
     wrapper.unmount();
   });
 
@@ -143,10 +163,10 @@ describe('ButtonElementView', (): void => {
   });
 
   it('renders loading metadata without native disabled state', (): void => {
-    const element = createButtonElement('提交');
+    const element = createButtonElement(createLiteralValue('提交'));
 
-    element.metadata.disabled = true;
-    element.metadata.loading = true;
+    element.metadata.disabled = createLiteralValue(true);
+    element.metadata.loading = createLiteralValue(true);
 
     const wrapper = mountButtonElementView(element);
     const button = wrapper.find('button');
@@ -159,10 +179,10 @@ describe('ButtonElementView', (): void => {
   });
 
   it('resolves disabled and loading metadata from binding templates', (): void => {
-    const element = createButtonElement('提交');
+    const element = createButtonElement(createLiteralValue('提交'));
 
-    element.metadata.disabled = '{{ disabled }}';
-    element.metadata.loading = '{{ loading }}';
+    element.metadata.disabled = createVariableValue('disabled');
+    element.metadata.loading = createVariableValue('loading');
 
     const wrapper = mountButtonElementView(element, {
       renderContext: {
@@ -185,7 +205,7 @@ describe('ButtonElementView', (): void => {
   });
 
   it('runs configured action method with resolved arguments when clicked', async (): Promise<void> => {
-    const element = createButtonElement('提交');
+    const element = createButtonElement(createLiteralValue('提交'));
     const runtime: WidgetRuntimeController = {
       run: vi.fn(),
       runInteraction: vi.fn()
@@ -193,7 +213,7 @@ describe('ButtonElementView', (): void => {
 
     element.metadata.actions = [
       {
-        args: ['{{ $input.coffeeId }}', '城市：{{ $input.city }}'],
+        args: [createVariableValue('$input.coffeeId'), createVariableValue('$input.city')],
         method: 'buttonByClick'
       },
       {
@@ -216,14 +236,14 @@ describe('ButtonElementView', (): void => {
 
     await wrapper.find('button').trigger('click');
 
-    expect(runtime.run).toHaveBeenNthCalledWith(1, 'buttonByClick', 'latte', '城市：上海');
+    expect(runtime.run).toHaveBeenNthCalledWith(1, 'buttonByClick', 'latte', '上海');
     expect(runtime.run).toHaveBeenNthCalledWith(2, 'refreshList');
     expect(runtime.runInteraction).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 
   it('does not run action methods while disabled or loading', async (): Promise<void> => {
-    const element = createButtonElement('提交');
+    const element = createButtonElement(createLiteralValue('提交'));
     const runtime: WidgetRuntimeController = {
       run: vi.fn(),
       runInteraction: vi.fn()
@@ -235,8 +255,8 @@ describe('ButtonElementView', (): void => {
         method: 'buttonByClick'
       }
     ];
-    element.metadata.disabled = true;
-    element.metadata.loading = true;
+    element.metadata.disabled = createLiteralValue(true);
+    element.metadata.loading = createLiteralValue(true);
 
     const wrapper = mountButtonElementView(element, { runtime });
 

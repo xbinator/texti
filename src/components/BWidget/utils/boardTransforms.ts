@@ -18,6 +18,7 @@ import type {
   WidgetShapeElement
 } from '../types';
 import { cloneDeep, escapeRegExp, isEqual } from 'lodash-es';
+import { isLiteralValue, isVariableValue } from '@/components/BSmart/utils/value';
 import { WIDGET_DEFAULT_NODE_SIZE, WIDGET_MIN_CREATE_SIZE, WIDGET_MIN_ELEMENT_SIZE } from '../constants/board';
 import { getWidgetElementSchema } from '../elements';
 import { createDefaultWidgetViewport, normalizeWidgetDataContract, type WidgetDataContractCandidate } from './widgetData';
@@ -156,7 +157,7 @@ function isWidgetElementLoopConfig(loop: unknown): loop is WidgetElementLoopConf
 
   return (
     typeof candidate.enabled === 'boolean' &&
-    typeof candidate.source === 'string' &&
+    (isVariableValue(candidate.source) || (isLiteralValue(candidate.source) && typeof candidate.source.value === 'string')) &&
     (typeof candidate.autoColumns === 'boolean' || candidate.autoColumns === undefined) &&
     ((typeof candidate.columns === 'number' && Number.isInteger(candidate.columns) && candidate.columns > 0) || candidate.columns === 'auto') &&
     typeof candidate.columnGap === 'number' &&

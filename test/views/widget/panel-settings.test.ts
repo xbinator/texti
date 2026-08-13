@@ -9,6 +9,7 @@ import type { PropType } from 'vue';
 import { config, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WidgetData, WidgetElement, WidgetElementLoopConfig } from '@/components/BWidget/types';
+import { createVariableValue } from '@/components/BSmart/utils/value';
 import { createDefaultWidgetData } from '@/components/BWidget/utils/widgetData';
 import { createDefaultWidgetElementLoopConfig } from '@/components/BWidget/utils/widgetLoop';
 import PanelSettings from '@/views/widget/components/PanelSettings.vue';
@@ -375,7 +376,7 @@ function createWidgetData(elements: WidgetElement | WidgetElement[]): WidgetData
 function createLoopConfig(source = '$input.items'): WidgetElementLoopConfig {
   return {
     enabled: true,
-    source,
+    source: createVariableValue(source),
     autoColumns: false,
     columns: 2,
     columnGap: 12,

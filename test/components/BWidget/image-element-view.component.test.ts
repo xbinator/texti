@@ -9,6 +9,8 @@ import type { VNode } from 'vue';
 import { defineComponent, h, ref } from 'vue';
 import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
+import type { BSmartValue } from '@/components/BSmart/types';
+import { createLiteralValue, createVariableValue } from '@/components/BSmart/utils/value';
 import ImageElementView from '@/components/BWidget/elements/Image/index.vue';
 import { provideRenderContext, type WidgetRenderContextOptions } from '@/components/BWidget/hooks/useRenderContext';
 import type { WidgetShapeElement } from '@/components/BWidget/types';
@@ -29,7 +31,7 @@ interface ImageElementViewMountOptions {
  * @param overrides - 元数据覆盖项
  * @returns 图片元素
  */
-function createImageElement(overrides: { src?: string; fit?: string; alt?: string } = {}): WidgetShapeElement {
+function createImageElement(overrides: { src?: BSmartValue<string>; fit?: string; alt?: BSmartValue<string> } = {}): WidgetShapeElement {
   return {
     id: 'image-1',
     name: 'image',
@@ -42,9 +44,9 @@ function createImageElement(overrides: { src?: string; fit?: string; alt?: strin
     style: {},
     loop: createDefaultWidgetElementLoopConfig(),
     metadata: {
-      src: overrides.src ?? 'https://example.com/a.png',
+      alt: overrides.alt ?? createLiteralValue(''),
+      src: overrides.src ?? createLiteralValue('https://example.com/a.png'),
       fit: overrides.fit ?? 'cover',
-      ...(overrides.alt !== undefined ? { alt: overrides.alt } : {})
     }
   };
 }
@@ -72,14 +74,14 @@ function mountImageElementView(element: WidgetShapeElement, options: ImageElemen
 
 describe('ImageElementView', (): void => {
   it('renders an img with src from element metadata', (): void => {
-    const wrapper = mountImageElementView(createImageElement({ src: 'https://cdn.example.com/x.png' }));
+    const wrapper = mountImageElementView(createImageElement({ src: createLiteralValue('https://cdn.example.com/x.png') }));
 
     expect(wrapper.find('img').attributes('src')).toBe('https://cdn.example.com/x.png');
     wrapper.unmount();
   });
 
-  it('resolves variable interpolation in src from render context', (): void => {
-    const element = createImageElement({ src: '{{ avatar }}' });
+  it('resolves a variable src from render context', (): void => {
+    const element = createImageElement({ src: createVariableValue('avatar') });
     const wrapper = mountImageElementView(element, {
       renderContext: {
         input: {},
@@ -96,7 +98,7 @@ describe('ImageElementView', (): void => {
   });
 
   it('shows the empty-src placeholder for variable-only src outside runtime mode', (): void => {
-    const element = createImageElement({ src: '{{ avatar }}' });
+    const element = createImageElement({ src: createVariableValue('avatar') });
     const wrapper = mountImageElementView(element, {
       renderContext: {
         input: {},
@@ -112,8 +114,8 @@ describe('ImageElementView', (): void => {
     wrapper.unmount();
   });
 
-  it('resolves variable interpolation in alt from render context', (): void => {
-    const element = createImageElement({ alt: '{{ label }}' });
+  it('resolves a variable alt from render context', (): void => {
+    const element = createImageElement({ alt: createVariableValue('label') });
     const wrapper = mountImageElementView(element, {
       renderContext: {
         input: {},
@@ -129,8 +131,42 @@ describe('ImageElementView', (): void => {
     wrapper.unmount();
   });
 
+  it('normalizes non-string variable results before binding image attributes', (): void => {
+    const element = createImageElement({ alt: createVariableValue('label') });
+    const wrapper = mountImageElementView(element, {
+      renderContext: {
+        input: {},
+        output: undefined,
+        data: {
+          label: { name: '示意图' }
+        }
+      },
+      renderOptions: { mode: 'runtime' }
+    });
+
+    expect(wrapper.find('img').attributes('alt')).toBe('{\n  "name": "示意图"\n}');
+    wrapper.unmount();
+  });
+
+  it('rejects historical template strings in migrated image fields', (): void => {
+    const element = createImageElement({
+      src: '{{ avatar }}' as unknown as BSmartValue<string>
+    });
+    const wrapper = mountImageElementView(element, {
+      renderContext: {
+        input: {},
+        output: undefined,
+        data: { avatar: 'https://cdn.example.com/legacy.png' }
+      },
+      renderOptions: { mode: 'runtime' }
+    });
+
+    expect(wrapper.find('img').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it('shows placeholder when src is empty', (): void => {
-    const element = createImageElement({ src: '' });
+    const element = createImageElement({ src: createLiteralValue('') });
     const wrapper = mountImageElementView(element);
 
     expect(wrapper.find('img').exists()).toBe(false);

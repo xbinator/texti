@@ -10,7 +10,8 @@ import { mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
 import type { BDraggableMoveEvent } from '@/components/BDraggable/types';
 import BSmartMethod from '@/components/BSmart/Method.vue';
-import type { BSmartMethodAction, BSmartMethodOption, VariableOptionGroup } from '@/components/BSmart/types';
+import type { BSmartInputValue, BSmartMethodAction, BSmartMethodOption, VariableOptionGroup } from '@/components/BSmart/types';
+import { createLiteralValue, createVariableValue, isSmartValue } from '@/components/BSmart/utils/value';
 
 /** BSmartMethod 源码，用于验证关键布局约束。 */
 const methodSource = readFileSync('src/components/BSmart/Method.vue', 'utf8');
@@ -170,7 +171,7 @@ function mountMethod(initialActions: BSmartMethodAction[] = []): VueWrapper {
         BSmartInput: defineComponent({
           name: 'BSmartInputStub',
           props: {
-            value: { type: String, default: '' },
+            value: { type: Object as PropType<BSmartInputValue>, required: true },
             options: {
               type: Array as PropType<VariableOptionGroup[]>,
               default: (): VariableOptionGroup[] => []
@@ -180,17 +181,17 @@ function mountMethod(initialActions: BSmartMethodAction[] = []): VueWrapper {
           emits: {
             /**
              * 更新参数值。
-             * @param value - 参数值
+             * @param value - 结构化参数值
              * @returns 是否允许触发事件
              */
-            'update:value': (value: string): boolean => typeof value === 'string'
+            'update:value': (value: BSmartInputValue): boolean => isSmartValue(value)
           },
           template: `
             <input
               class="b-smart-method-test-input"
               :placeholder="placeholder"
-              :value="value"
-              @input="$emit('update:value', $event.target.value)"
+              :value="value.value"
+              @input="$emit('update:value', { type: 'literal', value: $event.target.value })"
             />
           `
         })
@@ -242,13 +243,13 @@ describe('BSmartMethod', (): void => {
 
     expect(inputs).toHaveLength(2);
 
-    await inputs[0].setValue('{{ $input.orderId }}');
+    wrapper.findAllComponents({ name: 'BSmartInputStub' })[0].vm.$emit('update:value', createVariableValue('$input.orderId'));
     await inputs[1].setValue('尽快处理');
     await findButtonByText(wrapper, '确定').trigger('click');
 
     expect((wrapper.vm as unknown as MethodHostVm).value).toEqual([
       {
-        args: ['{{ $input.orderId }}', '尽快处理'],
+        args: [createVariableValue('$input.orderId'), createLiteralValue('尽快处理')],
         method: 'submitOrder'
       }
     ]);
@@ -258,7 +259,7 @@ describe('BSmartMethod', (): void => {
   it('appends a new action from the trigger', async (): Promise<void> => {
     const wrapper = mountMethod([
       {
-        args: ['{{ $input.orderId }}'],
+        args: [createVariableValue('$input.orderId')],
         method: 'submitOrder'
       }
     ]);
@@ -269,7 +270,7 @@ describe('BSmartMethod', (): void => {
 
     expect((wrapper.vm as unknown as MethodHostVm).value).toEqual([
       {
-        args: ['{{ $input.orderId }}'],
+        args: [createVariableValue('$input.orderId')],
         method: 'submitOrder'
       },
       {
@@ -306,7 +307,7 @@ describe('BSmartMethod', (): void => {
   it('renders configured actions and removes one from the inline list', async (): Promise<void> => {
     const wrapper = mountMethod([
       {
-        args: ['{{ $input.orderId }}'],
+        args: [createVariableValue('$input.orderId')],
         method: 'submitOrder'
       }
     ]);
@@ -323,7 +324,7 @@ describe('BSmartMethod', (): void => {
   it('keeps trigger text fixed to placeholder when actions exist', (): void => {
     const wrapper = mountMethod([
       {
-        args: ['{{ $input.orderId }}'],
+        args: [createVariableValue('$input.orderId')],
         method: 'submitOrder'
       }
     ]);
@@ -335,7 +336,7 @@ describe('BSmartMethod', (): void => {
   it('edits a configured action from the inline list', async (): Promise<void> => {
     const wrapper = mountMethod([
       {
-        args: ['{{ $input.orderId }}'],
+        args: [createVariableValue('$input.orderId')],
         method: 'submitOrder'
       }
     ]);
@@ -346,7 +347,7 @@ describe('BSmartMethod', (): void => {
 
     expect((wrapper.vm as unknown as MethodHostVm).value).toEqual([
       {
-        args: ['{{ $input.orderId }}'],
+        args: [createVariableValue('$input.orderId')],
         method: 'refreshList'
       }
     ]);
@@ -356,7 +357,7 @@ describe('BSmartMethod', (): void => {
   it('keeps existing arguments when switching to another method', async (): Promise<void> => {
     const wrapper = mountMethod([
       {
-        args: ['one', 'two', 'three'],
+        args: [createLiteralValue('one'), createLiteralValue('two'), createLiteralValue('three')],
         method: 'submitOrder'
       }
     ]);
@@ -367,7 +368,7 @@ describe('BSmartMethod', (): void => {
 
     expect((wrapper.vm as unknown as MethodHostVm).value).toEqual([
       {
-        args: ['one', 'two', 'three'],
+        args: [createLiteralValue('one'), createLiteralValue('two'), createLiteralValue('three')],
         method: 'refreshList'
       }
     ]);
@@ -411,7 +412,7 @@ describe('BSmartMethod', (): void => {
 
   it('renders action blocks through BDraggable and reorders actions on move', async (): Promise<void> => {
     const firstAction: BSmartMethodAction = {
-      args: ['{{ $input.orderId }}'],
+      args: [createVariableValue('$input.orderId')],
       method: 'submitOrder'
     };
     const secondAction: BSmartMethodAction = {

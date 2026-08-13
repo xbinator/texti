@@ -85,9 +85,10 @@
 </template>
 
 <script setup lang="ts">
-import type { BSmartMethodAction, BSmartMethodOption, VariableOptionGroup } from './types';
+import type { BSmartMethodAction, BSmartMethodOption, BSmartValue, VariableOptionGroup } from './types';
 import { computed, ref } from 'vue';
 import type { BDraggableMoveEvent } from '@/components/BDraggable/types';
+import { createLiteralValue } from '@/components/BSmart/utils/value';
 import { normalizeMethodAction, normalizeMethodActions } from '@/components/BWidget/utils/widgetMethods';
 import { createNamespace } from '@/utils/namespace';
 
@@ -142,7 +143,7 @@ function createEmptyMethodAction(): BSmartMethodAction {
  */
 function cloneMethodAction(action: BSmartMethodAction): BSmartMethodAction {
   return {
-    args: [...action.args],
+    args: action.args.map((argument: BSmartValue<string>): BSmartValue<string> => ({ ...argument })),
     method: action.method
   };
 }
@@ -220,7 +221,7 @@ function readArgumentLabel(index: number): string {
  * @returns 参数输入占位
  */
 function readArgumentPlaceholder(index: number): string {
-  return `${readArgumentLabel(index)}，支持 {{ }}`;
+  return `${readArgumentLabel(index)}，可选择变量`;
 }
 
 /**
@@ -263,9 +264,12 @@ function closeModal(): void {
  */
 function handleMethodSelect(method: BSmartMethodOption): void {
   const parameters = readMethodParameters(method);
-  const preservedArgs = [...editingAction.value.args];
+  const preservedArgs = editingAction.value.args.map((argument: BSmartValue<string>): BSmartValue<string> => ({ ...argument }));
   const missingParameterCount = parameters.length - preservedArgs.length;
-  const nextArgs = missingParameterCount > 0 ? [...preservedArgs, ...Array.from({ length: missingParameterCount }, (): string => '')] : preservedArgs;
+  const nextArgs =
+    missingParameterCount > 0
+      ? [...preservedArgs, ...Array.from({ length: missingParameterCount }, (): BSmartValue<string> => createLiteralValue(''))]
+      : preservedArgs;
 
   editingAction.value = {
     args: nextArgs,
@@ -278,7 +282,7 @@ function handleMethodSelect(method: BSmartMethodOption): void {
  */
 function addArgument(): void {
   editingAction.value = {
-    args: [...editingAction.value.args, ''],
+    args: [...editingAction.value.args, createLiteralValue('')],
     method: editingAction.value.method
   };
 }
@@ -289,7 +293,7 @@ function addArgument(): void {
  */
 function removeArgument(index: number): void {
   editingAction.value = {
-    args: editingAction.value.args.filter((_argument: string, currentIndex: number): boolean => currentIndex !== index),
+    args: editingAction.value.args.filter((_argument: BSmartValue<string>, currentIndex: number): boolean => currentIndex !== index),
     method: editingAction.value.method
   };
 }

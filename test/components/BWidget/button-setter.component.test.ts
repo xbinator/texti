@@ -7,8 +7,10 @@ import { defineComponent, ref } from 'vue';
 import type { PropType, Ref } from 'vue';
 import { mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
-import type { Variable, VariableOptionGroup } from '@/components/BSmart/types';
+import type { BSmartInputValue, BSmartValue, Variable, VariableOptionGroup } from '@/components/BSmart/types';
+import { createLiteralValue, createVariableValue, isSmartValue } from '@/components/BSmart/utils/value';
 import ButtonSetter from '@/components/BWidget/elements/Button/Setter.vue';
+import { buttonElementSchema } from '@/components/BWidget/elements/Button/schema';
 import { provideWidgetContext } from '@/components/BWidget/hooks/useWidgetContext';
 import type { WidgetData, WidgetElement } from '@/components/BWidget/types';
 import { createDefaultWidgetElementLoopConfig } from '@/components/BWidget/utils/widgetLoop';
@@ -39,9 +41,9 @@ function createButtonElement(): WidgetElement {
     loop: createDefaultWidgetElementLoopConfig(),
     metadata: {
       actions: [],
-      disabled: false,
-      loading: false,
-      text: '确认'
+      disabled: createLiteralValue(false),
+      loading: createLiteralValue(false),
+      text: createLiteralValue('确认')
     }
   };
 }
@@ -136,7 +138,7 @@ function mountButtonSetter(element: WidgetElement): VueWrapper {
         BSmartInput: defineComponent({
           name: 'BSmartInputStub',
           props: {
-            value: { type: String, default: undefined },
+            value: { type: Object as PropType<BSmartInputValue>, required: true },
             options: {
               type: Array as PropType<VariableOptionGroup[]>,
               default: (): VariableOptionGroup[] => []
@@ -146,24 +148,24 @@ function mountButtonSetter(element: WidgetElement): VueWrapper {
           emits: {
             /**
              * 更新输入文本。
-             * @param value - 新输入值
+             * @param value - 新结构化输入值
              * @returns 是否允许触发事件
              */
-            'update:value': (value: string): boolean => typeof value === 'string'
+            'update:value': (value: BSmartInputValue): boolean => isSmartValue(value)
           },
           template: `
             <input
               class="widget-button-setter-stub-smart-input"
               :data-placeholder="placeholder"
-              :value="value"
-              @input="$emit('update:value', $event.target.value)"
+              :value="value.value"
+              @input="$emit('update:value', { type: 'literal', value: $event.target.value })"
             />
           `
         }),
         BSmartSelect: defineComponent({
           name: 'BSmartSelectStub',
           props: {
-            value: { type: [Boolean, String], default: undefined },
+            value: { type: Object as PropType<BSmartValue<boolean>>, default: undefined },
             options: {
               type: Array as PropType<Array<{ label: string; value: boolean | string }>>,
               default: (): Array<{ label: string; value: boolean | string }> => []
@@ -175,11 +177,11 @@ function mountButtonSetter(element: WidgetElement): VueWrapper {
           },
           emits: {
             /**
-             * 更新静态值或变量模板。
-             * @param value - 新选择值
+             * 更新静态值或变量引用。
+             * @param value - 新结构化选择值
              * @returns 是否允许触发事件
              */
-            'update:value': (value: boolean | string): boolean => typeof value === 'boolean' || typeof value === 'string'
+            'update:value': (value: BSmartValue<boolean>): boolean => isSmartValue(value)
           },
           template: `
             <div class="widget-button-setter-stub-smart-select">
@@ -189,14 +191,14 @@ function mountButtonSetter(element: WidgetElement): VueWrapper {
                 class="widget-button-setter-stub-smart-select-option"
                 :data-option-label="item.label"
                 type="button"
-                @click="$emit('update:value', item.value)"
+                @click="$emit('update:value', { type: 'literal', value: item.value })"
               >
                 {{ item.label }}
               </button>
               <button
                 class="widget-button-setter-stub-smart-select-variable"
                 type="button"
-                @click="$emit('update:value', '{{ loading }}')"
+                @click="$emit('update:value', { type: 'variable', value: 'loading' })"
               >
                 变量
               </button>
@@ -207,8 +209,8 @@ function mountButtonSetter(element: WidgetElement): VueWrapper {
           name: 'BSmartMethodStub',
           props: {
             value: {
-              type: Array as PropType<Array<{ args: string[]; method: string }>>,
-              default: (): Array<{ args: string[]; method: string }> => []
+              type: Array as PropType<Array<{ args: BSmartValue<string>[]; method: string }>>,
+              default: (): Array<{ args: BSmartValue<string>[]; method: string }> => []
             },
             methods: {
               type: Array as PropType<Array<{ label: string; parameters?: string[]; value: string }>>,
@@ -225,14 +227,14 @@ function mountButtonSetter(element: WidgetElement): VueWrapper {
              * @param value - 新动作配置
              * @returns 是否允许触发事件
              */
-            'update:value': (value: Array<{ args: string[]; method: string }>): boolean =>
-              value.every((action: { args: string[]; method: string }): boolean => typeof action.method === 'string' && Array.isArray(action.args))
+            'update:value': (value: Array<{ args: BSmartValue<string>[]; method: string }>): boolean =>
+              value.every((action: { args: BSmartValue<string>[]; method: string }): boolean => typeof action.method === 'string' && Array.isArray(action.args))
           },
           template: `
             <button
               class="widget-button-setter-stub-method"
               type="button"
-              @click="$emit('update:value', [{ method: 'buttonByClick', args: ['{{ $input.orderId }}'] }])"
+              @click="$emit('update:value', [{ method: 'buttonByClick', args: [{ type: 'variable', value: '$input.orderId' }] }])"
             >
               动作设置
             </button>
@@ -293,14 +295,20 @@ function findInputByPlaceholder(wrapper: VueWrapper, placeholder: string): DOMWr
 }
 
 describe('Button Setter', (): void => {
+  it('defines structured Smart defaults in the button schema', (): void => {
+    expect(buttonElementSchema.metadata?.text).toEqual(createLiteralValue('按钮'));
+    expect(buttonElementSchema.metadata?.disabled).toEqual(createLiteralValue(false));
+    expect(buttonElementSchema.metadata?.loading).toEqual(createLiteralValue(false));
+  });
+
   it('writes text to metadata when the label input changes', async (): Promise<void> => {
     const element = createButtonElement();
     const wrapper = mountButtonSetter(element);
     const input = findInputByPlaceholder(wrapper, '按钮文字');
 
-    await input.setValue('确认 {{ $input.orderId }}');
+    await input.setValue('确认订单');
 
-    expect(element.metadata.text).toBe('确认 {{ $input.orderId }}');
+    expect(element.metadata.text).toEqual(createLiteralValue('确认订单'));
     wrapper.unmount();
   });
 
@@ -325,13 +333,15 @@ describe('Button Setter', (): void => {
 
     await findTextSelectOptionByLabel(wrapper, '状态', '禁用').trigger('click');
     await findTextSelectVariableByLabel(wrapper, '加载').trigger('click');
-    wrapper.findComponent({ name: 'BSmartMethodStub' }).vm.$emit('update:value', [{ method: 'buttonByClick', args: ['{{ $input.orderId }}'] }]);
+    wrapper.findComponent({ name: 'BSmartMethodStub' }).vm.$emit('update:value', [
+      { method: 'buttonByClick', args: [createVariableValue('$input.orderId')] }
+    ]);
 
-    expect(element.metadata.disabled).toBe(true);
-    expect(element.metadata.loading).toBe('{{ loading }}');
+    expect(element.metadata.disabled).toEqual(createLiteralValue(true));
+    expect(element.metadata.loading).toEqual(createVariableValue('loading'));
     expect(element.metadata.actions).toEqual([
       {
-        args: ['{{ $input.orderId }}'],
+        args: [createVariableValue('$input.orderId')],
         method: 'buttonByClick'
       }
     ]);

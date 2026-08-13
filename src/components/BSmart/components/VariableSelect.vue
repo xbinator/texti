@@ -1,3 +1,7 @@
+<!--
+  @file VariableSelect.vue
+  @description 展示支持树形折叠和活动项导航的变量列表。
+-->
 <template>
   <SelectDropdown
     :visible="dropdownVisible"
@@ -7,11 +11,12 @@
     :position="position"
     :dropdown-width="dropdownWidth"
     :inline-style="inlineStyle"
+    :scroll-active-into-view="scrollActiveIntoView"
     @select="handleSelect"
     @update:active-index="handleMouseEnter"
   >
     <template #item="{ item }">
-      <div class="variable-item" :class="{ 'is-without-toggle': !hasToggleButton(item) }" :style="getVariableItemStyle(item)">
+      <div class="variable-item" :class="{ 'is-without-toggle': !hasToggleButton(item) }" :style="getVariableItemStyle(item)" :data-variable-value="item.value">
         <BButton
           v-if="item.hasChildren"
           type="ghost"
@@ -75,6 +80,8 @@ interface Props {
   position: { top: number; left: number; bottom: number };
   /** 当前高亮项索引 */
   activeIndex?: number;
+  /** 活动项变化时是否滚动到可视区 */
+  scrollActiveIntoView?: boolean;
   /** 下拉菜单宽度 */
   dropdownWidth?: number;
   /** 是否将下拉菜单传送到 body */
@@ -85,6 +92,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   activeIndex: 0,
+  scrollActiveIntoView: false,
   dropdownWidth: 300,
   teleport: true,
   inlineStyle: undefined

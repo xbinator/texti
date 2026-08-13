@@ -125,7 +125,9 @@ watch(
  */
 function scrollActiveItemIntoView(index: number): void {
   const activeItem = dropdownRef.value?.querySelectorAll<HTMLElement>('.select-dropdown__item')[index];
-  activeItem?.scrollIntoView({ block: 'nearest' });
+  if (typeof activeItem?.scrollIntoView === 'function') {
+    activeItem.scrollIntoView({ block: 'nearest' });
+  }
 }
 
 watch([() => props.activeIndex, () => props.scrollActiveIntoView, () => props.visible], async ([activeIndex, scrollActiveIntoView, visible]) => {

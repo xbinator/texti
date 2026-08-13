@@ -10,7 +10,7 @@
       </BSectionItem>
 
       <BSectionItem label="数据源">
-        <BSmartInput v-model:value="element.loop.source" :use-template-syntax="false" :options="variableOptions" placeholder="数组数据路径，如 $input.items" />
+        <BSmartInput v-model:value="element.loop.source" :options="variableOptions" placeholder="数组数据路径，如 $input.items" />
       </BSectionItem>
 
       <BSectionItem label="迭代变量名">

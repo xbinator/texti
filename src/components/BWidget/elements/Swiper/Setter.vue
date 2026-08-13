@@ -40,13 +40,23 @@
       <BInputNumber v-model:value="element.metadata.initialIndex" class="widget-swiper-setter__initial-index-input" :min="0" :precision="0" />
     </BSectionItem>
     <BSectionItem label="纵向滚动">
-      <BSmartSelect v-model:value="element.metadata.vertical" class="widget-swiper-setter__vertical-select" :options="WIDGET_SWIPER_BOOLEAN_OPTIONS" />
+      <BSmartSelect
+        v-model:value="element.metadata.vertical"
+        class="widget-swiper-setter__vertical-select"
+        :options="WIDGET_SWIPER_BOOLEAN_OPTIONS"
+        :variables="variableOptions"
+      />
     </BSectionItem>
   </BSectionBlock>
 
   <BSectionBlock title="播放" label-min-width="64">
     <BSectionItem label="自动播放">
-      <BSmartSelect v-model:value="element.metadata.autoplay" class="widget-swiper-setter__autoplay-select" :options="WIDGET_SWIPER_BOOLEAN_OPTIONS" />
+      <BSmartSelect
+        v-model:value="element.metadata.autoplay"
+        class="widget-swiper-setter__autoplay-select"
+        :options="WIDGET_SWIPER_BOOLEAN_OPTIONS"
+        :variables="variableOptions"
+      />
     </BSectionItem>
     <BSectionItem label="间隔">
       <BInputNumber v-model:value="element.metadata.autoplayInterval" class="widget-swiper-setter__interval-input" :min="100" :precision="0" />
@@ -55,7 +65,12 @@
       <BInputNumber v-model:value="element.metadata.animationDuration" class="widget-swiper-setter__duration-input" :min="0" :precision="0" />
     </BSectionItem>
     <BSectionItem label="循环播放">
-      <BSmartSelect v-model:value="element.metadata.loop" class="widget-swiper-setter__loop-select" :options="WIDGET_SWIPER_BOOLEAN_OPTIONS" />
+      <BSmartSelect
+        v-model:value="element.metadata.loop"
+        class="widget-swiper-setter__loop-select"
+        :options="WIDGET_SWIPER_BOOLEAN_OPTIONS"
+        :variables="variableOptions"
+      />
     </BSectionItem>
   </BSectionBlock>
 
@@ -65,6 +80,7 @@
         v-model:value="element.metadata.showIndicator"
         class="widget-swiper-setter__indicator-visible-select"
         :options="WIDGET_SWIPER_BOOLEAN_OPTIONS"
+        :variables="variableOptions"
       />
     </BSectionItem>
     <BSectionItem label="颜色">
@@ -85,6 +101,8 @@ import type { WidgetSwiperElementMetadata, WidgetSwiperImageItem } from './schem
 import type { WidgetElement } from '../../types';
 import { computed, ref, watch } from 'vue';
 import type { BDraggableMoveEvent } from '@/components/BDraggable/types';
+import type { BSmartValue } from '@/components/BSmart/types';
+import { createLiteralValue, isLiteralValue, isVariableValue } from '@/components/BSmart/utils/value';
 import { useElementVariables } from '../../hooks/useElementVariables';
 import SwiperImageItem from './components/ImageItem.vue';
 import { WIDGET_SWIPER_BOOLEAN_OPTIONS, WIDGET_SWIPER_FIT_OPTIONS, WIDGET_SWIPER_INDICATOR_SHAPE_OPTIONS } from './schema';
@@ -119,9 +137,26 @@ let imageKeySeed = 0;
  */
 function createEmptyImage(): WidgetSwiperImageItem {
   return {
-    alt: '',
-    src: ''
+    alt: createLiteralValue(''),
+    src: createLiteralValue('')
   };
+}
+
+/**
+ * 规整图片文本 Smart 值，不转换旧字符串数据。
+ * @param value - 原始字段值
+ * @returns 合法文本 Smart 值
+ */
+function normalizeImageValue(value: unknown): BSmartValue<string> {
+  if (isVariableValue(value)) {
+    return { ...value };
+  }
+
+  if (isLiteralValue(value) && typeof value.value === 'string') {
+    return createLiteralValue(value.value);
+  }
+
+  return createLiteralValue('');
 }
 
 /**
@@ -146,8 +181,8 @@ function normalizeImages(images: WidgetSwiperImageItem[] | undefined): WidgetSwi
 
   return images.map((image: WidgetSwiperImageItem): WidgetSwiperImageItem => {
     const normalizedImage: WidgetSwiperImageItem = {
-      alt: typeof image.alt === 'string' ? image.alt : '',
-      src: typeof image.src === 'string' ? image.src : ''
+      alt: normalizeImageValue(image.alt),
+      src: normalizeImageValue(image.src)
     };
 
     if (typeof image.title === 'string') {

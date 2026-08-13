@@ -10,6 +10,7 @@ import { defineComponent, h, ref } from 'vue';
 import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
 import type { Variable, VariableOptionGroup } from '@/components/BSmart/types';
+import { createLiteralValue, createVariableValue } from '@/components/BSmart/utils/value';
 import { useElementVariables, type ElementTargetReader, type UseElementVariablesReturn } from '@/components/BWidget/hooks/useElementVariables';
 import { provideWidgetContext } from '@/components/BWidget/hooks/useWidgetContext';
 import type { WidgetData, WidgetElement, WidgetElementLoopConfig } from '@/components/BWidget/types';
@@ -180,7 +181,7 @@ function createGroupElement(
 function createLoopConfig(): WidgetElementLoopConfig {
   return {
     enabled: true,
-    source: '$input.products',
+    source: createVariableValue('$input.products'),
     autoColumns: false,
     columns: 2,
     columnGap: 12,
@@ -469,7 +470,7 @@ describe('useElementVariables', (): void => {
   });
 
   it('hides loop variables when loop source is empty', (): void => {
-    const loopElement = createWidgetElement('text-1', {}, { ...createLoopConfig(), source: '' });
+    const loopElement = createWidgetElement('text-1', {}, { ...createLoopConfig(), source: createLiteralValue('') });
     const widgetDataRef = ref<WidgetData | undefined>(createLoopWidgetData([loopElement]));
     const { variableOptions, wrapper } = mountElementVariables(widgetDataRef, (): WidgetElement => loopElement);
     const values = readVariableValues(variableOptions.value);
@@ -480,7 +481,7 @@ describe('useElementVariables', (): void => {
   });
 
   it('hides loop variables when loop source points to a non-array field', (): void => {
-    const loopElement = createWidgetElement('text-1', {}, { ...createLoopConfig(), source: '$input.city' });
+    const loopElement = createWidgetElement('text-1', {}, { ...createLoopConfig(), source: createVariableValue('$input.city') });
     const widgetDataRef = ref<WidgetData | undefined>(createLoopWidgetData([loopElement]));
     const { variableOptions, wrapper } = mountElementVariables(widgetDataRef, (): WidgetElement => loopElement);
     const values = readVariableValues(variableOptions.value);
@@ -504,7 +505,7 @@ describe('useElementVariables', (): void => {
 
   it('hides inherited loop variables when group loop source is invalid', (): void => {
     const groupChild = createWidgetElement('text-1');
-    const loopContextGroup = createGroupElement('group-1', {}, [groupChild], { ...createLoopConfig(), source: '$input.city' });
+    const loopContextGroup = createGroupElement('group-1', {}, [groupChild], { ...createLoopConfig(), source: createVariableValue('$input.city') });
     const widgetDataRef = ref<WidgetData | undefined>(createLoopWidgetData([loopContextGroup]));
     const { variableOptions, wrapper } = mountElementVariables(widgetDataRef, (): WidgetElement => groupChild);
     const values = readVariableValues(variableOptions.value);

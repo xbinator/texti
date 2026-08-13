@@ -3,6 +3,7 @@
  * @description 验证 BWidget 手动Widget element transform 与历史记录。
  */
 import { describe, expect, it } from 'vitest';
+import { createVariableValue } from '@/components/BSmart/utils/value';
 import type { WidgetBoardState, WidgetElement, WidgetShapeElement } from '@/components/BWidget/types';
 import {
   addWidgetShape,
@@ -191,6 +192,23 @@ describe('boardTransforms', (): void => {
     });
 
     expect(initial.elements).toHaveLength(0);
+  });
+
+  it('accepts structured loop sources and rejects historical primitive sources', (): void => {
+    const structuredElement = createShapeElement('structured-node');
+    structuredElement.loop.source = createVariableValue('$input.items');
+    const structuredState = createWidgetBoardState({ elements: [structuredElement] });
+    const legacyElement = {
+      ...createShapeElement('legacy-node'),
+      loop: {
+        ...createDefaultWidgetElementLoopConfig(),
+        source: '$input.items'
+      }
+    } as unknown as WidgetShapeElement;
+    const legacyState = createWidgetBoardState({ elements: [legacyElement] });
+
+    expect(structuredState.elements[0]?.loop.source).toEqual(createVariableValue('$input.items'));
+    expect(legacyState.elements).toHaveLength(0);
   });
 
   it('normalizes widget data contract fields in lightweight snapshots', (): void => {

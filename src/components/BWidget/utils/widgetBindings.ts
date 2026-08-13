@@ -6,6 +6,8 @@ import type { WidgetRenderEvaluationOptions } from '../renderOptions';
 import type { WidgetMetadata } from '../types';
 import type { WidgetExpressionHost, WidgetExpressionReadResult } from './widgetExpression';
 import type { WidgetRenderContext } from 'types/widget';
+import type { BSmartValue } from '@/components/BSmart/types';
+import { isLiteralValue, isSmartValue } from '@/components/BSmart/utils/value';
 import { evaluateWidgetExpression } from './widgetExpression';
 
 /** 支持的绑定上下文根名称。 */
@@ -775,12 +777,41 @@ export function removeWidgetTemplateBindings(template: string): string {
 }
 
 /**
+ * 按当前渲染模式解析结构化 Smart 值。
+ * @param value - Smart 值
+ * @param options - Widget 渲染求值选项
+ * @returns 静态值或变量解析结果，无法解析时返回 undefined
+ */
+export function resolveWidgetSmartValue<T>(value: BSmartValue<T> | undefined, options: WidgetRenderEvaluationOptions = {}): unknown {
+  if (!isSmartValue(value)) {
+    return undefined;
+  }
+
+  if (isLiteralValue(value)) {
+    return value.value;
+  }
+
+  const { renderContext, renderOptions = { mode: 'design' } } = options;
+  if (renderOptions.mode !== 'runtime' || !renderContext || !value.value.trim()) {
+    return undefined;
+  }
+
+  const result = evaluateWidgetBindingExpression(value.value, renderContext);
+
+  return result.resolved ? result.value : undefined;
+}
+
+/**
  * 按当前渲染模式解析字段展示值。
  * @param value - 字段原始值
  * @param options - Widget 渲染求值选项
  * @returns 当前模式下实际展示的字段值
  */
 export function resolveWidgetDisplayValue(value: unknown, options: WidgetRenderEvaluationOptions = {}): unknown {
+  if (isSmartValue(value)) {
+    return resolveWidgetSmartValue(value, options);
+  }
+
   if (typeof value !== 'string') {
     return value;
   }

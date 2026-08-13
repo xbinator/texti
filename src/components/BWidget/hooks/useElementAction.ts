@@ -6,7 +6,8 @@ import type { WidgetMetadata, WidgetShapeElement } from '../types';
 import type { MethodAction } from '../utils/widgetMethods';
 import type { WidgetRenderContext } from 'types/widget';
 import type { Ref } from 'vue';
-import { resolveWidgetTemplateValue } from '../utils/widgetBindings';
+import type { BSmartValue } from '@/components/BSmart/types';
+import { resolveWidgetSmartValue } from '../utils/widgetBindings';
 import { useElementValue } from './useElementValue';
 import { useRenderContext } from './useRenderContext';
 import { useWidgetRuntime, type WidgetRuntimeController } from './useWidgetRuntime';
@@ -17,13 +18,16 @@ import { useWidgetRuntime, type WidgetRuntimeController } from './useWidgetRunti
 export type ElementActionRunner = () => void;
 
 /**
- * 解析方法动作参数模板。
- * @param argument - 参数模板
+ * 解析方法动作参数。
+ * @param argument - 结构化方法参数
  * @param renderContext - Widget 渲染上下文
  * @returns 解析后的参数值
  */
-function resolveElementActionArgument(argument: string, renderContext: WidgetRenderContext | undefined): unknown {
-  return resolveWidgetTemplateValue(argument, renderContext);
+function resolveElementActionArgument(argument: BSmartValue<string>, renderContext: WidgetRenderContext | undefined): unknown {
+  return resolveWidgetSmartValue(argument, {
+    renderContext,
+    renderOptions: { mode: 'runtime' }
+  });
 }
 
 /**
@@ -33,7 +37,7 @@ function resolveElementActionArgument(argument: string, renderContext: WidgetRen
  * @returns 解析后的参数列表
  */
 function resolveElementActionArgs(action: MethodAction, renderContext: WidgetRenderContext | undefined): unknown[] {
-  return action.args.map((argument: string): unknown => resolveElementActionArgument(argument, renderContext));
+  return action.args.map((argument: BSmartValue<string>): unknown => resolveElementActionArgument(argument, renderContext));
 }
 
 /**
