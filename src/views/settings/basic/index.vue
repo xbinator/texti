@@ -221,8 +221,7 @@ function handleCloseCustomizeTheme(): void {
   appearance: none;
   cursor: pointer;
   background: transparent;
-  border: none;
-  border-radius: 0;
+  border-radius: var(--input-keycap-radius);
   transition: background var(--motion-duration-fast) var(--motion-easing-standard), color var(--motion-duration-fast) var(--motion-easing-standard);
 
   &:hover {

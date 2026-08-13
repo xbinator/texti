@@ -285,7 +285,6 @@ function handleDropdownVisibleChange(open: boolean): void {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px 12px 4px;
   border-top: 1px solid var(--border-primary);
 }
 
@@ -293,6 +292,7 @@ function handleDropdownVisibleChange(open: boolean): void {
   display: flex;
   gap: 6px;
   align-items: flex-start;
+  padding: 8px 12px 4px;
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-secondary);
