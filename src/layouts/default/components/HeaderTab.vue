@@ -14,7 +14,7 @@
       <span v-if="isDirty" class="header-tab__dirty-mark">*</span>
     </div>
 
-    <button ref="closeRef" class="header-tab__close" @pointerdown.stop @click.stop="emit('close')">
+    <button ref="closeRef" class="header-tab__close" @pointerdown.stop @click.stop="handleCloseClick">
       <Icon icon="ic:round-close" width="16" height="16" />
     </button>
   </div>
@@ -56,6 +56,12 @@ const CLOSE_FLOATING_WIDTH_THRESHOLD = 100;
 /** 普通布局下标签根节点左右 padding 总和。 */
 const COMPACT_TAB_HORIZONTAL_PADDING = 10;
 
+/** 关闭离场动画兜底超时时长（ms），略大于 CSS 过渡时长，避免 transitionend 丢失卡住关闭流程。 */
+const CLOSE_FALLBACK_TIMEOUT_MS = 400;
+
+/** 关闭事件发出后检查关闭是否被拦截的延时（ms），覆盖同步返回的关闭守卫。 */
+const CLOSE_CANCEL_CHECK_DELAY_MS = 200;
+
 /**
  * 组件 Props 定义。
  */
@@ -95,6 +101,18 @@ const closeRef = ref<HTMLButtonElement | null>(null);
 /** 关闭按钮是否需要悬浮覆盖标题末尾。 */
 const isCloseFloating = ref(false);
 
+/** 是否正在播放关闭离场动画。 */
+const isClosing = ref(false);
+
+/** 关闭动画兜底定时器 ID。 */
+let closeFallbackTimer: number | undefined;
+
+/** 关闭被拦截后的状态回滚定时器 ID。 */
+let closeCancelTimer: number | undefined;
+
+/** 关闭动画 transitionend 监听清理函数。 */
+let removeCloseListener: (() => void) | undefined;
+
 /** 监听标签尺寸变化，用于同步关闭按钮布局。 */
 let closeLayoutObserver: ResizeObserver | undefined;
 
@@ -108,6 +126,7 @@ const isDirty = computed<boolean>(() => tabsStore.isDirty(props.tab.id));
 const tabClass = computed<Record<string, boolean>>(() => ({
   'is-active': isActive.value,
   'is-close-floating': isCloseFloating.value,
+  'is-closing': isClosing.value,
   'is-missing': tabsStore.isMissing(props.tab.id),
   'is-dragging': props.dragging ?? false
 }));
@@ -132,6 +151,11 @@ function getCompactTabWidth(): number {
  * 根据普通布局宽度是否超过阈值，同步关闭按钮是否悬浮。
  */
 function updateCloseLayout(): void {
+  // 离场动画期间宽度被人为收缩，不应参与悬浮判定
+  if (isClosing.value) {
+    return;
+  }
+
   isCloseFloating.value = getCompactTabWidth() > CLOSE_FLOATING_WIDTH_THRESHOLD;
 }
 
@@ -162,6 +186,95 @@ function observeCloseLayout(): void {
   closeLayoutObserver.observe(root);
   closeLayoutObserver.observe(title);
   closeLayoutObserver.observe(close);
+}
+
+/**
+ * 判断当前环境是否偏好减少动效。
+ * @returns 是否减少动效
+ */
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/**
+ * 关闭被拦截后回滚离场状态，直接恢复标签原状。
+ */
+function restoreFromClosing(): void {
+  isClosing.value = false;
+
+  const root = rootRef.value;
+  if (root) {
+    root.style.width = '';
+  }
+
+  scheduleCloseSync();
+}
+
+/**
+ * 清理离场动画监听并发出关闭事件，随后延迟检查关闭是否被守卫拦截。
+ */
+function finishClose(): void {
+  window.clearTimeout(closeFallbackTimer);
+  closeFallbackTimer = undefined;
+  removeCloseListener?.();
+  removeCloseListener = undefined;
+
+  emit('close');
+
+  // 关闭守卫（未保存确认、并发保护）可能拒绝关闭，此时标签仍留在 store 中，需要恢复原状
+  closeCancelTimer = window.setTimeout((): void => {
+    if (!isClosing.value) {
+      return;
+    }
+
+    if (tabsStore.tabs.some((tab: Tab): boolean => tab.id === props.tab.id)) {
+      restoreFromClosing();
+    }
+  }, CLOSE_CANCEL_CHECK_DELAY_MS);
+}
+
+/**
+ * 监听宽度过渡结束触发关闭，并保留超时兜底避免 transitionend 丢失。
+ * @param root - 标签根元素
+ */
+function watchCloseTransition(root: HTMLElement): void {
+  const handleTransitionEnd = (event: TransitionEvent): void => {
+    if (event.target === root && event.propertyName === 'width') {
+      finishClose();
+    }
+  };
+
+  root.addEventListener('transitionend', handleTransitionEnd);
+  removeCloseListener = (): void => {
+    root.removeEventListener('transitionend', handleTransitionEnd);
+  };
+  closeFallbackTimer = window.setTimeout(finishClose, CLOSE_FALLBACK_TIMEOUT_MS);
+}
+
+/**
+ * 处理关闭按钮点击：先播放宽度收缩离场动画，动画结束后再发出关闭事件。
+ * 右侧标签随 flex 布局自然从右往左滑动补位。
+ */
+function handleCloseClick(): void {
+  if (isClosing.value) {
+    return;
+  }
+
+  const root = rootRef.value;
+  if (!root || prefersReducedMotion()) {
+    emit('close');
+    return;
+  }
+
+  isClosing.value = true;
+
+  // 锁定当前渲染宽度作为收缩过渡的起点
+  root.style.width = `${root.offsetWidth}px`;
+  // 强制同步布局提交起始宽度，避免与目标宽度合并导致直接跳变
+  root.getBoundingClientRect();
+  root.style.width = '0px';
+
+  watchCloseTransition(root);
 }
 
 /**
@@ -252,9 +365,15 @@ onMounted((): void => {
 });
 
 /**
- * 组件卸载时释放尺寸监听器。
+ * 组件卸载时释放尺寸监听器与关闭动画定时器。
  */
 onUnmounted((): void => {
+  window.clearTimeout(closeFallbackTimer);
+  window.clearTimeout(closeCancelTimer);
+  closeFallbackTimer = undefined;
+  closeCancelTimer = undefined;
+  removeCloseListener?.();
+  removeCloseListener = undefined;
   closeLayoutObserver?.disconnect();
   closeLayoutObserver = undefined;
 });
@@ -276,7 +395,8 @@ onUnmounted((): void => {
   box-shadow: var(--button-shadow);
   transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard),
     border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard),
-    opacity var(--motion-duration-base) var(--motion-easing-standard);
+    opacity var(--motion-duration-base) var(--motion-easing-standard), width var(--motion-duration-base) var(--motion-easing-standard),
+    padding var(--motion-duration-base) var(--motion-easing-standard), border-width var(--motion-duration-base) var(--motion-easing-standard);
 
   /* Ensure tabs themselves are clickable (not draggable) */
   -webkit-app-region: no-drag;
@@ -413,6 +533,16 @@ onUnmounted((): void => {
   opacity: 0;
   transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard),
     opacity var(--motion-duration-base) var(--motion-easing-standard);
+}
+
+/* 关闭离场：宽度被 JS 收缩到 0，padding 与边框同步归零，避免残留占位 */
+.header-tab.is-closing {
+  padding: 0;
+  overflow: hidden;
+  pointer-events: none;
+  border-right-width: 0;
+  border-left-width: 0;
+  opacity: 0;
 }
 
 @keyframes header-tab-status-spin {

@@ -33,7 +33,7 @@
             title="欢迎"
             @click="handleOpenWelcome"
           >
-            <Icon icon="lucide:layout-grid" width="14" height="14" />
+            <Icon icon="lucide:hexagon" width="14" height="14" />
           </button>
           <HeaderTabs />
         </div>
@@ -358,18 +358,18 @@ useEventListener(window, 'resize', validateWindowState);
     border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard),
     transform var(--motion-duration-fast) var(--motion-easing-press);
   -webkit-app-region: no-drag;
-}
 
-.b-layout-welcome-tab:hover,
-.b-layout-welcome-tab.is-active {
-  background: var(--bg-hover);
-  border-color: var(--input-focus-border);
-  box-shadow: var(--button-active-shadow);
-}
+  &:hover,
+  &.is-active {
+    background: var(--bg-hover);
+    border-color: var(--input-focus-border);
+    box-shadow: var(--button-active-shadow);
+  }
 
-.b-layout-welcome-tab:active {
-  box-shadow: var(--button-pressed-shadow);
-  transform: translate(var(--interaction-press-offset), var(--interaction-press-offset));
+  &:active {
+    box-shadow: var(--button-pressed-shadow);
+    transform: translate(var(--interaction-press-offset), var(--interaction-press-offset));
+  }
 }
 
 .b-layout-header__divider {

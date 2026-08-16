@@ -206,13 +206,21 @@ function handleWheel(event: WheelEvent): void {
   align-items: center;
   height: 100%;
   margin-right: 4px;
+  transition: margin-right var(--motion-duration-base) var(--motion-easing-standard);
   -webkit-app-region: no-drag;
+}
+
+/* 标签离场收缩时同步收起右侧间距，避免动画结束瞬间残留 4px 跳动 */
+.header-tabs :deep(.header-tabs__item:has(> .header-tab.is-closing)) {
+  margin-right: 0;
 }
 
 .header-tabs :deep(.header-tab) {
   transition: color var(--motion-duration-base) var(--motion-easing-standard), background var(--motion-duration-base) var(--motion-easing-standard),
     border-color var(--motion-duration-base) var(--motion-easing-standard), box-shadow var(--motion-duration-base) var(--motion-easing-standard),
-    opacity var(--motion-duration-base) var(--motion-easing-standard), transform var(--motion-duration-fast) var(--motion-easing-press);
+    opacity var(--motion-duration-base) var(--motion-easing-standard), transform var(--motion-duration-fast) var(--motion-easing-press),
+    width var(--motion-duration-base) var(--motion-easing-standard), padding var(--motion-duration-base) var(--motion-easing-standard),
+    border-width var(--motion-duration-base) var(--motion-easing-standard);
 }
 
 .header-tabs :deep(.header-tab:active:not(.is-dragging)) {
