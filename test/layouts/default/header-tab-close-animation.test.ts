@@ -145,9 +145,9 @@ function getStyleRule(selector: string): string {
 /**
  * 读取标签根元素。
  * @param wrapper - 标签包装器
- * @returns 根元素 DOM 包装器
+ * @returns 根元素 DOM 包装器（get() 固定命中，类型上省略 exists）
  */
-function getTabRoot(wrapper: ReturnType<typeof mount>): DOMWrapper<Element> {
+function getTabRoot(wrapper: ReturnType<typeof mount>): Omit<DOMWrapper<Element>, 'exists'> {
   return wrapper.get('.header-tab');
 }
 
