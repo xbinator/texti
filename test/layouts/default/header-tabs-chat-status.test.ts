@@ -8,7 +8,7 @@ import type { PropType } from 'vue';
 import { defineComponent } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import HeaderTabs from '@/layouts/default/components/HeaderTabs.vue';
 import { useChatTabStore } from '@/stores/chat/tab';
 import { storeEvents } from '@/stores/helpers/events';
@@ -19,6 +19,9 @@ const routeMock = vi.hoisted(() => ({ fullPath: '/welcome' }));
 const routerPushMock = vi.hoisted(() => vi.fn<(path: string) => Promise<unknown>>());
 const routeFailureMock = vi.hoisted(() => ({ type: 'aborted' }));
 const modalConfirmMock = vi.hoisted(() => vi.fn<() => Promise<[boolean, boolean]>>());
+
+/** matchMedia mock：jsdom 缺少该 API，返回减少动效偏好使关闭事件立即发出。 */
+const matchMediaMock = vi.fn((): { matches: boolean } => ({ matches: true }));
 
 vi.mock('vue-router', () => ({
   useRoute: (): typeof routeMock => routeMock,
@@ -116,6 +119,12 @@ describe('HeaderTabs chat status', (): void => {
     routerPushMock.mockResolvedValue(undefined);
     modalConfirmMock.mockReset();
     modalConfirmMock.mockResolvedValue([false, true]);
+    matchMediaMock.mockReset().mockReturnValue({ matches: true });
+    vi.stubGlobal('matchMedia', matchMediaMock);
+  });
+
+  afterEach((): void => {
+    vi.unstubAllGlobals();
   });
 
   it('renders running, waiting, error and completed chat states', (): void => {

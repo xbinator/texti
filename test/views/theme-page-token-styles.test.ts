@@ -41,8 +41,9 @@ describe('page theme token styles', (): void => {
     const shortcutsSource = readSource('src/layouts/default/components/ShortcutsHelp.vue');
     const chatSiderSource = readSource('src/layouts/default/components/ChatSider.vue');
     const welcomeTabRule = getRuleBody(layoutSource, '.b-layout-welcome-tab');
-    const welcomeTabHoverRule = getRuleBody(layoutSource, '.b-layout-welcome-tab:hover,\n.b-layout-welcome-tab.is-active');
-    const welcomeTabActiveRule = getRuleBody(layoutSource, '.b-layout-welcome-tab:active');
+    // 源码样式已改用 Less 嵌套写法（&:hover / &.is-active / &:active），按嵌套选择器提取规则体
+    const welcomeTabHoverRule = getRuleBody(layoutSource, '&:hover,\n  &.is-active');
+    const welcomeTabActiveRule = getRuleBody(layoutSource, '&:active');
 
     expect(layoutSource).toContain('background var(--motion-duration-base) var(--motion-easing-standard)');
     expect(layoutSource).toContain('overflow: hidden;');

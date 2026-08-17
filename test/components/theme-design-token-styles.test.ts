@@ -42,7 +42,8 @@ describe('theme design token styles', (): void => {
     expect(selectSource).toContain('box-shadow var(--motion-duration-base) var(--motion-easing-standard)');
     expect(selectSource).toContain('background var(--motion-duration-base) var(--motion-easing-standard)');
     expect(selectSource).toContain('border-radius: 0 0 var(--control-radius) var(--control-radius);');
-    expect(selectSource).toContain('padding: 8px 12px;');
+    // tips 区域 padding 已调整为 8px 12px 4px（见 044931de）
+    expect(selectSource).toContain('padding: 8px 12px 4px;');
     expect(settingsSource).toContain('basic-settings__theme-footer');
     expect(settingsSource).toContain('padding: 0 12px;');
     expect(settingsSource).toContain('height: 32px;');

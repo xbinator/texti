@@ -148,7 +148,8 @@ describe('app rem scaling styles', (): void => {
     const layoutSource = readSource('src/layouts/default/index.vue');
 
     expect(buttonSource).toContain('height: 32px;');
-    expect(selectSource).toContain('padding: 8px 12px;');
+    // BSelect tips 区域 padding 已调整为 8px 12px 4px（见 044931de），仍保持 px 单位书写
+    expect(selectSource).toContain('padding: 8px 12px 4px;');
     expect(layoutSource).toContain('height: 36px;');
   });
 

@@ -8,7 +8,7 @@ import type { PropType } from 'vue';
 import { defineComponent } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { mount } from '@vue/test-utils';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import HeaderTabs from '@/layouts/default/components/HeaderTabs.vue';
 import type { RecentRecord } from '@/shared/storage';
 import type { Tab } from '@/stores/workspace/tabs';
@@ -27,6 +27,9 @@ const ensureLoadedMock = vi.hoisted(() => vi.fn<() => Promise<void>>().mockResol
 
 /** 最近记录列表 mock。 */
 const recentRecordsMock = vi.hoisted<{ value: RecentRecord[] }>(() => ({ value: [] }));
+
+/** matchMedia mock：jsdom 缺少该 API，返回减少动效偏好使关闭事件立即发出。 */
+const matchMediaMock = vi.fn((): { matches: boolean } => ({ matches: true }));
 
 /** 菜单打开请求记录。 */
 interface MenuOpenRequest {
@@ -237,6 +240,12 @@ describe('HeaderTabs menu integration', (): void => {
     recentRecordsMock.value = [];
     menuOpenRequests = [];
     menuCloseRequests = [];
+    matchMediaMock.mockReset().mockReturnValue({ matches: true });
+    vi.stubGlobal('matchMedia', matchMediaMock);
+  });
+
+  afterEach((): void => {
+    vi.unstubAllGlobals();
   });
 
   it('renders a single HeaderTabMenu for multiple tabs', (): void => {
