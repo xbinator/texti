@@ -4,9 +4,13 @@
  */
 import type { AIMCPRequestConfig, AITavilyRuntimeConfig, AIToolExecutor } from 'types/ai';
 import type { ChatRuntimeContext, ChatRuntimeModelSelection, ChatRuntimeSendInput } from 'types/chat-runtime';
+import { GLOB_TOOL_NAME, GREP_TOOL_NAME, READ_DIRECTORY_TOOL_NAME } from '@@/shared/ai/tools/index.ts';
 import type { MemoryInjectionMode } from '@/ai/memory/types';
 import { toTransportTools } from '@/ai/tools/stream';
 import { filterMemoryTools } from './memorySelection';
+
+/** 依赖已选工作区才能安全暴露给模型的目录发现工具。 */
+const WORKSPACE_DISCOVERY_TOOL_NAMES = new Set<string>([READ_DIRECTORY_TOOL_NAME, GLOB_TOOL_NAME, GREP_TOOL_NAME]);
 
 /** ChatRuntime 通用请求配置。 */
 export type ChatRuntimeRequestConfig = Pick<
@@ -58,12 +62,25 @@ export interface RuntimeRequestPolicyResult {
 }
 
 /**
+ * 根据工作区状态过滤目录发现工具。
+ * @param tools - 候选工具列表
+ * @param workspaceRoot - 当前请求冻结的工作区根目录
+ * @returns 过滤后的工具列表
+ */
+function filterWorkspaceTools(tools: AIToolExecutor[], workspaceRoot: string | undefined): AIToolExecutor[] {
+  if (workspaceRoot?.trim()) return tools;
+
+  return tools.filter((tool: AIToolExecutor): boolean => !WORKSPACE_DISCOVERY_TOOL_NAMES.has(tool.definition.name));
+}
+
+/**
  * 构建 Runtime 请求配置和 renderer 工具快照。
  * @param input - 已解析的请求依赖
  * @returns Runtime 请求策略结果
  */
 export function buildRuntimeRequestConfig(input: RuntimeRequestPolicyInput): RuntimeRequestPolicyResult {
-  const rendererTools = input.toolSupport ? filterMemoryTools(input.candidateTools, input.memoryMode) : [];
+  const workspaceTools = filterWorkspaceTools(input.candidateTools, input.workspaceRoot);
+  const rendererTools = input.toolSupport ? filterMemoryTools(workspaceTools, input.memoryMode) : [];
 
   return {
     config: {

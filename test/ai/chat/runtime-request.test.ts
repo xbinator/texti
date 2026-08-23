@@ -68,4 +68,18 @@ describe('buildRuntimeRequestConfig', (): void => {
     expect(result.config.tools).toBeUndefined();
     expect(result.rendererTools).toEqual([]);
   });
+
+  it('does not expose workspace discovery tools without a workspace root', (): void => {
+    const result = buildRuntimeRequestConfig({
+      model: { providerId: 'provider-1', modelId: 'model-2' },
+      contextWindow: 8000,
+      candidateTools: [createTool('read_directory'), createTool('glob'), createTool('grep'), createTool('read_file')],
+      toolSupport: true,
+      memoryMode: 'full',
+      skillContentHashes: {}
+    });
+
+    expect(result.rendererTools.map((tool: AIToolExecutor): string => tool.definition.name)).toEqual(['read_file']);
+    expect(result.config.tools?.map((tool): string => tool.name)).toEqual(['read_file']);
+  });
 });
